@@ -13,8 +13,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function SuppliersPage() {
+  const { user } = useAuth();
   const formatRating = (rating: number) => {
     return rating.toFixed(1);
   };
@@ -33,6 +35,7 @@ export default function SuppliersPage() {
 
   const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user?.companyId) return;
     setSaving(true);
     try {
       await addDoc(collection(db, 'suppliers'), {
@@ -42,7 +45,7 @@ export default function SuppliersPage() {
         category,
         rating: 0,
         status: 'active',
-        companyId: 'company-1',
+        companyId: user.companyId,
         createdAt: serverTimestamp(),
       });
       setAddOpen(false);

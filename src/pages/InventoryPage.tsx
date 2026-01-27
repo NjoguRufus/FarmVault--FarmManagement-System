@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, writeBatch, increment } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
-import { InventoryItem, InventoryCategory, ExpenseCategory, Supplier } from '@/types';
+import { InventoryItem, InventoryCategory, ExpenseCategory, Supplier, CropType, InventoryCategoryItem } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Dialog,
   DialogTrigger,
@@ -14,15 +15,45 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 
 export default function InventoryPage() {
   const { activeProject } = useProject();
+  const { user } = useAuth();
   const { data: allInventory = [], isLoading } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
   const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
+  
+  // Fetch categories for the company
+  const { data: allCategories = [] } = useCollection<InventoryCategoryItem>(
+    'inventoryCategories',
+    'inventoryCategories',
+  );
+  
+  const categories = useMemo(() => {
+    if (!user?.companyId) return [];
+    return allCategories.filter((cat) => cat.companyId === user.companyId);
+  }, [allCategories, user?.companyId]);
+  
+  // Default categories if none exist
+  const defaultCategories = ['fertilizer', 'chemical', 'diesel', 'materials'];
+  const availableCategories = useMemo(() => {
+    const categoryNames = categories.map((cat) => cat.name.toLowerCase());
+    const defaults = defaultCategories.filter((def) => !categoryNames.includes(def));
+    return [
+      ...categories.map((cat) => cat.name),
+      ...defaults,
+    ].sort();
+  }, [categories]);
 
-  const inventory = activeProject
-    ? allInventory.filter(i => i.projectId === activeProject.id)
-    : allInventory;
+  // Always show all inventory items for the company; project context is used
+  // only for optional filtering and expense linkage.
+  const inventory = allInventory;
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -45,12 +76,14 @@ export default function InventoryPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
-  const [category, setCategory] = useState<InventoryCategory>('fertilizer');
+  const [category, setCategory] = useState<string>('fertilizer');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('kg');
   const [pricePerUnit, setPricePerUnit] = useState('');
   const [saving, setSaving] = useState(false);
-  const [scope, setScope] = useState<'project' | 'crop' | 'all'>('project');
+  const [selectedCrops, setSelectedCrops] = useState<CropType[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [countAsExpense, setCountAsExpense] = useState(false);
 
@@ -60,33 +93,108 @@ export default function InventoryPage() {
   const [restockTotalCost, setRestockTotalCost] = useState('');
   const [restockSaving, setRestockSaving] = useState(false);
 
+  const [cropFilter, setCropFilter] = useState<'all' | CropType>('all');
+
+  const cropOptions: CropType[] = ['tomatoes', 'french-beans', 'capsicum', 'maize', 'watermelons', 'rice'];
+
+  const toggleCropSelection = (crop: CropType) => {
+    setSelectedCrops((prev) =>
+      prev.includes(crop) ? prev.filter((c) => c !== crop) : [...prev, crop],
+    );
+  };
+
+  const filteredInventory =
+    cropFilter === 'all'
+      ? inventory
+      : inventory.filter((item) => {
+          if (Array.isArray(item.cropTypes) && item.cropTypes.length) {
+            return item.cropTypes.includes(cropFilter);
+          }
+          if (item.cropType && item.cropType !== 'all') {
+            return item.cropType === cropFilter;
+          }
+          // Items without explicit crop binding are treated as general stock.
+          return true;
+        });
+
+  const handleAddCategory = async (categoryName: string) => {
+    if (!user?.companyId || !categoryName.trim()) return;
+    
+    // Check if category already exists
+    const normalizedName = categoryName.trim().toLowerCase();
+    const exists = categories.some(
+      (cat) => cat.name.toLowerCase() === normalizedName,
+    );
+    
+    if (exists) {
+      setCategory(categoryName.trim());
+      setShowNewCategoryInput(false);
+      setNewCategoryName('');
+      return;
+    }
+    
+    // Add new category to Firebase
+    await addDoc(collection(db, 'inventoryCategories'), {
+      name: categoryName.trim(),
+      companyId: user.companyId,
+      createdAt: serverTimestamp(),
+    });
+    
+    setCategory(categoryName.trim());
+    setShowNewCategoryInput(false);
+    setNewCategoryName('');
+  };
+
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event from bubbling up
     if (!activeProject) return;
     setSaving(true);
     try {
-      const cropType =
-        scope === 'all' ? 'all' : activeProject.cropType;
-
-      await addDoc(collection(db, 'inventoryItems'), {
+      // If a new category was entered, add it first
+      let finalCategory = category.toLowerCase();
+      if (showNewCategoryInput && newCategoryName.trim()) {
+        const categoryName = newCategoryName.trim();
+        // Check if category already exists
+        const normalizedName = categoryName.toLowerCase();
+        const exists = categories.some(
+          (cat) => cat.name.toLowerCase() === normalizedName,
+        );
+        
+        if (!exists) {
+          // Add new category to Firebase
+          await addDoc(collection(db, 'inventoryCategories'), {
+            name: categoryName,
+            companyId: user?.companyId || activeProject.companyId,
+            createdAt: serverTimestamp(),
+          });
+        }
+        finalCategory = normalizedName;
+      }
+      
+      const data: any = {
         name,
-        category,
+        category: finalCategory,
         quantity: Number(quantity || '0'),
         unit,
         pricePerUnit: Number(pricePerUnit || '0'),
         companyId: activeProject.companyId,
-        scope,
-        cropType,
         supplierId: selectedSupplierId || undefined,
         supplierName: suppliers.find((s) => s.id === selectedSupplierId)?.name,
         lastUpdated: serverTimestamp(),
         createdAt: serverTimestamp(),
-      });
+      };
+
+      if (selectedCrops.length) {
+        data.cropTypes = selectedCrops;
+      }
+
+      await addDoc(collection(db, 'inventoryItems'), data);
 
       if (countAsExpense) {
         const amount = Number(quantity || '0') * Number(pricePerUnit || '0');
         if (amount > 0) {
-          const categoryMap: Record<InventoryCategory, ExpenseCategory> = {
+          const categoryMap: Record<string, ExpenseCategory> = {
             fertilizer: 'fertilizer',
             chemical: 'chemical',
             diesel: 'fuel',
@@ -95,32 +203,29 @@ export default function InventoryPage() {
 
           await addDoc(collection(db, 'expenses'), {
             companyId: activeProject.companyId,
-            projectId: scope === 'project' ? activeProject.id : null,
-            cropType: scope === 'all' ? null : activeProject.cropType,
-            category: categoryMap[category],
+            projectId: activeProject.id,
+            cropType: activeProject.cropType,
+            category: categoryMap[finalCategory] || 'other',
             description: `Initial stock - ${name} (${quantity} ${unit})`,
             amount,
             date: serverTimestamp(),
-            stageIndex: undefined,
-            stageName: undefined,
-            syncedFromWorkLogId: undefined,
+            // Optional linkage fields (stage*, syncedFromWorkLogId, paidAt, etc.)
+            // are intentionally omitted here when unknown to avoid sending `undefined`.
             synced: false,
             paid: false,
-            paidAt: undefined,
-            paidBy: undefined,
-            paidByName: undefined,
             createdAt: serverTimestamp(),
           });
         }
       }
 
-      setAddOpen(false);
       setName('');
-      setCategory('fertilizer');
+      setCategory(availableCategories[0]?.toLowerCase() || 'fertilizer');
+      setNewCategoryName('');
+      setShowNewCategoryInput(false);
       setQuantity('');
       setUnit('kg');
       setPricePerUnit('');
-      setScope('project');
+      setSelectedCrops([]);
       setSelectedSupplierId('');
       setCountAsExpense(false);
     } finally {
@@ -182,14 +287,9 @@ export default function InventoryPage() {
         description: `Restock ${restockItem.name} (${qty} ${restockItem.unit})`,
         amount: total,
         date: serverTimestamp(),
-        stageIndex: undefined,
-        stageName: undefined,
-        syncedFromWorkLogId: undefined,
+        // Optional linkage fields are omitted when unknown to avoid `undefined` values.
         synced: false,
         paid: false,
-        paidAt: undefined,
-        paidBy: undefined,
-        paidByName: undefined,
         createdAt: serverTimestamp(),
       });
 
@@ -214,9 +314,23 @@ export default function InventoryPage() {
             )}
           </p>
         </div>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <Dialog 
+          open={addOpen} 
+          onOpenChange={(open) => {
+            // Allow opening the dialog
+            if (open) {
+              setAddOpen(true);
+            } else {
+              // Only allow closing if not currently saving
+              // This prevents the dialog from closing during form submission or select interactions
+              if (!saving) {
+                setAddOpen(false);
+              }
+            }
+          }}
+        >
           <DialogTrigger asChild>
-            <button className="fv-btn fv-btn--primary" disabled={!activeProject}>
+            <button className="fv-btn fv-btn--primary">
               <Plus className="h-4 w-4" />
               Add Item
             </button>
@@ -230,7 +344,16 @@ export default function InventoryPage() {
                 Select a project first to add an inventory item.
               </p>
             ) : (
-              <form onSubmit={handleAddItem} className="space-y-4">
+              <form 
+                onSubmit={handleAddItem} 
+                className="space-y-4"
+                onKeyDown={(e) => {
+                  // Prevent Enter key from closing dialog if pressed in form
+                  if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+                    // Allow normal form submission
+                  }
+                }}
+              >
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Item name</label>
                   <input
@@ -241,32 +364,118 @@ export default function InventoryPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Crop scope</label>
-                  <select
-                    className="fv-select w-full"
-                    value={scope}
-                    onChange={(e) => setScope(e.target.value as typeof scope)}
-                  >
-                    <option value="project">This project only</option>
-                    <option value="crop">All projects for this crop</option>
-                    <option value="all">All crops (general stock)</option>
-                  </select>
+                  <label className="text-sm font-medium text-foreground">Crop scope (optional)</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Select the crops this item is used for. Leave all unchecked to make it available for all crops.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {cropOptions.map((crop) => (
+                      <button
+                        key={crop}
+                        type="button"
+                        onClick={() => toggleCropSelection(crop)}
+                        className={cn(
+                          'flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs',
+                          selectedCrops.includes(crop)
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-background text-foreground',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'inline-flex h-3 w-3 items-center justify-center rounded-[3px] border',
+                            selectedCrops.includes(crop)
+                              ? 'border-primary bg-primary'
+                              : 'border-muted bg-background',
+                          )}
+                        >
+                          {selectedCrops.includes(crop) && (
+                            <span className="block h-2 w-2 bg-background rounded-[2px]" />
+                          )}
+                        </span>
+                        <span className="capitalize">{crop.replace('-', ' ')}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-foreground">Category</label>
-                    <select
-                      className="fv-select w-full"
-                      value={category}
-                      onChange={(e) =>
-                        setCategory(e.target.value as InventoryCategory)
-                      }
-                    >
-                      <option value="fertilizer">Fertilizer</option>
-                    <option value="chemical">Chemical</option>
-                    <option value="diesel">Diesel</option>
-                    <option value="materials">Materials</option>
-                    </select>
+                    {!showNewCategoryInput ? (
+                      <div className="flex gap-2">
+                        <Select
+                          value={category}
+                          onValueChange={(value) => {
+                            if (value === '__new__') {
+                              setShowNewCategoryInput(true);
+                            } else {
+                              setCategory(value);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableCategories.map((cat) => (
+                              <SelectItem key={cat} value={cat.toLowerCase()}>
+                                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="__new__">
+                              <span className="flex items-center gap-2">
+                                <Plus className="h-3 w-3" />
+                                Add new category
+                              </span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <input
+                          className="fv-input flex-1"
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                          placeholder="Enter new category name"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (newCategoryName.trim()) {
+                                handleAddCategory(newCategoryName);
+                              }
+                            } else if (e.key === 'Escape') {
+                              setShowNewCategoryInput(false);
+                              setNewCategoryName('');
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (newCategoryName.trim()) {
+                              handleAddCategory(newCategoryName);
+                            } else {
+                              setShowNewCategoryInput(false);
+                            }
+                          }}
+                          className="fv-btn fv-btn--primary px-3"
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNewCategoryInput(false);
+                            setNewCategoryName('');
+                          }}
+                          className="fv-btn fv-btn--secondary px-3"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-foreground">Unit</label>
@@ -279,18 +488,22 @@ export default function InventoryPage() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Supplier (optional)</label>
-                  <select
-                    className="fv-select w-full"
-                    value={selectedSupplierId}
-                    onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  <Select
+                    value={selectedSupplierId || '__none__'}
+                    onValueChange={(value) => setSelectedSupplierId(value === '__none__' ? '' : value)}
                   >
-                    <option value="">No supplier</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="No supplier" />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      <SelectItem value="__none__">No supplier</SelectItem>
+                      {suppliers.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -340,6 +553,10 @@ export default function InventoryPage() {
                     type="submit"
                     disabled={saving}
                     className="fv-btn fv-btn--primary"
+                    onClick={(e) => {
+                      // Prevent any default close behavior
+                      e.stopPropagation();
+                    }}
                   >
                     {saving ? 'Saving…' : 'Save Item'}
                   </button>
@@ -451,13 +668,22 @@ export default function InventoryPage() {
             className="fv-input pl-10"
           />
         </div>
-        <select className="fv-select">
-          <option value="">All Categories</option>
-          <option value="seeds">Seeds</option>
-          <option value="fertilizers">Fertilizers</option>
-          <option value="pesticides">Pesticides</option>
-          <option value="equipment">Equipment</option>
-        </select>
+        <Select
+          value={cropFilter}
+          onValueChange={(value) => setCropFilter(value as 'all' | CropType)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All crops" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All crops</SelectItem>
+            {cropOptions.map((crop) => (
+              <SelectItem key={crop} value={crop}>
+                {crop.replace('-', ' ')}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Inventory Table */}
@@ -479,7 +705,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {inventory.map((item) => (
+              {filteredInventory.map((item) => (
                 <tr key={item.id}>
                   <td>
                     <div className="flex items-center gap-3">
@@ -524,7 +750,7 @@ export default function InventoryPage() {
 
         {/* Mobile Cards */}
         <div className="md:hidden space-y-3">
-          {inventory.map((item) => (
+          {filteredInventory.map((item) => (
             <div key={item.id} className="p-4 bg-muted/30 rounded-lg">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">

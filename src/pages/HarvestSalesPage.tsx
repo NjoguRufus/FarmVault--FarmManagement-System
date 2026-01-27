@@ -62,7 +62,27 @@ export default function HarvestSalesPage() {
   const [buyerName, setBuyerName] = useState('');
   const [saleQty, setSaleQty] = useState('');
   const [saleUnitPrice, setSaleUnitPrice] = useState('');
+  const [saleTotal, setSaleTotal] = useState('');
+  const [salePriceMode, setSalePriceMode] = useState<'perUnit' | 'total'>('perUnit');
+  const [saleMode, setSaleMode] = useState<'crates' | 'kg'>('kg');
+  const [crateSize, setCrateSize] = useState<'big' | 'small'>('big');
   const [saleSaving, setSaleSaving] = useState(false);
+
+  const parseNumber = (value: string) => Number(value || '0');
+
+  const recomputeTotalFromPerUnit = (qtyStr: string, unitPriceStr: string) => {
+    const qty = parseNumber(qtyStr);
+    const price = parseNumber(unitPriceStr);
+    if (!qty || !price) return '';
+    return String(qty * price);
+  };
+
+  const recomputeUnitFromTotal = (qtyStr: string, totalStr: string) => {
+    const qty = parseNumber(qtyStr);
+    const total = parseNumber(totalStr);
+    if (!qty || !total) return '';
+    return String(total / qty);
+  };
 
   const handleRecordHarvest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,13 +115,33 @@ export default function HarvestSalesPage() {
     if (!activeProject) return;
     setSaleSaving(true);
     try {
-      const quantity = Number(saleQty || '0');
-      const unitPrice = Number(saleUnitPrice || '0');
-      const totalAmount = quantity * unitPrice;
+      const quantity = parseNumber(saleQty);
+      let unitPrice: number;
+      let totalAmount: number;
+
+      if (salePriceMode === 'perUnit') {
+        unitPrice = parseNumber(saleUnitPrice);
+        totalAmount = quantity * unitPrice;
+      } else {
+        totalAmount = parseNumber(saleTotal);
+        unitPrice = quantity ? totalAmount / quantity : 0;
+      }
+
+      const isTomatoes = activeProject.cropType === 'tomatoes';
+      const isFrenchBeans = activeProject.cropType === 'french-beans';
+
+      let unit: string | undefined;
+      if (isTomatoes && saleMode === 'crates') {
+        unit = crateSize === 'big' ? 'crate-big' : 'crate-small';
+      } else {
+        // For tomatoes in kg mode, french beans, and any other crop, we use kg.
+        unit = 'kg';
+      }
 
       await addDoc(collection(db, 'sales'), {
         buyerName,
         quantity,
+        unit,
         unitPrice,
         totalAmount,
         status: 'pending',
@@ -115,6 +155,10 @@ export default function HarvestSalesPage() {
       setBuyerName('');
       setSaleQty('');
       setSaleUnitPrice('');
+      setSaleTotal('');
+      setSalePriceMode('perUnit');
+      setSaleMode('kg');
+      setCrateSize('big');
     } finally {
       setSaleSaving(false);
     }
@@ -137,7 +181,7 @@ export default function HarvestSalesPage() {
         <div className="flex gap-2">
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--secondary" disabled={!activeProject}>
+              <button className="fv-btn fv-btn--secondary">
                 <Plus className="h-4 w-4" />
                 Record Harvest
               </button>
@@ -219,7 +263,7 @@ export default function HarvestSalesPage() {
 
           <Dialog open={saleOpen} onOpenChange={setSaleOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--primary" disabled={!activeProject}>
+              <button className="fv-btn fv-btn--primary">
                 <Plus className="h-4 w-4" />
                 Add Sale
               </button>
@@ -243,30 +287,288 @@ export default function HarvestSalesPage() {
                       required
                     />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Quantity (kg)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input"
-                        value={saleQty}
-                        onChange={(e) => setSaleQty(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Unit price (KES/kg)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input"
-                        value={saleUnitPrice}
-                        onChange={(e) => setSaleUnitPrice(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
+                  {activeProject.cropType === 'tomatoes' && (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Sale unit</label>
+                        <select
+                          className="fv-select w-full"
+                          value={saleMode}
+                          onChange={(e) => setSaleMode(e.target.value as 'crates' | 'kg')}
+                        >
+                          <option value="crates">Crates (big / small)</option>
+                          <option value="kg">Kilograms (kg)</option>
+                        </select>
+                      </div>
+
+                      {saleMode === 'crates' && (
+                        <>
+                          <div className="space-y-1">
+                            <label className="text-sm font-medium text-foreground">Crate size</label>
+                            <select
+                              className="fv-select w-full"
+                              value={crateSize}
+                              onChange={(e) => setCrateSize(e.target.value as 'big' | 'small')}
+                            >
+                              <option value="big">Big crate</option>
+                              <option value="small">Small crate</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-sm font-medium text-foreground">Pricing mode</label>
+                            <select
+                              className="fv-select w-full"
+                              value={salePriceMode}
+                              onChange={(e) => setSalePriceMode(e.target.value as 'perUnit' | 'total')}
+                            >
+                              <option value="perUnit">Price per crate</option>
+                              <option value="total">Total amount</option>
+                            </select>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-sm font-medium text-foreground">Quantity (crates)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={saleQty}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setSaleQty(value);
+                                  if (salePriceMode === 'perUnit') {
+                                    setSaleTotal(recomputeTotalFromPerUnit(value, saleUnitPrice));
+                                  } else {
+                                    setSaleUnitPrice(recomputeUnitFromTotal(value, saleTotal));
+                                  }
+                                }}
+                                required
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              {salePriceMode === 'perUnit' ? (
+                                <>
+                                  <label className="text-sm font-medium text-foreground">Price per crate (KES)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    className="fv-input"
+                                    value={saleUnitPrice}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setSaleUnitPrice(value);
+                                      setSaleTotal(recomputeTotalFromPerUnit(saleQty, value));
+                                    }}
+                                    required
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <label className="text-sm font-medium text-foreground">Total amount (KES)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    className="fv-input"
+                                    value={saleTotal}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setSaleTotal(value);
+                                      setSaleUnitPrice(recomputeUnitFromTotal(saleQty, value));
+                                    }}
+                                    required
+                                  />
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Total: {saleTotal ? formatCurrency(parseNumber(saleTotal)) : 'KES 0'}{' '}
+                            {saleQty && saleUnitPrice && (
+                              <>({saleQty} crates @ KES {Number(saleUnitPrice || '0').toLocaleString()} each)</>
+                            )}
+                          </p>
+                        </>
+                      )}
+
+                      {saleMode === 'kg' && (
+                        <>
+                          <div className="space-y-1">
+                            <label className="text-sm font-medium text-foreground">Pricing mode</label>
+                            <select
+                              className="fv-select w-full"
+                              value={salePriceMode}
+                              onChange={(e) => setSalePriceMode(e.target.value as 'perUnit' | 'total')}
+                            >
+                              <option value="perUnit">Price per kg</option>
+                              <option value="total">Total amount</option>
+                            </select>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-sm font-medium text-foreground">Quantity (kg)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={saleQty}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setSaleQty(value);
+                                  if (salePriceMode === 'perUnit') {
+                                    setSaleTotal(recomputeTotalFromPerUnit(value, saleUnitPrice));
+                                  } else {
+                                    setSaleUnitPrice(recomputeUnitFromTotal(value, saleTotal));
+                                  }
+                                }}
+                                required
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              {salePriceMode === 'perUnit' ? (
+                                <>
+                                  <label className="text-sm font-medium text-foreground">Price per kg (KES)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    className="fv-input"
+                                    value={saleUnitPrice}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setSaleUnitPrice(value);
+                                      setSaleTotal(recomputeTotalFromPerUnit(saleQty, value));
+                                    }}
+                                    required
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <label className="text-sm font-medium text-foreground">Total amount (KES)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    className="fv-input"
+                                    value={saleTotal}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setSaleTotal(value);
+                                      setSaleUnitPrice(recomputeUnitFromTotal(saleQty, value));
+                                    }}
+                                    required
+                                  />
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Total: {saleTotal ? formatCurrency(parseNumber(saleTotal)) : 'KES 0'}
+                          </p>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {activeProject.cropType === 'french-beans' && (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Pricing mode</label>
+                        <select
+                          className="fv-select w-full"
+                          value={salePriceMode}
+                          onChange={(e) => setSalePriceMode(e.target.value as 'perUnit' | 'total')}
+                        >
+                          <option value="perUnit">Price per kg</option>
+                          <option value="total">Total amount</option>
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-foreground">Quantity (kg)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="fv-input"
+                            value={saleQty}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setSaleQty(value);
+                              if (salePriceMode === 'perUnit') {
+                                setSaleTotal(recomputeTotalFromPerUnit(value, saleUnitPrice));
+                              } else {
+                                setSaleUnitPrice(recomputeUnitFromTotal(value, saleTotal));
+                              }
+                            }}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          {salePriceMode === 'perUnit' ? (
+                            <>
+                              <label className="text-sm font-medium text-foreground">Price per kg (KES)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={saleUnitPrice}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setSaleUnitPrice(value);
+                                  setSaleTotal(recomputeTotalFromPerUnit(saleQty, value));
+                                }}
+                                required
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <label className="text-sm font-medium text-foreground">Total amount (KES)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={saleTotal}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setSaleTotal(value);
+                                  setSaleUnitPrice(recomputeUnitFromTotal(saleQty, value));
+                                }}
+                                required
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Total: {saleTotal ? formatCurrency(parseNumber(saleTotal)) : 'KES 0'}
+                      </p>
+                    </>
+                  )}
+
+                  {activeProject.cropType !== 'tomatoes' &&
+                    activeProject.cropType !== 'french-beans' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-foreground">Quantity (kg)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="fv-input"
+                            value={saleQty}
+                            onChange={(e) => setSaleQty(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-foreground">Unit price (KES/kg)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="fv-input"
+                            value={saleUnitPrice}
+                            onChange={(e) => setSaleUnitPrice(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
                   <DialogFooter>
                     <button
                       type="button"
@@ -416,8 +718,15 @@ export default function HarvestSalesPage() {
               {sales.map((sale) => (
                 <tr key={sale.id}>
                   <td className="font-medium text-foreground">{sale.buyerName}</td>
-                  <td>{sale.quantity.toLocaleString()} kg</td>
-                  <td>{formatCurrency(sale.unitPrice)}/kg</td>
+                  <td>
+                    {sale.quantity.toLocaleString()}{' '}
+                    {sale.unit ||
+                      (activeProject?.cropType === 'tomatoes' ? 'crates' : 'kg')}
+                  </td>
+                  <td>
+                    {formatCurrency(sale.unitPrice)}
+                    {sale.unit ? ` / ${sale.unit}` : '/kg'}
+                  </td>
                   <td className="font-semibold">{formatCurrency(sale.totalAmount)}</td>
                   <td>
                     <span className={cn('fv-badge capitalize', getStatusBadge(sale.status))}>
@@ -445,7 +754,11 @@ export default function HarvestSalesPage() {
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">{sale.quantity.toLocaleString()} kg</span>
+                <span className="text-muted-foreground">
+                  {sale.quantity.toLocaleString()}{' '}
+                  {sale.unit ||
+                    (activeProject?.cropType === 'tomatoes' ? 'crates' : 'kg')}
+                </span>
                 <span className="font-semibold">{formatCurrency(sale.totalAmount)}</span>
               </div>
             </div>

@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays } from 'lucide-react';
+import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
-import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory } from '@/types';
+import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, InventoryCategoryItem } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCurrentStageForProject } from '@/services/stageService';
 import { syncTodaysLabourExpenses } from '@/services/workLogService';
@@ -18,6 +18,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from 'date-fns';
 
 export default function OperationsPage() {
   const { activeProject } = useProject();
@@ -26,6 +36,27 @@ export default function OperationsPage() {
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
   const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const { data: allCategories = [] } = useCollection<InventoryCategoryItem>(
+    'inventoryCategories',
+    'inventoryCategories',
+  );
+  
+  // Get categories for the company
+  const categories = useMemo(() => {
+    if (!user?.companyId) return [];
+    return allCategories.filter((cat) => cat.companyId === user.companyId);
+  }, [allCategories, user?.companyId]);
+  
+  // Default categories if none exist
+  const defaultCategories = ['fertilizer', 'chemical', 'diesel', 'materials'];
+  const availableCategories = useMemo(() => {
+    const categoryNames = categories.map((cat) => cat.name.toLowerCase());
+    const defaults = defaultCategories.filter((def) => !categoryNames.includes(def));
+    return [
+      ...categories.map((cat) => cat.name),
+      ...defaults,
+    ].sort();
+  }, [categories]);
 
   const [search, setSearch] = useState('');
 
@@ -62,13 +93,15 @@ export default function OperationsPage() {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  const [chemicalItemId, setChemicalItemId] = useState('');
-  const [chemicalQuantity, setChemicalQuantity] = useState('');
-  const [chemicalDrumsSprayed, setChemicalDrumsSprayed] = useState('');
-  const [fertilizerItemId, setFertilizerItemId] = useState('');
-  const [fertilizerQuantity, setFertilizerQuantity] = useState('');
-  const [fuelItemId, setFuelItemId] = useState('');
-  const [fuelQuantity, setFuelQuantity] = useState('');
+  type InputUsageItem = {
+    id: string;
+    type: InventoryCategory;
+    itemId: string;
+    quantity: string;
+    drumsSprayed?: string;
+  };
+
+  const [inputUsages, setInputUsages] = useState<InputUsageItem[]>([]);
 
   const currentStage = useMemo(() => {
     if (!activeProject) return null;
@@ -102,6 +135,37 @@ export default function OperationsPage() {
     [companyInventory],
   );
 
+  const addInputUsage = (type?: InventoryCategory) => {
+    setInputUsages([
+      ...inputUsages,
+      { id: Date.now().toString(), type: type || 'fertilizer', itemId: '', quantity: '' },
+    ]);
+  };
+
+  const removeInputUsage = (id: string) => {
+    setInputUsages(inputUsages.filter((item) => item.id !== id));
+  };
+
+  const updateInputUsage = (id: string, field: keyof InputUsageItem, value: string) => {
+    setInputUsages(
+      inputUsages.map((item) => {
+        if (item.id === id) {
+          const updated = { ...item, [field]: value };
+          // If category changes, clear the selected item
+          if (field === 'type') {
+            updated.itemId = '';
+          }
+          return updated;
+        }
+        return item;
+      }),
+    );
+  };
+
+  const getItemsForCategory = (category: InventoryCategory) => {
+    return companyInventory.filter((i) => i.category === category);
+  };
+
   const handleAddWorkLog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeProject) return;
@@ -129,7 +193,7 @@ export default function OperationsPage() {
       const usageDate = date instanceof Date ? date : new Date(date);
 
       const recordIfNeeded = async (
-        kind: 'chemical' | 'fertilizer' | 'diesel',
+        category: InventoryCategory,
         inventoryItemId: string,
         quantityStr: string,
         extra?: { drumsSprayed?: number },
@@ -142,7 +206,7 @@ export default function OperationsPage() {
           companyId: activeProject.companyId,
           projectId: activeProject.id,
           inventoryItemId,
-          category: kind as InventoryCategory,
+          category,
           quantity: quantityVal,
           unit: item.unit,
           source: 'workLog',
@@ -153,26 +217,28 @@ export default function OperationsPage() {
         });
       };
 
-      await Promise.all([
-        recordIfNeeded('chemical', chemicalItemId, chemicalQuantity, {
-          drumsSprayed: Number(chemicalDrumsSprayed || '0') || undefined,
-        }),
-        recordIfNeeded('fertilizer', fertilizerItemId, fertilizerQuantity),
-        recordIfNeeded('diesel', fuelItemId, fuelQuantity),
-      ]);
+      await Promise.all(
+        inputUsages
+          .filter((usage) => usage.itemId && usage.quantity)
+          .map((usage) =>
+            recordIfNeeded(
+              usage.type,
+              usage.itemId,
+              usage.quantity,
+              usage.type === 'chemical' && usage.drumsSprayed
+                ? { drumsSprayed: Number(usage.drumsSprayed || '0') || undefined }
+                : undefined,
+            ),
+          ),
+      );
 
-      setAddOpen(false);
+      // Clear form but keep modal open for multiple entries
       setWorkCategory('');
       setNumberOfPeople('');
       setRatePerPerson('');
       setNotes('');
-      setChemicalItemId('');
-      setChemicalQuantity('');
-      setChemicalDrumsSprayed('');
-      setFertilizerItemId('');
-      setFertilizerQuantity('');
-      setFuelItemId('');
-      setFuelQuantity('');
+      setInputUsages([]);
+      setDate(new Date());
     } finally {
       setSaving(false);
     }
@@ -211,19 +277,19 @@ export default function OperationsPage() {
         <div className="flex gap-2">
           <button
             className="fv-btn fv-btn--secondary"
-            disabled={!activeProject || syncing}
+            disabled={syncing}
             onClick={handleSyncTodaysLabour}
           >
             {syncing ? 'Syncing…' : "Sync Today's Labour"}
           </button>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <button className="fv-btn fv-btn--primary" disabled={!activeProject}>
-              <Plus className="h-4 w-4" />
-              Log Daily Work
-            </button>
-          </DialogTrigger>
-          <DialogContent>
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <button className="fv-btn fv-btn--primary">
+                <Plus className="h-4 w-4" />
+                Log Daily Work
+              </button>
+            </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] md:max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Log Daily Work</DialogTitle>
             </DialogHeader>
@@ -233,46 +299,63 @@ export default function OperationsPage() {
               </p>
             ) : (
               <form onSubmit={handleAddWorkLog} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Date</label>
-                  <input
-                    type="date"
-                    className="fv-input"
-                    value={date ? new Date(date).toISOString().slice(0, 10) : ''}
-                    onChange={(e) => setDate(e.target.value ? new Date(e.target.value) : undefined)}
-                    required
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Work type</label>
-                  <input
-                    className="fv-input"
-                    value={workCategory}
-                    onChange={(e) => setWorkCategory(e.target.value)}
-                    required
-                    placeholder="Spraying, Fertilizer application, Watering..."
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Number of people</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="fv-input"
-                    value={numberOfPeople}
-                    onChange={(e) => setNumberOfPeople(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Rate per person (optional)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="fv-input"
-                    value={ratePerPerson}
-                    onChange={(e) => setRatePerPerson(e.target.value)}
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Date</label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn(
+                            'fv-input w-full justify-start text-left font-normal',
+                            !date && 'text-muted-foreground',
+                          )}
+                        >
+                          <CalendarDays className="mr-2 h-4 w-4" />
+                          {date ? format(date, 'PPP') : <span>Pick a date</span>}
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={date}
+                          onSelect={setDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Work type</label>
+                    <input
+                      className="fv-input"
+                      value={workCategory}
+                      onChange={(e) => setWorkCategory(e.target.value)}
+                      required
+                      placeholder="Spraying, Fertilizer application, Watering..."
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Number of people</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="fv-input"
+                      value={numberOfPeople}
+                      onChange={(e) => setNumberOfPeople(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Rate per person (optional)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="fv-input"
+                      value={ratePerPerson}
+                      onChange={(e) => setRatePerPerson(e.target.value)}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Notes</label>
@@ -286,105 +369,102 @@ export default function OperationsPage() {
 
                 {/* Input usage sections */}
                 <div className="space-y-3 border-t pt-3 mt-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Inputs used (optional)
-                  </p>
-
-                  {/* Chemicals */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Chemical</label>
-                      <select
-                        className="fv-select w-full text-sm"
-                        value={chemicalItemId}
-                        onChange={(e) => setChemicalItemId(e.target.value)}
-                      >
-                        <option value="">None</option>
-                        {chemicalItems.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} ({item.unit})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Qty</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input text-sm"
-                        value={chemicalQuantity}
-                        onChange={(e) => setChemicalQuantity(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Drums sprayed</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input text-sm"
-                        value={chemicalDrumsSprayed}
-                        onChange={(e) => setChemicalDrumsSprayed(e.target.value)}
-                      />
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Inputs used (optional)
+                    </p>
                   </div>
 
-                  {/* Fertilizer */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Fertilizer</label>
-                      <select
-                        className="fv-select w-full text-sm"
-                        value={fertilizerItemId}
-                        onChange={(e) => setFertilizerItemId(e.target.value)}
+                  {inputUsages.map((usage) => (
+                    <div key={usage.id} className="flex flex-col sm:flex-row gap-2 p-3 border rounded-lg bg-muted/20">
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-foreground">Category</label>
+                          <Select
+                            value={usage.type}
+                            onValueChange={(value) => updateInputUsage(usage.id, 'type', value as InventoryCategory)}
+                          >
+                            <SelectTrigger className="w-full text-sm h-9">
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableCategories.map((cat) => (
+                                <SelectItem key={cat} value={cat.toLowerCase()}>
+                                  {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-foreground">Item</label>
+                          <Select
+                            value={usage.itemId}
+                            onValueChange={(value) => updateInputUsage(usage.id, 'itemId', value)}
+                            disabled={!usage.type}
+                          >
+                            <SelectTrigger className="w-full text-sm h-9">
+                              <SelectValue placeholder="Select item" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {getItemsForCategory(usage.type).length === 0 ? (
+                                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                  No {usage.type} items available
+                                </div>
+                              ) : (
+                                getItemsForCategory(usage.type).map((item) => (
+                                  <SelectItem key={item.id} value={item.id}>
+                                    {item.name} ({item.unit})
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-foreground">Quantity</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="fv-input text-sm h-9"
+                            value={usage.quantity}
+                            onChange={(e) => updateInputUsage(usage.id, 'quantity', e.target.value)}
+                            placeholder="0"
+                          />
+                        </div>
+                        {usage.type === 'chemical' && (
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-foreground">Drums sprayed</label>
+                            <input
+                              type="number"
+                              min={0}
+                              className="fv-input text-sm h-9"
+                              value={usage.drumsSprayed || ''}
+                              onChange={(e) => updateInputUsage(usage.id, 'drumsSprayed', e.target.value)}
+                              placeholder="0"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeInputUsage(usage.id)}
+                        className="p-2 hover:bg-destructive/10 rounded-md transition-colors self-start sm:self-center"
                       >
-                        <option value="">None</option>
-                        {fertilizerItems.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} ({item.unit})
-                          </option>
-                        ))}
-                      </select>
+                        <X className="h-4 w-4 text-destructive" />
+                      </button>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Qty</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input text-sm"
-                        value={fertilizerQuantity}
-                        onChange={(e) => setFertilizerQuantity(e.target.value)}
-                      />
-                    </div>
-                  </div>
+                  ))}
 
-                  {/* Fuel */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Fuel (diesel)</label>
-                      <select
-                        className="fv-select w-full text-sm"
-                        value={fuelItemId}
-                        onChange={(e) => setFuelItemId(e.target.value)}
-                      >
-                        <option value="">None</option>
-                        {fuelItems.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} ({item.unit})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">Qty</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input text-sm"
-                        value={fuelQuantity}
-                        onChange={(e) => setFuelQuantity(e.target.value)}
-                      />
-                    </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => addInputUsage()}
+                      className="fv-btn fv-btn--secondary text-xs py-1.5 px-3"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Input
+                    </button>
                   </div>
                 </div>
                 <DialogFooter>

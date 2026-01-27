@@ -143,7 +143,7 @@ export default function ExpensesPage() {
           </button>
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--primary" disabled={!activeProject}>
+              <button className="fv-btn fv-btn--primary">
                 <Plus className="h-4 w-4" />
                 Add Expense
               </button>

@@ -122,6 +122,13 @@ export interface Expense {
 
 export type InventoryCategory = 'fertilizer' | 'chemical' | 'diesel' | 'materials';
 
+export interface InventoryCategoryItem {
+  id: string;
+  name: string;
+  companyId: string;
+  createdAt: Date;
+}
+
 export interface InventoryItem {
   id: string;
   companyId: string;
@@ -133,13 +140,18 @@ export interface InventoryItem {
   unit: string;
   pricePerUnit?: number;
 
-   // Scope: which crops/projects this item is intended for
+  // Legacy scope fields kept for backwards compatibility.
+  // New items should use `cropTypes` instead.
   // 'project'  -> only for a specific project/season
   // 'crop'     -> for all projects of a given crop
   // 'all'      -> any crop/project (general stock)
   scope?: 'project' | 'crop' | 'all';
   // Either a specific crop type or 'all' for general-purpose stock
   cropType?: CropType | 'all';
+
+  // Preferred: list of crops this item is used for.
+  // When omitted, the item is treated as usable for all crops.
+  cropTypes?: CropType[];
 
   supplierId?: string;
   // Optional denormalised supplier name for UI
@@ -258,6 +270,8 @@ export interface Sale {
   harvestId: string;
   buyerName: string;
   quantity: number;
+  // Optional unit for the quantity, e.g. "kg", "crate-big", "crate-small"
+  unit?: string;
   unitPrice: number;
   totalAmount: number;
   date: Date;

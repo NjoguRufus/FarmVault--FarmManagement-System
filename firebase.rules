@@ -1,0 +1,153 @@
+// Firestore security rules for FarmVault
+// You can keep evolving these as we add more features.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper functions ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Load the authenticated user's profile to get their companyId.
+    function userCompanyId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId;
+    }
+
+    // For creates: ensure the new document's companyId matches the user's companyId.
+    function matchesCompanyOnCreate() {
+      return isSignedIn()
+        && request.resource.data.companyId == userCompanyId();
+    }
+
+    // For reads/updates/deletes: ensure the existing doc's companyId matches the user's companyId.
+    function matchesCompanyOnDoc() {
+      return isSignedIn()
+        && resource.data.companyId == userCompanyId();
+    }
+
+    // --- Users ---
+
+    match /users/{userId} {
+      // Users can read their own profile.
+      allow read: if isSignedIn() && userId == request.auth.uid;
+
+      // Lock down writes here for now; you can relax this as needed.
+      allow write: if false;
+    }
+
+    // --- Companies ---
+
+    match /companies/{companyId} {
+      // Only users whose profile companyId matches can access their company document.
+      allow read, write: if isSignedIn() && userCompanyId() == companyId;
+    }
+
+    // --- Projects ---
+
+    match /projects/{projectId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Project Stages ---
+
+    match /projectStages/{stageId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Work Logs ---
+
+    match /workLogs/{workLogId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Expenses ---
+
+    match /expenses/{expenseId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Season Challenges ---
+
+    match /seasonChallenges/{challengeId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Inventory Usage ---
+
+    match /inventoryUsage/{usageId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Inventory Items ---
+
+    match /inventoryItems/{itemId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Inventory Categories ---
+
+    match /inventoryCategories/{categoryId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Inventory Purchases ---
+
+    match /inventoryPurchases/{purchaseId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Harvests ---
+
+    match /harvests/{harvestId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Sales ---
+
+    match /sales/{saleId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Suppliers ---
+
+    match /suppliers/{supplierId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Employees ---
+
+    match /employees/{employeeId} {
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Feedback ---
+
+    match /feedback/{feedbackId} {
+      // Feedback is linked to a company; enforce same-company access.
+      allow read, update, delete: if matchesCompanyOnDoc();
+      allow create: if matchesCompanyOnCreate();
+    }
+
+    // --- Fallback: deny everything else by default ---
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
