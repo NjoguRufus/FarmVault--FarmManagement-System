@@ -1,18 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogIn } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as any;
-  const from = location.state?.from?.pathname || '/';
+  const from = location.state?.from?.pathname || '/dashboard';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Redirect when authenticated (handles both initial load and after login)
+  useEffect(() => {
+    if (isAuthenticated) {
+      setLoading(false);
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,82 +29,122 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate(from, { replace: true });
+      // Navigation will happen via useEffect when isAuthenticated becomes true
     } catch (err: any) {
       setError(err?.message || 'Failed to sign in');
-    } finally {
       setLoading(false);
     }
   };
 
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-950 via-background to-emerald-900">
-      <div className="w-full max-w-md px-6">
-        <div className="bg-card/95 backdrop-blur-xl border border-border/60 rounded-2xl shadow-2xl p-8 space-y-8">
-          {/* Logo + Title */}
-          <div className="text-center space-y-3">
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Farm Background Image with Overlay - Responsive */}
+      <div className="absolute inset-0">
+        {/* Mobile background (default) */}
+        <div 
+          className="md:hidden absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{
+            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.25)), url('/farm-backgroundmobile.jpg')`,
+          }}
+        />
+        {/* Desktop background */}
+        <div 
+          className="hidden md:block absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{
+            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.25)), url('/farm-background-desktop.jpg')`,
+          }}
+        />
+        {/* Optional overlay for better text readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10"></div>
+      </div>
+
+      {/* Login Form Card */}
+      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md">
+          {/* Logo and Branding */}
+          <div className="text-center space-y-3 mb-8">
             <div className="flex justify-center">
               <img
                 src="/Logo/FarmVault_Logo dark mode.png"
                 alt="FarmVault logo"
-                className="h-12 w-auto rounded-md object-contain"
+                className="h-32 w-auto md:h-40 lg:h-48 object-contain drop-shadow-lg"
               />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                Sign in to FarmVault
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Secure access to your farm management dashboard
+              <p className="text-sm md:text-base text-white/90 mt-1 drop-shadow-md">
+                <span className="hidden md:inline">A smart farm operations & decision system for modern agriculture</span>
+                <span className="md:hidden">A smart farm operations for modern agriculture</span>
               </p>
             </div>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground">Email</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="fv-input"
-                placeholder="you@farm.co.ke"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground">Password</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="fv-input"
-                placeholder="********"
-              />
-            </div>
-
-            {error && (
-              <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {error}
+          {/* Form Card */}
+          <div className="bg-[#F5F1EB] rounded-3xl shadow-2xl p-6 md:p-8 space-y-6 border border-white/20">
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Email Field */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-[#2D4A3E]" />
+                  <label className="text-sm font-medium text-[#2D4A3E]">Email</label>
+                </div>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-[#2D4A3E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2D4A3E]/20 focus:border-[#2D4A3E]"
+                  placeholder="Email"
+                />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="fv-btn fv-btn--primary w-full flex items-center justify-center gap-2"
-            >
-              <LogIn className="h-4 w-4" />
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+              {/* Password Field */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-[#2D4A3E]" />
+                  <label className="text-sm font-medium text-[#2D4A3E]">Password</label>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 pr-12 text-sm text-[#2D4A3E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2D4A3E]/20 focus:border-[#2D4A3E]"
+                    placeholder="Password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2D4A3E] hover:text-[#2D4A3E]/70 transition-colors"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
 
-          <p className="text-[11px] text-center text-muted-foreground">
-            Use the same email and password configured in your Firebase Auth users.
-          </p>
+              {error && (
+                <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+
+              {/* Sign In Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-[#8B6F47] hover:bg-[#7A5F3A] text-white font-medium px-4 py-3.5 text-base transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Signing in…' : 'Sign In'}
+              </button>
+            </form>
+
+          </div>
         </div>
       </div>
     </div>
