@@ -1593,11 +1593,19 @@ export default function ManagerOperationsPage() {
                                 <SelectValue placeholder="Select item" />
                               </SelectTrigger>
                               <SelectContent>
-                                {itemOptions.map((item) => (
-                                  <SelectItem key={item.id} value={item.id}>
-                                    {item.name}
-                                  </SelectItem>
-                                ))}
+                                {itemOptions.map((item) => {
+                                  const outOfStock = item.quantity <= 0;
+                                  return (
+                                    <SelectItem
+                                      key={item.id}
+                                      value={item.id}
+                                      disabled={outOfStock}
+                                    >
+                                      {item.name}
+                                      {outOfStock ? ' (Out of stock)' : ''}
+                                    </SelectItem>
+                                  );
+                                })}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1882,11 +1890,19 @@ export default function ManagerOperationsPage() {
                                   <SelectValue placeholder="Select item" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {itemOptions.map((item) => (
-                                    <SelectItem key={item.id} value={item.id}>
-                                      {item.name}
-                                    </SelectItem>
-                                  ))}
+                                  {itemOptions.map((item) => {
+                                    const outOfStock = item.quantity <= 0;
+                                    return (
+                                      <SelectItem
+                                        key={item.id}
+                                        value={item.id}
+                                        disabled={outOfStock}
+                                      >
+                                        {item.name}
+                                        {outOfStock ? ' (Out of stock)' : ''}
+                                      </SelectItem>
+                                    );
+                                  })}
                                 </SelectContent>
                               </Select>
                             </div>

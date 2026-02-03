@@ -92,13 +92,22 @@ export type ExpenseCategory =
   | 'fertilizer'
   | 'chemical'
   | 'fuel'
-  | 'other';
+  | 'other'
+  // Broker market expense categories
+  | 'space'
+  | 'watchman'
+  | 'ropes'
+  | 'carton'
+  | 'offloading_labour'
+  | 'onloading_labour'
+  | 'broker_payment';
 
 export interface Expense {
   id: string;
   companyId: string;
   projectId?: string;
   cropType?: CropType;
+  harvestId?: string; // For broker expenses linked to a harvest
 
   category: ExpenseCategory;
   description: string;
@@ -121,6 +130,17 @@ export interface Expense {
 
   createdAt: Date;
 }
+
+export const BROKER_EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
+  { value: 'space', label: 'Crates Space' },
+  { value: 'watchman', label: 'Watchman' },
+  { value: 'ropes', label: 'Ropes' },
+  { value: 'carton', label: 'Carton' },
+  { value: 'offloading_labour', label: 'Offloading Labour' },
+  { value: 'onloading_labour', label: 'Onloading Labour' },
+  { value: 'broker_payment', label: 'Broker Payment' },
+  { value: 'other', label: 'Other' },
+];
 
 export type InventoryCategory = 'fertilizer' | 'chemical' | 'diesel' | 'materials';
 
@@ -302,6 +322,11 @@ export interface Harvest {
   marketName?: string;
   brokerId?: string;
   brokerName?: string;
+  // Transport to market (can be more than one lorry)
+  lorryPlate?: string;
+  lorryPlates?: string[];
+  driverId?: string;
+  driverName?: string;
 }
 
 export interface Sale {
@@ -319,6 +344,7 @@ export interface Sale {
   date: Date;
   status: 'pending' | 'partial' | 'completed' | 'cancelled';
   brokerId?: string; // ID of the broker who made the sale
+  amountPaid?: number; // When status is 'partial', amount already paid (remainder = totalAmount - amountPaid)
 }
 
 export interface Supplier {

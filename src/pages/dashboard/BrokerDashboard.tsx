@@ -1,43 +1,35 @@
 import React, { useMemo } from 'react';
 import { DollarSign, Package, TrendingUp, Calendar, Award, AlertTriangle } from 'lucide-react';
-import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
-import { Sale, Harvest, Project } from '@/types';
+import { Sale, Harvest } from '@/types';
 import { LuxuryStatCard } from '@/components/dashboard/LuxuryStatCard';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 
 export function BrokerDashboard() {
-  const { activeProject } = useProject();
   const { user } = useAuth();
+  const brokerId = user?.id ?? '';
 
-  const companyId = user?.companyId || '';
-
-  // Data sources
   const { data: allSales = [] } = useCollection<Sale>('sales', 'sales');
   const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allProjects = [] } = useCollection<Project>('projects', 'projects');
 
-  // Filter sales by broker and project
-  const brokerSales = useMemo(() => {
-    if (!activeProject) return [];
-    return allSales.filter(
-      s => s.projectId === activeProject.id &&
-      s.companyId === activeProject.companyId &&
-      s.brokerId === user?.id
-    );
-  }, [allSales, activeProject, user?.id]);
-
-  // Filter harvests by project
-  const projectHarvests = useMemo(() => {
-    if (!activeProject) return [];
+  // Harvests allocated to this broker (brokerId on harvest); brokers only see market harvests
+  const brokerHarvests = useMemo(() => {
     return allHarvests.filter(
-      h => h.projectId === activeProject.id &&
-      h.companyId === activeProject.companyId
+      (h) => h.brokerId === brokerId && (h.destination ?? 'farm') === 'market',
     );
-  }, [allHarvests, activeProject]);
+  }, [allHarvests, brokerId]);
+
+  const brokerHarvestIds = useMemo(() => new Set(brokerHarvests.map((h) => h.id)), [brokerHarvests]);
+
+  // Sales where this broker is assigned or sale is from their allocated harvest
+  const brokerSales = useMemo(() => {
+    return allSales.filter(
+      (s) => s.brokerId === brokerId || brokerHarvestIds.has(s.harvestId),
+    );
+  }, [allSales, brokerId, brokerHarvestIds]);
 
   // Calculate stats
   const totalSales = useMemo(() => {
@@ -85,12 +77,12 @@ export function BrokerDashboard() {
     return Math.min(...brokerSales.map(s => s.unitPrice));
   }, [brokerSales]);
 
-  // Harvest linkage
+  // Harvest linkage for allocated harvests only
   const harvestStock = useMemo(() => {
     const stock: Record<string, { harvest: Harvest; remaining: number; sold: number }> = {};
-    projectHarvests.forEach(harvest => {
+    brokerHarvests.forEach((harvest) => {
       const sold = brokerSales
-        .filter(s => s.harvestId === harvest.id)
+        .filter((s) => s.harvestId === harvest.id)
         .reduce((sum, s) => sum + s.quantity, 0);
       stock[harvest.id] = {
         harvest,
@@ -99,17 +91,7 @@ export function BrokerDashboard() {
       };
     });
     return stock;
-  }, [projectHarvests, brokerSales]);
-
-  if (!activeProject) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="fv-card p-8 text-center">
-          <p className="text-muted-foreground">Please select a project to view the broker dashboard.</p>
-        </div>
-      </div>
-    );
-  }
+  }, [brokerHarvests, brokerSales]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -117,7 +99,7 @@ export function BrokerDashboard() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Broker Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Sales performance for <span className="font-medium">{activeProject.name}</span>
+          Your sales performance and allocated harvests
         </p>
       </div>
 
@@ -143,8 +125,8 @@ export function BrokerDashboard() {
           iconVariant="success"
         />
         <LuxuryStatCard
-          title="Active Project"
-          value={activeProject.name}
+          title="Allocated Harvests"
+          value={brokerHarvests.length}
           icon={Calendar}
           iconVariant="info"
         />
@@ -206,7 +188,7 @@ export function BrokerDashboard() {
         <div className="p-4 space-y-3">
           {Object.values(harvestStock).length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No harvests available for this project.
+              No harvests allocated to you yet. When a harvest is assigned to you, it will appear here and in Harvest & Sales.
             </p>
           ) : (
             Object.values(harvestStock).map(({ harvest, remaining, sold }) => (

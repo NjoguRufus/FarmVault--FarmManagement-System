@@ -2,7 +2,7 @@ import React from 'react';
 import { Bell, Search, ChevronDown, Settings, LogOut, User, Menu } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
-import { cn } from '@/lib/utils';
+import { cn, getDisplayRole } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -132,7 +132,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               <div className="hidden md:flex flex-col items-start">
                 <span className="text-sm font-medium">{user?.name}</span>
                 <span className="text-xs text-muted-foreground capitalize">
-                  {user?.role.replace('-', ' ')}
+                  {user ? getDisplayRole(user) : ''}
                 </span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground hidden md:block" />

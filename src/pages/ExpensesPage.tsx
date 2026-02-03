@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -42,9 +43,31 @@ export default function ExpensesPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date } | undefined>();
 
-  const expenses = activeProject
-    ? allExpenses.filter(e => e.projectId === activeProject.id)
-    : allExpenses;
+  // Filter expenses based on user role
+  // Brokers should only see expenses they incurred (related to their sales activities)
+  const isBroker = useMemo(() => {
+    if (!user) return false;
+    if (user.role === 'broker') return true;
+    if (user.role === 'employee') {
+      // Check if employee role is broker-related
+      const employeeRole = (user as any).employeeRole;
+      return employeeRole === 'sales-broker' || employeeRole === 'broker';
+    }
+    return false;
+  }, [user]);
+
+  const expenses = useMemo(() => {
+    let filtered = activeProject
+      ? allExpenses.filter(e => e.projectId === activeProject.id)
+      : allExpenses;
+
+    // For brokers, only show expenses they paid for (related to their sales work)
+    if (isBroker && user) {
+      filtered = filtered.filter(e => e.paidBy === user.id);
+    }
+
+    return filtered;
+  }, [allExpenses, activeProject, isBroker, user]);
 
   const filteredExpenses = expenses.filter((e) => {
     const matchesCategory = categoryFilter === 'all' || e.category === categoryFilter;
@@ -217,7 +240,14 @@ export default function ExpensesPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/broker/expenses"
+            className="fv-btn fv-btn--secondary flex items-center gap-2"
+          >
+            <Receipt className="h-4 w-4" />
+            Broker expenses
+          </Link>
           {unpaidWorkLogs.length > 0 && (
             <>
               <button 

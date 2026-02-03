@@ -19,7 +19,7 @@ import {
   ChevronRight,
   Building2,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, getDisplayRole } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
 const companyNavItems = [
@@ -85,11 +85,11 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
     employeeRole === 'sales-broker' ||
     employeeRole === 'broker'
   ) {
-    // Broker: own dashboard + harvest & sales + expenses
+    // Broker: own dashboard + broker harvest & sales + expenses (no projects)
     navItems = [
       { title: 'Broker Dashboard', href: '/broker', icon: LayoutDashboard },
-      { title: 'Harvest & Sales', href: '/harvest-sales', icon: TrendingUp },
-      { title: 'Expenses', href: '/expenses', icon: Receipt },
+      { title: 'Harvest & Sales', href: '/broker/harvest-sales', icon: TrendingUp },
+      { title: 'Market Expenses', href: '/broker/expenses', icon: Receipt },
     ];
   } else if (
     (user.role === 'employee' || user.role === ('user' as any)) &&
@@ -146,13 +146,14 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       <nav className="flex-1 overflow-y-auto py-4 px-3 scrollbar-thin">
         <ul className="space-y-1">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.href;
+            const normalizedPath = location.pathname.replace(/\/+/g, '/');
+            const isActive = normalizedPath === item.href.replace(/\/+/g, '/');
             const Icon = item.icon;
 
             return (
               <li key={item.href}>
                 <Link
-                  to={item.href}
+                  to={item.href.replace(/\/+/g, '/')}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                     isActive
@@ -178,7 +179,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-medium text-sidebar-foreground">{user.name}</span>
-              <span className="text-xs text-sidebar-muted capitalize">{user.role.replace('-', ' ')}</span>
+              <span className="text-xs text-sidebar-muted">{getDisplayRole(user)}</span>
             </div>
           </div>
         </div>

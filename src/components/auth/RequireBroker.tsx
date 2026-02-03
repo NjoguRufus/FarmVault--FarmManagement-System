@@ -11,7 +11,8 @@ interface RequireBrokerProps {
 export function RequireBroker({ children }: RequireBrokerProps) {
   const { user, isAuthenticated } = useAuth();
   const location = useLocation();
-  
+  const { data: employees = [], isLoading: employeesLoading } = useCollection<Employee>('employees', 'employees');
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
@@ -21,14 +22,28 @@ export function RequireBroker({ children }: RequireBrokerProps) {
     return children;
   }
 
-  // If user is employee, check employee role
+  // If user is employee, allow access if employeeRole is broker (avoids redirect loop while employees load)
   if (user?.role === 'employee') {
-    const { data: employees = [] } = useCollection<Employee>('employees', 'employees');
-    const isBrokerEmployee = employees.some(e => e.id === user.id && e.role === 'sales-broker');
-    if (isBrokerEmployee) {
+    const employeeRole = (user as any).employeeRole as string | undefined;
+    if (employeeRole === 'sales-broker' || employeeRole === 'broker') {
       return children;
+    }
+    // Optional: also allow if employees collection confirms (for users without employeeRole set)
+    if (!employeesLoading) {
+      const isBrokerEmployee = employees.some(e => e.id === user.id && e.role === 'sales-broker');
+      if (isBrokerEmployee) {
+        return children;
+      }
+    } else {
+      // Still loading employees: show loading so we don't redirect to /dashboard and cause glitch
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="text-muted-foreground">Loading…</div>
+        </div>
+      );
     }
   }
 
+  // Redirect non-brokers to their appropriate dashboard
   return <Navigate to="/dashboard" replace />;
 }

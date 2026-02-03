@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
-import { Harvest, Sale, Employee } from '@/types';
+import { Harvest, Sale, Employee, User } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatDate } from '@/lib/dateUtils';
@@ -33,6 +33,7 @@ export default function HarvestSalesPage() {
   const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests');
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
+  const { data: allUsers = [] } = useCollection<User>('harvest-page-users', 'users');
 
   const harvests = activeProject
     ? allHarvests.filter((h) => h.projectId === activeProject.id)
@@ -42,11 +43,34 @@ export default function HarvestSalesPage() {
     ? allSales.filter((s) => s.projectId === activeProject.id)
     : allSales;
 
-  const brokers = activeProject
-    ? allEmployees.filter(
-        (e) => e.companyId === activeProject.companyId && e.role === 'sales-broker',
-      )
-    : allEmployees.filter((e) => e.role === 'sales-broker');
+  // Company drivers (for going to market)
+  const drivers = React.useMemo(() => {
+    if (!activeProject) return [];
+    return allEmployees.filter(
+      (e) =>
+        e.companyId === activeProject.companyId &&
+        (e.role === 'logistics-driver' || e.role === 'driver'),
+    );
+  }, [allEmployees, activeProject?.companyId]);
+
+  // Brokers: employees with sales-broker role + users with platform role 'broker'.
+  // Use the broker's AUTH USER ID (id they use when logged in) so harvest.brokerId matches user.id on the broker dashboard.
+  const brokers = React.useMemo(() => {
+    const fromEmployees =
+      activeProject
+        ? allEmployees.filter(
+            (e) => e.companyId === activeProject.companyId && e.role === 'sales-broker',
+          )
+        : allEmployees.filter((e) => e.role === 'sales-broker');
+    const fromUsers = (allUsers as User[]).filter((u) => u.role === 'broker');
+    const byId = new Map<string, { id: string; name: string }>();
+    fromEmployees.forEach((e) => {
+      const authId = (e as any).authUserId ?? e.id;
+      byId.set(authId, { id: authId, name: e.name });
+    });
+    fromUsers.forEach((u) => byId.set(u.id, { id: u.id, name: u.name }));
+    return Array.from(byId.values());
+  }, [allEmployees, allUsers, activeProject?.companyId]);
 
   const marketHarvests = harvests.filter((h) => h.destination === 'market');
 
@@ -88,6 +112,11 @@ export default function HarvestSalesPage() {
   const [harvestMarket, setHarvestMarket] = useState('');
   const [harvestCustomMarket, setHarvestCustomMarket] = useState('');
   const [harvestBrokerId, setHarvestBrokerId] = useState('');
+  const [harvestCrateType, setHarvestCrateType] = useState<'big' | 'small'>('big');
+  const [harvestLorryPlates, setHarvestLorryPlates] = useState<string[]>(['']);
+  const [harvestDriverType, setHarvestDriverType] = useState<'company' | 'other'>('company');
+  const [harvestDriverId, setHarvestDriverId] = useState('');
+  const [harvestDriverOtherName, setHarvestDriverOtherName] = useState('');
   const [harvestSaving, setHarvestSaving] = useState(false);
 
   const [buyerName, setBuyerName] = useState('');
@@ -132,11 +161,19 @@ export default function HarvestSalesPage() {
     setHarvestSaving(true);
     try {
       const destination = harvestDestination;
+      const isTomatoes = activeProject.cropType === 'tomatoes';
+      const unit =
+        isTomatoes && destination === 'market'
+          ? harvestCrateType === 'big'
+            ? 'crate-big'
+            : 'crate-small'
+          : harvestUnit;
+      const quality = isTomatoes ? 'A' : harvestQuality;
 
       const harvestData: any = {
         quantity: Number(harvestQty || '0'),
-        unit: harvestUnit,
-        quality: harvestQuality,
+        unit,
+        quality,
         projectId: activeProject.id,
         companyId: activeProject.companyId,
         cropType: activeProject.cropType,
@@ -166,9 +203,20 @@ export default function HarvestSalesPage() {
           harvestData.brokerId = harvestBrokerId;
           harvestData.brokerName = broker?.name;
         }
+        const plates = harvestLorryPlates.map((p) => p.trim()).filter(Boolean);
+        if (plates.length > 0) harvestData.lorryPlates = plates;
+        if (harvestDriverType === 'company' && harvestDriverId) {
+          const driver = drivers.find((d) => d.id === harvestDriverId);
+          harvestData.driverId = harvestDriverId;
+          harvestData.driverName = driver?.name;
+        } else if (harvestDriverType === 'other' && harvestDriverOtherName.trim()) {
+          harvestData.driverName = harvestDriverOtherName.trim();
+        }
       }
 
       const harvestRef = await addDoc(collection(db, 'harvests'), harvestData);
+
+      queryClient.invalidateQueries({ queryKey: ['harvests'] });
 
       // If this harvest is sold directly from the farm and has pricing,
       // automatically create a completed sale linked to this harvest.
@@ -227,6 +275,11 @@ export default function HarvestSalesPage() {
       setHarvestMarket('');
       setHarvestCustomMarket('');
       setHarvestBrokerId('');
+      setHarvestCrateType('big');
+      setHarvestLorryPlates(['']);
+      setHarvestDriverType('company');
+      setHarvestDriverId('');
+      setHarvestDriverOtherName('');
     } finally {
       setHarvestSaving(false);
     }
@@ -353,7 +406,7 @@ export default function HarvestSalesPage() {
                 Record Harvest
               </button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[90vw] md:max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Record Harvest</DialogTitle>
               </DialogHeader>
@@ -416,24 +469,26 @@ export default function HarvestSalesPage() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Quality</label>
-                    <Select
-                      value={harvestQuality}
-                      onValueChange={(val) =>
-                        setHarvestQuality(val as 'A' | 'B' | 'C')
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select quality" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="A">Grade A</SelectItem>
-                        <SelectItem value="B">Grade B</SelectItem>
-                        <SelectItem value="C">Grade C</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {activeProject.cropType !== 'tomatoes' && (
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Quality</label>
+                      <Select
+                        value={harvestQuality}
+                        onValueChange={(val) =>
+                          setHarvestQuality(val as 'A' | 'B' | 'C')
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select quality" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="A">Grade A</SelectItem>
+                          <SelectItem value="B">Grade B</SelectItem>
+                          <SelectItem value="C">Grade C</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   {activeProject.cropType === 'tomatoes' && harvestDestination === 'farm' && (
                     <div className="space-y-3 border rounded-lg p-3">
@@ -505,7 +560,109 @@ export default function HarvestSalesPage() {
 
                   {activeProject.cropType === 'tomatoes' && harvestDestination === 'market' && (
                     <div className="space-y-3 border rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground font-medium">Market & Broker</p>
+                      <p className="text-xs text-muted-foreground font-medium">Going to market</p>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Lorry number plate(s)</label>
+                        {harvestLorryPlates.map((plate, i) => (
+                          <div key={i} className="flex gap-2 mt-1">
+                            <input
+                              className="fv-input flex-1"
+                              value={plate}
+                              onChange={(e) =>
+                                setHarvestLorryPlates((prev) =>
+                                  prev.map((p, j) => (j === i ? e.target.value : p))
+                                )
+                              }
+                              placeholder="e.g. KCA 123A"
+                            />
+                            {harvestLorryPlates.length > 1 && (
+                              <button
+                                type="button"
+                                className="fv-btn fv-btn--secondary shrink-0"
+                                onClick={() =>
+                                  setHarvestLorryPlates((prev) => prev.filter((_, j) => j !== i))
+                                }
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline mt-1"
+                          onClick={() => setHarvestLorryPlates((prev) => [...prev, ''])}
+                        >
+                          + Add another lorry
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Driver</label>
+                        <Select
+                          value={harvestDriverType}
+                          onValueChange={(val) => {
+                            setHarvestDriverType(val as 'company' | 'other');
+                            setHarvestDriverId('');
+                            setHarvestDriverOtherName('');
+                          }}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="company">Company driver</SelectItem>
+                            <SelectItem value="other">Other (different company)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {harvestDriverType === 'company' && (
+                          <Select
+                            value={harvestDriverId || '__select__'}
+                            onValueChange={(v) => setHarvestDriverId(v === '__select__' || v === '__no_drivers__' ? '' : v)}
+                          >
+                            <SelectTrigger className="w-full mt-1">
+                              <SelectValue placeholder="Select driver" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__select__">Select driver</SelectItem>
+                              {drivers.map((d) => (
+                                <SelectItem key={d.id} value={d.id}>
+                                  {d.name}
+                                </SelectItem>
+                              ))}
+                              {drivers.length === 0 && (
+                                <SelectItem value="__no_drivers__" disabled>
+                                  No company drivers
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        {harvestDriverType === 'other' && (
+                          <input
+                            className="fv-input w-full mt-1"
+                            value={harvestDriverOtherName}
+                            onChange={(e) => setHarvestDriverOtherName(e.target.value)}
+                            placeholder="Driver name"
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Crate type</label>
+                        <Select
+                          value={harvestCrateType}
+                          onValueChange={(val) =>
+                            setHarvestCrateType(val as 'big' | 'small')
+                          }
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select crate" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="big">Big crate</SelectItem>
+                            <SelectItem value="small">Small crate</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-foreground">Market</label>
                         <Select
@@ -539,14 +696,14 @@ export default function HarvestSalesPage() {
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-foreground">Broker</label>
                         <Select
-                          value={harvestBrokerId || 'none'}
-                          onValueChange={(val) => setHarvestBrokerId(val === 'none' ? '' : val)}
+                          value={harvestBrokerId || '__no_broker__'}
+                          onValueChange={(val) => setHarvestBrokerId(val === '__no_broker__' ? '' : val)}
                         >
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select broker" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="none">No broker</SelectItem>
+                            <SelectItem value="__no_broker__">No broker</SelectItem>
                             {brokers.map((broker) => (
                               <SelectItem key={broker.id} value={broker.id}>
                                 {broker.name}
@@ -617,7 +774,8 @@ export default function HarvestSalesPage() {
                       <SelectContent>
                         {marketHarvests.map((h) => (
                           <SelectItem key={h.id} value={h.id}>
-                            {formatDate(h.date)} - {h.quantity.toLocaleString()} {h.unit} (Grade {h.quality})
+                            {formatDate(h.date)} - {h.quantity.toLocaleString()} {h.unit}
+                            {activeProject?.cropType !== 'tomatoes' ? ` (Grade ${h.quality})` : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -662,14 +820,14 @@ export default function HarvestSalesPage() {
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-foreground">Broker (optional)</label>
                       <Select
-                        value={saleBrokerId || 'none'}
-                        onValueChange={(val) => setSaleBrokerId(val === 'none' ? '' : val)}
+                        value={saleBrokerId || '__no_broker__'}
+                        onValueChange={(val) => setSaleBrokerId(val === '__no_broker__' ? '' : val)}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Select broker" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">No broker</SelectItem>
+                          <SelectItem value="__no_broker__">No broker</SelectItem>
                           {brokers.map((broker) => (
                             <SelectItem key={broker.id} value={broker.id}>
                               {broker.name}
@@ -1132,9 +1290,13 @@ export default function HarvestSalesPage() {
                   </td>
                   <td className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</td>
                   <td>
-                    <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
-                      Grade {harvest.quality}
-                    </span>
+                    {harvest.cropType === 'tomatoes' ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
+                        Grade {harvest.quality}
+                      </span>
+                    )}
                   </td>
                   <td>
                     {harvest.destination === 'market' ? (
@@ -1176,9 +1338,11 @@ export default function HarvestSalesPage() {
             <div key={harvest.id} className="p-4 bg-muted/30 rounded-lg">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</span>
-                <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
-                  Grade {harvest.quality}
-                </span>
+                {harvest.cropType !== 'tomatoes' && (
+                  <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
+                    Grade {harvest.quality}
+                  </span>
+                )}
               </div>
               <p className="text-sm text-muted-foreground">
                 {formatDate(harvest.date, { month: 'long' })}
@@ -1244,8 +1408,8 @@ export default function HarvestSalesPage() {
                   saleStatusFilter === 'all' ? true : sale.status === saleStatusFilter,
                 )
                 .map((sale) => {
-                  const broker = sale.brokerId
-                    ? allEmployees.find((e) => e.id === sale.brokerId)
+                  const brokerName = sale.brokerId
+                    ? brokers.find((b) => b.id === sale.brokerId)?.name
                     : null;
                   return (
                 <tr key={sale.id}>
@@ -1266,7 +1430,7 @@ export default function HarvestSalesPage() {
                     </span>
                   </td>
                   <td className="text-sm text-muted-foreground">
-                    {broker ? broker.name : '—'}
+                    {brokerName ?? '—'}
                   </td>
                   <td>
                     <button className="p-2 hover:bg-muted rounded-lg transition-colors">
@@ -1285,8 +1449,8 @@ export default function HarvestSalesPage() {
               saleStatusFilter === 'all' ? true : sale.status === saleStatusFilter,
             )
             .map((sale) => {
-              const broker = sale.brokerId
-                ? allEmployees.find((e) => e.id === sale.brokerId)
+              const brokerName = sale.brokerId
+                ? brokers.find((b) => b.id === sale.brokerId)?.name
                 : null;
               return (
             <div key={sale.id} className="p-4 bg-muted/30 rounded-lg">
@@ -1305,7 +1469,7 @@ export default function HarvestSalesPage() {
                 <span className="font-semibold">{formatCurrency(sale.totalAmount)}</span>
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {broker ? `Broker: ${broker.name}` : 'No broker set'}
+                {brokerName ? `Broker: ${brokerName}` : 'No broker set'}
               </p>
             </div>
           );})}

@@ -20,6 +20,9 @@ import ExpensesPage from "@/pages/ExpensesPage";
 import OperationsPage from "@/pages/OperationsPage";
 import InventoryPage from "@/pages/InventoryPage";
 import HarvestSalesPage from "@/pages/HarvestSalesPage";
+import BrokerHarvestSalesPage from "@/pages/BrokerHarvestSalesPage";
+import BrokerExpensesPage from "@/pages/BrokerExpensesPage";
+import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
@@ -34,6 +37,7 @@ import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
 import { RequireManager } from "@/components/auth/RequireManager";
 import { RequireBroker } from "@/components/auth/RequireBroker";
+import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
 import SetupCompany from "@/pages/SetupCompany";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
@@ -124,15 +128,15 @@ const App = () => (
                 }
               >
                 <Route path="/dashboard" element={<CompanyDashboardRoute />} />
-                <Route path="/projects" element={<ProjectsPage />} />
-                <Route path="/projects/new" element={<NewProjectPage />} />
-                <Route path="/projects/:projectId" element={<ProjectDetailsPage />} />
-                <Route path="/projects/:projectId/planning" element={<ProjectPlanningPage />} />
+                <Route path="/projects" element={<RequireNotBroker><ProjectsPage /></RequireNotBroker>} />
+                <Route path="/projects/new" element={<RequireNotBroker><NewProjectPage /></RequireNotBroker>} />
+                <Route path="/projects/:projectId" element={<RequireNotBroker><ProjectDetailsPage /></RequireNotBroker>} />
+                <Route path="/projects/:projectId/planning" element={<RequireNotBroker><ProjectPlanningPage /></RequireNotBroker>} />
                 <Route path="/crop-stages" element={<CropStagesPage />} />
                 <Route path="/expenses" element={<ExpensesPage />} />
                 <Route path="/operations" element={<OperationsPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
-                <Route path="/harvest-sales" element={<HarvestSalesPage />} />
+                <Route path="/harvest-sales" element={<RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker>} />
                 <Route path="/suppliers" element={<SuppliersPage />} />
                 <Route path="/challenges" element={<SeasonChallengesPage />} />
                 <Route path="/employees" element={<EmployeesPage />} />
@@ -155,13 +159,17 @@ const App = () => (
               </Route>
 
               <Route
+                path="/broker"
                 element={
                   <RequireBroker>
                     <MainLayout />
                   </RequireBroker>
                 }
               >
-                <Route path="/broker" element={<BrokerDashboard />} />
+                <Route index element={<BrokerDashboard />} />
+                <Route path="harvest-sales" element={<BrokerHarvestSalesPage />} />
+                <Route path="harvest/:harvestId" element={<BrokerHarvestDetailsPage />} />
+                <Route path="expenses" element={<BrokerExpensesPage />} />
               </Route>
 
               <Route
