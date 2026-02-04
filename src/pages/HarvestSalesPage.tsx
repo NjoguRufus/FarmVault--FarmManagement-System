@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, List } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -30,6 +31,7 @@ const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 export default function HarvestSalesPage() {
   const { activeProject } = useProject();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests');
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
@@ -73,6 +75,21 @@ export default function HarvestSalesPage() {
   }, [allEmployees, allUsers, activeProject?.companyId]);
 
   const marketHarvests = harvests.filter((h) => h.destination === 'market');
+
+  // Per-harvest sold quantity (for sold-out indicator)
+  const harvestStock = useMemo(() => {
+    const stock: Record<string, { sold: number; remaining: number }> = {};
+    harvests.forEach((h) => {
+      const sold = sales
+        .filter((s) => s.harvestId === h.id)
+        .reduce((sum, s) => sum + s.quantity, 0);
+      stock[h.id] = {
+        sold,
+        remaining: Math.max(0, h.quantity - sold),
+      };
+    });
+    return stock;
+  }, [harvests, sales]);
 
   const totalHarvest = harvests.reduce((sum, h) => sum + h.quantity, 0);
   const totalSales = sales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -135,6 +152,7 @@ export default function HarvestSalesPage() {
   ]);
 
   const [harvestFilter, setHarvestFilter] = useState<'all' | 'farm' | 'market'>('all');
+  const [harvestViewMode, setHarvestViewMode] = useState<'list' | 'card'>('list');
   const [saleStatusFilter, setSaleStatusFilter] = useState<
     'all' | 'pending' | 'partial' | 'completed' | 'cancelled'
   >('all');
@@ -1232,8 +1250,36 @@ export default function HarvestSalesPage() {
       <div className="fv-card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <h3 className="text-lg font-semibold">Harvest Records</h3>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Filter by destination</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button
+                type="button"
+                className={cn(
+                  'p-2 transition-colors',
+                  harvestViewMode === 'list'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted/50 hover:bg-muted text-muted-foreground',
+                )}
+                onClick={() => setHarvestViewMode('list')}
+                title="List view"
+              >
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'p-2 transition-colors',
+                  harvestViewMode === 'card'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted/50 hover:bg-muted text-muted-foreground',
+                )}
+                onClick={() => setHarvestViewMode('card')}
+                title="Card view"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+            </div>
+            <span className="text-xs text-muted-foreground">Filter</span>
             <Select
               value={harvestFilter}
               onValueChange={(val) =>
@@ -1256,107 +1302,152 @@ export default function HarvestSalesPage() {
           <p className="text-sm text-muted-foreground mb-4">Loading harvests…</p>
         )}
 
-        {loadingHarvests && (
-          <p className="text-sm text-muted-foreground mb-4">Loading harvests…</p>
-        )}
-
         {harvests.length === 0 && !loadingHarvests && (
           <p className="text-sm text-muted-foreground">No harvests recorded yet.</p>
         )}
 
-        <div className="hidden md:block overflow-x-auto">
-          <table className="fv-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Quantity</th>
-                <th>Quality</th>
-                <th>Destination</th>
-                <th>Notes</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {harvests
-                .filter((harvest) => {
-                  if (harvestFilter === 'all') return true;
-                  const dest = harvest.destination || 'farm';
-                  return dest === harvestFilter;
-                })
-                .map((harvest) => (
-                <tr key={harvest.id}>
-                  <td>
-                    {formatDate(harvest.date)}
-                  </td>
-                  <td className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</td>
-                  <td>
-                    {harvest.cropType === 'tomatoes' ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
-                        Grade {harvest.quality}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {harvest.destination === 'market' ? (
-                      <div className="space-y-0.5 text-xs">
-                        <span className="fv-badge fv-badge--gold capitalize">
-                          Market
-                        </span>
-                        <div className="text-muted-foreground">
-                          {harvest.marketName || 'Market not set'}
-                          {harvest.brokerName && (
-                            <> • Broker: {harvest.brokerName}</>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Farm</span>
-                    )}
-                  </td>
-                  <td className="text-muted-foreground">{harvest.notes || '-'}</td>
-                  <td>
-                    <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </td>
+        {harvests.length > 0 && !loadingHarvests && harvestViewMode === 'list' && (
+          <div className="overflow-x-auto">
+            <table className="fv-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Quantity</th>
+                  <th>Quality</th>
+                  <th>Destination</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {harvests
+                  .filter((harvest) => {
+                    if (harvestFilter === 'all') return true;
+                    const dest = harvest.destination || 'farm';
+                    return dest === harvestFilter;
+                  })
+                  .map((harvest) => {
+                    const stock = harvestStock[harvest.id];
+                    const soldOut = stock ? stock.remaining <= 0 : false;
+                    return (
+                      <tr
+                        key={harvest.id}
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => navigate(`/harvest-sales/harvest/${harvest.id}`)}
+                      >
+                        <td>{formatDate(harvest.date)}</td>
+                        <td className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</td>
+                        <td>
+                          {harvest.cropType === 'tomatoes' ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
+                              Grade {harvest.quality}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {harvest.destination === 'market' ? (
+                            <div className="space-y-0.5 text-xs">
+                              <span className="fv-badge fv-badge--gold capitalize">Market</span>
+                              <div className="text-muted-foreground">
+                                {harvest.marketName || 'Market not set'}
+                                {harvest.brokerName && <> • Broker: {harvest.brokerName}</>}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Farm</span>
+                          )}
+                        </td>
+                        <td>
+                          {soldOut && (
+                            <span className="fv-badge bg-destructive/20 text-destructive text-xs">SOLD OUT</span>
+                          )}
+                          {!soldOut && stock && stock.sold > 0 && (
+                            <span className="text-xs text-muted-foreground">Sold: {stock.sold.toLocaleString()}</span>
+                          )}
+                          {!soldOut && (!stock || stock.sold === 0) && <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="text-muted-foreground">{harvest.notes || '-'}</td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors"
+                            onClick={() => navigate(`/harvest-sales/harvest/${harvest.id}`)}
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        <div className="md:hidden space-y-3">
-          {harvests
-            .filter((harvest) => {
-              if (harvestFilter === 'all') return true;
-              const dest = harvest.destination || 'farm';
-              return dest === harvestFilter;
-            })
-            .map((harvest) => (
-            <div key={harvest.id} className="p-4 bg-muted/30 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</span>
-                {harvest.cropType !== 'tomatoes' && (
-                  <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
-                    Grade {harvest.quality}
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {formatDate(harvest.date, { month: 'long' })}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {harvest.destination === 'market'
-                  ? `Market: ${harvest.marketName || 'Not set'}${
-                      harvest.brokerName ? ` • Broker: ${harvest.brokerName}` : ''
-                    }`
-                  : 'Destination: Farm'}
-              </p>
-            </div>
-          ))}
-        </div>
+        {harvests.length > 0 && !loadingHarvests && harvestViewMode === 'card' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {harvests
+              .filter((harvest) => {
+                if (harvestFilter === 'all') return true;
+                const dest = harvest.destination || 'farm';
+                return dest === harvestFilter;
+              })
+              .map((harvest) => {
+                const stock = harvestStock[harvest.id];
+                const soldOut = stock ? stock.remaining <= 0 : false;
+                const sold = stock?.sold ?? 0;
+                return (
+                  <div
+                    key={harvest.id}
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      'relative p-4 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors cursor-pointer',
+                      soldOut && 'opacity-90',
+                    )}
+                    onClick={() => navigate(`/harvest-sales/harvest/${harvest.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/harvest-sales/harvest/${harvest.id}`);
+                      }
+                    }}
+                  >
+                    {soldOut && (
+                      <div
+                        className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-lg overflow-hidden"
+                        aria-hidden
+                      >
+                        <span className="text-4xl font-black text-destructive/30 rotate-[-20deg] select-none">
+                          SOLD OUT
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">{harvest.quantity.toLocaleString()} {harvest.unit}</span>
+                      {harvest.cropType !== 'tomatoes' && (
+                        <span className={cn('fv-badge', getQualityBadge(harvest.quality))}>
+                          Grade {harvest.quality}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">{formatDate(harvest.date, { month: 'long' })}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {harvest.destination === 'market'
+                        ? `Market: ${harvest.marketName || 'Not set'}${harvest.brokerName ? ` • Broker: ${harvest.brokerName}` : ''}`
+                        : 'Destination: Farm'}
+                    </p>
+                    {sold > 0 && !soldOut && (
+                      <p className="text-xs text-muted-foreground mt-2">Sold: {sold.toLocaleString()}</p>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* Sales Section */}

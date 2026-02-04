@@ -11,4 +11,5 @@ export { CropStageProgress, InventoryOverview, SalesOverview } from './Dashboard
 // Other Dashboard Components
 export { ActivityChart } from './ActivityChart';
 export { ExpensesPieChart } from './ExpensesPieChart';
+export { ExpensesBarChart } from './ExpensesBarChart';
 export { ProjectsTable } from './ProjectsTable';

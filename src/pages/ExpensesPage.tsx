@@ -4,11 +4,14 @@ import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Recei
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
+import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
+import { BROKER_EXPENSE_CATEGORIES } from '@/types';
+import { getExpenseCategoryLabel } from '@/lib/utils';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import { Wrench, CheckCircle, Clock } from 'lucide-react';
@@ -84,6 +87,17 @@ export default function ExpensesPage() {
   });
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+  // Broker expense categories (for admin view)
+  const brokerCategoryValues = useMemo(
+    () => new Set(BROKER_EXPENSE_CATEGORIES.map((c) => c.value)),
+    [],
+  );
+  const brokerExpenses = useMemo(
+    () => expenses.filter((e) => brokerCategoryValues.has(e.category as ExpenseCategory)),
+    [expenses, brokerCategoryValues],
+  );
+  const brokerExpensesTotal = brokerExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -241,13 +255,15 @@ export default function ExpensesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            to="/broker/expenses"
-            className="fv-btn fv-btn--secondary flex items-center gap-2"
-          >
-            <Receipt className="h-4 w-4" />
-            Broker expenses
-          </Link>
+          {!isBroker && (
+            <a
+              href="#broker-expenses"
+              className="fv-btn fv-btn--secondary flex items-center gap-2"
+            >
+              <Receipt className="h-4 w-4" />
+              Broker expenses
+            </a>
+          )}
           {unpaidWorkLogs.length > 0 && (
             <>
               <button 
@@ -403,76 +419,83 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <div className="grid grid-cols-2 gap-2 sm:gap-3">
-            <SimpleStatCard
-              title="Total Expenses"
-              value={formatCurrency(totalExpenses)}
-              subtitle={`From ${expenses.length} transactions`}
-              layout="vertical"
-            />
-            <SimpleStatCard
-              title="Filtered Total"
-              value={formatCurrency(totalExpenses)}
-              subtitle="Based on applied filters"
-              layout="vertical"
+      {/* Summary Cards + Filters */}
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
+          <SimpleStatCard
+            title="Total Expenses"
+            value={formatCurrency(totalExpenses)}
+            subtitle={`From ${expenses.length} transactions`}
+            layout="vertical"
+          />
+          <SimpleStatCard
+            title="Filtered Total"
+            value={formatCurrency(totalExpenses)}
+            subtitle="Based on applied filters"
+            layout="vertical"
+          />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search expenses..."
+              className="fv-input pl-10"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4 mt-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search expenses..."
-                className="fv-input pl-10"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="All Categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              <SelectItem value="Seeds">Seeds</SelectItem>
+              <SelectItem value="Fertilizers">Fertilizers</SelectItem>
+              <SelectItem value="Labor">Labor</SelectItem>
+              <SelectItem value="Pesticides">Pesticides</SelectItem>
+              <SelectItem value="Irrigation">Irrigation</SelectItem>
+              <SelectItem value="Equipment">Equipment</SelectItem>
+            </SelectContent>
+          </Select>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="fv-btn fv-btn--secondary flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4" />
+                Date range
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={setDateRange}
               />
-            </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="Seeds">Seeds</SelectItem>
-                <SelectItem value="Fertilizers">Fertilizers</SelectItem>
-                <SelectItem value="Labor">Labor</SelectItem>
-                <SelectItem value="Pesticides">Pesticides</SelectItem>
-                <SelectItem value="Irrigation">Irrigation</SelectItem>
-                <SelectItem value="Equipment">Equipment</SelectItem>
-              </SelectContent>
-            </Select>
-            <Popover>
-              <PopoverTrigger asChild>
-                <button className="fv-btn fv-btn--secondary flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4" />
-                  Date range
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="p-0" align="end">
-                <Calendar
-                  mode="range"
-                  selected={dateRange}
-                  onSelect={setDateRange}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
-        <ExpensesPieChart
-          data={Object.entries(
-            filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-              acc[e.category] = (acc[e.category] || 0) + e.amount;
-              return acc;
-            }, {}),
-          ).map(([category, amount]) => ({ category, amount }))}
-        />
+        {/* Pie + Bar charts side by side (no empty space) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ExpensesPieChart
+            data={Object.entries(
+              filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                acc[e.category] = (acc[e.category] || 0) + e.amount;
+                return acc;
+              }, {}),
+            ).map(([category, amount]) => ({ category, amount }))}
+          />
+          <ExpensesBarChart
+            data={Object.entries(
+              filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                acc[e.category] = (acc[e.category] || 0) + e.amount;
+                return acc;
+              }, {}),
+            ).map(([category, amount]) => ({ category, amount }))}
+          />
+        </div>
       </div>
 
       {/* Expenses Table */}
@@ -541,6 +564,66 @@ export default function ExpensesPage() {
           ))}
         </div>
       </div>
+
+      {/* Broker expenses (visible to admin/manager, not to brokers) */}
+      {!isBroker && (
+        <div id="broker-expenses" className="fv-card scroll-mt-6">
+          <h3 className="text-lg font-semibold mb-4">Broker expenses</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            Market-related expenses (Crates Space, Watchman, Ropes, Labour, etc.) recorded by brokers.
+          </p>
+          <div className="mb-4">
+            <SimpleStatCard
+              title="Total broker expenses"
+              value={formatCurrency(brokerExpensesTotal)}
+              subtitle={`${brokerExpenses.length} entries`}
+              layout="vertical"
+            />
+          </div>
+          {brokerExpenses.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No broker expenses recorded yet.</p>
+          ) : (
+            <>
+              <div className="hidden md:block overflow-x-auto">
+                <table className="fv-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {brokerExpenses.map((e) => (
+                      <tr key={e.id}>
+                        <td className="text-muted-foreground">{formatDate(e.date)}</td>
+                        <td>{getExpenseCategoryLabel(e.category)}</td>
+                        <td>{e.description || '—'}</td>
+                        <td className="font-semibold">{formatCurrency(e.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="md:hidden space-y-3">
+                {brokerExpenses.map((e) => (
+                  <div key={e.id} className="p-4 bg-muted/30 rounded-lg">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium">{getExpenseCategoryLabel(e.category)}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(e.date)}</p>
+                        {e.description && <p className="text-sm mt-1">{e.description}</p>}
+                      </div>
+                      <span className="font-semibold">{formatCurrency(e.amount)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

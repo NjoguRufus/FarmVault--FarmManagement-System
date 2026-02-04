@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { Expense, ExpenseCategory, Harvest } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
+import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { getExpenseCategoryLabel } from '@/lib/utils';
 import { toDate, formatDate } from '@/lib/dateUtils';
@@ -154,11 +155,10 @@ export default function BrokerExpensesPage() {
         />
       </div>
 
-      {pieData.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ExpensesPieChart data={pieData} />
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ExpensesPieChart data={pieData} />
+        <ExpensesBarChart data={pieData} />
+      </div>
 
       <div className="fv-card">
         <h3 className="text-lg font-semibold mb-4">My Market Expenses</h3>
