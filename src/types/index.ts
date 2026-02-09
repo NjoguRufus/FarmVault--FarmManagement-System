@@ -204,9 +204,9 @@ export interface InventoryItem {
   /** Optional weight in kg */
   kgs?: number;
 
-  // --- Wooden crates (boxes): big or small ---
-  /** When category is wooden-crates: box size for harvest/display */
-  boxSize?: 'big' | 'small';
+  // --- Wooden boxes (wooden-crates): big, medium, or small ---
+  /** When category is wooden-crates: wooden box size for harvest/display */
+  boxSize?: 'big' | 'medium' | 'small';
 
   // Legacy scope fields kept for backwards compatibility.
   // New items should use `cropTypes` instead.
@@ -310,9 +310,10 @@ export interface InventoryUsage {
   quantity: number;
   unit: string;
 
-  source: 'workLog' | 'manual-adjustment' | 'workCard';
+  source: 'workLog' | 'manual-adjustment' | 'workCard' | 'harvest';
   workLogId?: string;
   workCardId?: string;
+  harvestId?: string;
   /** Manager assigned (when source is workCard). */
   managerName?: string;
 
@@ -359,7 +360,7 @@ export interface Harvest {
   // Farm-side pricing metadata (optional)
   farmPricingMode?: 'perUnit' | 'total';
   // Unit used for farm pricing: crate types or kg
-  farmPriceUnitType?: 'crate-big' | 'crate-small' | 'kg';
+  farmPriceUnitType?: 'crate-big' | 'crate-medium' | 'crate-small' | 'kg';
   farmUnitPrice?: number;
   farmTotalPrice?: number;
 

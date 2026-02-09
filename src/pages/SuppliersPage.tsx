@@ -60,6 +60,7 @@ export default function SuppliersPage() {
   const [editContact, setEditContact] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editCategory, setEditCategory] = useState('Seeds');
+  const [editCategories, setEditCategories] = useState<string[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewRating, setReviewRating] = useState(0);

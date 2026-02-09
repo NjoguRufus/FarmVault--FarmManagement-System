@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, MoreHorizontal, Phone, Eye, EyeOff } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db, authEmployeeCreate } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useCollection } from '@/hooks/useCollection';
-import { Employee } from '@/types';
+import { Employee, User } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -57,6 +57,7 @@ export default function EmployeesPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees');
+  const { data: allUsers = [] } = useCollection<User>('users', 'employees-page-users');
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -227,6 +228,19 @@ export default function EmployeesPage() {
     return employees.filter((e) => e.companyId === user?.companyId);
   }, [employees, user?.companyId, user?.role]);
 
+  const authUserIdToEmail = useMemo(() => {
+    const map = new Map<string, string>();
+    (allUsers as User[]).forEach((u) => {
+      if (u.email) map.set(u.id, u.email);
+    });
+    return map;
+  }, [allUsers]);
+
+  const getEmployeeEmail = (emp: Employee) => {
+    const authId = (emp as Employee & { authUserId?: string }).authUserId;
+    return authId ? authUserIdToEmail.get(authId) : undefined;
+  };
+
   const filteredEmployees = useMemo(
     () =>
       companyEmployees.filter((e) => {
@@ -385,6 +399,10 @@ export default function EmployeesPage() {
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Department</dt>
                     <dd className="font-medium">{selectedEmployee.department}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Email</dt>
+                    <dd className="font-medium">{getEmployeeEmail(selectedEmployee) || '—'}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Contact</dt>
@@ -573,7 +591,7 @@ export default function EmployeesPage() {
                 <th>Employee</th>
                 <th>Role</th>
                 <th>Department</th>
-                <th>Contact</th>
+                <th>Contact / Email</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -604,9 +622,17 @@ export default function EmployeesPage() {
                   <td>{getRoleLabel(employee.role)}</td>
                   <td>{employee.department}</td>
                   <td>
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{employee.contact}</span>
+                    <div className="flex flex-col gap-0.5">
+                      {getEmployeeEmail(employee) && (
+                        <div className="flex items-center gap-2">
+                          <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-sm">{getEmployeeEmail(employee)}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-sm">{employee.contact || '—'}</span>
+                      </div>
                     </div>
                   </td>
                   <td>
@@ -684,8 +710,20 @@ export default function EmployeesPage() {
                   </DropdownMenu>
                 </div>
               </div>
-              <div className="text-sm text-muted-foreground">
-                {employee.department} • {employee.contact}
+              <div className="text-sm text-muted-foreground space-y-1">
+                <div>{employee.department}</div>
+                {getEmployeeEmail(employee) && (
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 shrink-0" />
+                    <span>{getEmployeeEmail(employee)}</span>
+                  </div>
+                )}
+                {employee.contact && (
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-4 w-4 shrink-0" />
+                    <span>{employee.contact}</span>
+                  </div>
+                )}
               </div>
             </div>
           ))}

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -16,7 +17,7 @@ import {
   rejectWorkCard,
   canAdminApproveOrReject,
 } from '@/services/operationsWorkCardService';
-import { recordInventoryUsage } from '@/services/inventoryService';
+import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getCompany } from '@/services/companyService';
@@ -42,6 +43,7 @@ import { format } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
 
 export default function OperationsPage() {
+  const navigate = useNavigate();
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -216,6 +218,7 @@ export default function OperationsPage() {
   const [savingCardUpdate, setSavingCardUpdate] = useState(false);
   const [approvingCard, setApprovingCard] = useState(false);
   const [rejectingCard, setRejectingCard] = useState(false);
+  const [insufficientStockMissing, setInsufficientStockMissing] = useState<{ itemName: string; unit: string; need: string; have: string }[] | null>(null);
   const [workCardEditMode, setWorkCardEditMode] = useState(false);
   // Create card form state
   const [cardWorkTitle, setCardWorkTitle] = useState('');
@@ -307,6 +310,24 @@ export default function OperationsPage() {
 
   const handleApproveWorkCard = async () => {
     if (!selectedWorkCard || !user) return;
+    const itemId = selectedWorkCard.actual?.actualResourceItemId;
+    const qty = selectedWorkCard.actual?.actualResourceQuantity ?? 0;
+    if (itemId && qty > 0 && selectedWorkCard.companyId && selectedWorkCard.projectId) {
+      const check = await checkStockForWorkCard({
+        companyId: selectedWorkCard.companyId,
+        projectId: selectedWorkCard.projectId,
+        inventoryItemId: itemId,
+        quantity: qty,
+        stageName: selectedWorkCard.stageName,
+        workCardId: selectedWorkCard.id,
+        date: new Date(),
+        managerName: selectedWorkCard.actual?.managerName,
+      });
+      if (!check.sufficient && check.missing?.length) {
+        setInsufficientStockMissing(check.missing);
+        return;
+      }
+    }
     setApprovingCard(true);
     try {
       await approveWorkCard({
@@ -1856,6 +1877,46 @@ export default function OperationsPage() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Insufficient stock: cannot approve until items are added */}
+      <Dialog open={insufficientStockMissing != null} onOpenChange={(open) => !open && setInsufficientStockMissing(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Insufficient stock</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            There is not enough inventory to approve this work card. Add the needed items below, then try approving again.
+          </p>
+          {insufficientStockMissing && insufficientStockMissing.length > 0 && (
+            <ul className="list-disc list-inside space-y-1 text-sm">
+              {insufficientStockMissing.map((m, i) => (
+                <li key={i}>
+                  <span className="font-medium">{m.itemName}</span>: have {m.have}, need {m.need}
+                </li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setInsufficientStockMissing(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setInsufficientStockMissing(null);
+                navigate('/inventory');
+              }}
+            >
+              <Package className="w-4 h-4 mr-2" />
+              Add to inventory
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

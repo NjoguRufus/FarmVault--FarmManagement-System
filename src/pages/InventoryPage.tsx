@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { Plus, Search, Package, MoreHorizontal, AlertTriangle, ShoppingCart, Minus, Trash2, ScrollText, History } from 'lucide-react';
+import { Plus, Search, Package, MoreHorizontal, AlertTriangle, ShoppingCart, Minus, Trash2, ScrollText, History, Box } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -98,7 +98,17 @@ export default function InventoryPage() {
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
+  /** Category is wooden boxes (either "wooden-crates" or custom "boxes") — show Wooden Boxes UI, no Unit/Items per box */
+  const isWoodenBoxesCategory = (cat: string) => {
+    const c = (cat || '').toLowerCase();
+    return c === 'wooden-crates' || c === 'boxes';
+  };
+
   const getCategoryIcon = (category: string) => {
+    const cat = category.toLowerCase();
+    if (cat === 'wooden-crates' || cat === 'boxes') {
+      return <span className="inline-flex text-amber-700"><Box className="w-6 h-6" strokeWidth={1.5} /></span>;
+    }
     const icons: Record<string, string> = {
       fertilizer: '🌾',
       chemical: '🧪',
@@ -107,10 +117,9 @@ export default function InventoryPage() {
       materials: '🔧',
       sacks: '🛍️',
       ropes: '🪢',
-      'wooden-crates': '📦',
       seeds: '🌱',
     };
-    return <span className="text-2xl">{icons[category.toLowerCase()] || '📦'}</span>;
+    return <span className="text-2xl">{icons[cat] || '📦'}</span>;
   };
 
   const getCategoryColor = (category: string) => {
@@ -123,13 +132,14 @@ export default function InventoryPage() {
       sacks: 'bg-amber-100 text-amber-800',
       ropes: 'bg-slate-200 text-slate-800',
       'wooden-crates': 'bg-amber-50 text-amber-900',
+      boxes: 'bg-amber-50 text-amber-900',
       seeds: 'bg-emerald-100 text-emerald-800',
     };
-    return colors[category] || colors.other;
+    return colors[category.toLowerCase()] || colors.other;
   };
 
   const getCategoryDisplayName = (cat: string) => {
-    if (cat === 'wooden-crates') return 'Wooden crates';
+    if (cat === 'wooden-crates' || cat === 'boxes') return 'Wooden Boxes';
     if (cat === 'diesel') return 'Fuel';
     if (cat === 'seeds') return 'Seeds';
     return cat.charAt(0).toUpperCase() + cat.slice(1);
@@ -156,10 +166,14 @@ export default function InventoryPage() {
       const k = it.kgs != null ? `, ${it.kgs} kg` : '';
       return `${b} bags${k}`;
     }
-    const itBox = item as InventoryItem & { boxSize?: 'big' | 'small' };
-    if (cat === 'wooden-crates' && itBox.boxSize) {
-      const size = itBox.boxSize === 'big' ? 'Big box' : 'Small box';
-      return `${item.quantity} ${size}`;
+    const itBox = item as InventoryItem & { boxSize?: 'big' | 'small' | 'medium' };
+    if (isWoodenBoxesCategory(cat) && itBox.boxSize) {
+      const size = itBox.boxSize === 'big' ? 'Big' : itBox.boxSize === 'medium' ? 'Medium' : 'Small';
+      return `${item.quantity} ${size} wooden box${item.quantity === 1 ? '' : 'es'}`;
+    }
+    if ((item.unit || '').toLowerCase() === 'boxes' && it.unitsPerBox) {
+      const total = item.quantity * it.unitsPerBox;
+      return `${item.quantity} boxes (${it.unitsPerBox}/box) = ${total} units`;
     }
     return `${item.quantity} ${item.unit}`;
   };
@@ -188,7 +202,9 @@ export default function InventoryPage() {
   const [litres, setLitres] = useState('');
   const [bags, setBags] = useState('');
   const [kgs, setKgs] = useState('');
-  const [boxSize, setBoxSize] = useState<'big' | 'small'>('big');
+  const [boxSize, setBoxSize] = useState<'big' | 'small' | 'medium'>('big');
+  /** When unit is "Boxes" (non-chemical): number of items in one box. Deductions use single units. */
+  const [itemsPerBoxWhenUnitBoxes, setItemsPerBoxWhenUnitBoxes] = useState('');
 
   const [restockOpen, setRestockOpen] = useState(false);
   const [restockItem, setRestockItem] = useState<InventoryItem | null>(null);
@@ -240,7 +256,7 @@ export default function InventoryPage() {
     if (cat === 'fertilizer') return Number(quantity || '0') || 0;
     if (cat === 'fuel' || cat === 'diesel') return Number(containers || '0') || 0;
     if (cat === 'chemical') return Number(quantity || '0') || 0;
-    if (cat === 'wooden-crates' || cat === 'seeds') return Number(quantity || '0') || 0;
+    if (isWoodenBoxesCategory(cat) || cat === 'seeds') return Number(quantity || '0') || 0;
     return Number(quantity || '0') || 0;
   }, [category, quantity, containers]);
 
@@ -407,6 +423,11 @@ export default function InventoryPage() {
       toast.error('Enter units per box (e.g. bottles or packets per box)');
       return;
     }
+    const unitLower = (unit || '').toLowerCase();
+    if (unitLower === 'boxes' && cat !== 'chemical' && !Number(itemsPerBoxWhenUnitBoxes || '0')) {
+      toast.error('When unit is Boxes, enter the number of items in one box (e.g. 1 if each box is 1 item).');
+      return;
+    }
     if ((cat === 'fuel' || cat === 'diesel') && !Number(containers || '0')) {
       toast.error('Enter number of containers (mtungi)');
       return;
@@ -415,7 +436,7 @@ export default function InventoryPage() {
       toast.error('Enter quantity for fertilizer');
       return;
     }
-    if (cat === 'wooden-crates' && !Number(quantity || '0')) {
+    if (isWoodenBoxesCategory(cat) && !Number(quantity || '0')) {
       toast.error('Enter number of wooden boxes');
       return;
     }
@@ -493,9 +514,18 @@ export default function InventoryPage() {
         data.quantity = Number(quantity || '0');
         data.unit = unit || 'packets';
         if (seedCrop) data.cropTypes = [seedCrop];
+      } else if (isWoodenBoxesCategory(cat)) {
+        data.quantity = Number(quantity || '0');
+        data.unit = 'wooden-box';
+        data.boxSize = boxSize;
       } else {
         data.quantity = Number(quantity || '0');
         data.unit = unit;
+        // When unit is Boxes: store items per box so deductions use single units
+        if ((unit || '').toLowerCase() === 'boxes') {
+          const perBox = Number(itemsPerBoxWhenUnitBoxes || '1');
+          data.unitsPerBox = Math.max(1, perBox);
+        }
       }
 
       if (selectedSupplierId) {
@@ -539,9 +569,10 @@ export default function InventoryPage() {
         } else if (cat === 'fertilizer') {
           descQty = quantity;
           descUnit = `${quantity} ${unit || 'bags'}`;
-        } else if (cat === 'wooden-crates') {
+        } else if (isWoodenBoxesCategory(cat)) {
           descQty = quantity;
-          descUnit = `${boxSize === 'big' ? 'Big' : 'Small'} wooden box`;
+          const sizeLabel = boxSize === 'big' ? 'Big' : boxSize === 'medium' ? 'Medium' : 'Small';
+          descUnit = `${sizeLabel} wooden box`;
         } else if (cat === 'seeds') {
           descQty = quantity;
           descUnit = `${quantity} ${unit || 'packets'}`;
@@ -557,6 +588,7 @@ export default function InventoryPage() {
           sacks: 'other',
           ropes: 'other',
           'wooden-crates': 'other',
+          boxes: 'other',
           seeds: 'other',
         };
         const expenseData: Record<string, unknown> = {
@@ -591,6 +623,7 @@ export default function InventoryPage() {
       setCountAsExpense(false);
       setChemicalPackaging('box');
       setUnitsPerBox('');
+      setItemsPerBoxWhenUnitBoxes('');
       setFuelType('diesel');
       setContainers('');
       setLitres('');
@@ -721,6 +754,7 @@ export default function InventoryPage() {
           sacks: 'other',
           ropes: 'other',
           'wooden-crates': 'other',
+          boxes: 'other',
           seeds: 'other',
         };
         const expenseRef = doc(collection(db, 'expenses'));
@@ -788,7 +822,7 @@ export default function InventoryPage() {
                 Add Item
               </button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
               <DialogHeader>
                 <DialogTitle>Add Inventory Item</DialogTitle>
               </DialogHeader>
@@ -909,9 +943,7 @@ export default function InventoryPage() {
                         </div>
                       ) : (category.toLowerCase() !== 'fuel' && category.toLowerCase() !== 'diesel') ? (
                         <div className="space-y-1 w-[120px] shrink-0">
-                          <label className="text-sm font-medium text-foreground">
-                            {category.toLowerCase() === 'wooden-crates' ? 'Boxes' : 'Quantity'}
-                          </label>
+                          <label className="text-sm font-medium text-foreground">Quantity</label>
                           <input
                             type="number"
                             className="fv-input h-10 w-full"
@@ -924,7 +956,7 @@ export default function InventoryPage() {
                             }}
                             min="0"
                             step="0.01"
-                            placeholder={category.toLowerCase() === 'wooden-crates' ? 'e.g. 5' : 'e.g. 10'}
+                            placeholder={isWoodenBoxesCategory(category) ? 'e.g. 5' : 'e.g. 10'}
                             required
                           />
                         </div>
@@ -1017,17 +1049,18 @@ export default function InventoryPage() {
                         </div>
                       </>
                     )}
-                    {category.toLowerCase() === 'wooden-crates' && (
+                    {isWoodenBoxesCategory(category) && (
                       <>
                         <div className="space-y-1">
-                          <label className="text-sm font-medium text-foreground">Box size</label>
-                          <Select value={boxSize} onValueChange={(v) => setBoxSize(v as 'big' | 'small')}>
+                          <label className="text-sm font-medium text-foreground">Wooden box size</label>
+                          <Select value={boxSize} onValueChange={(v) => setBoxSize(v as 'big' | 'small' | 'medium')}>
                             <SelectTrigger className="h-10">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="big">Big box</SelectItem>
-                              <SelectItem value="small">Small box</SelectItem>
+                              <SelectItem value="big">Big</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="small">Small</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -1054,8 +1087,8 @@ export default function InventoryPage() {
                         </div>
                       </>
                     )}
-                    {/* Row: Unit | Kgs (optional, per item). Shown for fertilizer (bags) and chemical. Hidden for fuel. */}
-                    {(category.toLowerCase() !== 'fuel' && category.toLowerCase() !== 'diesel') && (
+                    {/* Row: Unit | Kgs (optional, per item). Hidden for fuel, diesel, and wooden boxes (Wooden Boxes use size only). */}
+                    {(category.toLowerCase() !== 'fuel' && category.toLowerCase() !== 'diesel' && !isWoodenBoxesCategory(category)) && (
                       <div className={cn(
                         'grid gap-3 items-end',
                         (category.toLowerCase() === 'fertilizer' && (unit || 'bags') === 'bags') || category.toLowerCase() === 'chemical'
@@ -1087,7 +1120,7 @@ export default function InventoryPage() {
                               </SelectContent>
                             </Select>
                           ) : (
-                            <Select value={unit || 'kg'} onValueChange={(v) => setUnit(v)}>
+                            <Select value={unit || 'kg'} onValueChange={(v) => { setUnit(v); if (v !== 'boxes') setItemsPerBoxWhenUnitBoxes(''); }}>
                               <SelectTrigger className="fv-input h-10 w-full min-w-0">
                                 <SelectValue placeholder="Unit" />
                               </SelectTrigger>
@@ -1103,6 +1136,22 @@ export default function InventoryPage() {
                             </Select>
                           )}
                         </div>
+                        {/* When unit is Boxes (non-chemical): items per box so deductions use single units */}
+                        {category.toLowerCase() !== 'chemical' && (unit || '').toLowerCase() === 'boxes' && (
+                          <div className="space-y-1 min-w-0">
+                            <label className="text-sm font-medium text-foreground">Items per box</label>
+                            <input
+                              type="number"
+                              className="fv-input h-10 w-full"
+                              value={itemsPerBoxWhenUnitBoxes}
+                              onChange={(e) => setItemsPerBoxWhenUnitBoxes(e.target.value)}
+                              min="1"
+                              placeholder="e.g. 1 or 12"
+                              required
+                            />
+                            <p className="text-xs text-muted-foreground">Deductions will use single items (units), not boxes.</p>
+                          </div>
+                        )}
                         {category.toLowerCase() === 'fertilizer' && (unit || 'bags') === 'bags' && (
                           <div className="space-y-1 min-w-0">
                             <label className="text-sm font-medium text-foreground">Kgs (optional, per item e.g. per bag)</label>

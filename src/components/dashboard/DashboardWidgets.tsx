@@ -54,27 +54,29 @@ export function InventoryOverview({ inventoryItems: propInventoryItems = [] }: I
     .slice(0, 4); // Show top 4 categories
 
   return (
-    <div className="fv-card">
-      <h3 className="text-lg font-semibold text-foreground mb-4">Inventory Overview</h3>
-      <div className="space-y-4">
-        {displayItems.length > 0 ? (
-          displayItems.map((item) => (
-            <div key={item.name} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-              <div className="flex items-center gap-3">
-                <div className="h-2 w-2 rounded-full bg-primary" />
-                <span className="text-sm font-medium">{item.name}</span>
+    <div className="fv-card flex flex-col h-full min-h-0">
+      <h3 className="text-lg font-semibold text-foreground mb-4 shrink-0">Inventory Overview</h3>
+      <div className="overflow-y-auto scrollbar-thin flex-1 min-h-0 max-h-[280px]">
+        <div className="space-y-4 pr-1">
+          {displayItems.length > 0 ? (
+            displayItems.map((item) => (
+              <div key={item.name} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                <div className="flex items-center gap-3">
+                  <div className="h-2 w-2 rounded-full bg-primary" />
+                  <span className="text-sm font-medium">{item.name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold">{item.quantity.toLocaleString()}</span>
+                  <span className="text-xs text-muted-foreground">
+                    KES {(item.value / 1000).toFixed(0)}k
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold">{item.quantity.toLocaleString()}</span>
-                <span className="text-xs text-muted-foreground">
-                  KES {(item.value / 1000).toFixed(0)}k
-                </span>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground text-center py-4">No inventory data available</p>
-        )}
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">No inventory data available</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -103,31 +105,33 @@ export function RecentTransactions({ transactions: propTransactions = [] }: Rece
   const formatDate = (d: Date) => d.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="fv-card">
-      <h3 className="text-lg font-semibold text-foreground mb-4">Recent Transactions</h3>
-      <div className="space-y-3">
-        {sorted.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No recent transactions</p>
-        ) : (
-          sorted.map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-              <div>
-                <span className="text-sm font-medium text-foreground">{tx.label}</span>
-                <span className="block text-xs text-muted-foreground">{formatDate(tx.date)}</span>
-                {tx.status && (
-                  <span className={`ml-0 mt-0.5 inline-block fv-badge text-xs ${
-                    tx.status === 'completed' ? 'fv-badge--active' : 'fv-badge--warning'
-                  }`}>
-                    {tx.status}
-                  </span>
-                )}
+    <div className="fv-card flex flex-col h-full min-h-0">
+      <h3 className="text-lg font-semibold text-foreground mb-4 shrink-0">Recent Transactions</h3>
+      <div className="overflow-y-auto scrollbar-thin flex-1 min-h-0 max-h-[280px]">
+        <div className="space-y-3 pr-1">
+          {sorted.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No recent transactions</p>
+          ) : (
+            sorted.map((tx) => (
+              <div key={tx.id} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
+                <div>
+                  <span className="text-sm font-medium text-foreground">{tx.label}</span>
+                  <span className="block text-xs text-muted-foreground">{formatDate(tx.date)}</span>
+                  {tx.status && (
+                    <span className={`ml-0 mt-0.5 inline-block fv-badge text-xs ${
+                      tx.status === 'completed' ? 'fv-badge--active' : 'fv-badge--warning'
+                    }`}>
+                      {tx.status}
+                    </span>
+                  )}
+                </div>
+                <span className={`text-sm font-semibold ${tx.type === 'sale' ? 'text-green-600 dark:text-green-400' : 'text-foreground'}`}>
+                  {tx.type === 'sale' ? '+' : '-'}{formatCurrency(tx.amount)}
+                </span>
               </div>
-              <span className={`text-sm font-semibold ${tx.type === 'sale' ? 'text-green-600 dark:text-green-400' : 'text-foreground'}`}>
-                {tx.type === 'sale' ? '+' : '-'}{formatCurrency(tx.amount)}
-              </span>
-            </div>
-          ))
-        )}
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
@@ -292,8 +296,8 @@ export function CropStageSection({ stages: propStages = [] }: CropStageSectionPr
   );
 
   return (
-    <div className="fv-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <div className="fv-card flex flex-col h-full min-h-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 shrink-0">
         <h3 className="text-lg font-semibold text-foreground">Crop Stage</h3>
         <div className="flex rounded-lg border border-border bg-muted/30 p-0.5">
           {toggleButtons.map(({ mode, label, icon }) => (
@@ -315,6 +319,7 @@ export function CropStageSection({ stages: propStages = [] }: CropStageSectionPr
         </div>
       </div>
 
+      <div className="overflow-y-auto scrollbar-thin flex-1 min-h-0 max-h-[280px] pr-1">
       {stagesWithProgress.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">No stage data available</p>
       ) : (
@@ -404,6 +409,7 @@ export function CropStageSection({ stages: propStages = [] }: CropStageSectionPr
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

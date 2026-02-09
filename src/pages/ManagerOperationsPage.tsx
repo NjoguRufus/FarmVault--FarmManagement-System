@@ -119,14 +119,20 @@ export default function ManagerOperationsPage() {
     return Array.from(byId.values());
   }, [managerWorkCards, companyWorkCards, managerIdsForCurrentUser, managerIdsArray.length]);
 
-  // My Work Cards: show all cards that are not yet paid (planned, submitted, rejected, approved). Paid cards move to Work Logs.
+  // Apply navbar project filter to work cards
+  const workCardsForProject = useMemo(() => {
+    if (!activeProject) return workCards;
+    return workCards.filter((c) => c.projectId === activeProject.id);
+  }, [workCards, activeProject]);
+
+  // My Work Cards: show all cards that are not yet paid (planned, submitted, rejected, approved) for the selected project. Paid cards move to Work Logs.
   const workCardsInProgress = useMemo(
-    () => workCards.filter((c) => !(c.payment?.isPaid || c.status === 'paid')),
-    [workCards],
+    () => workCardsForProject.filter((c) => !(c.payment?.isPaid || c.status === 'paid')),
+    [workCardsForProject],
   );
   const workCardsCompleted = useMemo(
-    () => workCards.filter((c) => c.status === 'paid' || c.payment?.isPaid),
-    [workCards],
+    () => workCardsForProject.filter((c) => c.status === 'paid' || c.payment?.isPaid),
+    [workCardsForProject],
   );
   const invalidateWorkCards = useInvalidateWorkCards();
 
@@ -140,13 +146,17 @@ export default function ManagerOperationsPage() {
 
   const showPeopleSection = user?.role === 'company-admin';
 
-  // Get work logs for the current manager's projects
+  // Get work logs for the current manager's projects, filtered by selected project (navbar switcher) when set
   const managerWorkLogs = useMemo(() => {
     if (!user) return [];
 
     // Company admins: show all logs for their company
     if (user.role === 'company-admin') {
-      return allWorkLogs.filter((log) => log.companyId === user.companyId);
+      return allWorkLogs.filter(
+        (log) =>
+          log.companyId === user.companyId &&
+          (!activeProject || log.projectId === activeProject.id),
+      );
     }
 
     // Managers (platform or employee role): show logs where they are the assigned manager (by user id or employee id)
@@ -155,12 +165,13 @@ export default function ManagerOperationsPage() {
         (log) =>
           log.companyId === user.companyId &&
           log.managerId != null &&
-          managerIdsForCurrentUser.has(log.managerId),
+          managerIdsForCurrentUser.has(log.managerId) &&
+          (!activeProject || log.projectId === activeProject.id),
       );
     }
 
     return [];
-  }, [allWorkLogs, user, isManagerOrAdmin, managerIdsForCurrentUser]);
+  }, [allWorkLogs, user, isManagerOrAdmin, managerIdsForCurrentUser, activeProject]);
 
   // Admin-planned work assigned to this manager that still needs a manager submission.
   // If the manager has already created their own daily work log for the same stage/date,
@@ -173,7 +184,8 @@ export default function ManagerOperationsPage() {
         plan.companyId !== user.companyId ||
         plan.managerId == null ||
         !managerIdsForCurrentUser.has(plan.managerId) ||
-        plan.managerSubmittedAt
+        plan.managerSubmittedAt ||
+        (activeProject && plan.projectId !== activeProject.id)
       ) {
         return false;
       }
@@ -308,16 +320,16 @@ export default function ManagerOperationsPage() {
     return Array.from(stages).sort();
   }, [managerWorkLogs]);
 
-  // Get stats: include both work logs and work cards so numbers reflect real work
+  // Get stats: include both work logs and work cards so numbers reflect real work (respecting project filter)
   const stats = useMemo(() => {
     const logTotal = managerWorkLogs.length;
     const logPaid = managerWorkLogs.filter((log) => log.paid).length;
-    const cardTotal = workCards.length;
-    const cardPaid = workCards.filter((c) => c.payment?.isPaid || c.status === 'paid').length;
+    const cardTotal = workCardsForProject.length;
+    const cardPaid = workCardsForProject.filter((c) => c.payment?.isPaid || c.status === 'paid').length;
     const totalLogs = logTotal + cardTotal;
     const paidLogs = logPaid + cardPaid;
     const unpaidLogs = totalLogs - paidLogs;
-    const totalLabour = workCards.reduce((sum, card) => {
+    const totalLabour = workCardsForProject.reduce((sum, card) => {
       const w = card.actual?.actualWorkers ?? 0;
       const r = card.actual?.ratePerPerson ?? 0;
       return sum + w * r;
@@ -333,7 +345,7 @@ export default function ManagerOperationsPage() {
       totalLabour,
       unpaidAmount,
     };
-  }, [managerWorkLogs, workCards]);
+  }, [managerWorkLogs, workCardsForProject]);
 
   // Helper functions
   const getPaidBadge = (paid?: boolean) =>
@@ -370,6 +382,12 @@ export default function ManagerOperationsPage() {
       return names.length > 0 ? names.join(', ') : 'Multiple employees';
     }
     return 'Unassigned';
+  };
+
+  const getProjectName = (projectId?: string | null) => {
+    if (!projectId) return '—';
+    const project = projects?.find((p) => p.id === projectId);
+    return project?.name ?? '—';
   };
 
   const formatCurrency = (amount: number) => {
@@ -1147,6 +1165,9 @@ export default function ManagerOperationsPage() {
                     </span>
                   </p>
                   <p className="text-xs text-muted-foreground">
+                    Project: <span className="font-medium text-foreground">{getProjectName(card.projectId)}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
                     {card.stageName || card.stageId} • Planned: {card.planned?.workers ?? 0} workers
                     {card.planned?.estimatedCost != null && ` • KES ${Number(card.planned.estimatedCost).toLocaleString()}`}
                   </p>
@@ -1731,6 +1752,12 @@ export default function ManagerOperationsPage() {
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {formatLogDate(entry.log.date)} • {entry.log.stageName}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Project:{' '}
+                          <span className="font-medium text-foreground">
+                            {getProjectName(entry.log.projectId)}
+                          </span>
                         </p>
                       </div>
                     </div>

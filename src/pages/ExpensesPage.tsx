@@ -510,15 +510,15 @@ export default function ExpensesPage() {
       </div>
 
       {/* Expenses Table */}
-      <div className="fv-card">
-        <h3 className="text-lg font-semibold mb-6">Recent Expenses</h3>
+      <div className="fv-card flex flex-col">
+        <h3 className="text-lg font-semibold mb-6 shrink-0">Recent Expenses</h3>
 
         {isLoading && (
           <p className="text-sm text-muted-foreground">Loading expenses…</p>
         )}
         
-        {/* Desktop Table */}
-        <div className="hidden md:block overflow-x-auto">
+        {/* Desktop Table: scrollable when many rows so card stays same size */}
+        <div className="hidden md:block overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0">
           <table className="fv-table">
             <thead>
               <tr>
@@ -573,8 +573,8 @@ export default function ExpensesPage() {
           </table>
         </div>
 
-        {/* Mobile Cards */}
-        <div className="md:hidden space-y-3">
+        {/* Mobile Cards: scrollable when 5+ so card stays same size */}
+        <div className="md:hidden overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-1">
           {filteredExpenses.map((expense) => (
             <div key={expense.id} className="p-4 bg-muted/30 rounded-lg">
               <div className="flex items-start justify-between mb-2">

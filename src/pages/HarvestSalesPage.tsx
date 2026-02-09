@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
-import { Harvest, Sale, Employee, User } from '@/types';
+import { Harvest, Sale, Employee, User, InventoryItem } from '@/types';
+import { deductInventoryForHarvest } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatDate } from '@/lib/dateUtils';
@@ -42,6 +43,7 @@ export default function HarvestSalesPage() {
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
   const { data: allUsers = [] } = useCollection<User>('harvest-page-users', 'users');
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'harvest-inventory');
 
   const harvests = activeProject
     ? allHarvests.filter((h) => h.projectId === activeProject.id)
@@ -63,6 +65,14 @@ export default function HarvestSalesPage() {
 
   // Brokers: employees with sales-broker role + users with platform role 'broker'.
   // Use the broker's AUTH USER ID (id they use when logged in) so harvest.brokerId matches user.id on the broker dashboard.
+  const woodenCrateItems = React.useMemo(() => {
+    if (!activeProject) return [];
+    const cat = (c: string) => (c || '').toLowerCase();
+    return allInventoryItems.filter(
+      (i) => i.companyId === activeProject.companyId && (cat(i.category) === 'wooden-crates' || cat(i.category) === 'boxes')
+    );
+  }, [allInventoryItems, activeProject?.companyId]);
+
   const brokers = React.useMemo(() => {
     const fromEmployees =
       activeProject
@@ -129,13 +139,16 @@ export default function HarvestSalesPage() {
   const [harvestNotes, setHarvestNotes] = useState('');
   const [harvestDestination, setHarvestDestination] = useState<'farm' | 'market'>('farm');
   const [harvestFarmPricingMode, setHarvestFarmPricingMode] = useState<'perUnit' | 'total'>('perUnit');
-  const [harvestFarmUnitType, setHarvestFarmUnitType] = useState<'crate-big' | 'crate-small' | 'kg'>('kg');
+  const [harvestFarmPaid, setHarvestFarmPaid] = useState(true);
+  const [harvestFarmUnitType, setHarvestFarmUnitType] = useState<'crate-big' | 'crate-medium' | 'crate-small' | 'kg'>('kg');
   const [harvestFarmUnitPrice, setHarvestFarmUnitPrice] = useState('');
   const [harvestFarmTotalPrice, setHarvestFarmTotalPrice] = useState('');
   const [harvestMarket, setHarvestMarket] = useState('');
   const [harvestCustomMarket, setHarvestCustomMarket] = useState('');
   const [harvestBrokerId, setHarvestBrokerId] = useState('');
   const [harvestCrateType, setHarvestCrateType] = useState<'big' | 'small'>('big');
+  const [harvestTomatoUnitMode, setHarvestTomatoUnitMode] = useState<'kg' | 'crates'>('kg');
+  const [harvestCrateInventoryItemId, setHarvestCrateInventoryItemId] = useState('');
   const [harvestLorryPlates, setHarvestLorryPlates] = useState<string[]>(['']);
   const [harvestDriverType, setHarvestDriverType] = useState<'company' | 'other'>('company');
   const [harvestDriverId, setHarvestDriverId] = useState('');
@@ -186,16 +199,30 @@ export default function HarvestSalesPage() {
     try {
       const destination = harvestDestination;
       const isTomatoes = activeProject.cropType === 'tomatoes';
-      const unit =
-        isTomatoes && destination === 'market'
-          ? harvestCrateType === 'big'
-            ? 'crate-big'
-            : 'crate-small'
-          : harvestUnit;
+      const qty = Number(harvestQty || '0');
+
+      let unit: string;
+      if (isTomatoes) {
+        if (harvestTomatoUnitMode === 'kg') {
+          unit = 'kg';
+        } else {
+          const crateItem = woodenCrateItems.find((i) => i.id === harvestCrateInventoryItemId);
+          if (!crateItem) {
+            alert('Please select a wooden crate type from inventory.');
+            setHarvestSaving(false);
+            return;
+          }
+          const boxSize = (crateItem as InventoryItem & { boxSize?: string }).boxSize;
+          unit = boxSize === 'big' ? 'crate-big' : boxSize === 'medium' ? 'crate-medium' : 'crate-small';
+        }
+      } else {
+        unit = harvestUnit;
+      }
+
       const quality = isTomatoes ? 'A' : harvestQuality;
 
       const harvestData: any = {
-        quantity: Number(harvestQty || '0'),
+        quantity: qty,
         unit,
         quality,
         projectId: activeProject.id,
@@ -211,14 +238,16 @@ export default function HarvestSalesPage() {
         harvestData.notes = harvestNotes.trim();
       }
 
-      if (destination === 'farm') {
+      const isFrenchBeans = activeProject.cropType === 'french-beans';
+      if (destination === 'farm' || isFrenchBeans) {
         harvestData.farmPricingMode = harvestFarmPricingMode;
-        harvestData.farmPriceUnitType = harvestFarmUnitType;
+        harvestData.farmPriceUnitType = isFrenchBeans ? 'kg' : harvestFarmUnitType;
         const unitPriceNum = Number(harvestFarmUnitPrice || '0');
         const totalPriceNum = Number(harvestFarmTotalPrice || '0');
         if (unitPriceNum > 0) harvestData.farmUnitPrice = unitPriceNum;
         if (totalPriceNum > 0) harvestData.farmTotalPrice = totalPriceNum;
-      } else if (destination === 'market') {
+      }
+      if (destination === 'market') {
         const rawMarket = harvestMarket === 'none' ? '' : harvestMarket;
         const marketName = rawMarket === 'custom' ? harvestCustomMarket : rawMarket;
         if (marketName) harvestData.marketName = marketName;
@@ -240,17 +269,34 @@ export default function HarvestSalesPage() {
 
       const harvestRef = await addDoc(collection(db, 'harvests'), harvestData);
 
+      if (isTomatoes && harvestTomatoUnitMode === 'crates' && harvestCrateInventoryItemId && qty > 0) {
+        try {
+          await deductInventoryForHarvest({
+            companyId: activeProject.companyId,
+            projectId: activeProject.id,
+            inventoryItemId: harvestCrateInventoryItemId,
+            quantity: qty,
+            harvestId: harvestRef.id,
+            date: new Date(),
+          });
+          queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
+        } catch (err: any) {
+          alert(err?.message ?? 'Harvest saved but failed to deduct crates from inventory.');
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['harvests'] });
 
-      // If this harvest is sold directly from the farm and has pricing,
-      // automatically create a completed sale linked to this harvest.
-      if (destination === 'farm') {
-        const qty = Number(harvestQty || '0');
+      // If this harvest is sold from the farm (tomatoes) or has pricing (french beans), create a sale.
+      // If paid, status=completed (revenue); else pending.
+      const isFrenchBeansSale = isFrenchBeans;
+      const isFarmSale = destination === 'farm' || isFrenchBeansSale;
+      if (isFarmSale) {
         const hasPerUnit = harvestData.farmUnitPrice && harvestData.farmUnitPrice > 0;
         const hasTotal = harvestData.farmTotalPrice && harvestData.farmTotalPrice > 0;
 
         if (qty > 0 && (hasPerUnit || hasTotal)) {
-          let unit = harvestFarmUnitType || harvestUnit || 'kg';
+          let unit = isFrenchBeansSale ? 'kg' : (harvestFarmUnitType || harvestUnit || 'kg');
           let totalAmount: number;
           let unitPrice: number;
 
@@ -273,7 +319,7 @@ export default function HarvestSalesPage() {
               unit,
               unitPrice,
               totalAmount,
-              status: 'completed',
+              status: harvestFarmPaid ? 'completed' : 'pending',
               projectId: activeProject.id,
               companyId: activeProject.companyId,
               cropType: activeProject.cropType,
@@ -294,12 +340,15 @@ export default function HarvestSalesPage() {
       setHarvestDestination('farm');
       setHarvestFarmPricingMode('perUnit');
       setHarvestFarmUnitType('kg');
+      setHarvestFarmPaid(true);
       setHarvestFarmUnitPrice('');
       setHarvestFarmTotalPrice('');
       setHarvestMarket('');
       setHarvestCustomMarket('');
       setHarvestBrokerId('');
       setHarvestCrateType('big');
+      setHarvestTomatoUnitMode('kg');
+      setHarvestCrateInventoryItemId('');
       setHarvestLorryPlates(['']);
       setHarvestDriverType('company');
       setHarvestDriverId('');
@@ -441,6 +490,96 @@ export default function HarvestSalesPage() {
               ) : (
                 <form onSubmit={handleRecordHarvest} className="space-y-4">
                   {activeProject.cropType === 'tomatoes' && (
+                    <>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Unit</label>
+                        <Select
+                          value={harvestTomatoUnitMode}
+                          onValueChange={(val) => {
+                            setHarvestTomatoUnitMode(val as 'kg' | 'crates');
+                            setHarvestCrateInventoryItemId('');
+                            if (val === 'kg') setHarvestFarmUnitType('kg');
+                          }}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select unit type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="kg">Kilograms (Kgs)</SelectItem>
+                            <SelectItem value="crates">Wooden crates</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {harvestTomatoUnitMode === 'crates' && (
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-foreground">Wooden crate type</label>
+                          <Select
+                            value={harvestCrateInventoryItemId || '__select__'}
+                            onValueChange={(v) => {
+                            const id = v === '__select__' ? '' : v;
+                            setHarvestCrateInventoryItemId(id);
+                            if (id) {
+                              const item = woodenCrateItems.find((i) => i.id === id);
+                              const boxSize = (item as InventoryItem & { boxSize?: string })?.boxSize;
+                              setHarvestFarmUnitType(boxSize === 'big' ? 'crate-big' : boxSize === 'medium' ? 'crate-medium' : 'crate-small');
+                            }
+                          }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select crate from inventory" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__select__">Select crate type</SelectItem>
+                              {woodenCrateItems.map((item) => {
+                                const boxSize = (item as InventoryItem & { boxSize?: string }).boxSize;
+                                const sizeLabel = boxSize === 'big' ? 'Big' : boxSize === 'medium' ? 'Medium' : 'Small';
+                                return (
+                                  <SelectItem key={item.id} value={item.id}>
+                                    {item.name} ({sizeLabel}) — {item.quantity} in stock
+                                  </SelectItem>
+                                );
+                              })}
+                              {woodenCrateItems.length === 0 && (
+                                <SelectItem value="__none__" disabled>
+                                  No wooden crates in inventory
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          {harvestTomatoUnitMode === 'crates' && woodenCrateItems.length === 0 && (
+                            <p className="text-xs text-amber-600">Add wooden crates in Inventory first.</p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <div className={cn('grid gap-3', activeProject.cropType === 'tomatoes' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2')}>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Quantity</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="fv-input"
+                        value={harvestQty}
+                        onChange={(e) => setHarvestQty(e.target.value)}
+                        required
+                        placeholder={activeProject.cropType === 'tomatoes' && harvestTomatoUnitMode === 'crates' ? 'Number of crates' : undefined}
+                      />
+                    </div>
+                    {activeProject.cropType !== 'tomatoes' && (
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Unit</label>
+                        <input
+                          className="fv-input"
+                          value={harvestUnit}
+                          onChange={(e) => setHarvestUnit(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {activeProject.cropType === 'tomatoes' && (
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-foreground">Destination</label>
                       <div className="flex flex-wrap gap-2 text-xs sm:text-sm">
@@ -471,28 +610,6 @@ export default function HarvestSalesPage() {
                       </div>
                     </div>
                   )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Quantity</label>
-                      <input
-                        type="number"
-                        min={0}
-                        className="fv-input"
-                        value={harvestQty}
-                        onChange={(e) => setHarvestQty(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Unit</label>
-                      <input
-                        className="fv-input"
-                        value={harvestUnit}
-                        onChange={(e) => setHarvestUnit(e.target.value)}
-                      />
-                    </div>
-                  </div>
                   {activeProject.cropType !== 'tomatoes' && (
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-foreground">Quality</label>
@@ -514,16 +631,78 @@ export default function HarvestSalesPage() {
                     </div>
                   )}
 
+                  {activeProject.cropType === 'french-beans' && (
+                    <div className="space-y-3 border rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground font-medium">Pricing (kg)</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-sm font-medium text-foreground">Pricing mode</label>
+                          <Select
+                            value={harvestFarmPricingMode}
+                            onValueChange={(val) =>
+                              setHarvestFarmPricingMode(val as 'perUnit' | 'total')
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select pricing mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="perUnit">Price per kg</SelectItem>
+                              <SelectItem value="total">Total amount</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          {harvestFarmPricingMode === 'perUnit' ? (
+                            <>
+                              <label className="text-sm font-medium text-foreground">Price per kg (KES)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={harvestFarmUnitPrice}
+                                onChange={(e) => setHarvestFarmUnitPrice(e.target.value)}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <label className="text-sm font-medium text-foreground">Total amount (KES)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                className="fv-input"
+                                value={harvestFarmTotalPrice}
+                                onChange={(e) => setHarvestFarmTotalPrice(e.target.value)}
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 pt-2">
+                        <input
+                          type="checkbox"
+                          id="harvestFarmPaidFB"
+                          checked={harvestFarmPaid}
+                          onChange={(e) => setHarvestFarmPaid(e.target.checked)}
+                          className="rounded border-border"
+                        />
+                        <label htmlFor="harvestFarmPaidFB" className="text-sm font-medium text-foreground cursor-pointer">
+                          Paid (if yes, counted as revenue)
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {activeProject.cropType === 'tomatoes' && harvestDestination === 'farm' && (
                     <div className="space-y-3 border rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground font-medium">Farm Pricing</p>
+                      <p className="text-xs text-muted-foreground font-medium">Pricing</p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="space-y-1">
                           <label className="text-sm font-medium text-foreground">Unit Type</label>
                           <Select
                             value={harvestFarmUnitType}
                             onValueChange={(val) =>
-                              setHarvestFarmUnitType(val as 'crate-big' | 'crate-small' | 'kg')
+                              setHarvestFarmUnitType(val as 'crate-big' | 'crate-medium' | 'crate-small' | 'kg')
                             }
                           >
                             <SelectTrigger className="w-full">
@@ -532,6 +711,7 @@ export default function HarvestSalesPage() {
                             <SelectContent>
                               <SelectItem value="kg">Kilograms (kg)</SelectItem>
                               <SelectItem value="crate-big">Big wooden box</SelectItem>
+                              <SelectItem value="crate-medium">Medium wooden box</SelectItem>
                               <SelectItem value="crate-small">Small wooden box</SelectItem>
                             </SelectContent>
                           </Select>
@@ -578,6 +758,18 @@ export default function HarvestSalesPage() {
                             </>
                           )}
                         </div>
+                      </div>
+                      <div className="flex items-center gap-2 pt-2">
+                        <input
+                          type="checkbox"
+                          id="harvestFarmPaid"
+                          checked={harvestFarmPaid}
+                          onChange={(e) => setHarvestFarmPaid(e.target.checked)}
+                          className="rounded border-border"
+                        />
+                        <label htmlFor="harvestFarmPaid" className="text-sm font-medium text-foreground cursor-pointer">
+                          Paid (if yes, counted as revenue)
+                        </label>
                       </div>
                     </div>
                   )}
@@ -669,23 +861,6 @@ export default function HarvestSalesPage() {
                             placeholder="Driver name"
                           />
                         )}
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium text-foreground">Wooden boxes</label>
-                        <Select
-                          value={harvestCrateType}
-                          onValueChange={(val) =>
-                            setHarvestCrateType(val as 'big' | 'small')
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select wooden box" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="big">Big wooden box</SelectItem>
-                            <SelectItem value="small">Small wooden box</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </div>
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-foreground">Market</label>
