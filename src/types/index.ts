@@ -606,3 +606,76 @@ export interface OperationsWorkCard {
   /** Set when status = rejected */
   rejectionReason?: string;
 }
+
+// --- Field Cash Harvest Collection (French Beans: pickers + weigh + buyer) ---
+
+export type HarvestCollectionStatus = 'collecting' | 'payout_complete' | 'sold' | 'closed';
+
+export interface HarvestCollection {
+  id: string;
+  companyId: string;
+  projectId: string;
+  cropType: CropType;
+  /** Display name for this collection (e.g. "Morning shift", "Block A") */
+  name?: string;
+  harvestDate: Date | unknown;
+
+  /** What pickers earn per kg (KES) */
+  pricePerKgPicker: number;
+  /** What buyer pays per kg (KES) – set when recording buyer sale */
+  pricePerKgBuyer?: number;
+
+  /** Auto: SUM of all pickers' totalKg */
+  totalHarvestKg: number;
+  /** Auto: SUM of all pickers' totalPay */
+  totalPickerCost: number;
+  /** Auto: totalHarvestKg * pricePerKgBuyer (when buyer price set) */
+  totalRevenue?: number;
+  /** Auto: totalRevenue - totalPickerCost */
+  profit?: number;
+
+  status: HarvestCollectionStatus;
+  /** When buyer payment received */
+  buyerPaidAt?: Date | unknown;
+  createdAt?: Date | unknown;
+}
+
+export interface HarvestPicker {
+  id: string;
+  companyId: string;
+  collectionId: string;
+
+  pickerNumber: number;
+  pickerName: string;
+
+  /** Sum of all weigh entries for this picker */
+  totalKg: number;
+  /** totalKg * pricePerKgPicker (from collection) */
+  totalPay: number;
+
+  isPaid: boolean;
+  paidAt?: Date | unknown;
+  /** When paid as part of a group, links to harvestPaymentBatches doc */
+  paymentBatchId?: string;
+}
+
+/** Record of a group payment (multiple pickers paid together) */
+export interface HarvestPaymentBatch {
+  id: string;
+  companyId: string;
+  collectionId: string;
+  pickerIds: string[];
+  totalAmount: number;
+  paidAt: Date | unknown;
+}
+
+export interface PickerWeighEntry {
+  id: string;
+  companyId: string;
+  pickerId: string;
+  collectionId: string;
+
+  weightKg: number;
+  tripNumber: number;
+  recordedAt: Date | unknown;
+}

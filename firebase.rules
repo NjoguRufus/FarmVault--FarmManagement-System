@@ -154,6 +154,32 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
+    // --- Harvest Collections (field cash: pickers + weigh + buyer) ---
+
+    match /harvestCollections/{collectionId} {
+      allow read: if isSignedIn();
+      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
+    match /harvestPickers/{pickerId} {
+      allow read: if isSignedIn();
+      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
+    match /pickerWeighEntries/{entryId} {
+      allow read: if isSignedIn();
+      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
+    match /harvestPaymentBatches/{batchId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+      allow update, delete: if false;
+    }
+
     // --- Sales ---
 
     match /sales/{saleId} {

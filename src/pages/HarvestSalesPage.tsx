@@ -32,6 +32,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import { hasHarvestCollectionsModule } from '@/lib/cropModules';
 
 const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
@@ -39,6 +41,9 @@ export default function HarvestSalesPage() {
   const { activeProject } = useProject();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
+  const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
+  const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
   const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests');
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
@@ -472,6 +477,15 @@ export default function HarvestSalesPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {showHarvestCollections && (
+            <Button
+              variant="default"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => navigate(`/harvest-collections/${activeProject.id}`)}
+            >
+              Harvest Collections
+            </Button>
+          )}
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--secondary">

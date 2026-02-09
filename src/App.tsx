@@ -22,6 +22,7 @@ import OperationsPage from "@/pages/OperationsPage";
 import InventoryPage from "@/pages/InventoryPage";
 import HarvestSalesPage from "@/pages/HarvestSalesPage";
 import HarvestDetailsPage from "@/pages/HarvestDetailsPage";
+import HarvestCollectionsPage from "@/pages/HarvestCollectionsPage";
 import BrokerHarvestSalesPage from "@/pages/BrokerHarvestSalesPage";
 import BrokerExpensesPage from "@/pages/BrokerExpensesPage";
 import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
@@ -147,6 +148,8 @@ const App = () => (
                 <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/harvest-sales" element={<RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker>} />
                 <Route path="/harvest-sales/harvest/:harvestId" element={<RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker>} />
+                <Route path="/harvest-collections" element={<RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker>} />
+                <Route path="/harvest-collections/:projectId" element={<RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker>} />
                 <Route path="/suppliers" element={<SuppliersPage />} />
                 <Route path="/challenges" element={<SeasonChallengesPage />} />
                 <Route path="/employees" element={<EmployeesPage />} />
