@@ -119,13 +119,13 @@ export default function ManagerOperationsPage() {
     return Array.from(byId.values());
   }, [managerWorkCards, companyWorkCards, managerIdsForCurrentUser, managerIdsArray.length]);
 
-  // Separate work cards into in‑progress vs completed (approved/paid)
+  // My Work Cards: show all cards that are not yet paid (planned, submitted, rejected, approved). Paid cards move to Work Logs.
   const workCardsInProgress = useMemo(
-    () => workCards.filter((c) => c.status === 'planned' || c.status === 'submitted' || c.status === 'rejected'),
+    () => workCards.filter((c) => !(c.payment?.isPaid || c.status === 'paid')),
     [workCards],
   );
   const workCardsCompleted = useMemo(
-    () => workCards.filter((c) => c.status === 'approved' || c.status === 'paid' || c.payment?.isPaid),
+    () => workCards.filter((c) => c.status === 'paid' || c.payment?.isPaid),
     [workCards],
   );
   const invalidateWorkCards = useInvalidateWorkCards();
@@ -625,7 +625,7 @@ export default function ManagerOperationsPage() {
     }
   };
 
-  // Handle submitting daily work log (manager creating their own work log)
+  // Handle submitting daily work log (manager creating their own work card that admin will approve/reject)
   const handleSubmitDailyWork = async () => {
     if (!user || !activeProject || !logDate) return;
     if (!logWorkType || !logNumberOfPeople) {
@@ -633,12 +633,19 @@ export default function ManagerOperationsPage() {
       return;
     }
 
-    // Use current stage or default stage
+    // Use current stage or default stage. getCurrentStageForProject returns { stageIndex, stageName } only (no id).
     const stageToUse = currentStage || projectStages[0];
     if (!stageToUse) {
       alert('No crop stage available for this project');
       return;
     }
+    // Resolve full stage with id (needed for Firestore); stageToUse may be from getCurrentStageForProject and lack id.
+    const fullStage =
+      projectStages.find(
+        (s) =>
+          s.stageName === (stageToUse as { stageName?: string }).stageName ||
+          (s as CropStage).stageIndex === (stageToUse as { stageIndex?: number }).stageIndex,
+      ) ?? projectStages[0];
 
     // For spraying and fertilizer application, ensure at least one inventory item is selected
     if (logWorkType === 'Spraying') {
@@ -665,7 +672,6 @@ export default function ManagerOperationsPage() {
     try {
       const numPeople = Number(logNumberOfPeople || '0');
       const rate = logRatePerPerson ? Number(logRatePerPerson) : undefined;
-      const calculatedTotal = numPeople * (rate || 0);
 
       const inputSummary =
         logInputs.length === 0
@@ -689,92 +695,47 @@ export default function ManagerOperationsPage() {
               })
               .join('; ');
 
-      const workLogData: any = {
+      // Create a manager-originated work card so it first appears in "My Work Cards" for both manager and admin.
+      // Firestore does not accept undefined. Use fullStage (has id); stageToUse from getCurrentStageForProject has no id.
+      const stageIdVal = (fullStage as CropStage | undefined)?.id ?? (stageToUse as { stageName?: string }).stageName ?? 'default';
+      const stageNameVal = (fullStage as CropStage | undefined)?.stageName ?? (stageToUse as { stageName?: string }).stageName ?? '';
+      await addDoc(collection(db, 'operationsWorkCards'), {
         companyId: activeProject.companyId,
         projectId: activeProject.id,
-        cropType: activeProject.cropType,
-        stageIndex: stageToUse.stageIndex,
-        stageName: stageToUse.stageName,
-        date: logDate,
-        workCategory: logWorkType, // Use work type as category
-        workType: logWorkType,
-        numberOfPeople: numPeople,
-        ratePerPerson: rate,
-        totalPrice: calculatedTotal > 0 ? calculatedTotal : undefined,
-        drumsSprayed: logDrumsSprayed || undefined,
-        notes: logNotes || undefined,
-        inputsUsed: inputSummary || undefined,
-        managerId: user.id, // Auto-set to current manager
-        managerName: user.name,
-        paid: false,
+        stageId: stageIdVal,
+        stageName: stageNameVal,
+        workTitle: logWorkType,
+        workCategory: logWorkType,
+        planned: {
+          date: logDate,
+          workers: numPeople,
+          inputs: null,
+          fuel: null,
+          chemicals: null,
+          fertilizer: null,
+          estimatedCost: null,
+        },
+        actual: {
+          submitted: true,
+          managerId: user.id,
+          managerName: user.name ?? null,
+          actualWorkers: numPeople,
+          ratePerPerson: rate ?? null,
+          actualInputsUsed: inputSummary || null,
+          actualFuelUsed: null,
+          actualChemicalsUsed: null,
+          actualFertilizerUsed: null,
+          notes: logNotes || null,
+          submittedAt: serverTimestamp(),
+          actualDate: logDate,
+        },
+        payment: { isPaid: false },
+        status: 'submitted',
+        allocatedManagerId: user.id,
+        createdByAdminId: '',
+        createdByManagerId: user.id,
         createdAt: serverTimestamp(),
-      };
-
-      // Remove undefined values to avoid Firestore errors
-      Object.keys(workLogData).forEach(key => {
-        if (workLogData[key] === undefined) {
-          delete workLogData[key];
-        }
       });
-
-      // Use batch to create work log and deduct inventory atomically
-      const batch = writeBatch(db);
-      const workLogRef = doc(collection(db, 'workLogs'));
-      batch.set(workLogRef, workLogData);
-
-      // Deduct inventory items and record usage
-      const usageDate = logDate instanceof Date ? logDate : new Date(logDate);
-      
-      for (const usage of logInputs) {
-        if (!usage.itemId || !usage.quantity) continue;
-        
-        const item = companyInventory.find((i) => i.id === usage.itemId);
-        if (!item) continue;
-
-        const quantityValue = parseQuantityOrFraction(usage.quantity.toString());
-        if (quantityValue > 0) {
-          // Deduct from inventory
-          const itemRef = doc(db, 'inventoryItems', usage.itemId);
-          batch.update(itemRef, {
-            quantity: increment(-quantityValue),
-            lastUpdated: serverTimestamp(),
-          });
-
-          // Record inventory usage (will be committed after batch)
-          // We'll do this after the batch commits to ensure workLogId is available
-        }
-      }
-
-      // Commit batch (creates work log and deducts inventory)
-      await batch.commit();
-      const workLogId = workLogRef.id;
-
-      // Record inventory usage after batch commit (so we have workLogId)
-      await Promise.all(
-        logInputs
-          .filter((usage) => usage.itemId && usage.quantity)
-          .map(async (usage) => {
-            const item = companyInventory.find((i) => i.id === usage.itemId);
-            if (!item) return;
-
-            const quantityValue = parseQuantityOrFraction(usage.quantity.toString());
-            if (quantityValue > 0) {
-              await recordInventoryUsage({
-                companyId: activeProject.companyId,
-                projectId: activeProject.id,
-                inventoryItemId: usage.itemId,
-                category: usage.category,
-                quantity: quantityValue,
-                unit: item.unit,
-                source: 'workLog',
-                workLogId,
-                stageIndex: stageToUse.stageIndex,
-                stageName: stageToUse.stageName,
-                date: usageDate,
-              });
-            }
-          }),
-      );
 
       // Reset form
       setLogDailyWorkOpen(false);
@@ -789,9 +750,7 @@ export default function ManagerOperationsPage() {
       setLogInputs([]);
 
       // Invalidate queries to refresh data
-      queryClient.invalidateQueries({ queryKey: ['workLogs'] });
-      queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
-      queryClient.invalidateQueries({ queryKey: ['inventoryUsage'] });
+      queryClient.invalidateQueries({ queryKey: ['operationsWorkCards'] });
     } catch (error) {
       console.error('Failed to log daily work:', error);
       alert('Failed to log daily work. Please try again.');
@@ -1138,14 +1097,14 @@ export default function ManagerOperationsPage() {
         </div>
       </div>
 
-      {/* Work Cards (Admin-created; Manager only submits execution — never creates) */}
+      {/* Work Cards (Admin or manager created; manager only submits execution for admin cards) */}
       {user && (user.companyId || managerIdsArray.length > 0) && (
         <div className="space-y-3">
           <div>
             <h2 className="font-semibold text-foreground mb-1">My Work Cards</h2>
             <p className="text-sm text-muted-foreground">
-              Work cards created by Admin and assigned to you. Use <strong>Record Work</strong> to submit execution data into the same card (no new cards).
-              Approved and paid cards will appear in your Work Logs &amp; Filters section.
+              Work cards assigned to you by Admin, plus cards you log yourself via <strong>Log Daily Work</strong>. Use <strong>Record Work</strong> to submit execution data.
+              Approved and paid cards will appear in your Work Logs &amp; Filters section once marked as paid.
             </p>
           </div>
           {workCardsInProgress.length === 0 ? (

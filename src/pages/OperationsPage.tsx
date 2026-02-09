@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote } from 'lucide-react';
+import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
 
@@ -106,6 +107,7 @@ export default function OperationsPage() {
 
   const [viewOpen, setViewOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [workLogViewMode, setWorkLogViewMode] = useState<'list' | 'cards'>('cards');
   const [selectedLog, setSelectedLog] = useState<WorkLog | null>(null);
   const [editLog, setEditLog] = useState<WorkLog | null>(null);
   const [previousWorkData, setPreviousWorkData] = useState<any>(null);
@@ -158,21 +160,18 @@ export default function OperationsPage() {
     return workCards.filter((c) => c.projectId === activeProject.id);
   }, [workCards, activeProject]);
 
-  /** Cards still in progress: planned, submitted, or rejected (shown in Work Cards grid). */
+  /** Work Cards grid: show all cards not yet paid (planned, submitted, rejected, approved). Paid cards move to Work Logs. */
   const workCardsInProgress = useMemo(() => {
-    return workCardsForProject.filter(
-      (c) => c.status === 'planned' || c.status === 'submitted' || c.status === 'rejected'
-    );
+    return workCardsForProject.filter((c) => !(c.payment?.isPaid || c.status === 'paid'));
   }, [workCardsForProject]);
 
-  /** Approved or paid cards (shown in Work Logs section). */
+  /** Paid cards (shown in Work Logs section once payment is completed). */
   const approvedOrPaidWorkCards = useMemo(() => {
-    return workCardsForProject.filter(
-      (c) => c.status === 'approved' || c.status === 'paid' || c.payment?.isPaid
-    );
+    // Business rule: only PAID cards should appear in Work Logs; approved-but-unpaid stay in Work Cards.
+    return workCardsForProject.filter((c) => c.payment?.isPaid || c.status === 'paid');
   }, [workCardsForProject]);
 
-  /** Combined list for Work Logs section: work logs + approved/paid work cards, sorted by date (newest first). */
+  /** Combined list for Work Logs section: work logs + paid work cards, sorted by date (newest first). */
   const combinedWorkEntries = useMemo(() => {
     const toTime = (d: unknown) => {
       if (!d) return 0;
@@ -1168,22 +1167,25 @@ export default function OperationsPage() {
             {' '}<span className="font-medium text-foreground">Approve / Reject</span>. Approved and paid cards appear in the Work logs section below.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {workCardsInProgress.map((card) => (
-              <div
-                key={card.id}
-                className={cn(
-                  'fv-card p-4 cursor-pointer hover:shadow-md hover:-translate-y-[1px] transition-all relative overflow-hidden border border-border/70 bg-card',
-                  card.status === 'submitted' && 'bg-amber-50/60',
-                  card.status === 'rejected' && 'bg-destructive/5',
-                  card.status === 'planned' && 'bg-card',
-                )}
-                onClick={() => {
-                  setSelectedWorkCard(card);
-                  setWorkCardModalOpen(true);
-                  setWorkCardEditMode(false);
-                  setRejectReason('');
-                }}
-              >
+            {workCardsInProgress.map((card) => {
+              const isManagerCreated = (card as any).createdByManagerId;
+              return (
+                <div
+                  key={card.id}
+                  className={cn(
+                    'fv-card p-4 cursor-pointer hover:shadow-md hover:-translate-y-[1px] transition-all relative overflow-hidden border border-border/70 bg-card',
+                    card.status === 'submitted' && 'bg-amber-50/60',
+                    card.status === 'rejected' && 'bg-destructive/5',
+                    card.status === 'planned' && 'bg-card',
+                    isManagerCreated && 'border-sky-300 bg-sky-50/70'
+                  )}
+                  onClick={() => {
+                    setSelectedWorkCard(card);
+                    setWorkCardModalOpen(true);
+                    setWorkCardEditMode(false);
+                    setRejectReason('');
+                  }}
+                >
                 {/* Status watermark */}
                 <span
                   className={cn(
@@ -1222,6 +1224,11 @@ export default function OperationsPage() {
                       <p className="text-[11px] text-muted-foreground">
                         Stage: <span className="font-medium text-foreground">{card.stageName || card.stageId || '—'}</span>
                       </p>
+                      {isManagerCreated && (
+                        <p className="text-[11px] text-sky-800 font-medium">
+                          From manager submission
+                        </p>
+                      )}
                       <p className="text-[11px] text-muted-foreground">
                         Workers planned:{' '}
                         <span className="font-medium text-foreground">
@@ -1257,8 +1264,9 @@ export default function OperationsPage() {
                     )}
                   </div>
                 </div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1278,18 +1286,134 @@ export default function OperationsPage() {
       </div>
 
       {/* Work Logs & completed work cards (approved/paid) */}
-      <div className="space-y-2">
-        <h2 className="font-heading font-semibold text-foreground text-lg">Work logs & completed cards</h2>
-        <p className="text-sm text-muted-foreground">
-          Work logs and approved or paid work cards. Click to view details or mark as paid.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 className="font-heading font-semibold text-foreground text-lg">Work logs & completed cards</h2>
+            <p className="text-sm text-muted-foreground">
+              Work logs and paid work cards. Click to view details or mark as paid.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant={workLogViewMode === 'list' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setWorkLogViewMode('list')}
+            >
+              <List className="h-4 w-4 mr-1" />
+              List
+            </Button>
+            <Button
+              variant={workLogViewMode === 'cards' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setWorkLogViewMode('cards')}
+            >
+              <Grid className="h-4 w-4 mr-1" />
+              Cards
+            </Button>
+          </div>
+        </div>
         {isLoading && (
-          <div className="col-span-full fv-card p-8 text-center">
+          <div className="fv-card p-8 text-center">
             <p className="text-sm text-muted-foreground">Loading…</p>
           </div>
         )}
+        {!isLoading && workLogViewMode === 'list' && combinedWorkEntries.length > 0 && (
+          <div className="fv-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">Date & Time</th>
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">Work</th>
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">Stage</th>
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">People / Amount</th>
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">Status</th>
+                    <th className="text-left p-3 text-sm font-medium text-muted-foreground">Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {combinedWorkEntries.map((entry) =>
+                    entry.type === 'workLog' ? (
+                      <tr
+                        key={`log-${entry.log.id}`}
+                        className={cn(
+                          'border-b hover:bg-muted/30 cursor-pointer relative',
+                          entry.log.paid && "after:content-['PAID'] after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:text-6xl after:font-bold after:text-red-500/10 after:rotate-[-35deg] after:pointer-events-none after:select-none after:z-0"
+                        )}
+                        onClick={() => handleViewLog(entry.log)}
+                      >
+                        <td className="p-3 relative z-10 text-sm">{formatDate(entry.log.date)}</td>
+                        <td className="p-3 relative z-10">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{getWorkTypeIcon(entry.log.workCategory)}</span>
+                            <span className="font-medium text-foreground">{entry.log.workCategory}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 relative z-10 text-sm">{entry.log.stageName}</td>
+                        <td className="p-3 relative z-10 text-sm">
+                          {entry.log.numberOfPeople} people
+                          {entry.log.ratePerPerson != null && ` @ KES ${entry.log.ratePerPerson.toLocaleString()}`}
+                          {entry.log.totalPrice != null && (
+                            <span className="font-semibold block">KES {entry.log.totalPrice.toLocaleString()}</span>
+                          )}
+                        </td>
+                        <td className="p-3 relative z-10">
+                          <span className={cn('fv-badge capitalize text-xs', getPaidBadge(entry.log.paid))}>
+                            {entry.log.paid ? 'Paid' : 'Unpaid'}
+                          </span>
+                        </td>
+                        <td className="p-3 relative z-10 text-xs text-muted-foreground">Work log</td>
+                      </tr>
+                    ) : (
+                      <tr
+                        key={`card-${entry.card.id}`}
+                        className={cn(
+                          'border-b hover:bg-muted/30 cursor-pointer relative',
+                          (entry.card.payment?.isPaid || entry.card.status === 'paid') && "after:content-['PAID'] after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:text-6xl after:font-bold after:text-red-500/10 after:rotate-[-35deg] after:pointer-events-none after:select-none after:z-0"
+                        )}
+                        onClick={() => {
+                          setSelectedWorkCard(entry.card);
+                          setWorkCardModalOpen(true);
+                          setWorkCardEditMode(false);
+                          setRejectReason('');
+                        }}
+                      >
+                        <td className="p-3 relative z-10 text-sm">
+                          {formatDate(
+                            (entry.card.actual?.actualDate as any)?.toDate?.() ?? (entry.card.approvedAt as any)?.toDate?.() ?? (entry.card as any).createdAt?.toDate?.() ?? new Date()
+                          )}
+                        </td>
+                        <td className="p-3 relative z-10">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{getWorkTypeIcon(entry.card.workTitle || entry.card.workCategory)}</span>
+                            <span className="font-medium text-foreground">{entry.card.workTitle || entry.card.workCategory}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 relative z-10 text-sm">{entry.card.stageName || entry.card.stageId || '—'}</td>
+                        <td className="p-3 relative z-10 text-sm">
+                          {(entry.card.actual?.actualWorkers ?? 0)} people
+                          {entry.card.actual?.ratePerPerson != null && ` @ KES ${Number(entry.card.actual.ratePerPerson).toLocaleString()}`}
+                          {(entry.card.actual?.actualWorkers != null && entry.card.actual?.ratePerPerson != null) && (
+                            <span className="font-semibold block">KES {(entry.card.actual.actualWorkers * entry.card.actual.ratePerPerson).toLocaleString()}</span>
+                          )}
+                        </td>
+                        <td className="p-3 relative z-10">
+                          <span className={cn('fv-badge capitalize text-xs', (entry.card.payment?.isPaid || entry.card.status === 'paid') ? 'fv-badge--active' : 'bg-emerald-100 text-emerald-800')}>
+                            {(entry.card.payment?.isPaid || entry.card.status === 'paid') ? 'Paid' : 'Approved'}
+                          </span>
+                        </td>
+                        <td className="p-3 relative z-10 text-xs text-muted-foreground">Work card</td>
+                      </tr>
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {!isLoading && workLogViewMode === 'cards' && combinedWorkEntries.length > 0 && (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {combinedWorkEntries.map((entry) =>
           entry.type === 'workLog' ? (
             <div
@@ -1447,9 +1571,10 @@ export default function OperationsPage() {
             </div>
           )
         )}
-
-        {combinedWorkEntries.length === 0 && !isLoading && (
-          <div className="col-span-full fv-card text-center py-12">
+        </div>
+        )}
+        {!isLoading && combinedWorkEntries.length === 0 && (
+          <div className="fv-card text-center py-12">
             <Wrench className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-2">No work logs or completed cards</h3>
             <p className="text-sm text-muted-foreground">
@@ -1459,15 +1584,89 @@ export default function OperationsPage() {
         )}
       </div>
 
-      {/* Admin Work Card Modal: Planned vs Actual comparison + Edit + Approve/Reject */}
+      {/* Admin Work Card Modal: Planned vs Actual (admin-created) or Manager submission only (manager-created) + Approve/Reject */}
       <Dialog open={workCardModalOpen} onOpenChange={(open) => { setWorkCardModalOpen(open); if (!open) setWorkCardEditMode(false); }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{workCardEditMode ? 'Edit Work Card (Planned)' : 'Work Card: Planned vs Actual'}</DialogTitle>
+            <DialogTitle>
+              {(selectedWorkCard as { createdByManagerId?: string } | null)?.createdByManagerId
+                ? 'Manager work submission'
+                : workCardEditMode
+                  ? 'Edit Work Card (Planned)'
+                  : 'Work Card: Planned vs Actual'}
+            </DialogTitle>
           </DialogHeader>
           {selectedWorkCard && (
             <div className="space-y-4">
-              {workCardEditMode ? (
+              {(selectedWorkCard as { createdByManagerId?: string }).createdByManagerId ? (
+                /* Manager-created card: only show manager submission and Approve/Reject (no admin/planned side) */
+                <>
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-lg text-foreground">
+                      {selectedWorkCard.workTitle || selectedWorkCard.workCategory}
+                    </h3>
+                    <span className={cn('fv-badge capitalize', selectedWorkCard.status === 'submitted' && 'bg-amber-100 text-amber-800')}>
+                      {selectedWorkCard.status}
+                    </span>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-muted/20">
+                    <h4 className="font-semibold text-foreground mb-3">Manager submission</h4>
+                    {selectedWorkCard.actual?.submitted ? (
+                      <ul className="space-y-1 text-sm">
+                        <li>Stage: {selectedWorkCard.stageName || selectedWorkCard.stageId || '—'}</li>
+                        <li>Workers: {selectedWorkCard.actual?.actualWorkers ?? '—'}</li>
+                        {selectedWorkCard.actual?.ratePerPerson != null && (
+                          <li>Price per person: KES {selectedWorkCard.actual.ratePerPerson.toLocaleString()}</li>
+                        )}
+                        {selectedWorkCard.actual?.actualWorkers != null && selectedWorkCard.actual?.ratePerPerson != null && selectedWorkCard.actual.actualWorkers > 0 && selectedWorkCard.actual.ratePerPerson > 0 && (
+                          <li className="font-medium">Total labour: KES {(selectedWorkCard.actual.actualWorkers * selectedWorkCard.actual.ratePerPerson).toLocaleString()} (expense when marked paid)</li>
+                        )}
+                        {selectedWorkCard.actual?.actualInputsUsed != null && String(selectedWorkCard.actual.actualInputsUsed).trim() !== '' && <li>Inputs: {selectedWorkCard.actual.actualInputsUsed}</li>}
+                        {selectedWorkCard.actual?.actualFuelUsed != null && String(selectedWorkCard.actual.actualFuelUsed).trim() !== '' && <li>Fuel: {selectedWorkCard.actual.actualFuelUsed}</li>}
+                        {selectedWorkCard.actual?.actualChemicalsUsed != null && String(selectedWorkCard.actual.actualChemicalsUsed).trim() !== '' && <li>Chemicals: {selectedWorkCard.actual.actualChemicalsUsed}</li>}
+                        {selectedWorkCard.actual?.actualFertilizerUsed != null && String(selectedWorkCard.actual.actualFertilizerUsed).trim() !== '' && <li>Fertilizer: {selectedWorkCard.actual.actualFertilizerUsed}</li>}
+                        {selectedWorkCard.actual?.notes != null && String(selectedWorkCard.actual.notes).trim() !== '' && <li>Notes: {selectedWorkCard.actual.notes}</li>}
+                      </ul>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">No submission details.</p>
+                    )}
+                  </div>
+                  {selectedWorkCard.status === 'rejected' && selectedWorkCard.rejectionReason && (
+                    <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                      Rejection reason: {selectedWorkCard.rejectionReason}
+                    </div>
+                  )}
+                  {canAdminApproveOrReject(selectedWorkCard) && (
+                    <div className="flex flex-wrap gap-3 pt-4 border-t">
+                      <button
+                        type="button"
+                        onClick={handleApproveWorkCard}
+                        disabled={approvingCard}
+                        className="fv-btn fv-btn--primary"
+                      >
+                        {approvingCard ? 'Approving…' : 'Approve'}
+                      </button>
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          className="fv-input flex-1 min-w-[160px]"
+                          placeholder="Rejection reason"
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleRejectWorkCard}
+                          disabled={rejectingCard || !rejectReason.trim()}
+                          className="fv-btn fv-btn--secondary"
+                        >
+                          {rejectingCard ? 'Rejecting…' : 'Reject'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : workCardEditMode ? (
                 <form onSubmit={handleUpdateWorkCard} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>

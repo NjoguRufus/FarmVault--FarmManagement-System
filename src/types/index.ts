@@ -594,7 +594,10 @@ export interface OperationsWorkCard {
   status: WorkCardStatus;
 
   allocatedManagerId: string | null;
+  /** Admin-created cards set this; manager-created cards may leave it empty. */
   createdByAdminId: string;
+  /** Optional flag for cards that originate from a manager "Log Daily Work" submission. */
+  createdByManagerId?: string | null;
   createdAt: Date | unknown;
   /** Set when status = approved */
   approvedBy?: string;

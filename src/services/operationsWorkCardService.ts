@@ -102,6 +102,8 @@ function mapDoc(id: string, data: Record<string, unknown>): OperationsWorkCard {
     allocatedManagerId:
       data.allocatedManagerId != null ? String(data.allocatedManagerId) : null,
     createdByAdminId: String(data.createdByAdminId ?? ''),
+    createdByManagerId:
+      data.createdByManagerId != null ? String(data.createdByManagerId) : undefined,
     createdAt: data.createdAt,
     approvedBy: data.approvedBy != null ? String(data.approvedBy) : undefined,
     approvedAt: data.approvedAt,
