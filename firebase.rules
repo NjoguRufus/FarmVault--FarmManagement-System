@@ -188,6 +188,13 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
+    // --- Harvest Cash Pools (French beans harvest wallet) ---
+    match /harvestCashPools/{poolId} {
+      allow read: if isSignedIn();
+      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
     // --- Suppliers ---
 
     match /suppliers/{supplierId} {

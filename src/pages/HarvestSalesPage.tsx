@@ -958,6 +958,7 @@ export default function HarvestSalesPage() {
             </DialogContent>
           </Dialog>
 
+          {!isFrenchBeans && (
           <Dialog open={saleOpen} onOpenChange={setSaleOpen}>
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--primary">
@@ -1409,6 +1410,7 @@ export default function HarvestSalesPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
         </div>
       </div>
 

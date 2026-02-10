@@ -13,6 +13,8 @@ import {
   Sprout,
   ChevronUp,
   ChevronDown,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +31,8 @@ import {
   markPickersPaidInBatch,
   setBuyerPriceAndMaybeClose,
   recalcCollectionTotals,
+  registerHarvestCash,
+  applyHarvestCashPayment,
 } from '@/services/harvestCollectionService';
 import {
   Dialog,
@@ -46,6 +50,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import {
+  Select as UiSelect,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 
@@ -97,6 +109,42 @@ export default function HarvestCollectionsPage() {
   const [pickerSearch, setPickerSearch] = useState('');
   const [statsExpanded, setStatsExpanded] = useState(true);
   const [paySelectedIds, setPaySelectedIds] = useState<Set<string>>(new Set());
+  const [cashAmount, setCashAmount] = useState('');
+  const [cashSource, setCashSource] = useState<'bank' | 'broker' | 'custom'>('bank');
+  const [cashSourceCustom, setCashSourceCustom] = useState('');
+  const [cashDialogCollection, setCashDialogCollection] = useState<HarvestCollection | null>(null);
+  const [cashDialogVisible, setCashDialogVisible] = useState(false);
+
+  const handleSaveCash = async () => {
+    if (!cashDialogCollection || !cashAmount.trim() || !companyId) return;
+    const amount = Number(cashAmount || '0');
+    if (amount <= 0) {
+      toast({ title: 'Invalid amount', description: 'Cash received must be greater than 0.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const resolvedSource =
+        cashSource === 'custom' && cashSourceCustom.trim().length > 0
+          ? cashSourceCustom.trim()
+          : cashSource;
+      await registerHarvestCash({
+        collectionId: cashDialogCollection.id,
+        projectId: cashDialogCollection.projectId,
+        companyId: cashDialogCollection.companyId,
+        cropType: String(cashDialogCollection.cropType),
+        cashReceived: amount,
+        source: resolvedSource,
+        receivedBy: user?.name || user?.email || user?.id || 'unknown',
+      });
+      queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
+      setCashDialogOpen(false);
+      setCashDialogCollection(null);
+      setCashAmount('');
+      toast({ title: 'Cash registered' });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message ?? 'Failed to register cash', variant: 'destructive' });
+    }
+  };
 
   useEffect(() => {
     setPaySelectedIds(new Set());
@@ -116,6 +164,10 @@ export default function HarvestCollectionsPage() {
     { refetchInterval: 5000 }
   );
 
+  const { data: allCashPools = [] } = useCollection<any>('harvestCashPools', 'harvestCashPools', {
+    refetchInterval: 5000,
+  });
+
   const companyId = user?.companyId ?? '';
 
   const collections = useMemo(() => {
@@ -126,6 +178,29 @@ export default function HarvestCollectionsPage() {
   const selectedCollection = useMemo(
     () => allCollections.find((c) => c.id === selectedCollectionId) ?? null,
     [allCollections, selectedCollectionId]
+  );
+
+  const isFrenchBeansCollection = useMemo(
+    () => (selectedCollection?.cropType as string | undefined)?.toLowerCase() === 'french-beans',
+    [selectedCollection?.cropType]
+  );
+
+  const cashPoolForCollection = useMemo(() => {
+    if (!selectedCollectionId) return null;
+    return allCashPools.find((p: any) => p.collectionId === selectedCollectionId) ?? null;
+  }, [allCashPools, selectedCollectionId]);
+
+  const cashPoolByCollection = useMemo(() => {
+    const map: Record<string, any> = {};
+    (allCashPools as any[]).forEach((p) => {
+      if (p.collectionId) map[p.collectionId] = p;
+    });
+    return map;
+  }, [allCashPools]);
+
+  const hasFrenchBeansCollections = useMemo(
+    () => collections.some((c) => String(c.cropType).toLowerCase() === 'french-beans'),
+    [collections]
   );
 
   const pickersForCollection = useMemo(() => {
@@ -154,7 +229,12 @@ export default function HarvestCollectionsPage() {
   const payUnpaidAndGroups = useMemo(() => {
     const unpaid = filteredPickersForPay.filter((p) => !p.isPaid);
     const paid = filteredPickersForPay.filter((p) => p.isPaid);
-    if (paid.length === 0) return { unpaid, groups: [] as { label: string; pickers: HarvestPicker[] }[] };
+    if (paid.length === 0)
+      return {
+        unpaid,
+        groups: [] as { label: string; pickers: HarvestPicker[] }[],
+        individuals: [] as { label: string; pickers: HarvestPicker[] }[],
+      };
 
     const toTime = (p: HarvestPicker) => {
       const t = p.paidAt;
@@ -176,12 +256,26 @@ export default function HarvestCollectionsPage() {
     batches.sort((a, b) => a.minPaidAt - b.minPaidAt);
     const labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let letterIndex = 0;
-    const groups = batches.map((b) => {
+    const groupsRaw = batches.map((b) => {
       const isLegacy = b.pickers.some((p) => !p.paymentBatchId);
-      const label = isLegacy ? 'Paid (earlier)' : `Group ${labels[letterIndex++] ?? String(letterIndex)}`;
-      return { label, pickers: b.pickers };
+      const letter = labels[letterIndex++] ?? String(letterIndex);
+      const isIndividual = b.pickers.length === 1;
+
+      let label: string;
+      if (isLegacy) {
+        // Legacy/older payments keep a generic label
+        label = isIndividual ? 'Individual (earlier)' : 'Paid (earlier)';
+      } else {
+        // Newer batches: Individual A/B/... when only one, otherwise Group A/B/...
+        label = isIndividual ? `Individual ${letter}` : `Group ${letter}`;
+      }
+
+      return { label, pickers: b.pickers, isIndividual };
     });
-    return { unpaid, groups };
+    const individuals = groupsRaw.filter((g) => g.isIndividual).map(({ label, pickers }) => ({ label, pickers }));
+    const groups = groupsRaw.filter((g) => !g.isIndividual).map(({ label, pickers }) => ({ label, pickers }));
+
+    return { unpaid, groups, individuals };
   }, [filteredPickersForPay]);
 
   /** Total amount to pay for currently selected pickers (Pay tab) */
@@ -276,6 +370,42 @@ export default function HarvestCollectionsPage() {
         harvestDate,
         pricePerKgPicker: price,
       });
+
+      // For French Beans: auto-carry forward current MAIN wallet balance as starting balance.
+      // The main wallet is the one shown next to the "New collection" button, which is tied
+      // to the first French Beans collection's cash pool.
+      const isFrenchBeans = String(effectiveProject.cropType).toLowerCase() === 'french-beans';
+      if (isFrenchBeans) {
+        const mainFbCollection = collections.find(
+          (c) => String(c.cropType).toLowerCase() === 'french-beans'
+        );
+        const mainPool =
+          mainFbCollection != null ? cashPoolByCollection[mainFbCollection.id] : undefined;
+        const mainRemaining = Number(mainPool?.remainingBalance ?? 0);
+
+        if (mainRemaining > 0) {
+          try {
+            await registerHarvestCash({
+              collectionId: id,
+              projectId: effectiveProject.id,
+              companyId,
+              cropType: String(effectiveProject.cropType),
+              cashReceived: mainRemaining,
+              source: 'carry-forward',
+              receivedBy: user?.name || user?.email || user?.id || 'system',
+            });
+            queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
+          } catch (e: any) {
+            // If auto wallet setup fails, continue but inform the user
+            toast({
+              title: 'Wallet not linked automatically',
+              description: e?.message ?? 'You may need to register harvest cash for this collection manually.',
+              variant: 'destructive',
+            });
+          }
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       setSelectedCollectionId(id);
       setViewMode('intake');
@@ -388,7 +518,35 @@ export default function HarvestCollectionsPage() {
       });
   };
 
-  const handleMarkPickerPaid = (pickerId: string) => {
+  const handleMarkPickerPaid = async (pickerId: string) => {
+    const picker = allPickers.find((p) => p.id === pickerId);
+    if (!picker) return;
+
+    // Prevent double-marking an already paid picker
+    if (picker.isPaid) {
+      toast({
+        title: 'Already paid',
+        description: 'This picker is already marked as paid.',
+      });
+      return;
+    }
+
+    const payAmount = picker.totalPay ?? 0;
+
+    if (isFrenchBeansCollection && selectedCollectionId) {
+      try {
+        await applyHarvestCashPayment(selectedCollectionId, payAmount);
+        queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
+      } catch (e: any) {
+        toast({
+          title: 'Cannot pay picker',
+          description: e?.message ?? 'Not enough cash in Harvest Cash Wallet.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     const updatedPickers = allPickers.map((p) =>
       p.id === pickerId ? { ...p, isPaid: true, paidAt: new Date() } : p
     );
@@ -409,22 +567,54 @@ export default function HarvestCollectionsPage() {
     });
   };
 
-  const handleMarkMultiplePaid = (pickerIds: string[]) => {
+  const handleMarkMultiplePaid = async (pickerIds: string[]) => {
     if (pickerIds.length === 0 || !selectedCollectionId || !companyId) return;
-    const totalAmount = pickerIds.reduce((sum, id) => {
+
+    // Only operate on pickers that are not yet paid to avoid
+    // duplicate payment batches and "document already exists" errors.
+    const unpaidIds = pickerIds.filter((id) => {
+      const p = allPickers.find((x) => x.id === id);
+      return p && !p.isPaid;
+    });
+
+    if (unpaidIds.length === 0) {
+      toast({
+        title: 'Nothing to pay',
+        description: 'All selected pickers are already marked as paid.',
+      });
+      setPaySelectedIds(new Set());
+      return;
+    }
+
+    const totalAmount = unpaidIds.reduce((sum, id) => {
       const p = allPickers.find((x) => x.id === id);
       return sum + (p?.totalPay ?? 0);
     }, 0);
+
+    if (isFrenchBeansCollection) {
+      try {
+        await applyHarvestCashPayment(selectedCollectionId, totalAmount);
+        queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
+      } catch (e: any) {
+        toast({
+          title: 'Cannot pay selected pickers',
+          description: e?.message ?? 'Not enough cash in Harvest Cash Wallet.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     const updatedPickers = allPickers.map((p) =>
-      pickerIds.includes(p.id) ? { ...p, isPaid: true, paidAt: new Date() } : p
+      unpaidIds.includes(p.id) ? { ...p, isPaid: true, paidAt: new Date() } : p
     );
     queryClient.setQueryData(['harvestPickers'], updatedPickers);
     setPaySelectedIds(new Set());
-    toast({ title: `${pickerIds.length} marked paid` });
+    toast({ title: `${unpaidIds.length} marked paid` });
     markPickersPaidInBatch({
       companyId,
       collectionId: selectedCollectionId,
-      pickerIds,
+      pickerIds: unpaidIds,
       totalAmount,
     }).catch((e: any) => {
       toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
@@ -497,9 +687,9 @@ export default function HarvestCollectionsPage() {
   }
 
   return (
-    <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0">
+      <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0">
       {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0">
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
           {selectedCollectionId ? (
             <Button
@@ -530,14 +720,163 @@ export default function HarvestCollectionsPage() {
           </h1>
         </div>
         {!selectedCollectionId && (
-          <Button
-            size="sm"
-            className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
-            onClick={() => setNewCollectionOpen(true)}
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            New collection
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={() => setNewCollectionOpen(true)}
+            >
+              <Plus className="h-4 w-4 mr-1.5" />
+              New collection
+            </Button>
+            {hasFrenchBeansCollections && (() => {
+              const fb = collections.find(
+                (c) => String(c.cropType).toLowerCase() === 'french-beans'
+              );
+              if (!fb) return null;
+              const pool = cashPoolByCollection[fb.id];
+              const totalPaidOut = pool?.totalPaidOut ?? 0;
+              const remaining = pool?.remainingBalance ?? 0;
+              const cashReceived = pool?.cashReceived ?? 0;
+              return (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs min-h-8 px-3 rounded-lg inline-flex items-center gap-1"
+                      onClick={() => {
+                        setCashDialogCollection(fb as any);
+                        setCashAmount(cashReceived ? String(cashReceived) : '');
+                        setCashSource((pool?.source as 'bank' | 'broker') ?? 'bank');
+                        setCashDialogVisible(false);
+                      }}
+                    >
+                      <Banknote className="h-3 w-3" />
+                      <span>Wallet</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50" align="center" side="bottom">
+                    <div className="space-y-4 text-center relative">
+                      <button
+                        type="button"
+                        className="absolute right-1.5 top-1.5 h-5 w-5 rounded-full bg-emerald-800 text-emerald-50 flex items-center justify-center text-xs"
+                        onClick={() => setCashDialogVisible(false)}
+                      >
+                        ×
+                      </button>
+                      <div className="flex flex-col items-center gap-2 pt-4">
+                        <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
+                        {/* Current balance big & blur-able with eye icon */}
+                        <div className="flex items-center gap-2">
+                          <div>
+                            <p className="text-[11px] text-emerald-100">Current balance</p>
+                            <p
+                              className={cn(
+                                'text-xl font-extrabold tabular-nums text-emerald-50',
+                                !cashDialogVisible && 'blur-sm select-none'
+                              )}
+                            >
+                              KES {remaining.toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="mt-3 inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
+                            onClick={() => setCashDialogVisible((v) => !v)}
+                          >
+                            {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        {/* Paid out + Cash received */}
+                        <div className="flex items-center justify-center gap-4 mt-1">
+                          <div>
+                            <p className="text-[11px] text-emerald-100">Paid out</p>
+                            <p
+                              className={cn(
+                                'font-semibold tabular-nums text-emerald-50',
+                                !cashDialogVisible && 'blur-sm select-none'
+                              )}
+                            >
+                              KES {totalPaidOut.toLocaleString()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-emerald-100">Cash received</p>
+                            <p
+                              className={cn(
+                                'font-semibold tabular-nums text-emerald-50',
+                                !cashDialogVisible && 'blur-sm select-none'
+                              )}
+                            >
+                              KES {cashReceived.toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Edit cash area */}
+                      <div className="pt-3 border-t border-emerald-500/70 space-y-3 mt-2 text-left">
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-emerald-100">Current cash received</p>
+                          <p
+                            className={cn(
+                              'text-sm font-semibold text-emerald-50 tabular-nums',
+                              !cashDialogVisible && 'blur-sm select-none'
+                            )}
+                          >
+                            KES {cashReceived.toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-emerald-100">Set cash received (KES)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={cashAmount}
+                            onChange={(e) => setCashAmount(e.target.value)}
+                            className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300"
+                            placeholder="e.g. 150000"
+                          />
+                          <Label className="mt-2 text-xs text-emerald-100">Source</Label>
+                          <UiSelect
+                            value={cashSource}
+                            onValueChange={(val) => setCashSource(val as 'bank' | 'broker' | 'custom')}
+                          >
+                            <SelectTrigger className="w-full min-h-9 rounded-xl border border-emerald-400/80 bg-emerald-900/60 px-3 py-1.5 text-xs text-emerald-50">
+                              <SelectValue placeholder="Select source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="bank">Bank</SelectItem>
+                              <SelectItem value="broker">Broker</SelectItem>
+                              <SelectItem value="custom">Custom…</SelectItem>
+                            </SelectContent>
+                          </UiSelect>
+                          {cashSource === 'custom' && (
+                            <Input
+                              value={cashSourceCustom}
+                              onChange={(e) => setCashSourceCustom(e.target.value)}
+                              className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300 mt-2"
+                              placeholder="Enter custom source (e.g. Mpesa float)"
+                            />
+                          )}
+                          <Button
+                            size="sm"
+                            className="mt-3 rounded-full bg-amber-100 text-emerald-900 border border-emerald-500 hover:bg-amber-200 hover:text-emerald-950 font-semibold shadow-sm"
+                            onClick={() => {
+                              setCashDialogCollection(fb as any);
+                              handleSaveCash();
+                            }}
+                          >
+                            Add / Update Cash
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
+          </div>
         )}
       </div>
 
@@ -563,6 +902,8 @@ export default function HarvestCollectionsPage() {
                 const displayName = c.name?.trim() || formatDate(c.harvestDate);
                 const totalPay = (c.totalPickerCost ?? 0);
                 const totalWeight = (c.totalHarvestKg ?? 0);
+                const isFrenchBeans = String(c.cropType).toLowerCase() === 'french-beans';
+                const pool = cashPoolByCollection[c.id];
                 const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
                 return (
                   <Card
@@ -598,6 +939,7 @@ export default function HarvestCollectionsPage() {
                           KES {totalPay.toLocaleString()}
                         </div>
                         <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                        {/* No per-card wallet button – wallet is controlled from header and inside collection view */}
                       </div>
                     </CardContent>
                   </Card>
@@ -652,6 +994,70 @@ export default function HarvestCollectionsPage() {
               {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
           </div>
+
+          {isFrenchBeansCollection && selectedCollection && (
+            <div className="mt-3 flex justify-end">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                    onClick={() => {
+                      setCashDialogCollection(selectedCollection as any);
+                      setCashAmount(cashPoolForCollection?.cashReceived?.toString() ?? '');
+                      setCashSource((cashPoolForCollection?.source as 'bank' | 'broker') ?? 'bank');
+                      setCashDialogVisible(false);
+                    }}
+                  >
+                    <Banknote className="h-3 w-3" />
+                    <span>Wallet</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-80 md:w-[420px] text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50"
+                  align="center"
+                  side="bottom"
+                >
+                  <div className="space-y-4 text-center py-3">
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <p className="text-[11px] text-emerald-100">Balance remaining</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <p
+                            className={cn(
+                              'text-xl font-extrabold tabular-nums text-emerald-50',
+                              !cashDialogVisible && 'blur-sm select-none'
+                            )}
+                          >
+                            KES {(cashPoolForCollection?.remainingBalance ?? 0).toLocaleString()}
+                          </p>
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
+                            onClick={() => setCashDialogVisible((v) => !v)}
+                          >
+                            {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-center justify-center gap-1 mt-1">
+                        <p className="text-[11px] text-emerald-100/90">Paid out</p>
+                        <p
+                          className={cn(
+                            'font-semibold text-emerald-50 tabular-nums',
+                            !cashDialogVisible && 'blur-sm select-none'
+                          )}
+                        >
+                          KES {(cashPoolForCollection?.totalPaidOut ?? 0).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
 
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
             <div className="flex flex-nowrap gap-1.5 sm:gap-2 overflow-x-auto pb-1 min-w-0">
@@ -857,48 +1263,104 @@ export default function HarvestCollectionsPage() {
                         </div>
                       </div>
                     )}
-                    {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
-                      <div key={label} className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-3">
-                        <p className="text-sm font-semibold text-foreground mb-2">{label}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {pickers.map((p) => {
+
+                    {/* Individuals section */}
+                    {payUnpaidAndGroups.individuals.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Individuals</p>
+                        <div className="flex flex-wrap gap-3">
+                          {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
+                            const p = pickers[0];
                             const tripCount = tripCountForPicker[p.id] ?? 0;
                             return (
                               <Card
                                 key={p.id}
-                                className="relative w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden shrink-0 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                                className="relative flex items-center gap-2 px-2 py-2 min-h-[72px] bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 flex-1 min-w-[230px] max-w-sm"
                               >
-                              <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
                                 <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
                                   {tripCount}
                                 </div>
-                                <div className="flex justify-center flex-shrink-0 pt-1">
-                                  <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
+                                <div className="flex items-center gap-2 flex-1">
+                                  <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
                                     {p.pickerNumber}
                                   </div>
-                                </div>
-                                <div className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-1">
-                                  {p.pickerName}
-                                </div>
-                                <div className="border-t border-border pt-1.5 mt-1 space-y-0.5">
-                                  <div className="text-lg font-bold text-foreground tabular-nums leading-none">
-                                    KES {(p.totalPay ?? 0).toLocaleString()}
+                                  <div className="flex flex-col flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <p className="font-semibold text-xs text-foreground truncate">{p.pickerName}</p>
+                                      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                                      <span className="text-[11px] font-bold tabular-nums text-foreground">
+                                        KES {(p.totalPay ?? 0).toLocaleString()}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                                        {(p.totalKg ?? 0).toFixed(1)} kg
+                                      </span>
+                                    </div>
+                                    <div className="inline-flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 font-medium mt-0.5">
+                                      <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                      <span>PAID</span>
+                                    </div>
                                   </div>
-                                  <div className="text-[10px] text-muted-foreground tabular-nums">
-                                    {(p.totalKg ?? 0).toFixed(1)} kg
-                                  </div>
                                 </div>
-                                <div className="inline-flex items-center justify-center gap-0.5 text-green-700 dark:text-green-400 font-medium text-[10px] pt-1">
-                                  <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                  PAID
-                                </div>
-                              </CardContent>
-                            </Card>
-                          );
-                        })}
+                              </Card>
+                            );
+                          })}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Group section */}
+                    {payUnpaidAndGroups.groups.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Groups</p>
+                        <div className="flex flex-wrap gap-3">
+                          {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
+                            <div
+                              key={label}
+                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-3 flex-1 min-w-[260px] max-w-md"
+                            >
+                              <p className="text-sm font-semibold text-foreground mb-2 text-center">{label}</p>
+                              <div className="flex flex-col gap-2">
+                                {pickers.map((p) => {
+                                  const tripCount = tripCountForPicker[p.id] ?? 0;
+                                  return (
+                                    <Card
+                                      key={p.id}
+                                      className="relative flex items-center gap-2 px-2 py-2 min-h-[72px] bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                                    >
+                                      <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                        {tripCount}
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-1">
+                                        <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
+                                          {p.pickerNumber}
+                                        </div>
+                                        <div className="flex flex-col flex-1 min-w-0">
+                                          <p className="font-semibold text-xs text-foreground truncate">{p.pickerName}</p>
+                                          <div className="flex items-center justify-between gap-2 mt-0.5">
+                                            <span className="text-[11px] font-bold tabular-nums text-foreground">
+                                              KES {(p.totalPay ?? 0).toLocaleString()}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                                              {(p.totalKg ?? 0).toFixed(1)} kg
+                                            </span>
+                                          </div>
+                                          <div className="inline-flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 font-medium mt-0.5">
+                                            <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                            <span>PAID</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1011,6 +1473,8 @@ export default function HarvestCollectionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Harvest cash wallet now uses popovers attached to Wallet buttons (no full-screen modal). */}
 
       {/* Add picker dialog */}
       <Dialog open={addPickerOpen} onOpenChange={setAddPickerOpen}>

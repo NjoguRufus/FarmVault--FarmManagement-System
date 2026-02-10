@@ -19,6 +19,7 @@ const COLLECTIONS = 'harvestCollections';
 const PICKERS = 'harvestPickers';
 const WEIGH_ENTRIES = 'pickerWeighEntries';
 const PAYMENT_BATCHES = 'harvestPaymentBatches';
+const CASH_POOLS = 'harvestCashPools';
 
 /** Create a new day collection session */
 export async function createHarvestCollection(params: {
@@ -198,6 +199,45 @@ export async function setBuyerPriceAndMaybeClose(params: {
   };
   if (params.markBuyerPaid) {
     update.buyerPaidAt = serverTimestamp();
+
+    // For French beans, when buyer is marked as paid, automatically create a harvest + sale
+    // record so that the Harvest Sales page reflects the revenue in Harvest Records and totals.
+    const isFrenchBeans = (col?.cropType as string | undefined)?.toLowerCase() === 'french-beans';
+    const alreadySavedToHarvests = !!col?.buyerPaidAt;
+    if (isFrenchBeans && !alreadySavedToHarvests && totalHarvestKg > 0 && totalRevenue > 0) {
+      // Create aggregate harvest document
+      const harvestRef = await addDoc(collection(db, 'harvests'), {
+        quantity: totalHarvestKg,
+        unit: 'kg',
+        quality: 'A',
+        projectId: col?.projectId,
+        companyId: col?.companyId,
+        cropType: col?.cropType,
+        destination: 'market',
+        date: col?.harvestDate ?? serverTimestamp(),
+        createdAt: serverTimestamp(),
+        notes: col?.name ? `From picker collection: ${col.name}` : 'From picker collection',
+        farmPricingMode: 'total',
+        farmPriceUnitType: 'kg',
+        farmTotalPrice: totalRevenue,
+      });
+
+      // Create matching sale document so total revenue is included in Harvest Sales totals
+      await addDoc(collection(db, 'sales'), {
+        harvestId: harvestRef.id,
+        buyerName: 'Buyer (collections)',
+        quantity: totalHarvestKg,
+        unit: 'kg',
+        unitPrice: params.pricePerKgBuyer,
+        totalAmount: totalRevenue,
+        status: 'completed',
+        projectId: col?.projectId,
+        companyId: col?.companyId,
+        cropType: col?.cropType,
+        date: col?.harvestDate ?? serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+    }
   }
   await updateDoc(colRef, update);
 }
@@ -212,4 +252,67 @@ export async function refreshCollectionStatus(collectionId: string): Promise<Har
   const status: HarvestCollectionStatus = allPaid ? 'payout_complete' : 'collecting';
   await updateDoc(colRef, { status });
   return status;
+}
+
+/** Register or update cash pool for a harvest collection (French beans wallet). */
+export async function registerHarvestCash(params: {
+  collectionId: string;
+  projectId: string;
+  companyId: string;
+  cropType: string;
+  cashReceived: number;
+  source: string;
+  receivedBy: string;
+}): Promise<void> {
+  const snap = await getDocs(
+    query(collection(db, CASH_POOLS), where('collectionId', '==', params.collectionId))
+  );
+  if (snap.empty) {
+    await addDoc(collection(db, CASH_POOLS), {
+      collectionId: params.collectionId,
+      projectId: params.projectId,
+      cropType: params.cropType,
+      companyId: params.companyId,
+      cashReceived: params.cashReceived,
+      totalPaidOut: 0,
+      remainingBalance: params.cashReceived,
+      source: params.source,
+      receivedAt: serverTimestamp(),
+      receivedBy: params.receivedBy,
+    });
+    return;
+  }
+
+  const docSnap = snap.docs[0];
+  const data = docSnap.data() as any;
+  const totalPaidOut = Number(data.totalPaidOut ?? 0);
+  await updateDoc(docSnap.ref, {
+    cashReceived: params.cashReceived,
+    remainingBalance: params.cashReceived - totalPaidOut,
+    source: params.source,
+    receivedAt: serverTimestamp(),
+    receivedBy: params.receivedBy,
+  });
+}
+
+/** Apply a picker payout from the harvest cash wallet; validates remaining balance. */
+export async function applyHarvestCashPayment(collectionId: string, amount: number): Promise<void> {
+  if (amount <= 0) return;
+  const snap = await getDocs(
+    query(collection(db, CASH_POOLS), where('collectionId', '==', collectionId))
+  );
+  if (snap.empty) {
+    throw new Error('No harvest cash recorded for this collection. Register cash first.');
+  }
+  const docSnap = snap.docs[0];
+  const data = docSnap.data() as any;
+  const remaining = Number(data.remainingBalance ?? 0);
+  const totalPaidOut = Number(data.totalPaidOut ?? 0);
+  if (remaining < amount) {
+    throw new Error('Not enough cash in Harvest Cash Wallet to pay this picker.');
+  }
+  await updateDoc(docSnap.ref, {
+    remainingBalance: remaining - amount,
+    totalPaidOut: totalPaidOut + amount,
+  });
 }
