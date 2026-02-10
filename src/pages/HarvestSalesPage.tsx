@@ -476,11 +476,11 @@ export default function HarvestSalesPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {showHarvestCollections && (
             <Button
               variant="default"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3 text-sm sm:h-10 sm:px-4"
               onClick={() => navigate(`/harvest-collections/${activeProject.id}`)}
             >
               Harvest Collections
@@ -488,8 +488,8 @@ export default function HarvestSalesPage() {
           )}
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--secondary">
-                <Plus className="h-4 w-4" />
+              <button className="fv-btn fv-btn--secondary h-9 px-3 text-sm sm:h-10 sm:px-4">
+                <Plus className="h-4 w-4 mr-1.5" />
                 Record Harvest
               </button>
             </DialogTrigger>
@@ -1442,8 +1442,8 @@ export default function HarvestSalesPage() {
       </div>
 
       {/* Harvests Section */}
-      <div className="fv-card">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
           <h3 className="text-lg font-semibold">Harvest Records</h3>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex rounded-lg border border-border overflow-hidden">
@@ -1502,7 +1502,7 @@ export default function HarvestSalesPage() {
         )}
 
         {harvests.length > 0 && !loadingHarvests && harvestViewMode === 'list' && (
-          <div className="overflow-x-auto">
+          <div className="fv-card overflow-x-auto">
             <table className="fv-table">
               <thead>
                 <tr>

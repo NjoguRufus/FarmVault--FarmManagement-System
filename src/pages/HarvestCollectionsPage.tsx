@@ -216,6 +216,16 @@ export default function HarvestCollectionsPage() {
     return map;
   }, [pickersForCollection, weighEntriesForCollection]);
 
+  // Precompute trip counts per picker so card rendering is cheap and fast when typing
+  const tripCountForPicker = useMemo(() => {
+    const counts: Record<string, number> = {};
+    weighEntriesForCollection.forEach((e) => {
+      const id = e.pickerId;
+      counts[id] = (counts[id] ?? 0) + 1;
+    });
+    return counts;
+  }, [weighEntriesForCollection]);
+
   const totalsFromPickers = useMemo(() => {
     let totalKg = 0;
     let totalPay = 0;
@@ -487,7 +497,7 @@ export default function HarvestCollectionsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 space-y-3 sm:space-y-4 w-full min-w-0">
+    <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0">
       {/* Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0">
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
@@ -687,7 +697,7 @@ export default function HarvestCollectionsPage() {
             </div>
 
             <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
-              <div className="flex flex-nowrap gap-2">
+              <div className="flex flex-wrap gap-2 items-stretch">
                 <Button
                   size="sm"
                   className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs"
@@ -699,36 +709,35 @@ export default function HarvestCollectionsPage() {
                   <Plus className="h-3.5 w-3.5 mr-1.5" />
                   Add picker
                 </Button>
-                <Button size="sm" variant="ghost" className="min-h-9 rounded-lg text-xs" onClick={syncTotals}>
-                  Sync totals
-                </Button>
-              </div>
-              {pickersForCollection.length === 0 ? (
-                <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
-              ) : (
-                <>
-                  <div className="relative max-w-xs">
+                {pickersForCollection.length > 0 && (
+                  <div className="relative max-w-xs flex-1 min-w-[180px]">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                     <Input
                       placeholder="Search name or number..."
                       value={pickerSearch}
                       onChange={(e) => setPickerSearch(e.target.value)}
-                      className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20"
+                      className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20 w-full"
                     />
                   </div>
+                )}
+              </div>
+              {pickersForCollection.length === 0 ? (
+                <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
+              ) : (
+                <>
                   <div className="flex flex-wrap gap-2">
                     {filteredPickers.length === 0 ? (
                       <p className="w-full text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
                     ) : (
                       filteredPickers.map((p) => {
-                        const entries = weighEntriesForCollection.filter((e) => e.pickerId === p.id);
+                        const tripCount = tripCountForPicker[p.id] ?? 0;
                         const nextTrip = nextTripForPicker[p.id] ?? 1;
                         const isPaid = p.isPaid;
                         return (
                           <Card
                             key={p.id}
                             className={cn(
-                              'relative transition-all w-[140px] min-h-[120px] flex flex-col overflow-hidden shrink-0',
+                              'relative transition-all w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden shrink-0',
                               isPaid
                                 ? 'opacity-75 cursor-not-allowed bg-muted/50'
                                 : 'cursor-pointer hover:bg-muted/50 active:scale-[0.98]'
@@ -742,18 +751,18 @@ export default function HarvestCollectionsPage() {
                             }}
                           >
                             <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                              <div className="absolute top-1 right-1 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                {p.pickerNumber}
+                              <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                {tripCount}
                               </div>
                               <div className="flex justify-center flex-shrink-0 pt-1">
                                 <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
                                   {p.pickerNumber}
                                 </div>
                               </div>
-                              <div className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-1">
+                              <div className="font-semibold text-foreground text-xs sm:text-sm leading-tight line-clamp-2 mt-1">
                                 {p.pickerName}
                               </div>
-                              <div className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+                              <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
                                 {(p.totalKg ?? 0).toFixed(1)} kg · KES {(p.totalPay ?? 0).toLocaleString()}
                               </div>
                               <div className={cn(
@@ -808,18 +817,19 @@ export default function HarvestCollectionsPage() {
                         <div className="flex flex-wrap gap-2">
                           {payUnpaidAndGroups.unpaid.map((p) => {
                             const selected = paySelectedIds.has(p.id);
+                            const tripCount = tripCountForPicker[p.id] ?? 0;
                             return (
                               <Card
                                 key={p.id}
                                 className={cn(
-                                  'relative w-[140px] min-h-[120px] flex flex-col overflow-hidden transition-all active:scale-[0.98] shrink-0 cursor-pointer hover:bg-muted/50 bg-card',
+                                  'relative w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden transition-all active:scale-[0.98] shrink-0 cursor-pointer hover:bg-muted/50 bg-card',
                                   selected && 'ring-2 ring-primary ring-offset-2'
                                 )}
                                 onClick={() => togglePaySelection(p.id)}
                               >
                                 <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                                  <div className="absolute top-1 right-1 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                    {p.pickerNumber}
+                                  <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                    {tripCount}
                                   </div>
                                   <div className="flex justify-center flex-shrink-0 pt-1">
                                     <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
@@ -851,14 +861,16 @@ export default function HarvestCollectionsPage() {
                       <div key={label} className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-3">
                         <p className="text-sm font-semibold text-foreground mb-2">{label}</p>
                         <div className="flex flex-wrap gap-2">
-                          {pickers.map((p) => (
-                            <Card
-                              key={p.id}
-                              className="relative w-[140px] min-h-[120px] flex flex-col overflow-hidden shrink-0 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
-                            >
+                          {pickers.map((p) => {
+                            const tripCount = tripCountForPicker[p.id] ?? 0;
+                            return (
+                              <Card
+                                key={p.id}
+                                className="relative w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden shrink-0 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                              >
                               <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                                <div className="absolute top-1 right-1 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                  {p.pickerNumber}
+                                <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                  {tripCount}
                                 </div>
                                 <div className="flex justify-center flex-shrink-0 pt-1">
                                   <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
@@ -882,7 +894,8 @@ export default function HarvestCollectionsPage() {
                                 </div>
                               </CardContent>
                             </Card>
-                          ))}
+                          );
+                        })}
                         </div>
                       </div>
                     ))}
@@ -954,7 +967,7 @@ export default function HarvestCollectionsPage() {
 
       {/* New collection dialog */}
       <Dialog open={newCollectionOpen} onOpenChange={setNewCollectionOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New collection</DialogTitle>
             <DialogDescription>Name the collection, set date and rate. Totals auto-calculate from weights.</DialogDescription>
@@ -1001,7 +1014,7 @@ export default function HarvestCollectionsPage() {
 
       {/* Add picker dialog */}
       <Dialog open={addPickerOpen} onOpenChange={setAddPickerOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add picker</DialogTitle>
             <DialogDescription>Number auto-fills (next in sequence). One number per picker in this collection.</DialogDescription>
@@ -1045,7 +1058,7 @@ export default function HarvestCollectionsPage() {
           if (!open) setWeighOpenedFromCard(false);
         }}
       >
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add weight</DialogTitle>
             <DialogDescription>

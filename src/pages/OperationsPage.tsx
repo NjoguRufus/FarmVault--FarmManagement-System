@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package } from 'lucide-react';
+import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package, Info } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -1182,11 +1182,31 @@ export default function OperationsPage() {
       {/* Work Cards (in progress only: planned, submitted, rejected) */}
       {workCardsInProgress.length > 0 && (
         <div className="space-y-3">
-          <h2 className="font-heading font-semibold text-foreground text-lg">Work cards</h2>
-          <p className="text-sm text-muted-foreground">
-            Cards awaiting action. Compare <span className="font-medium text-foreground">Planned vs Actual</span> and
-            {' '}<span className="font-medium text-foreground">Approve / Reject</span>. Approved and paid cards appear in the Work logs section below.
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="font-heading font-semibold text-foreground text-lg">Work cards</h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-full h-5 w-5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  aria-label="Work cards info"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 text-sm bg-popover/90 backdrop-blur-sm border-border/70" align="start" side="bottom">
+                <div className="space-y-2 text-foreground">
+                  <p>
+                    Cards awaiting action. Compare <span className="font-medium text-foreground">Planned vs Actual</span> and
+                    <span className="font-medium text-foreground"> Approve / Reject</span>.
+                  </p>
+                  <p>
+                    Approved and paid cards appear in the Work logs section below.
+                  </p>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {workCardsInProgress.map((card) => {
               const isManagerCreated = (card as any).createdByManagerId;
@@ -1309,11 +1329,26 @@ export default function OperationsPage() {
       {/* Work Logs & completed work cards (approved/paid) */}
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
+          <div className="flex items-center gap-2">
             <h2 className="font-heading font-semibold text-foreground text-lg">Work logs & completed cards</h2>
-            <p className="text-sm text-muted-foreground">
-              Work logs and paid work cards. Click to view details or mark as paid.
-            </p>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-full h-5 w-5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  aria-label="Work logs info"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 text-sm bg-popover/90 backdrop-blur-sm border-border/70" align="start" side="bottom">
+                <div className="space-y-2 text-foreground">
+                  <p>
+                    Work logs and paid work cards. Click to view details or mark as paid.
+                  </p>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="flex gap-2">
             <Button

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Search, CheckCircle, Clock, CalendarDays, Eye, Filter, Download, Banknote, List, Grid, Plus } from 'lucide-react';
+import { Search, CheckCircle, Clock, CalendarDays, Eye, Filter, Download, Banknote, List, Grid, Plus, Info } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn, parseQuantityOrFraction } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
@@ -1118,12 +1119,30 @@ export default function ManagerOperationsPage() {
       {/* Work Cards (Admin or manager created; manager only submits execution for admin cards) */}
       {user && (user.companyId || managerIdsArray.length > 0) && (
         <div className="space-y-3">
-          <div>
-            <h2 className="font-semibold text-foreground mb-1">My Work Cards</h2>
-            <p className="text-sm text-muted-foreground">
-              Work cards assigned to you by Admin, plus cards you log yourself via <strong>Log Daily Work</strong>. Use <strong>Record Work</strong> to submit execution data.
-              Approved and paid cards will appear in your Work Logs &amp; Filters section once marked as paid.
-            </p>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-foreground">My Work Cards</h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-full h-5 w-5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  aria-label="My Work Cards info"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 text-sm bg-popover/90 backdrop-blur-sm border-border/70" align="start" side="bottom">
+                <div className="space-y-2 text-foreground">
+                  <p>
+                    Work cards assigned to you by Admin, plus cards you log yourself via <strong>Log Daily Work</strong>.
+                  </p>
+                  <p>
+                    Use <strong>Record Work</strong> to submit execution data. Approved and paid cards will appear in your
+                    <strong> Work Logs &amp; Filters</strong> section once marked as paid.
+                  </p>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
           {workCardsInProgress.length === 0 ? (
             <div className="fv-card p-6 text-center text-muted-foreground">
