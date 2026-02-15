@@ -50,13 +50,36 @@ service cloud.firestore {
       );
     }
 
-    // --- Users ---
+    // Read allowed if: doc's companyId matches user's company, OR doc has no companyId (legacy/backfill),
+    // OR user is developer. Remove the "doc has no companyId" branch after backfilling companyId on all docs.
+    function docHasNoCompanyId() {
+      return resource.data.get('companyId', null) == null;
+    }
+    function canReadCompanyDoc() {
+      return isSignedIn() && (
+        resource.data.get('companyId', null) == userCompanyId()
+        || docHasNoCompanyId()
+        || isDeveloper()
+      );
+    }
 
+    // --- Users ---
+    // Read/write own profile; company-admin or developer can read/write users in their company (or users with no companyId, e.g. pending).
     match /users/{userId} {
-      // For now, allow any signed-in user to read/write user documents.
-      // This keeps the app functional while we iterate on role-based security.
-      // Tighten these rules later using custom auth claims if needed.
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId
+        || (isCompanyAdmin() && (resource.data.get('companyId', null) == userCompanyId() || resource.data.get('companyId', null) == null))
+        || isDeveloper()
+      );
+      allow create: if isSignedIn() && (
+        request.auth.uid == userId
+        || ((isCompanyAdmin() || isDeveloper()) && (request.resource.data.get('companyId', null) == userCompanyId() || request.resource.data.get('companyId', null) == null))
+      );
+      allow update, delete: if isSignedIn() && (
+        request.auth.uid == userId
+        || (isCompanyAdmin() && (resource.data.get('companyId', null) == userCompanyId() || resource.data.get('companyId', null) == null))
+        || isDeveloper()
+      );
     }
 
     // --- Companies ---
@@ -70,7 +93,7 @@ service cloud.firestore {
     // --- Projects ---
 
     match /projects/{projectId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -78,7 +101,7 @@ service cloud.firestore {
     // --- Project Stages ---
 
     match /projectStages/{stageId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -86,14 +109,14 @@ service cloud.firestore {
     // --- Work Logs ---
 
     match /workLogs/{workLogId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
     // --- Operations Work Cards (Admin creates; Manager submits execution only) ---
     match /operationsWorkCards/{cardId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow read: if canReadCompanyDoc();
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
     }
@@ -101,7 +124,7 @@ service cloud.firestore {
     // --- Expenses ---
 
     match /expenses/{expenseId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -109,7 +132,7 @@ service cloud.firestore {
     // --- Season Challenges ---
 
     match /seasonChallenges/{challengeId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -117,7 +140,7 @@ service cloud.firestore {
     // --- Inventory Usage ---
 
     match /inventoryUsage/{usageId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -125,7 +148,7 @@ service cloud.firestore {
     // --- Inventory Items ---
 
     match /inventoryItems/{itemId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -133,7 +156,7 @@ service cloud.firestore {
     // --- Inventory Categories ---
 
     match /inventoryCategories/{categoryId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -141,7 +164,7 @@ service cloud.firestore {
     // --- Inventory Purchases ---
 
     match /inventoryPurchases/{purchaseId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -149,7 +172,7 @@ service cloud.firestore {
     // --- Harvests ---
 
     match /harvests/{harvestId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -157,25 +180,25 @@ service cloud.firestore {
     // --- Harvest Collections (field cash: pickers + weigh + buyer) ---
 
     match /harvestCollections/{collectionId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
     match /harvestPickers/{pickerId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
     match /pickerWeighEntries/{entryId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
     match /harvestPaymentBatches/{batchId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
       allow update, delete: if false;
     }
@@ -183,14 +206,14 @@ service cloud.firestore {
     // --- Sales ---
 
     match /sales/{saleId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
     // --- Harvest Cash Pools (French beans harvest wallet) ---
     match /harvestCashPools/{poolId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -199,7 +222,7 @@ service cloud.firestore {
     // NOTE: Writes are intended to be done ONLY from backend (Cloud Functions / Admin SDK).
     // Client apps should treat these documents as read-only.
     match /harvestWallets/{walletId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow write: if false;
     }
 
@@ -207,14 +230,14 @@ service cloud.firestore {
     // Tracks how much each harvest collection has deducted from its master wallet.
     // Updated only from backend code so we block all client writes here.
     match /collectionCashUsage/{usageId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow write: if false;
     }
 
     // --- Suppliers ---
 
     match /suppliers/{supplierId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -222,7 +245,7 @@ service cloud.firestore {
     // --- Employees ---
     // Create: company-admin or manager (same company only), or developer. Requester's user doc must have companyId for company match.
     match /employees/{employeeId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (
         (isCompanyAdmin() && request.resource.data.get('companyId', null) == userCompanyId())
@@ -234,7 +257,7 @@ service cloud.firestore {
     // --- Deliveries ---
 
     match /deliveries/{deliveryId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -242,7 +265,7 @@ service cloud.firestore {
     // --- Needed Items ---
 
     match /neededItems/{itemId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -250,7 +273,7 @@ service cloud.firestore {
     // --- Feedback ---
 
     match /feedback/{feedbackId} {
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
@@ -281,7 +304,7 @@ service cloud.firestore {
     // --- Inventory audit logs: who did what (restock/deduct/delete/add); company users create and read their own ---
     match /inventoryAuditLogs/{logId} {
       allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow read: if isSignedIn();
+      allow read: if canReadCompanyDoc();
       allow update, delete: if false;
     }
 

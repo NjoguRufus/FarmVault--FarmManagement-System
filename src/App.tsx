@@ -56,6 +56,7 @@ import AdminFinancesPage from "@/pages/admin/AdminFinancesPage";
 import AdminExpensesPage from "@/pages/admin/AdminExpensesPage";
 import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const queryClient = new QueryClient();
 
@@ -121,6 +122,7 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          <ErrorBoundary>
           <BrowserRouter>
             <Routes>
               {/* Public routes */}
@@ -220,6 +222,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
+          </ErrorBoundary>
         </TooltipProvider>
         </NotificationProvider>
       </ProjectProvider>
