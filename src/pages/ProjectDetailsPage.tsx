@@ -314,70 +314,59 @@ export default function ProjectDetailsPage() {
           Back to Projects
         </button>
 
-        {/* Project summary strip */}
-        <div className="fv-card flex flex-col gap-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-foreground">{project.name}</h1>
-                <span className="fv-badge capitalize">
-                  {project.cropType.replace('-', ' ')}
-                </span>
-                <span className="fv-badge capitalize">
-                  {project.status}
-                </span>
+        {/* Project summary card */}
+        <div className="fv-card overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 pb-4 border-b border-border/60">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{project.name}</h1>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="fv-badge capitalize text-xs">{project.cropType.replace('-', ' ')}</span>
+                <span className="fv-badge capitalize text-xs">{project.status}</span>
               </div>
-              <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mt-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-muted-foreground mt-3">
                 {project.plantingDate && (
                   <span className="flex items-center gap-1">
-                    <CalendarIcon className="h-4 w-4" />
-                    Planted{' '}
-                    {formatDate(project.plantingDate)}
+                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
+                    Planted {formatDate(project.plantingDate)}
                   </span>
                 )}
                 {expectedHarvestDate && (
                   <span className="flex items-center gap-1">
-                    <CalendarIcon className="h-4 w-4" />
-                    Expected harvest{' '}
-                    {formatDate(expectedHarvestDate)}
+                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
+                    Expected harvest {formatDate(expectedHarvestDate)}
                   </span>
                 )}
               </div>
             </div>
             {project.status === 'active' && (
-              <div className="flex items-center gap-2">
-                <button
-                  className="fv-btn fv-btn--primary"
-                  onClick={() => navigate(`/projects/${project.id}/planning`)}
-                >
-                  {project.planning ? 'Plan changes' : 'Plan season'}
-                </button>
-              </div>
+              <button
+                className="fv-btn fv-btn--primary shrink-0 w-full sm:w-auto"
+                onClick={() => navigate(`/projects/${project.id}/planning`)}
+              >
+                {project.planning ? 'Plan changes' : 'Plan season'}
+              </button>
             )}
           </div>
 
-          {/* Metrics cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
-            <SimpleStatCard
-              title="Days since planting"
-              value={typeof daysSincePlanting === 'number' ? Math.floor(daysSincePlanting) : '—'}
-              layout="vertical"
-            />
-            <SimpleStatCard
-              title="Current stage"
-              value={currentStage?.stageName ?? 'Not started'}
-              layout="vertical"
-            />
-            <SimpleStatCard
-              title="Stage progress"
-              value={`${stageProgressPercent}%`}
-              layout="vertical"
-            />
-            <SimpleStatCard
-              title="Total expenses"
-              value={formatCurrency(totalExpenses)}
-              layout="vertical"
-            />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Days since planting</p>
+              <p className="text-lg font-semibold text-foreground tabular-nums">
+                {typeof daysSincePlanting === 'number' ? Math.floor(daysSincePlanting) : '—'}
+              </p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Current stage</p>
+              <p className="text-sm font-semibold text-foreground leading-tight">{currentStage?.stageName ?? 'Not started'}</p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage progress</p>
+              <p className="text-lg font-semibold text-foreground tabular-nums">{stageProgressPercent}%</p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total expenses</p>
+              <p className="text-sm font-semibold text-foreground tabular-nums">{formatCurrency(totalExpenses)}</p>
+            </div>
           </div>
         </div>
       </div>

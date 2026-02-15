@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft } from 'lucide-react';
+import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -323,13 +324,26 @@ export default function ProjectPlanningPage() {
         </button>
 
         <div className="fv-card flex items-start gap-3 bg-amber-50/80 dark:bg-amber-900/20">
-          <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
-          <div>
+          <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+          <div className="flex items-start gap-2 min-w-0">
             <h2 className="text-sm font-semibold text-foreground">Planning mode</h2>
-            <p className="text-xs text-muted-foreground">
-              Changes here affect project timelines and reports. All edits are logged as immutable
-              change-of-plan events.
-            </p>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-amber-200/50 dark:hover:bg-amber-800/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                  aria-label="More information"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="max-w-sm text-sm" align="start">
+                <p className="text-muted-foreground">
+                  Changes here affect project timelines and reports. All edits are logged as immutable
+                  change-of-plan events.
+                </p>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       </div>
@@ -433,11 +447,26 @@ export default function ProjectPlanningPage() {
 
           {/* 2️⃣ Seed / Variety Planning */}
           <div className="fv-card space-y-4">
-            <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
-            <p className="text-sm text-muted-foreground">
-              Capture the exact seed, variety, supplier, and batch. This enables yield analysis and
-              traceability across seasons.
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    aria-label="More information"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="max-w-sm text-sm" align="start">
+                  <p className="text-muted-foreground">
+                    Capture the exact seed, variety, supplier, and batch. This enables yield analysis and
+                    traceability across seasons.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </div>
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -542,11 +571,26 @@ export default function ProjectPlanningPage() {
 
           {/* 3️⃣ Pre-season / planned challenges */}
           <div className="fv-card space-y-4">
-            <h2 className="text-lg font-semibold">Pre-season / Planned Challenges</h2>
-            <p className="text-sm text-muted-foreground">
-              Record anticipated risks such as pest pressure, late rains, or labour constraints. These
-              are separate from actual season challenges and help compare plan vs reality.
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Pre-season / Planned Challenges</h2>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    aria-label="More information"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="max-w-sm text-sm" align="start">
+                  <p className="text-muted-foreground">
+                    Record anticipated risks such as pest pressure, late rains, or labour constraints. These
+                    are separate from actual season challenges and help compare plan vs reality.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </div>
             <div className="flex flex-col md:flex-row gap-2">
               <input
                 className="fv-input flex-1"

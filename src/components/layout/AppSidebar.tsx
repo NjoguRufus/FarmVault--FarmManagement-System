@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { cn, getDisplayRole } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const companyNavItems = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -64,6 +65,7 @@ interface AppSidebarProps {
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const location = useLocation();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
 
   const employeeRole = (user as any)?.employeeRole as string | undefined;
 
@@ -167,6 +169,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
               <li key={item.href}>
                 <Link
                   to={item.href.replace(/\/+/g, '/')}
+                  onClick={() => isMobile && onToggle()}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                     isActive
