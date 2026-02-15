@@ -127,9 +127,14 @@ export default function ExpensesPage() {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('labour');
+  const [customCategory, setCustomCategory] = useState('');
   const [saving, setSaving] = useState(false);
   const [labourExpensesOpen, setLabourExpensesOpen] = useState(false);
+  const [brokerExpensesOpen, setBrokerExpensesOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+
+  const isTomatoesProject = activeProject?.cropType === 'tomatoes';
+  const showBrokerExpensesButton = !isBroker && isTomatoesProject;
 
   // Get unpaid work logs for the active project
   const unpaidWorkLogs = useMemo(() => {
@@ -173,10 +178,14 @@ export default function ExpensesPage() {
     if (!activeProject) return;
     setSaving(true);
     try {
+      const categoryToSave =
+        category === 'other' && customCategory.trim()
+          ? customCategory.trim()
+          : category;
       await addDoc(collection(db, 'expenses'), {
         description,
         amount: Number(amount || '0'),
-        category,
+        category: categoryToSave,
         projectId: activeProject.id,
         companyId: activeProject.companyId,
         cropType: activeProject.cropType,
@@ -187,15 +196,16 @@ export default function ExpensesPage() {
         paid: false,
         createdAt: serverTimestamp(),
       });
-      
+
       // Invalidate queries to refresh data immediately
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
-      
+
       setAddOpen(false);
       setDescription('');
       setAmount('');
       setCategory('labour');
+      setCustomCategory('');
     } finally {
       setSaving(false);
     }
@@ -266,14 +276,15 @@ export default function ExpensesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!isBroker && (
-            <a
-              href="#broker-expenses"
+          {showBrokerExpensesButton && (
+            <button
+              type="button"
               className="fv-btn fv-btn--secondary flex items-center gap-2"
+              onClick={() => setBrokerExpensesOpen(true)}
             >
               <Receipt className="h-4 w-4" />
               Broker expenses
-            </a>
+            </button>
           )}
           {unpaidWorkLogs.length > 0 && (
             <>
@@ -355,7 +366,13 @@ export default function ExpensesPage() {
             <Download className="h-4 w-4" />
             Export
           </button>
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <Dialog
+            open={addOpen}
+            onOpenChange={(open) => {
+              setAddOpen(open);
+              if (!open) setCustomCategory('');
+            }}
+          >
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--primary">
                 <Plus className="h-4 w-4" />
@@ -407,6 +424,20 @@ export default function ExpensesPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {category === 'other' && (
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Custom category</label>
+                      <input
+                        className="fv-input"
+                        placeholder="e.g. Seeds, Equipment, Transport"
+                        value={customCategory}
+                        onChange={(e) => setCustomCategory(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Type the category name; it will be saved with this expense.
+                      </p>
+                    </div>
+                  )}
                   <DialogFooter>
                     <button
                       type="button"
@@ -594,64 +625,68 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Broker expenses (visible to admin/manager, not to brokers) */}
-      {!isBroker && (
-        <div id="broker-expenses" className="fv-card scroll-mt-6">
-          <h3 className="text-lg font-semibold mb-4">Broker expenses</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Market-related expenses (Crates Space, Watchman, Ropes, Labour, etc.) recorded by brokers.
-          </p>
-          <div className="mb-4">
-            <SimpleStatCard
-              title="Total broker expenses"
-              value={formatCurrency(brokerExpensesTotal)}
-              subtitle={`${brokerExpenses.length} entries`}
-              layout="vertical"
-            />
-          </div>
-          {brokerExpenses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No broker expenses recorded yet.</p>
-          ) : (
-            <>
-              <div className="hidden md:block overflow-x-auto">
-                <table className="fv-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Category</th>
-                      <th>Description</th>
-                      <th>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {brokerExpenses.map((e) => (
-                      <tr key={e.id}>
-                        <td className="text-muted-foreground">{formatDate(e.date)}</td>
-                        <td>{getExpenseCategoryLabel(e.category)}</td>
-                        <td>{e.description || '—'}</td>
-                        <td className="font-semibold">{formatCurrency(e.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="md:hidden space-y-3">
-                {brokerExpenses.map((e) => (
-                  <div key={e.id} className="p-4 bg-muted/30 rounded-lg">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-medium">{getExpenseCategoryLabel(e.category)}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(e.date)}</p>
-                        {e.description && <p className="text-sm mt-1">{e.description}</p>}
-                      </div>
-                      <span className="font-semibold">{formatCurrency(e.amount)}</span>
-                    </div>
+      {/* Broker expenses modal (tomatoes project only; visible to admin/manager, not to brokers) */}
+      {showBrokerExpensesButton && (
+        <Dialog open={brokerExpensesOpen} onOpenChange={setBrokerExpensesOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Broker expenses</DialogTitle>
+              <p className="text-sm text-muted-foreground">
+                Market-related expenses (Crates Space, Watchman, Ropes, Labour, etc.) recorded by brokers.
+              </p>
+            </DialogHeader>
+            <div className="space-y-4">
+              <SimpleStatCard
+                title="Total broker expenses"
+                value={formatCurrency(brokerExpensesTotal)}
+                subtitle={`${brokerExpenses.length} entries`}
+                layout="vertical"
+              />
+              {brokerExpenses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No broker expenses recorded yet.</p>
+              ) : (
+                <>
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="fv-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Category</th>
+                          <th>Description</th>
+                          <th>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {brokerExpenses.map((e) => (
+                          <tr key={e.id}>
+                            <td className="text-muted-foreground">{formatDate(e.date)}</td>
+                            <td>{getExpenseCategoryLabel(e.category)}</td>
+                            <td>{e.description || '—'}</td>
+                            <td className="font-semibold">{formatCurrency(e.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+                  <div className="md:hidden space-y-3">
+                    {brokerExpenses.map((e) => (
+                      <div key={e.id} className="p-4 bg-muted/30 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-medium">{getExpenseCategoryLabel(e.category)}</p>
+                            <p className="text-xs text-muted-foreground">{formatDate(e.date)}</p>
+                            {e.description && <p className="text-sm mt-1">{e.description}</p>}
+                          </div>
+                          <span className="font-semibold">{formatCurrency(e.amount)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

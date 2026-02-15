@@ -637,6 +637,8 @@ export interface HarvestCollection {
   status: HarvestCollectionStatus;
   /** When buyer payment received */
   buyerPaidAt?: Date | unknown;
+  /** Set when this collection has been synced to Harvest Sales (harvest + sale created) */
+  harvestId?: string;
   createdAt?: Date | unknown;
 }
 

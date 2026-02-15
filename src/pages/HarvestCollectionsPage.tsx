@@ -36,6 +36,7 @@ import {
   payPickersFromWalletBatchFirestore,
   topUpHarvestWallet,
   getHarvestWallet,
+  syncClosedCollectionToHarvestSale,
 } from '@/services/harvestCollectionService';
 import {
   Dialog,
@@ -121,6 +122,8 @@ export default function HarvestCollectionsPage() {
   const [cashDialogVisible, setCashDialogVisible] = useState(false);
   const [cashDialogSaving, setCashDialogSaving] = useState(false);
   const [payingSelected, setPayingSelected] = useState(false);
+  const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
+  const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
 
   const handleSaveCash = async () => {
     if (!cashDialogCollection || !cashAmount.trim() || !companyId) return;
@@ -173,6 +176,7 @@ export default function HarvestCollectionsPage() {
 
   useEffect(() => {
     setPaySelectedIds(new Set());
+    setShowPaidAndProfit(false);
   }, [selectedCollectionId]);
 
   const { data: allCollections = [], isLoading: loadingCollections } = useCollection<HarvestCollection>(
@@ -219,8 +223,56 @@ export default function HarvestCollectionsPage() {
 
   const collections = useMemo(() => {
     if (!effectiveProject) return allCollections;
-    return allCollections.filter((c) => c.projectId === effectiveProject.id);
+    const filtered = allCollections.filter((c) => c.projectId === effectiveProject.id);
+    const toTime = (c: HarvestCollection) => {
+      const d = c.harvestDate;
+      const t = d != null ? toDate(d) : null;
+      return t ? t.getTime() : 0;
+    };
+    return [...filtered].sort((a, b) => toTime(b) - toTime(a));
   }, [allCollections, effectiveProject]);
+
+  const activeCollections = useMemo(
+    () => collections.filter((c) => c.status !== 'closed'),
+    [collections]
+  );
+  const closedCollections = useMemo(
+    () => collections.filter((c) => c.status === 'closed'),
+    [collections]
+  );
+
+  // Backfill: sync already-closed French beans collections (without harvestId) to Harvest & Sales so they appear and are counted
+  const backfillSyncedRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const toSync = collections.filter(
+      (c) =>
+        String(c.cropType).toLowerCase() === 'french-beans' &&
+        (c.status === 'closed' || !!c.buyerPaidAt) &&
+        (c.totalRevenue ?? 0) > 0 &&
+        (c.totalHarvestKg ?? 0) > 0 &&
+        !c.harvestId &&
+        !backfillSyncedRef.current.has(c.id)
+    );
+    if (toSync.length === 0) return;
+    toSync.forEach((c) => backfillSyncedRef.current.add(c.id));
+    (async () => {
+      let synced = 0;
+      for (const c of toSync) {
+        try {
+          const ok = await syncClosedCollectionToHarvestSale(c.id);
+          if (ok) synced++;
+        } catch {
+          backfillSyncedRef.current.delete(c.id);
+        }
+      }
+      if (synced > 0) {
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+        queryClient.invalidateQueries({ queryKey: ['harvests'] });
+        queryClient.invalidateQueries({ queryKey: ['sales'] });
+        toast({ title: 'Synced', description: `${synced} closed collection(s) added to Harvest & Sales.` });
+      }
+    })();
+  }, [collections, queryClient, toast]);
 
   const selectedCollection = useMemo(
     () => allCollections.find((c) => c.id === selectedCollectionId) ?? null,
@@ -256,6 +308,16 @@ export default function HarvestCollectionsPage() {
       .filter((p) => p.collectionId === selectedCollectionId)
       .sort((a, b) => (a.pickerNumber ?? 0) - (b.pickerNumber ?? 0));
   }, [allPickers, selectedCollectionId]);
+
+  /** Amount paid out for the selected collection (for Wallet popover inside pickers) */
+  const amountPaidOutThisCollection = useMemo(() => {
+    if (!selectedCollectionId) return 0;
+    const fromPool = cashPoolForCollection?.totalPaidOut;
+    if (fromPool != null && Number(fromPool) >= 0) return Number(fromPool);
+    return pickersForCollection
+      .filter((p) => p.isPaid)
+      .reduce((s, p) => s + (p.totalPay ?? 0), 0);
+  }, [selectedCollectionId, cashPoolForCollection?.totalPaidOut, pickersForCollection]);
 
   const filteredPickers = useMemo(() => {
     const q = (pickerSearch || '').trim().toLowerCase();
@@ -641,47 +703,40 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
-    if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
-      setPayingSelected(true);
-      try {
-        await payPickersFromWalletBatchFirestore({
-          companyId,
-          projectId: effectiveProject.id,
-          cropType: String(effectiveProject.cropType),
-          collectionId: selectedCollectionId,
-          pickerIds: unpaidIds,
-        });
-
-        const updatedPickers = allPickers.map((p) =>
-          unpaidIds.includes(p.id) ? { ...p, isPaid: true, paidAt: new Date() } : p
-        );
-        queryClient.setQueryData(['harvestPickers'], updatedPickers);
-        // Refresh harvest cash pools and shared wallet so balances update in UI
-        queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
-        queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
-        setPaySelectedIds(new Set());
-        toast({ title: `${unpaidIds.length} marked paid` });
-      } catch (e: any) {
-        console.error('payPickersFromWalletBatchFirestore error', e);
-        toast({
-          title: 'Cannot pay selected pickers',
-          description: e?.message ?? 'Not enough cash in Harvest Wallet.',
-          variant: 'destructive',
-        });
-        return;
-      } finally {
-        setPayingSelected(false);
-      }
-      return;
-    }
-
-    // Non-wallet collections: mark paid locally & via batch as before
+    // Optimistic update: update UI immediately so the button doesn't feel delayed
     const updatedPickers = allPickers.map((p) =>
       unpaidIds.includes(p.id) ? { ...p, isPaid: true, paidAt: new Date() } : p
     );
     queryClient.setQueryData(['harvestPickers'], updatedPickers);
     setPaySelectedIds(new Set());
+    setPayingSelected(false);
     toast({ title: `${unpaidIds.length} marked paid` });
+
+    if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
+      payPickersFromWalletBatchFirestore({
+        companyId,
+        projectId: effectiveProject.id,
+        cropType: String(effectiveProject.cropType),
+        collectionId: selectedCollectionId,
+        pickerIds: unpaidIds,
+      })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
+          queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
+        })
+        .catch((e: any) => {
+          console.error('payPickersFromWalletBatchFirestore error', e);
+          queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+          toast({
+            title: 'Payment failed',
+            description: e?.message ?? 'Not enough cash in Harvest Wallet.',
+            variant: 'destructive',
+          });
+        });
+      return;
+    }
+
+    // Non-wallet collections: UI-only update (no wallet to deduct)
   };
 
   const handleSetBuyerPrice = async (markBuyerPaid: boolean) => {
@@ -708,6 +763,8 @@ export default function HarvestCollectionsPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       if (markBuyerPaid) {
+        queryClient.invalidateQueries({ queryKey: ['harvests'] });
+        queryClient.invalidateQueries({ queryKey: ['sales'] });
         toast({ title: 'Buyer paid – harvest closed' });
         setBuyerPricePerKg('');
       } else {
@@ -955,10 +1012,40 @@ export default function HarvestCollectionsPage() {
 
       {/* List of collections */}
       {!selectedCollectionId && (
-        <div className="space-y-3">
-          <p className="text-muted-foreground text-sm">
-            Project: <span className="font-medium text-foreground">{effectiveProject.name}</span>
-          </p>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-muted-foreground text-sm mr-2">
+              Project: <span className="font-medium text-foreground">{effectiveProject.name}</span>
+            </p>
+            {collections.length > 0 && (
+              <div className="flex gap-1.5">
+                <Button
+                  variant={collectionFilter === 'all' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setCollectionFilter('all')}
+                >
+                  All
+                </Button>
+                <Button
+                  variant={collectionFilter === 'active' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setCollectionFilter('active')}
+                >
+                  Active
+                </Button>
+                <Button
+                  variant={collectionFilter === 'closed' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setCollectionFilter('closed')}
+                >
+                  Closed
+                </Button>
+              </div>
+            )}
+          </div>
           {loadingCollections ? (
             <p className="text-muted-foreground">Loading…</p>
           ) : collections.length === 0 ? (
@@ -970,54 +1057,123 @@ export default function HarvestCollectionsPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
-              {collections.map((c, index) => {
-                const displayName = c.name?.trim() || formatDate(c.harvestDate);
-                const totalPay = (c.totalPickerCost ?? 0);
-                const totalWeight = (c.totalHarvestKg ?? 0);
-                const isFrenchBeans = String(c.cropType).toLowerCase() === 'french-beans';
-                const pool = cashPoolByCollection[c.id];
-                const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
-                return (
-                  <Card
-                    key={c.id}
-                    className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px]"
-                    onClick={() => {
-                      setSelectedCollectionId(c.id);
-                      setViewMode('intake');
-                    }}
-                  >
-                    <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
-                      <span
-                        className={cn(
-                          'absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded',
-                          c.status === 'closed' && 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-                          c.status === 'collecting' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                          c.status === 'payout_complete' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                          c.status === 'sold' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/30 dark:text-slate-300'
-                        )}
-                      >
-                        {c.status}
-                      </span>
-                      <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
-                        <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
-                      </div>
-                      <div className="w-full flex-1 flex flex-col justify-center min-h-0">
-                        <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
-                          {displayName}
-                        </span>
-                      </div>
-                      <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                        <div className="text-sm font-bold text-foreground tabular-nums">
-                          KES {totalPay.toLocaleString()}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
-                        {/* No per-card wallet button – wallet is controlled from header and inside collection view */}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+            <div className="space-y-6">
+              {(collectionFilter === 'all' || collectionFilter === 'active') && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Active collections {collectionFilter === 'all' && activeCollections.length > 0 && `(${activeCollections.length})`}
+                  </h3>
+                  {activeCollections.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No active collections.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
+                      {activeCollections.map((c, index) => {
+                        const displayName = c.name?.trim() || formatDate(c.harvestDate);
+                        const totalPay = (c.totalPickerCost ?? 0);
+                        const totalWeight = (c.totalHarvestKg ?? 0);
+                        const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
+                        return (
+                          <Card
+                            key={c.id}
+                            className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
+                            onClick={() => {
+                              setSelectedCollectionId(c.id);
+                              setViewMode('intake');
+                            }}
+                          >
+                            <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
+                              <span
+                                className={cn(
+                                  'absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded',
+                                  c.status === 'collecting' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+                                  c.status === 'payout_complete' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                                  c.status === 'sold' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/30 dark:text-slate-300'
+                                )}
+                              >
+                                {c.status}
+                              </span>
+                              <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
+                                <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
+                              </div>
+                              <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                                <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
+                                  {displayName}
+                                </span>
+                              </div>
+                              <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
+                                <div className="text-sm font-bold text-foreground tabular-nums">
+                                  KES {totalPay.toLocaleString()}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {(collectionFilter === 'all' || collectionFilter === 'closed') && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Closed collections {collectionFilter === 'all' && closedCollections.length > 0 && `(${closedCollections.length})`}
+                  </h3>
+                  {closedCollections.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No closed collections.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
+                      {closedCollections.map((c, index) => {
+                        const displayName = c.name?.trim() || formatDate(c.harvestDate);
+                        const totalPay = (c.totalPickerCost ?? 0);
+                        const totalWeight = (c.totalHarvestKg ?? 0);
+                        const Icon = COLLECTION_ICONS[(activeCollections.length + index) % COLLECTION_ICONS.length];
+                        return (
+                          <Card
+                            key={c.id}
+                            className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
+                            onClick={() => {
+                              setSelectedCollectionId(c.id);
+                              setViewMode('intake');
+                            }}
+                          >
+                            <div
+                              className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-2xl overflow-hidden"
+                              aria-hidden
+                            >
+                              <span
+                                className="text-2xl sm:text-xl font-bold text-red-500/35 dark:text-red-400/30 select-none whitespace-nowrap"
+                                style={{ transform: 'rotate(-22deg)' }}
+                              >
+                                CLOSED
+                              </span>
+                            </div>
+                            <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
+                              <span className="absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                closed
+                              </span>
+                              <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
+                                <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
+                              </div>
+                              <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                                <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
+                                  {displayName}
+                                </span>
+                              </div>
+                              <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
+                                <div className="text-sm font-bold text-foreground tabular-nums">
+                                  KES {totalPay.toLocaleString()}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1098,7 +1254,7 @@ export default function HarvestCollectionsPage() {
                     <div className="flex flex-col items-center gap-3">
                       <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
                       <div className="flex flex-col items-center justify-center gap-2">
-                        <p className="text-[11px] text-emerald-100">Current balance (shared)</p>
+                        <p className="text-[11px] text-emerald-100">Amount paid out (this collection)</p>
                         <div className="flex items-center justify-center gap-2">
                           <p
                             className={cn(
@@ -1106,7 +1262,7 @@ export default function HarvestCollectionsPage() {
                               !cashDialogVisible && 'blur-sm select-none'
                             )}
                           >
-                            KES {(harvestWallet?.currentBalance ?? cashPoolForCollection?.remainingBalance ?? 0).toLocaleString()}
+                            KES {amountPaidOutThisCollection.toLocaleString()}
                           </p>
                           <button
                             type="button"
@@ -1337,45 +1493,39 @@ export default function HarvestCollectionsPage() {
                       </div>
                     )}
 
-                    {/* Individuals section */}
+                    {/* Individuals section — square cards */}
                     {payUnpaidAndGroups.individuals.length > 0 && (
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-muted-foreground">Individuals</p>
-                        <div className="flex flex-wrap gap-3">
+                        <div className="flex flex-wrap gap-2">
                           {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
                             const p = pickers[0];
                             const tripCount = tripCountForPicker[p.id] ?? 0;
                             return (
                               <Card
                                 key={p.id}
-                                className="relative flex items-center gap-2 px-2 py-2 min-h-[72px] bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 flex-1 min-w-[230px] max-w-sm"
+                                className="relative w-[48%] min-w-[120px] sm:w-[130px] aspect-square max-w-[140px] flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 shrink-0"
                               >
-                                <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                  {tripCount}
-                                </div>
-                                <div className="flex items-center gap-2 flex-1">
-                                  <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
-                                    {p.pickerNumber}
+                                <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                  <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                    {tripCount}
                                   </div>
-                                  <div className="flex flex-col flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <p className="font-semibold text-xs text-foreground truncate">{p.pickerName}</p>
-                                      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                                  <div className="flex justify-center flex-shrink-0 pt-1">
+                                    <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
+                                      {p.pickerNumber}
                                     </div>
-                                    <div className="flex items-center justify-between gap-2 mt-0.5">
-                                      <span className="text-[11px] font-bold tabular-nums text-foreground">
-                                        KES {(p.totalPay ?? 0).toLocaleString()}
-                                      </span>
-                                      <span className="text-[10px] text-muted-foreground tabular-nums">
-                                        {(p.totalKg ?? 0).toFixed(1)} kg
-                                      </span>
+                                  </div>
+                                  <p className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-0.5">{p.pickerName}</p>
+                                  <div className="border-t border-border pt-1 mt-1 space-y-0.5">
+                                    <div className="text-sm font-bold text-foreground tabular-nums leading-none">
+                                      KES {(p.totalPay ?? 0).toLocaleString()}
                                     </div>
-                                    <div className="inline-flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 font-medium mt-0.5">
+                                    <div className="inline-flex items-center justify-center gap-0.5 text-[10px] text-green-700 dark:text-green-400 font-medium">
                                       <CheckCircle2 className="h-3 w-3 shrink-0" />
                                       <span>PAID</span>
                                     </div>
                                   </div>
-                                </div>
+                                </CardContent>
                               </Card>
                             );
                           })}
@@ -1383,7 +1533,7 @@ export default function HarvestCollectionsPage() {
                       </div>
                     )}
 
-                    {/* Group section */}
+                    {/* Group section — compact square cards */}
                     {payUnpaidAndGroups.groups.length > 0 && (
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-muted-foreground">Groups</p>
@@ -1391,40 +1541,35 @@ export default function HarvestCollectionsPage() {
                           {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
                             <div
                               key={label}
-                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-3 flex-1 min-w-[260px] max-w-md"
+                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-2 flex-1 min-w-0 max-w-[320px]"
                             >
-                              <p className="text-sm font-semibold text-foreground mb-2 text-center">{label}</p>
-                              <div className="flex flex-col gap-2">
+                              <p className="text-xs font-semibold text-foreground mb-2 text-center">{label}</p>
+                              <div className="flex flex-wrap gap-2 justify-center">
                                 {pickers.map((p) => {
                                   const tripCount = tripCountForPicker[p.id] ?? 0;
                                   return (
                                     <Card
                                       key={p.id}
-                                      className="relative flex items-center gap-2 px-2 py-2 min-h-[72px] bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                                      className="relative w-[100px] min-w-[100px] aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 shrink-0"
                                     >
-                                      <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                        {tripCount}
-                                      </div>
-                                      <div className="flex items-center gap-2 flex-1">
-                                        <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
-                                          {p.pickerNumber}
+                                      <CardContent className="p-1.5 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                        <div className="absolute top-0.5 right-0.5 px-1 h-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground">
+                                          {tripCount}
                                         </div>
-                                        <div className="flex flex-col flex-1 min-w-0">
-                                          <p className="font-semibold text-xs text-foreground truncate">{p.pickerName}</p>
-                                          <div className="flex items-center justify-between gap-2 mt-0.5">
-                                            <span className="text-[11px] font-bold tabular-nums text-foreground">
-                                              KES {(p.totalPay ?? 0).toLocaleString()}
-                                            </span>
-                                            <span className="text-[10px] text-muted-foreground tabular-nums">
-                                              {(p.totalKg ?? 0).toFixed(1)} kg
-                                            </span>
-                                          </div>
-                                          <div className="inline-flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 font-medium mt-0.5">
-                                            <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                            <span>PAID</span>
+                                        <div className="flex justify-center flex-shrink-0">
+                                          <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold tabular-nums shadow ring-2 ring-background">
+                                            {p.pickerNumber}
                                           </div>
                                         </div>
-                                      </div>
+                                        <p className="font-medium text-foreground text-[10px] leading-tight line-clamp-2">{p.pickerName}</p>
+                                        <div className="text-[10px] font-bold tabular-nums text-foreground">
+                                          KES {(p.totalPay ?? 0).toLocaleString()}
+                                        </div>
+                                        <div className="inline-flex items-center justify-center gap-0.5 text-[9px] text-green-700 dark:text-green-400 font-medium">
+                                          <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
+                                          <span>PAID</span>
+                                        </div>
+                                      </CardContent>
                                     </Card>
                                   );
                                 })}
@@ -1445,6 +1590,51 @@ export default function HarvestCollectionsPage() {
                   <CardTitle className="text-lg">Buyer sale</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {selectedCollection.status === 'closed' && (
+                    <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">Buyer settlement</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => setShowPaidAndProfit((v) => !v)}
+                        >
+                          {showPaidAndProfit ? (
+                            <>
+                              <EyeOff className="h-4 w-4 mr-1.5" />
+                              Hide amounts
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-4 w-4 mr-1.5" />
+                              Show amounts
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      <div className="space-y-1 text-sm">
+                        <p>
+                          Amount buyer paid:{' '}
+                          {showPaidAndProfit ? (
+                            <strong>KES {(selectedCollection.totalRevenue ?? 0).toLocaleString()}</strong>
+                          ) : (
+                            <span className="text-muted-foreground">••••••</span>
+                          )}
+                        </p>
+                        <p>
+                          Profit:{' '}
+                          {showPaidAndProfit ? (
+                            <strong className={(selectedCollection.profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                              KES {(selectedCollection.profit ?? 0).toLocaleString()}
+                            </strong>
+                          ) : (
+                            <span className="text-muted-foreground">••••••</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Price per kg (buyer) — KES</Label>
                     <Input
@@ -1455,9 +1645,10 @@ export default function HarvestCollectionsPage() {
                       value={buyerPricePerKg}
                       onChange={(e) => setBuyerPricePerKg(e.target.value)}
                       className="text-lg min-h-12 rounded-xl"
+                      disabled={selectedCollection.status === 'closed'}
                     />
                   </div>
-                  {Number(buyerPricePerKg || 0) > 0 && (
+                  {selectedCollection.status !== 'closed' && Number(buyerPricePerKg || 0) > 0 && (
                     <div className="space-y-1 text-sm">
                       <p>
                         Total revenue: <strong>KES {totalRevenue.toLocaleString()}</strong>
@@ -1469,29 +1660,36 @@ export default function HarvestCollectionsPage() {
                       </p>
                     </div>
                   )}
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="min-h-12 rounded-xl flex-1"
-                      disabled={!buyerPricePerKg || markingBuyerPaid}
-                      onClick={() => handleSetBuyerPrice(false)}
-                    >
-                      Save buyer price
-                    </Button>
-                    <Button
-                      size="lg"
-                      className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
-                      disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid || selectedCollection.status === 'closed'}
-                      onClick={() => handleSetBuyerPrice(true)}
-                    >
-                      MARK BUYER PAID
-                    </Button>
-                  </div>
-                  {!allPickersPaid && pickersForCollection.length > 0 && (
-                    <p className="text-amber-600 dark:text-amber-400 text-sm">
-                      All pickers must be marked cash paid before closing.
-                    </p>
+                  {selectedCollection.status !== 'closed' && (
+                    <>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <Button
+                          size="lg"
+                          variant="outline"
+                          className="min-h-12 rounded-xl flex-1"
+                          disabled={!buyerPricePerKg || markingBuyerPaid}
+                          onClick={() => handleSetBuyerPrice(false)}
+                        >
+                          Save buyer price
+                        </Button>
+                        <Button
+                          size="lg"
+                          className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
+                          disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid}
+                          onClick={() => handleSetBuyerPrice(true)}
+                        >
+                          MARK BUYER PAID
+                        </Button>
+                      </div>
+                      {!allPickersPaid && pickersForCollection.length > 0 && (
+                        <p className="text-amber-600 dark:text-amber-400 text-sm">
+                          All pickers must be marked cash paid before closing.
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {selectedCollection.status === 'closed' && (
+                    <p className="text-sm text-muted-foreground">This collection is closed. Amount paid and profit are shown above (use Show amounts to reveal).</p>
                   )}
                 </CardContent>
               </Card>

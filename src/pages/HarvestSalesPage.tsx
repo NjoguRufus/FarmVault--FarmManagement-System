@@ -10,7 +10,7 @@ import { Harvest, Sale, Employee, User, InventoryItem } from '@/types';
 import { deductInventoryForHarvest } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
-import { formatDate } from '@/lib/dateUtils';
+import { formatDate, toDate } from '@/lib/dateUtils';
 import {
   Dialog,
   DialogTrigger,
@@ -53,6 +53,14 @@ export default function HarvestSalesPage() {
   const harvests = activeProject
     ? allHarvests.filter((h) => h.projectId === activeProject.id)
     : allHarvests;
+
+  const harvestsByLatestFirst = useMemo(() => {
+    return [...harvests].sort((a, b) => {
+      const da = toDate(a.date) ?? new Date(0);
+      const db = toDate(b.date) ?? new Date(0);
+      return db.getTime() - da.getTime();
+    });
+  }, [harvests]);
 
   const sales = activeProject
     ? allSales.filter((s) => s.projectId === activeProject.id)
@@ -1518,7 +1526,7 @@ export default function HarvestSalesPage() {
                 </tr>
               </thead>
               <tbody>
-                {harvests
+                {harvestsByLatestFirst
                   .filter((harvest) => {
                     if (harvestFilter === 'all') return true;
                     const dest = harvest.destination || 'farm';
@@ -1597,7 +1605,7 @@ export default function HarvestSalesPage() {
 
         {harvests.length > 0 && !loadingHarvests && harvestViewMode === 'card' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {harvests
+            {harvestsByLatestFirst
               .filter((harvest) => {
                 if (harvestFilter === 'all') return true;
                 const dest = harvest.destination || 'farm';
