@@ -219,19 +219,29 @@ service cloud.firestore {
     }
 
     // --- Harvest Wallets (single master harvest wallet per project/crop) ---
-    // NOTE: Writes are intended to be done ONLY from backend (Cloud Functions / Admin SDK).
-    // Client apps should treat these documents as read-only.
+    // Document ID format: companyId_projectId_cropType. Read/write when company matches or ID starts with user's companyId.
     match /harvestWallets/{walletId} {
-      allow read: if canReadCompanyDoc();
-      allow write: if false;
+      allow read: if canReadCompanyDoc() || (isSignedIn() && userCompanyId() != null && walletId.matches('^' + userCompanyId() + '_.*'));
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow update: if isSignedIn() && (
+        resource.data.get('companyId', null) == userCompanyId()
+        || (resource.data.get('companyId', null) == null && userCompanyId() != null && walletId.matches('^' + userCompanyId() + '_.*'))
+        || isDeveloper()
+      );
+      allow delete: if false;
     }
 
     // --- Collection cash usage for harvest wallet deductions ---
-    // Tracks how much each harvest collection has deducted from its master wallet.
-    // Updated only from backend code so we block all client writes here.
+    // Document ID format: walletId_collectionId (walletId = companyId_projectId_cropType). Read/write when company matches or ID starts with user's companyId.
     match /collectionCashUsage/{usageId} {
-      allow read: if canReadCompanyDoc();
-      allow write: if false;
+      allow read: if canReadCompanyDoc() || (isSignedIn() && userCompanyId() != null && usageId.matches('^' + userCompanyId() + '_.*'));
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow update: if isSignedIn() && (
+        resource.data.get('companyId', null) == userCompanyId()
+        || (resource.data.get('companyId', null) == null && userCompanyId() != null && usageId.matches('^' + userCompanyId() + '_.*'))
+        || isDeveloper()
+      );
+      allow delete: if false;
     }
 
     // --- Suppliers ---

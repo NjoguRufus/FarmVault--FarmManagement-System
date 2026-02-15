@@ -530,11 +530,22 @@ export async function payPickersFromWalletBatchFirestore(params: {
       });
     }
 
-    // Mark pickers paid
+    // Create a payment batch so this group is tracked (1 picker = individual, 2+ = group)
+    const batchRef = doc(collection(db, PAYMENT_BATCHES));
+    tx.set(batchRef, {
+      companyId,
+      collectionId,
+      pickerIds: toPay.map((p) => p.ref.id),
+      totalAmount,
+      paidAt: serverTimestamp(),
+    });
+
+    // Mark pickers paid and link to this batch
     toPay.forEach(({ ref }) => {
       tx.update(ref, {
         isPaid: true,
         paidAt: new Date(),
+        paymentBatchId: batchRef.id,
       });
     });
   });

@@ -419,6 +419,14 @@ export default function HarvestCollectionsPage() {
     return map;
   }, [pickersForCollection, weighEntriesForCollection]);
 
+  // Sync trip number when add-weight dialog opens or when weigh data updates (e.g. after fast successive saves)
+  useEffect(() => {
+    if (addWeighOpen && weighOpenedFromCard && weighPickerId) {
+      const next = nextTripForPicker[weighPickerId] ?? 1;
+      setWeighTrip(String(next));
+    }
+  }, [addWeighOpen, weighOpenedFromCard, weighPickerId, nextTripForPicker]);
+
   // Precompute trip counts per picker so card rendering is cheap and fast when typing
   const tripCountForPicker = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -597,6 +605,20 @@ export default function HarvestCollectionsPage() {
     queryClient.setQueryData(['harvestPickers'], updatedPickers);
     queryClient.setQueryData(['harvestCollections'], updatedCollections);
 
+    // Optimistic: add this weigh entry to cache so next trip number is correct when reopening quickly
+    queryClient.setQueryData<PickerWeighEntry[]>(['pickerWeighEntries'], (old = []) => [
+      ...old,
+      {
+        id: `opt-${weighPickerId}-${Date.now()}`,
+        companyId: companyId!,
+        pickerId: weighPickerId,
+        collectionId: selectedCollectionId,
+        weightKg: kg,
+        tripNumber: trip,
+        recordedAt: new Date(),
+      },
+    ]);
+
     setAddWeighOpen(false);
     setWeighPickerId('');
     setWeighKg('');
@@ -655,9 +677,13 @@ export default function HarvestCollectionsPage() {
         queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
         queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
       } catch (e: any) {
+        const isPermissionDenied =
+          e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
         toast({
-          title: 'Cannot pay picker',
-          description: e?.message ?? 'Not enough cash in Harvest Wallet.',
+          title: 'Payment failed',
+          description: isPermissionDenied
+            ? 'Insufficient permissions. You may not have access to update harvest payments.'
+            : (e?.message ?? 'Not enough cash in Harvest Wallet.'),
           variant: 'destructive',
         });
         return;
@@ -727,9 +753,13 @@ export default function HarvestCollectionsPage() {
         .catch((e: any) => {
           console.error('payPickersFromWalletBatchFirestore error', e);
           queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+          const isPermissionDenied =
+            e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
           toast({
             title: 'Payment failed',
-            description: e?.message ?? 'Not enough cash in Harvest Wallet.',
+            description: isPermissionDenied
+              ? 'Insufficient permissions. You may not have access to update harvest payments.'
+              : (e?.message ?? 'Not enough cash in Harvest Wallet.'),
             variant: 'destructive',
           });
         });
@@ -1700,12 +1730,12 @@ export default function HarvestCollectionsPage() {
 
       {/* New collection dialog */}
       <Dialog open={newCollectionOpen} onOpenChange={setNewCollectionOpen}>
-        <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
             <DialogTitle>New collection</DialogTitle>
             <DialogDescription>Name the collection, set date and rate. Totals auto-calculate from weights.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
             <div>
               <Label>Collection name</Label>
               <Input
@@ -1736,7 +1766,7 @@ export default function HarvestCollectionsPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => setNewCollectionOpen(false)}>Cancel</Button>
             <Button onClick={handleCreateCollection} disabled={creating}>
               {creating ? 'Creating…' : 'Create'}
@@ -1749,12 +1779,12 @@ export default function HarvestCollectionsPage() {
 
       {/* Add picker dialog */}
       <Dialog open={addPickerOpen} onOpenChange={setAddPickerOpen}>
-        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
             <DialogTitle>Add picker</DialogTitle>
             <DialogDescription>Number auto-fills (next in sequence). One number per picker in this collection.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
             <div>
               <Label>Picker number</Label>
               <Input
@@ -1776,7 +1806,7 @@ export default function HarvestCollectionsPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => setAddPickerOpen(false)}>Cancel</Button>
             <Button onClick={handleAddPicker} disabled={addingPicker}>
               {addingPicker ? 'Adding…' : 'Add'}
@@ -1793,16 +1823,16 @@ export default function HarvestCollectionsPage() {
           if (!open) setWeighOpenedFromCard(false);
         }}
       >
-        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[80vh] sm:max-h-[70vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
             <DialogTitle>Add weight</DialogTitle>
             <DialogDescription>
               {weighOpenedFromCard && weighPickerId
-                ? `Trip #${weighTrip}. Totals update when you save.`
+                ? `Trip #${nextTripForPicker[weighPickerId] ?? weighTrip}. Totals update when you save.`
                 : 'Weight and trip for the picker.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
             {weighOpenedFromCard && weighPickerId ? (
               <p className="font-medium text-foreground">
                 #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
@@ -1853,7 +1883,7 @@ export default function HarvestCollectionsPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
             <Button variant="outline" onClick={() => setAddWeighOpen(false)}>Cancel</Button>
             <Button onClick={handleAddWeigh} disabled={!weighPickerId || !weighKg.trim()}>
               Save

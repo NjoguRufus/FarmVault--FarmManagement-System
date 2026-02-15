@@ -56,6 +56,13 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
           <div className="w-full max-w-md text-center space-y-6">
             <div className="flex justify-center">
+              <img
+                src="/Logo/FarmVault_Logo dark mode.png"
+                alt="FarmVault"
+                className="h-14 w-auto object-contain"
+              />
+            </div>
+            <div className="flex justify-center">
               <div className="rounded-full bg-destructive/10 p-4">
                 <AlertTriangle className="h-12 w-12 text-destructive" />
               </div>
