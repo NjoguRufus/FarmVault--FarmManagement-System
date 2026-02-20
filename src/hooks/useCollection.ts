@@ -7,14 +7,25 @@ export type UseCollectionOptions = {
   refetchInterval?: number;
 };
 
-export function useCollection<T = any>(key: string, path: string, options?: UseCollectionOptions) {
+export function useCollection<T = any>(
+  key: string,
+  path: string,
+  options?: UseCollectionOptions & { enabled?: boolean }
+) {
   return useQuery({
-    queryKey: [key],
+    queryKey: [key, path],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, path));
-      return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as T[];
+      try {
+        const snap = await getDocs(collection(db, path));
+        return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as T[];
+      } catch (err) {
+        console.error(`[useCollection] Error fetching ${path}:`, err);
+        return [] as T[];
+      }
     },
     refetchInterval: options?.refetchInterval,
+    enabled: options?.enabled ?? true,
+    staleTime: 30_000,
   });
 }
 

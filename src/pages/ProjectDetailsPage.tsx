@@ -343,7 +343,7 @@ export default function ProjectDetailsPage() {
                 className="fv-btn fv-btn--primary shrink-0 w-full sm:w-auto"
                 onClick={() => navigate(`/projects/${project.id}/planning`)}
               >
-                {project.planning ? 'Plan changes' : 'Plan season'}
+                {project.planning ? 'Plan changes' : 'Season Plan'}
               </button>
             )}
           </div>

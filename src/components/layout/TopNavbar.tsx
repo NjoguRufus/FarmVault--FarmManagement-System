@@ -59,10 +59,10 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
       <div className="flex h-full items-center justify-between px-4 sm:px-6">
         {/* Left: Mobile Menu + Logo + Project Selector */}
         <div className="flex items-center gap-2 sm:gap-4">
-          {/* Mobile Menu Button */}
+          {/* Mobile Menu Button - hidden on mobile (bottom nav replaces sidebar) */}
           <button
             onClick={onSidebarToggle}
-            className="md:hidden flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
+            className="hidden md:flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
             aria-label="Toggle sidebar"
           >
             <Menu className="h-5 w-5 text-foreground" />

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './AppSidebar';
+import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
@@ -95,8 +96,9 @@ export function MainLayout() {
       <main
         className={cn(
           'pt-16 min-h-screen transition-all duration-300',
-          // On mobile, no padding (sidebar overlays)
-          // On desktop, add padding based on sidebar state
+          // On mobile: bottom padding for fixed bottom nav + safe area
+          'pb-[max(5.5rem,calc(5.5rem+env(safe-area-inset-bottom)))] md:pb-0',
+          // On desktop: add padding based on sidebar state
           sidebarCollapsed ? 'md:pl-16' : 'md:pl-60'
         )}
       >
@@ -105,6 +107,7 @@ export function MainLayout() {
         </div>
       </main>
 
+      <BottomNav />
       <AIChatButton />
     </div>
   );

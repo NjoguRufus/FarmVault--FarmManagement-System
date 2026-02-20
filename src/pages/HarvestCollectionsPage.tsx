@@ -16,6 +16,7 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  CircleDollarSign,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -116,7 +117,7 @@ export default function HarvestCollectionsPage() {
   const [paySelectedIds, setPaySelectedIds] = useState<Set<string>>(new Set());
   const [cashAmount, setCashAmount] = useState('');
   const [cashPreviousAmount, setCashPreviousAmount] = useState(0);
-  const [cashSource, setCashSource] = useState<'bank' | 'broker' | 'custom'>('bank');
+  const [cashSource, setCashSource] = useState<'bank' | 'custom'>('bank');
   const [cashSourceCustom, setCashSourceCustom] = useState('');
   const [cashDialogCollection, setCashDialogCollection] = useState<HarvestCollection | null>(null);
   const [cashDialogVisible, setCashDialogVisible] = useState(false);
@@ -770,7 +771,11 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleSetBuyerPrice = async (markBuyerPaid: boolean) => {
-    if (!selectedCollectionId) return;
+    const collectionId = selectedCollectionId?.trim?.() || '';
+    if (!collectionId) {
+      toast({ title: 'Error', description: 'No collection selected.', variant: 'destructive' });
+      return;
+    }
     const price = Number(buyerPricePerKg || 0);
     if (price <= 0) {
       toast({ title: 'Invalid price', description: 'Buyer price per kg must be > 0', variant: 'destructive' });
@@ -787,7 +792,7 @@ export default function HarvestCollectionsPage() {
     setMarkingBuyerPaid(true);
     try {
       await setBuyerPriceAndMaybeClose({
-        collectionId: selectedCollectionId,
+        collectionId,
         pricePerKgBuyer: price,
         markBuyerPaid,
       });
@@ -801,6 +806,7 @@ export default function HarvestCollectionsPage() {
         toast({ title: 'Buyer price saved' });
       }
     } catch (e: any) {
+      console.error('Mark buyer paid failed:', e?.message, e?.stack ?? e);
       toast({ title: 'Error', description: e?.message ?? 'Failed', variant: 'destructive' });
     } finally {
       setMarkingBuyerPaid(false);
@@ -900,7 +906,7 @@ export default function HarvestCollectionsPage() {
                         setCashPreviousAmount(cashReceived);
                         // For top-up UX, start with empty input so user types the new amount to add
                         setCashAmount('');
-                        setCashSource((pool?.source as 'bank' | 'broker') ?? 'bank');
+                        setCashSource((pool?.source as 'bank' | 'custom') ?? 'bank');
                         setCashDialogVisible(false);
                       }}
                     >
@@ -992,14 +998,13 @@ export default function HarvestCollectionsPage() {
                           <Label className="mt-2 text-xs text-emerald-100">Source</Label>
                           <UiSelect
                             value={cashSource}
-                            onValueChange={(val) => setCashSource(val as 'bank' | 'broker' | 'custom')}
+                            onValueChange={(val) => setCashSource(val as 'bank' | 'custom')}
                           >
                             <SelectTrigger className="w-full min-h-9 rounded-xl border border-emerald-400/80 bg-emerald-900/60 px-3 py-1.5 text-xs text-emerald-50">
                               <SelectValue placeholder="Select source" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="bank">Bank</SelectItem>
-                              <SelectItem value="broker">Broker</SelectItem>
                               <SelectItem value="custom">Custom…</SelectItem>
                             </SelectContent>
                           </UiSelect>
@@ -1212,9 +1217,9 @@ export default function HarvestCollectionsPage() {
       {/* Collection detail: Intake / Pay / Buyer */}
       {selectedCollection && selectedCollectionId && (
         <>
-          <div className="flex items-start gap-2">
+          <div className="space-y-2">
             {statsExpanded && (
-              <div className="flex-1 min-w-0 space-y-2">
+              <div className="min-w-0 space-y-2">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 py-2 px-2 sm:px-3 rounded-xl bg-muted/40">
                   <span className="font-semibold text-foreground text-sm sm:text-base">
                     {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
@@ -1223,7 +1228,7 @@ export default function HarvestCollectionsPage() {
                     <span className="text-xs text-muted-foreground">@{selectedCollection.pricePerKgPicker}/kg</span>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className={cn('grid gap-2', ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) || selectedCollection.status === 'closed') ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2')}>
                   <SimpleStatCard
                     layout="mobile-compact"
                     title="Total kg"
@@ -1240,23 +1245,59 @@ export default function HarvestCollectionsPage() {
                     iconVariant="primary"
                     className="py-2 px-2 text-sm"
                   />
+                  {((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) || selectedCollection.status === 'closed') && (
+                    <div className="rounded-lg border bg-card py-2 px-2 text-sm flex flex-col justify-center gap-2 min-h-[3.5rem] col-span-2 sm:col-span-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" />
+                          <span className="text-xs font-medium text-muted-foreground">
+                            Buyer sale · {((totalsFromPickers.totalKg ?? selectedCollection.totalHarvestKg) ?? 0).toFixed(1)} kg
+                            {(selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0) && (
+                              <> @ {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} Ksh</>
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowPaidAndProfit((v) => !v)}
+                          className="shrink-0 p-1 rounded text-muted-foreground hover:bg-muted"
+                          title={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
+                          aria-label={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
+                        >
+                          {showPaidAndProfit ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-border pt-2">
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Payment</p>
+                          <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm')}>
+                            {showPaidAndProfit ? `KES ${Number(selectedCollection.totalRevenue ?? 0).toLocaleString()}` : '•••'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Profit</p>
+                          <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm', Number(selectedCollection.profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
+                            {showPaidAndProfit ? `KES ${Number(selectedCollection.profit ?? 0).toLocaleString()}` : '•••'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setStatsExpanded((e) => !e)}
-              className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:bg-muted touch-manipulation"
-              aria-expanded={statsExpanded}
-              title={statsExpanded ? 'Hide totals' : 'Show totals'}
-            >
-              {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
-          </div>
-
-          {isFrenchBeansCollection && selectedCollection && (
-            <div className="mt-3 flex justify-end">
-              <Popover>
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setStatsExpanded((e) => !e)}
+                className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:bg-muted touch-manipulation"
+                aria-expanded={statsExpanded}
+                title={statsExpanded ? 'Hide totals' : 'Show totals'}
+              >
+                {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              {isFrenchBeansCollection && selectedCollection && (
+                <Popover>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
@@ -1267,7 +1308,7 @@ export default function HarvestCollectionsPage() {
                       setCashPreviousAmount(existingReceived);
                       // For top-up UX, keep input empty so user types the new amount to add
                       setCashAmount('');
-                      setCashSource((cashPoolForCollection?.source as 'bank' | 'broker') ?? 'bank');
+                      setCashSource((cashPoolForCollection?.source as 'bank' | 'custom') ?? 'bank');
                       setCashDialogVisible(false);
                     }}
                   >
@@ -1307,8 +1348,9 @@ export default function HarvestCollectionsPage() {
                   </div>
                 </PopoverContent>
               </Popover>
+              )}
             </div>
-          )}
+          </div>
 
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
             <div className="flex flex-nowrap gap-1.5 sm:gap-2 overflow-x-auto pb-1 min-w-0">
@@ -1358,6 +1400,7 @@ export default function HarvestCollectionsPage() {
                 <Button
                   size="sm"
                   className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs"
+                  disabled={selectedCollection?.status === 'closed'}
                   onClick={() => {
                     setNewPickerNumber(String(nextPickerNumber));
                     setAddPickerOpen(true);
@@ -1621,48 +1664,11 @@ export default function HarvestCollectionsPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {selectedCollection.status === 'closed' && (
-                    <div className="rounded-xl border bg-muted/30 p-4 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-foreground">Buyer settlement</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => setShowPaidAndProfit((v) => !v)}
-                        >
-                          {showPaidAndProfit ? (
-                            <>
-                              <EyeOff className="h-4 w-4 mr-1.5" />
-                              Hide amounts
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="h-4 w-4 mr-1.5" />
-                              Show amounts
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                      <div className="space-y-1 text-sm">
-                        <p>
-                          Amount buyer paid:{' '}
-                          {showPaidAndProfit ? (
-                            <strong>KES {(selectedCollection.totalRevenue ?? 0).toLocaleString()}</strong>
-                          ) : (
-                            <span className="text-muted-foreground">••••••</span>
-                          )}
-                        </p>
-                        <p>
-                          Profit:{' '}
-                          {showPaidAndProfit ? (
-                            <strong className={(selectedCollection.profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                              KES {(selectedCollection.profit ?? 0).toLocaleString()}
-                            </strong>
-                          ) : (
-                            <span className="text-muted-foreground">••••••</span>
-                          )}
-                        </p>
-                      </div>
+                    <div className="space-y-1 text-sm text-muted-foreground">
+                      {selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0 && (
+                        <p>Price they bought with: <strong className="text-foreground">KES {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} per kg</strong></p>
+                      )}
+                      <p>Payment and profit are shown in the stat cards above (use Show amounts to reveal).</p>
                     </div>
                   )}
                   <div className="space-y-2">
@@ -1717,9 +1723,6 @@ export default function HarvestCollectionsPage() {
                         </p>
                       )}
                     </>
-                  )}
-                  {selectedCollection.status === 'closed' && (
-                    <p className="text-sm text-muted-foreground">This collection is closed. Amount paid and profit are shown above (use Show amounts to reveal).</p>
                   )}
                 </CardContent>
               </Card>

@@ -1,61 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  FolderKanban,
-  Layers,
-  Receipt,
-  Wrench,
-  Package,
-  TrendingUp,
-  Users,
-  Truck,
-  AlertTriangle,
-  FileText,
-  CreditCard,
-  HelpCircle,
-  MessageSquare,
-  ChevronLeft,
-  ChevronRight,
-  Building2,
-  Database,
-  Settings,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn, getDisplayRole } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
-
-const companyNavItems = [
-  { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { title: 'My Dashboard', href: '/employee-dashboard', icon: LayoutDashboard, employeeOnly: true },
-  { title: 'Projects', href: '/projects', icon: FolderKanban },
-  { title: 'Crop Stages', href: '/crop-stages', icon: Layers },
-  { title: 'Expenses', href: '/expenses', icon: Receipt },
-  { title: 'Operations', href: '/operations', icon: Wrench },
-  { title: 'Inventory', href: '/inventory', icon: Package },
-  { title: 'Harvest & Sales', href: '/harvest-sales', icon: TrendingUp },
-  { title: 'Suppliers', href: '/suppliers', icon: Truck },
-  { title: 'Season Challenges', href: '/challenges', icon: AlertTriangle },
-  { title: 'Employees', href: '/employees', icon: Users },
-  { title: 'Reports', href: '/reports', icon: FileText },
-  { title: 'Billing & Subscription', href: '/billing', icon: CreditCard },
-  { title: 'Settings', href: '/settings', icon: Settings },
-  { title: 'Support', href: '/support', icon: HelpCircle },
-  { title: 'Feedback', href: '/feedback', icon: MessageSquare },
-];
-
-const developerNavItems = [
-  { title: 'Admin Home', href: '/admin', icon: LayoutDashboard },
-  { title: 'Companies', href: '/admin/companies', icon: Building2 },
-  { title: 'Users', href: '/admin/users', icon: Users },
-  { title: 'Pending Users', href: '/admin/users/pending', icon: Users },
-  { title: 'Finances', href: '/admin/finances', icon: CreditCard },
-  { title: 'FarmVault Expenses', href: '/admin/expenses', icon: Receipt },
-  { title: 'Backups', href: '/admin/backups', icon: Database },
-  { title: 'Code Red', href: '/admin/code-red', icon: AlertTriangle },
-  { title: 'Feedback inbox', href: '/admin/feedback', icon: MessageSquare },
-  { title: 'Audit Logs', href: '/admin/audit-logs', icon: FileText },
-];
+import { getNavItemsForSidebar } from '@/config/navConfig';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -67,59 +16,11 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const { user } = useAuth();
   const isMobile = useIsMobile();
 
-  const employeeRole = (user as any)?.employeeRole as string | undefined;
-
-  let navItems = companyNavItems;
-
-  if (!user) {
-    // While auth is still loading, show full company nav to avoid a blank sidebar.
-    navItems = companyNavItems;
-  } else if (user.role === 'developer') {
-    // Developers: full admin nav
-    navItems = developerNavItems;
-  } else if (user.role === 'company-admin' || user.role === ('company_admin' as any)) {
-    // Company admin: full company nav including dashboard (hide legacy employee dashboard)
-    navItems = companyNavItems.filter((item) => item.href !== '/employee-dashboard');
-  } else if (
-    user.role === 'manager' ||
-    employeeRole === 'manager' ||
-    employeeRole === 'operations-manager'
-  ) {
-    // Manager: manager operations + inventory + feedback
-    navItems = [
-      { title: 'Manager Operations', href: '/manager/operations', icon: Wrench },
-      { title: 'Inventory', href: '/inventory', icon: Package },
-      { title: 'Feedback', href: '/feedback', icon: MessageSquare },
-    ];
-  } else if (
-    user.role === 'broker' ||
-    employeeRole === 'sales-broker' ||
-    employeeRole === 'broker'
-  ) {
-    // Broker: own dashboard + broker harvest & sales + expenses + feedback
-    navItems = [
-      { title: 'Broker Dashboard', href: '/broker', icon: LayoutDashboard },
-      { title: 'Harvest & Sales', href: '/broker/harvest-sales', icon: TrendingUp },
-      { title: 'Market Expenses', href: '/broker/expenses', icon: Receipt },
-      { title: 'Feedback', href: '/feedback', icon: MessageSquare },
-    ];
-  } else if (
-    (user.role === 'employee' || user.role === ('user' as any)) &&
-    (employeeRole === 'logistics-driver' || employeeRole === 'driver')
-  ) {
-    // Driver: own dashboard + feedback
-    navItems = [
-      { title: 'Driver Dashboard', href: '/driver', icon: Truck },
-      { title: 'Feedback', href: '/feedback', icon: MessageSquare },
-    ];
-  } else {
-    // Fallback: minimal company nav
-    navItems = companyNavItems.filter((item) => item.href === '/dashboard');
-  }
+  const navItems = getNavItemsForSidebar(user);
 
   return (
-    <>
-      {/* Mobile overlay when sidebar is open */}
+    <div className="hidden md:block">
+      {/* Mobile overlay when sidebar is open (desktop only - sidebar hidden on mobile) */}
       {!collapsed && (
         <div
           className="fixed inset-0 bg-black/50 z-30 md:hidden transition-opacity duration-300"
@@ -162,13 +63,14 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         <ul className="space-y-1">
           {navItems.map((item) => {
             const normalizedPath = location.pathname.replace(/\/+/g, '/');
-            const isActive = normalizedPath === item.href.replace(/\/+/g, '/');
+            const itemPath = item.path.replace(/\/+/g, '/');
+            const isActive = normalizedPath === itemPath || (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
             const Icon = item.icon;
 
             return (
-              <li key={item.href}>
+              <li key={item.path}>
                 <Link
-                  to={item.href.replace(/\/+/g, '/')}
+                  to={itemPath}
                   onClick={() => isMobile && onToggle()}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
@@ -178,7 +80,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
                   )}
                 >
                   <Icon className={cn('h-5 w-5 shrink-0', isActive && 'text-sidebar-primary')} />
-                  {!collapsed && <span>{item.title}</span>}
+                  {!collapsed && <span>{item.label}</span>}
                 </Link>
               </li>
             );
@@ -213,6 +115,6 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         )}
       </button>
     </aside>
-    </>
+    </div>
   );
 }

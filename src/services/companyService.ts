@@ -71,14 +71,14 @@ export async function updateCompany(
   await updateDoc(ref, updates);
 }
 
-export async function createCompany(name: string, email: string) {
+export async function createCompany(name: string, email: string, plan: string = 'starter') {
   const ref = await addDoc(collection(db, 'companies'), {
     name,
     email,
     createdAt: serverTimestamp(),
     status: 'active',
     subscriptionPlan: 'trial',
-    plan: 'starter',
+    plan: ['starter', 'professional', 'enterprise'].includes(plan) ? plan : 'starter',
     userCount: 1,
     projectCount: 0,
     revenue: 0,

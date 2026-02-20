@@ -44,6 +44,7 @@ import { RequireBroker } from "@/components/auth/RequireBroker";
 import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
 import SetupCompany from "@/pages/SetupCompany";
+import ChoosePlan from "@/pages/ChoosePlan";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminCompaniesPage from "@/pages/admin/AdminCompaniesPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
@@ -128,8 +129,9 @@ const App = () => (
               {/* Public routes */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/choose-plan" element={<ChoosePlan />} />
               <Route path="/setup-company" element={<SetupCompany />} />
-              <Route path="/setup" element={<Navigate to="/setup-company" replace />} />
+              <Route path="/setup" element={<Navigate to="/choose-plan" replace />} />
 
               {/* Protected app routes (company-level) */}
               <Route

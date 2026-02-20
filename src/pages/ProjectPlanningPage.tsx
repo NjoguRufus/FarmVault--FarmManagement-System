@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info } from 'lucide-react';
+import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -17,26 +17,22 @@ import {
 } from 'firebase/firestore';
 import { arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { CropStage, Project } from '@/types';
+import { CropStage, Project, Supplier } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
-import { generateStageTimeline } from '@/lib/cropStageConfig';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useCollection } from '@/hooks/useCollection';
+import { useQueryClient } from '@tanstack/react-query';
+import { generateStageTimeline, type GeneratedStage } from '@/lib/cropStageConfig';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const companyId = user?.companyId || null;
   const role = user?.role;
-  const canEdit = role === 'company-admin' || role === 'manager';
+  const canEdit = role === 'company-admin' || role === 'manager' || role === 'admin';
 
   const { data: project, isLoading: projectLoading, refetch: refetchProject } = useQuery<Project | null>({
     queryKey: ['project', companyId, projectId],
@@ -56,6 +52,44 @@ export default function ProjectPlanningPage() {
     companyId,
     projectId,
   );
+
+  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
+  const companySuppliers = useMemo(
+    () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
+    [suppliers, companyId],
+  );
+  const supplierNames = useMemo(() => companySuppliers.map((s) => s.name).filter(Boolean), [companySuppliers]);
+
+  const filteredSuppliersForInput = useMemo(() => {
+    const q = (seedSupplier || '').trim().toLowerCase();
+    if (!q) return companySuppliers;
+    return companySuppliers.filter((s) => s.name.toLowerCase().includes(q));
+  }, [companySuppliers, seedSupplier]);
+
+  const noSupplierMatch = (seedSupplier || '').trim() && filteredSuppliersForInput.length === 0;
+
+  const handleAddNewSupplier = async () => {
+    const name = seedSupplier.trim();
+    if (!name || !companyId || addingSupplier) return;
+    setAddingSupplier(true);
+    try {
+      await addDoc(collection(db, 'suppliers'), {
+        name,
+        contact: '',
+        email: null,
+        category: 'Seeds',
+        categories: ['Seeds'],
+        rating: 0,
+        status: 'active',
+        companyId,
+        createdAt: serverTimestamp(),
+      });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      setSupplierDropdownOpen(false);
+    } finally {
+      setAddingSupplier(false);
+    }
+  };
 
   const loading = projectLoading || stagesLoading;
   const today = new Date();
@@ -83,6 +117,14 @@ export default function ProjectPlanningPage() {
   const planHistory = project?.planning?.planHistory ?? [];
   const [newChallenge, setNewChallenge] = useState('');
   const [savingChallenge, setSavingChallenge] = useState(false);
+  const [editingSeed, setEditingSeed] = useState(false);
+  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const supplierInputRef = useRef<HTMLInputElement>(null);
+  const supplierDropdownRef = useRef<HTMLDivElement>(null);
+
+  const hasPlantingDate = Boolean(project?.plantingDate);
+  const hasExistingSeed = Boolean(project?.planning?.seed && (project.planning.seed as any)?.name);
 
   useEffect(() => {
     if (!project?.plantingDate) {
@@ -96,6 +138,21 @@ export default function ProjectPlanningPage() {
       setPlantingDateInput(dateObj.toISOString().slice(0, 10));
     }
   }, [project?.plantingDate]);
+
+  useEffect(() => {
+    const s = project?.planning?.seed;
+    if (s) {
+      setSeedName((s as any).name ?? '');
+      setSeedVariety((s as any).variety ?? '');
+      setSeedSupplier((s as any).supplier ?? '');
+      setSeedBatch((s as any).batchNumber ?? '');
+    } else {
+      setSeedName('');
+      setSeedVariety('');
+      setSeedSupplier('');
+      setSeedBatch('');
+    }
+  }, [project?.planning?.seed]);
 
   const handleSavePlantingDate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +173,8 @@ export default function ProjectPlanningPage() {
     const changed =
       !oldDate || oldDate.getTime() !== newDate.getTime();
     if (!changed) return;
-    if (!plantingReason.trim()) return;
+    // Reason required only when changing an existing date (not first time)
+    if (oldDate && !plantingReason.trim()) return;
 
     setSavingPlanting(true);
     try {
@@ -125,7 +183,7 @@ export default function ProjectPlanningPage() {
         field: 'plantingDate',
         oldValue: oldDate && !isNaN(oldDate.getTime()) ? oldDate.toISOString() : null,
         newValue: newDate.toISOString(),
-        reason: plantingReason,
+        reason: plantingReason.trim() || (oldDate ? '' : 'Initial planting date'),
         changedAt: serverTimestamp(),
         changedBy: user?.id ?? 'unknown',
       };
@@ -177,10 +235,29 @@ export default function ProjectPlanningPage() {
     e.preventDefault();
     if (!project || !companyId || !projectId) return;
     if (!seedName.trim()) return;
-    if (!seedReason.trim()) return;
+    // Reason required only when changing existing seed (not first time)
+    if (hasExistingSeed && !seedReason.trim()) return;
 
     setSavingSeed(true);
     try {
+      // If supplier name is not in list, add it to Suppliers so it appears there
+      if (seedSupplier.trim() && !companySuppliers.some((s) => s.name.trim().toLowerCase() === seedSupplier.trim().toLowerCase())) {
+        if (companyId) {
+          await addDoc(collection(db, 'suppliers'), {
+            name: seedSupplier.trim(),
+            contact: '',
+            email: null,
+            category: 'Seeds',
+            categories: ['Seeds'],
+            rating: 0,
+            status: 'active',
+            companyId,
+            createdAt: serverTimestamp(),
+          });
+          queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+        }
+      }
+
       const projectRef = doc(db, 'projects', projectId);
       const oldSeed = project.planning?.seed ?? {};
       const newSeed = {
@@ -190,6 +267,8 @@ export default function ProjectPlanningPage() {
         batchNumber: seedBatch || null,
       };
 
+      const isFirstTimeSeed = !(project.planning?.seed && (project.planning.seed as any).name);
+      const reasonForHistory = isFirstTimeSeed ? 'Initial seed plan' : seedReason;
       const historyEntries = [];
       const fields: (keyof typeof newSeed)[] = ['name', 'variety', 'supplier', 'batchNumber'];
       for (const f of fields) {
@@ -200,7 +279,7 @@ export default function ProjectPlanningPage() {
             field: `planning.seed.${f}`,
             oldValue: oldVal,
             newValue: newVal,
-            reason: seedReason,
+            reason: reasonForHistory,
             changedAt: serverTimestamp(),
             changedBy: user?.id ?? 'unknown',
           });
@@ -212,12 +291,22 @@ export default function ProjectPlanningPage() {
       };
       if (historyEntries.length) {
         update['planning.planHistory'] = arrayUnion(...historyEntries);
+      } else if (isFirstTimeSeed) {
+        update['planning.planHistory'] = arrayUnion({
+          field: 'planning.seed',
+          oldValue: null,
+          newValue: seedName,
+          reason: 'Initial seed plan',
+          changedAt: serverTimestamp(),
+          changedBy: user?.id ?? 'unknown',
+        });
       }
 
       await updateDoc(projectRef, update);
       await refetchProject();
       setSeedReason('');
       setChangeSeedModalOpen(false);
+      setEditingSeed(false);
     } finally {
       setSavingSeed(false);
     }
@@ -285,7 +374,7 @@ export default function ProjectPlanningPage() {
         <div className="fv-card flex items-center gap-3">
           <AlertTriangle className="h-6 w-6 text-destructive" />
           <div>
-            <h2 className="créfont-semibold text-foreground">Project not found</h2>
+            <h2 className="font-semibold text-foreground">Project not found</h2>
             <p className="text-sm text-muted-foreground">
               The requested project could not be found or you don&apos;t have access to it.
             </p>
@@ -312,39 +401,33 @@ export default function ProjectPlanningPage() {
   const totalExpectedChallenges = expectedChallenges.length;
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Back + warning */}
-      <div className="flex flex-col gap-4">
+    <div className="space-y-8 animate-fade-in" role="main">
+      {/* Back + Planning mode (same row) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button
-          className="fv-btn fv-btn--secondary w-fit"
+          className="fv-btn fv-btn--secondary"
           onClick={() => navigate(`/projects/${project.id}`)}
         >
           <ChevronLeft className="h-4 w-4" />
           Back to Project
         </button>
-
-        <div className="fv-card flex items-start gap-3 bg-amber-50/80 dark:bg-amber-900/20">
-          <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
-          <div className="flex items-start gap-2 min-w-0">
-            <h2 className="text-sm font-semibold text-foreground">Planning mode</h2>
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-amber-200/50 dark:hover:bg-amber-800/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                  aria-label="More information"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="max-w-sm text-sm" align="start">
-                <p className="text-muted-foreground">
-                  Changes here affect project timelines and reports. All edits are logged as immutable
-                  change-of-plan events.
-                </p>
-              </PopoverContent>
-            </Popover>
-          </div>
+        <div className="flex items-center gap-1.5 rounded-lg border bg-amber-50/80 dark:bg-amber-900/20 px-2.5 py-1.5 text-xs font-medium text-foreground">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          <span>Planning mode</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
+                aria-label="More information"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <p>Changes here affect project timelines and reports. All edits are logged as immutable change-of-plan events.</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -353,255 +436,311 @@ export default function ProjectPlanningPage() {
         <div className="space-y-6 xl:col-span-2">
           {/* 1️⃣ Planting Date Planning */}
           <div className="fv-card space-y-4">
-            <h2 className="text-lg font-semibold">Planting Date Planning</h2>
-            <p className="text-sm text-muted-foreground">
-              Plan and adjust the season start date. Any change is recorded as a change of plan and
-              future stages are recalculated, while completed stages are preserved.
-            </p>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">Planting Date Planning</h2>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
+                      aria-label="More information"
+                    >
+                      <Info className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    <p>Plan and adjust the season start date. Any change is recorded as a change of plan and future stages are recalculated, while completed stages are preserved.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              {hasPlantingDate && (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={() => setChangePlantingModalOpen(true)}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+            {!hasPlantingDate ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSavePlantingDate(e);
+                }}
+                className="space-y-4"
+              >
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Current planting date</label>
-                  <div className="fv-input bg-muted/60 flex items-center gap-2 text-sm">
-                    <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                    <span>{formatDate(project.plantingDate)}</span>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Planned planting date</label>
+                  <label className="text-sm font-medium text-foreground">Planting date</label>
                   <input
                     type="date"
                     className="fv-input"
-                    disabled={!canEdit}
                     value={plantingDateInput}
                     onChange={(e) => setPlantingDateInput(e.target.value)}
+                    required
                   />
                 </div>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="fv-btn fv-btn--secondary"
-                  disabled={!canEdit}
-                  onClick={() => setChangePlantingModalOpen(true)}
-                >
-                  Change plan
+                <button type="submit" className="fv-btn fv-btn--primary" disabled={savingPlanting || !plantingDateInput}>
+                  {savingPlanting ? 'Saving…' : 'Set planting date'}
                 </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium">{formatDate(project.plantingDate)}</span>
               </div>
-            </div>
+            )}
 
-            <Dialog open={changePlantingModalOpen} onOpenChange={setChangePlantingModalOpen}>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Change planting plan</DialogTitle>
-                </DialogHeader>
-                <form
-                  onSubmit={(e) => {
-                    handleSavePlantingDate(e);
-                  }}
-                  className="space-y-4"
+            {changePlantingModalOpen && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+                onClick={() => { setChangePlantingModalOpen(false); setPlantingReason(''); }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="planting-modal-title"
+              >
+                <div
+                  className="bg-card border border-border rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Planned planting date</label>
-                    <input
-                      type="date"
-                      className="fv-input w-full"
-                      value={plantingDateInput}
-                      onChange={(e) => setPlantingDateInput(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Reason for change</label>
-                    <textarea
-                      className="fv-input w-full resize-none"
-                      rows={3}
-                      value={plantingReason}
-                      onChange={(e) => setPlantingReason(e.target.value)}
-                      placeholder="E.g. delayed rains, seed delivery delay, field not ready..."
-                      required
-                    />
-                  </div>
-                  <DialogFooter>
-                    <button
-                      type="button"
-                      className="fv-btn fv-btn--secondary"
-                      onClick={() => {
-                        setChangePlantingModalOpen(false);
-                        setPlantingReason('');
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="fv-btn fv-btn--primary"
-                      disabled={savingPlanting}
-                    >
-                      {savingPlanting ? 'Saving…' : 'Save Change'}
-                    </button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+                  <h2 id="planting-modal-title" className="text-lg font-semibold">Change planting plan</h2>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSavePlantingDate(e);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Planned planting date</label>
+                      <input
+                        type="date"
+                        className="fv-input w-full"
+                        value={plantingDateInput}
+                        onChange={(e) => setPlantingDateInput(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Reason for change</label>
+                      <textarea
+                        className="fv-input w-full resize-none"
+                        rows={3}
+                        value={plantingReason}
+                        onChange={(e) => setPlantingReason(e.target.value)}
+                        placeholder="E.g. delayed rains, seed delivery delay, field not ready..."
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        className="fv-btn fv-btn--secondary"
+                        onClick={() => { setChangePlantingModalOpen(false); setPlantingReason(''); }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="fv-btn fv-btn--primary"
+                        disabled={savingPlanting}
+                      >
+                        {savingPlanting ? 'Saving…' : 'Save Change'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2️⃣ Seed / Variety Planning */}
           <div className="fv-card space-y-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    aria-label="More information"
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="max-w-sm text-sm" align="start">
-                  <p className="text-muted-foreground">
-                    Capture the exact seed, variety, supplier, and batch. This enables yield analysis and
-                    traceability across seasons.
-                  </p>
-                </PopoverContent>
-              </Popover>
-            </div>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Seed name</label>
-                  <input
-                    className="fv-input"
-                    disabled={!canEdit}
-                    value={seedName}
-                    onChange={(e) => setSeedName(e.target.value)}
-                    placeholder="e.g. Hybrid Tomato X123"
-                    required
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Variety</label>
-                  <input
-                    className="fv-input"
-                    value={seedVariety}
-                    onChange={(e) => setSeedVariety(e.target.value)}
-                    placeholder="e.g. Indeterminate salad type"
-                  />
-                </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
+                      aria-label="More information"
+                    >
+                      <Info className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    <p>Capture the exact seed, variety, supplier, and batch. This enables yield analysis and traceability across seasons.</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Supplier</label>
-                  <input
-                    className="fv-input"
-                    disabled={!canEdit}
-                    value={seedSupplier}
-                    onChange={(e) => setSeedSupplier(e.target.value)}
-                    placeholder="e.g. SeedCo, local agrovet..."
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Batch / lot number</label>
-                  <input
-                    className="fv-input"
-                    value={seedBatch}
-                    onChange={(e) => setSeedBatch(e.target.value)}
-                    placeholder="e.g. LOT-2026-08-1234"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end">
+              {hasExistingSeed && !editingSeed && (
                 <button
                   type="button"
-                  className="fv-btn fv-btn--secondary"
-                  disabled={!canEdit}
-                  onClick={() => setChangeSeedModalOpen(true)}
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={() => setEditingSeed(true)}
                 >
-                  Change plan
+                  Edit
                 </button>
-              </div>
+              )}
             </div>
-
-            <Dialog open={changeSeedModalOpen} onOpenChange={setChangeSeedModalOpen}>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Change seed plan</DialogTitle>
-                </DialogHeader>
-                <form
-                  onSubmit={(e) => {
-                    handleSaveSeed(e);
-                  }}
-                  className="space-y-4"
-                >
+            {!hasExistingSeed || editingSeed ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSaveSeed(e);
+                }}
+                className="space-y-4"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Seed name</label>
+                    <input
+                      className="fv-input"
+                      value={seedName}
+                      onChange={(e) => setSeedName(e.target.value)}
+                      placeholder="e.g. Hybrid Tomato X123"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Variety</label>
+                    <input
+                      className="fv-input"
+                      value={seedVariety}
+                      onChange={(e) => setSeedVariety(e.target.value)}
+                      placeholder="e.g. Indeterminate salad type"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1 relative" ref={supplierDropdownRef}>
+                    <label className="text-sm font-medium text-foreground">Supplier</label>
+                    <input
+                      ref={supplierInputRef}
+                      className="fv-input"
+                      value={seedSupplier}
+                      onChange={(e) => setSeedSupplier(e.target.value)}
+                      onFocus={() => setSupplierDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                      placeholder="Type to search or select supplier..."
+                      autoComplete="off"
+                    />
+                    {supplierDropdownOpen && (
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-popover shadow-lg max-h-48 overflow-y-auto">
+                        {filteredSuppliersForInput.length > 0 ? (
+                          <ul className="py-1">
+                            {filteredSuppliersForInput.map((s) => (
+                              <li key={s.id}>
+                                <button
+                                  type="button"
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
+                                  onMouseDown={(e) => { e.preventDefault(); setSeedSupplier(s.name); setSupplierDropdownOpen(false); supplierInputRef.current?.blur(); }}
+                                >
+                                  {s.name}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : noSupplierMatch ? (
+                          <div className="px-3 py-3 text-sm">
+                            <p className="text-muted-foreground mb-2">No supplier found</p>
+                            <button
+                              type="button"
+                              className="fv-btn fv-btn--primary text-xs inline-flex items-center gap-1"
+                              onMouseDown={(e) => { e.preventDefault(); handleAddNewSupplier(); }}
+                              disabled={addingSupplier}
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {addingSupplier ? 'Adding…' : `Add "${seedSupplier.trim()}" as supplier`}
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">Type to search suppliers</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Batch / lot number</label>
+                    <input
+                      className="fv-input"
+                      value={seedBatch}
+                      onChange={(e) => setSeedBatch(e.target.value)}
+                      placeholder="e.g. LOT-2026-08-1234"
+                    />
+                  </div>
+                </div>
+                {hasExistingSeed && editingSeed && (
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-foreground">Reason for change</label>
                     <textarea
                       className="fv-input w-full resize-none"
-                      rows={3}
+                      rows={2}
                       value={seedReason}
                       onChange={(e) => setSeedReason(e.target.value)}
-                      placeholder="E.g. switching to disease-resistant variety, new supplier, trialing new hybrid..."
+                      placeholder="E.g. switching variety, new supplier..."
                       required
                     />
                   </div>
-                  <DialogFooter>
+                )}
+                <div className="flex justify-end gap-2">
+                  {hasExistingSeed && editingSeed && (
                     <button
                       type="button"
                       className="fv-btn fv-btn--secondary"
-                      onClick={() => {
-                        setChangeSeedModalOpen(false);
-                        setSeedReason('');
-                      }}
+                      onClick={() => { setEditingSeed(false); setSeedReason(''); }}
                     >
                       Cancel
                     </button>
-                    <button
-                      type="submit"
-                      className="fv-btn fv-btn--primary"
-                      disabled={savingSeed}
-                    >
-                      {savingSeed ? 'Saving…' : 'Save Seed Plan'}
-                    </button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+                  )}
+                  <button type="submit" className="fv-btn fv-btn--primary" disabled={savingSeed || !seedName.trim() || (hasExistingSeed && editingSeed && !seedReason.trim())}>
+                    {savingSeed ? 'Saving…' : hasExistingSeed ? 'Save changes' : 'Save seed plan'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-2 rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm">
+                <p><span className="text-muted-foreground">Seed:</span> <span className="font-medium">{seedName || '—'}</span></p>
+                <p><span className="text-muted-foreground">Variety:</span> <span className="font-medium">{seedVariety || '—'}</span></p>
+                <p><span className="text-muted-foreground">Supplier:</span> <span className="font-medium">{seedSupplier || '—'}</span></p>
+                <p><span className="text-muted-foreground">Batch:</span> <span className="font-medium">{seedBatch || '—'}</span></p>
+              </div>
+            )}
+
           </div>
 
           {/* 3️⃣ Pre-season / planned challenges */}
           <div className="fv-card space-y-4">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-semibold">Pre-season / Planned Challenges</h2>
-              <Popover>
-                <PopoverTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     type="button"
-                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
                     aria-label="More information"
                   >
                     <Info className="h-4 w-4" />
                   </button>
-                </PopoverTrigger>
-                <PopoverContent className="max-w-sm text-sm" align="start">
-                  <p className="text-muted-foreground">
-                    Record anticipated risks such as pest pressure, late rains, or labour constraints. These
-                    are separate from actual season challenges and help compare plan vs reality.
-                  </p>
-                </PopoverContent>
-              </Popover>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p>Record anticipated risks such as pest pressure, late rains, or labour constraints. These are separate from actual season challenges and help compare plan vs reality.</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex flex-col md:flex-row gap-2">
               <input
                 className="fv-input flex-1"
-                disabled={!canEdit}
                 placeholder="E.g. High whitefly pressure expected in early vegetative stage"
                 value={newChallenge}
                 onChange={(e) => setNewChallenge(e.target.value)}
               />
               <button
+                type="button"
                 className="fv-btn fv-btn--secondary"
-                disabled={!canEdit || savingChallenge}
+                disabled={savingChallenge}
                 onClick={handleAddExpectedChallenge}
               >
                 {savingChallenge ? 'Adding…' : 'Add'}

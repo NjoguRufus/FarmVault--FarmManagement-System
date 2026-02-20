@@ -46,12 +46,12 @@ export function AIChatButton() {
           isOpen && 'hidden'
         )}
       >
-        <Bot className="h-6 w-6" />
+        <Bot className="h-5 w-5" />
       </button>
 
       {/* Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-96 h-[500px] bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-fade-in">
+        <div className="fixed right-4 bottom-[5.5rem] md:bottom-6 md:right-6 z-50 w-96 h-[500px] bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-primary text-primary-foreground">
             <div className="flex items-center gap-2">

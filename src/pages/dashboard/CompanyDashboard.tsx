@@ -1,119 +1,119 @@
-import React from 'react';
-import { DollarSign, TrendingUp, Package, Wallet, Calendar as CalendarIcon } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ProjectsTable } from '@/components/dashboard/ProjectsTable';
-import { InventoryOverview, RecentTransactions, RecentTransactionItem, CropStageSection } from '@/components/dashboard/DashboardWidgets';
+import {
+  InventoryOverview,
+  RecentTransactions,
+  RecentTransactionItem,
+  CropStageSection,
+} from '@/components/dashboard/DashboardWidgets';
 import { InventoryItem, CropStage } from '@/types';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
-import { Company, Expense, Harvest, Project, Sale } from '@/types';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Expense, Harvest, Project, Sale } from '@/types';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 import { toDate } from '@/lib/dateUtils';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
+import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
+import { NewOperationMenu } from '@/components/dashboard/NewOperationMenu';
 
 export function CompanyDashboard() {
-  const { activeProject } = useProject();
+  const { activeProject, setActiveProject } = useProject();
   const { user } = useAuth();
-  const [projectFilter, setProjectFilter] = React.useState<'all' | 'selected'>('selected');
+  const isMobile = useIsMobile();
+  const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
   const companyId = user?.companyId || '';
-  const { data: allProjects = [] } = useCollection<Project>('dashboard-projects', 'projects');
+  const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
+    'dashboard-projects',
+    'projects'
+  );
   const { data: allExpenses = [] } = useCollection<Expense>('dashboard-expenses', 'expenses');
   const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests');
   const { data: allSales = [] } = useCollection<Sale>('dashboard-sales', 'sales');
-  const { data: allInventory = [] } = useCollection<InventoryItem>('dashboard-inventory', 'inventoryItems');
-  const { data: allStages = [] } = useCollection<CropStage>('dashboard-stages', 'projectStages');
+  const { data: allInventory = [] } = useCollection<InventoryItem>(
+    'dashboard-inventory',
+    'inventoryItems'
+  );
+  const { data: allStages = [] } = useCollection<CropStage>(
+    'dashboard-stages',
+    'projectStages'
+  );
 
-  const companyProjects = companyId
-    ? allProjects.filter(p => p.companyId === companyId)
-    : allProjects;
+  const companyProjects = useMemo(
+    () => (companyId ? allProjects.filter((p) => p.companyId === companyId) : allProjects),
+    [allProjects, companyId]
+  );
 
-  // Filter by project if selected, otherwise show all company data
-  const filteredExpenses = React.useMemo(() => {
-    let filtered = companyId
-      ? allExpenses.filter(e => e.companyId === companyId)
-      : allExpenses;
-    
+  const filteredExpenses = useMemo(() => {
+    let filtered = companyId ? allExpenses.filter((e) => e.companyId === companyId) : allExpenses;
     if (projectFilter === 'selected' && activeProject) {
-      filtered = filtered.filter(e => e.projectId === activeProject.id);
+      filtered = filtered.filter((e) => e.projectId === activeProject.id);
     }
     return filtered;
   }, [allExpenses, companyId, activeProject, projectFilter]);
 
-  const filteredHarvests = React.useMemo(() => {
-    let filtered = companyId
-      ? allHarvests.filter(h => h.companyId === companyId)
-      : allHarvests;
-    
+  const filteredHarvests = useMemo(() => {
+    let filtered = companyId ? allHarvests.filter((h) => h.companyId === companyId) : allHarvests;
     if (projectFilter === 'selected' && activeProject) {
-      filtered = filtered.filter(h => h.projectId === activeProject.id);
+      filtered = filtered.filter((h) => h.projectId === activeProject.id);
     }
     return filtered;
   }, [allHarvests, companyId, activeProject, projectFilter]);
 
-  const filteredSales = React.useMemo(() => {
-    let filtered = companyId
-      ? allSales.filter(s => s.companyId === companyId)
-      : allSales;
-    
+  const filteredSales = useMemo(() => {
+    let filtered = companyId ? allSales.filter((s) => s.companyId === companyId) : allSales;
     if (projectFilter === 'selected' && activeProject) {
-      filtered = filtered.filter(s => s.projectId === activeProject.id);
+      filtered = filtered.filter((s) => s.projectId === activeProject.id);
     }
     return filtered;
   }, [allSales, companyId, activeProject, projectFilter]);
 
-  const filteredProjects = React.useMemo(() => {
-    if (projectFilter === 'selected' && activeProject) {
-      return [activeProject];
-    }
+  const filteredProjects = useMemo(() => {
+    if (projectFilter === 'selected' && activeProject) return [activeProject];
     return companyProjects;
   }, [companyProjects, activeProject, projectFilter]);
 
-  // Filter inventory and stages by company/project
-  const filteredInventory = React.useMemo(() => {
-    let filtered = companyId
-      ? allInventory.filter(i => i.companyId === companyId)
+  const filteredInventory = useMemo(() => {
+    const filtered = companyId
+      ? allInventory.filter((i) => i.companyId === companyId)
       : allInventory;
-    
-    if (projectFilter === 'selected' && activeProject) {
-      // For inventory, we might want to show all company inventory, but for now keep it company-wide
-      // You can add project-specific filtering if needed
-    }
     return filtered;
-  }, [allInventory, companyId, activeProject, projectFilter]);
+  }, [allInventory, companyId]);
 
-  const filteredStages = React.useMemo(() => {
-    let filtered = companyId
-      ? allStages.filter(s => s.companyId === companyId)
-      : allStages;
-    
+  const filteredStages = useMemo(() => {
+    let filtered = companyId ? allStages.filter((s) => s.companyId === companyId) : allStages;
     if (projectFilter === 'selected' && activeProject) {
-      filtered = filtered.filter(s => s.projectId === activeProject.id);
+      filtered = filtered.filter((s) => s.projectId === activeProject.id);
     }
     return filtered;
   }, [allStages, companyId, activeProject, projectFilter]);
 
-  // Always show crop stages for the currently selected project in the widget
-  const activeProjectStages = React.useMemo(() => {
+  const activeProjectStages = useMemo(() => {
     if (!activeProject) return [];
     return allStages.filter(
-      (s) => s.companyId === companyId && s.projectId === activeProject.id,
+      (s) => s.companyId === companyId && s.projectId === activeProject.id
     );
   }, [allStages, companyId, activeProject]);
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalHarvest = filteredHarvests.reduce((sum, h) => sum + h.quantity, 0);
   const totalSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
   const netBalance = totalSales - totalExpenses;
-  
-  // Calculate total budget from filtered projects
   const totalBudget = filteredProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
   const remainingBudget = totalBudget - totalExpenses;
 
-    // Recent transactions: merge sales and expenses, sort by date desc (real data)
-  const recentTransactions = React.useMemo((): RecentTransactionItem[] => {
+  const recentTransactions = useMemo((): RecentTransactionItem[] => {
     const items: RecentTransactionItem[] = [];
     filteredSales.forEach((s) => {
       const d = toDate(s.date);
@@ -139,22 +139,17 @@ export function CompanyDashboard() {
     return items.sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 15);
   }, [filteredSales, filteredExpenses]);
 
-  const expensesByCategory = Object.values(
-    filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-      acc[e.category] = (acc[e.category] || 0) + e.amount;
-      return acc;
-    }, {}),
-  ).length
-    ? Object.entries(
-        filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-          acc[e.category] = (acc[e.category] || 0) + e.amount;
-          return acc;
-        }, {}),
-      ).map(([category, amount]) => ({ category, amount }))
-    : [];
+  const expensesByCategory = useMemo(() => {
+    const acc = filteredExpenses.reduce<Record<string, number>>((a, e) => {
+      a[e.category] = (a[e.category] || 0) + e.amount;
+      return a;
+    }, {});
+    return Object.keys(acc).length
+      ? Object.entries(acc).map(([category, amount]) => ({ category, amount }))
+      : [];
+  }, [filteredExpenses]);
 
-  // Build activity data for bar chart: last 6 months, expenses + sales per month
-  const activityChartData = React.useMemo(() => {
+  const activityChartData = useMemo(() => {
     const months: { month: string; expenses: number; sales: number }[] = [];
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
@@ -179,37 +174,56 @@ export function CompanyDashboard() {
     return months;
   }, [filteredExpenses, filteredSales]);
 
+  const firstName = user?.name?.trim().split(/\s+/)[0] || null;
+
+  const handleProjectChange = useCallback(
+    (value: string) => {
+      if (value === 'all') {
+        setProjectFilter('all');
+        setActiveProject(null);
+      } else {
+        const proj = companyProjects.find((p) => p.id === value);
+        if (proj) {
+          setActiveProject(proj);
+          setProjectFilter('selected');
+        }
+      }
+    },
+    [companyProjects, setActiveProject]
+  );
+
+  if (projectsLoading) {
+    return <DashboardSkeleton />;
+  }
+
+  const projectSelectorValue =
+    projectFilter === 'selected' && activeProject ? activeProject.id : 'all';
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Company Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Overview of all farm operations and metrics
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select 
-            value={projectFilter} 
-            onValueChange={(value) => setProjectFilter(value as 'all' | 'selected')}
-          >
-            <SelectTrigger className="w-40 text-sm">
-              <SelectValue placeholder="Filter" />
+      {/* Unified header: Greeting + Project selector + New Operation (desktop & mobile) */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <DashboardGreeting firstName={firstName} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
+            <SelectTrigger className="h-9 w-[140px] sm:w-[180px] rounded-xl border border-border/50 bg-card/80 text-sm">
+              <SelectValue placeholder="Project" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="selected">
-                {activeProject ? activeProject.name : 'Selected Project'}
-              </SelectItem>
               <SelectItem value="all">All Projects</SelectItem>
+              {companyProjects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          <NewOperationMenu variant={isMobile ? 'mobile' : 'default'} />
         </div>
       </div>
 
-      {/* Stats Grid - Compact and Mobile Responsive */}
+      {/* Stats Grid */}
       <div className="space-y-3">
-        {/* Row 1: Total Revenue and Total Expenses (same row on desktop) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <StatCard
             title="Total Revenue"
@@ -230,7 +244,6 @@ export function CompanyDashboard() {
             compact
           />
         </div>
-        {/* Row 2: Profit and Loss + Remaining Budget (side by side on mobile) */}
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             title="Profit and Loss"
@@ -253,7 +266,7 @@ export function CompanyDashboard() {
         </div>
       </div>
 
-      {/* Charts Row - Recent Activity and Expenses Category (same row on desktop) */}
+      {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <ActivityChart data={activityChartData} />
         <ExpensesPieChart data={expensesByCategory} />
