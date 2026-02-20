@@ -1,31 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, ShieldCheck, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap } from 'lucide-react';
 import { registerCompanyAdmin } from '@/services/authService';
 import { createCompany, createCompanyUserProfile } from '@/services/companyService';
 import { SUBSCRIPTION_PLANS } from '@/config/plans';
 import { OnboardingHeader } from '@/components/onboarding/OnboardingHeader';
 import { OnboardingNavButtons } from '@/components/onboarding/OnboardingNavButtons';
 import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
-const STEPS = 3;
+const STEPS = 4;
 
 export default function SetupCompany() {
   const navigate = useNavigate();
   const location = useLocation();
   const statePlan = (location.state as { plan?: string })?.plan;
-  const selectedPlan =
+  const initialPlan =
     statePlan && ['starter', 'professional', 'enterprise'].includes(statePlan)
       ? statePlan
       : null;
 
-  useEffect(() => {
-    if (!selectedPlan) {
-      navigate('/choose-plan', { replace: true });
-    }
-  }, [selectedPlan, navigate]);
-
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(initialPlan);
   const [step, setStep] = useState(1);
+
+  useEffect(() => {
+    if (step === 4 && selectedPlan === null) {
+      setSelectedPlan('professional');
+    }
+  }, [step, selectedPlan]);
   const [companyName, setCompanyName] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
   const [adminName, setAdminName] = useState('');
@@ -37,7 +39,9 @@ export default function SetupCompany() {
   const [success, setSuccess] = useState(false);
 
   const planLabel =
-    SUBSCRIPTION_PLANS.find((p) => p.value === selectedPlan)?.name ?? selectedPlan;
+    selectedPlan
+      ? SUBSCRIPTION_PLANS.find((p) => p.value === selectedPlan)?.name ?? selectedPlan
+      : null;
 
   // Step 1 validation
   const step1Valid =
@@ -65,6 +69,10 @@ export default function SetupCompany() {
       return;
     }
     if (step === 3) {
+      setStep(4);
+      return;
+    }
+    if (step === 4 && selectedPlan) {
       await handleCreateAccount();
     }
   };
@@ -105,7 +113,6 @@ export default function SetupCompany() {
     navigate('/dashboard', { replace: true });
   };
 
-  if (!selectedPlan) return null;
 
   // Success state screen
   if (success) {
@@ -138,10 +145,13 @@ export default function SetupCompany() {
     );
   }
 
+  const step4Valid = selectedPlan != null;
+
   const canContinue =
     (step === 1 && step1Valid) ||
     (step === 2 && step2Valid) ||
-    (step === 3 && !loading);
+    (step === 3) ||
+    (step === 4 && step4Valid && !loading);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-8 sm:py-12">
@@ -155,9 +165,11 @@ export default function SetupCompany() {
                 alt="FarmVault"
                 className="h-10 w-auto rounded-lg object-contain bg-sidebar-primary/10 p-1"
               />
-              <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                Plan: {planLabel}
-              </span>
+              {planLabel && (
+                <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                  Plan: {planLabel}
+                </span>
+              )}
             </div>
 
             {/* Step Header */}
@@ -167,14 +179,18 @@ export default function SetupCompany() {
                   ? 'Company Details'
                   : step === 2
                     ? 'Admin Account'
-                    : 'Review & Create'
+                    : step === 3
+                      ? 'Review'
+                      : 'Choose Your Plan'
               }
               subtitle={
                 step === 1
                   ? 'Tell us about your farm business'
                   : step === 2
                     ? 'Create your admin login credentials'
-                    : 'Review your details before creating your account'
+                    : step === 3
+                      ? 'Review your details before selecting a plan'
+                      : 'Select a subscription plan to continue'
               }
               step={step}
               totalSteps={STEPS}
@@ -321,10 +337,61 @@ export default function SetupCompany() {
                       <span className="text-muted-foreground">Admin Email</span>
                       <span className="font-medium">{adminEmail}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Plan</span>
-                      <span className="font-medium">{planLabel}</span>
-                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step === 4 && (
+                <div className="space-y-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Pricing
+                  </p>
+                  <div className="grid sm:grid-cols-3 gap-4">
+                    {SUBSCRIPTION_PLANS.map((plan) => {
+                      const isSelected = selectedPlan === plan.value;
+                      return (
+                        <button
+                          key={plan.value}
+                          type="button"
+                          onClick={() => setSelectedPlan(plan.value)}
+                          className={cn(
+                            'fv-card text-left transition-all duration-300 relative rounded-xl',
+                            isSelected ? 'ring-2 ring-primary ring-offset-2' : 'hover:border-primary/50',
+                            plan.popular && 'border-fv-gold/50'
+                          )}
+                        >
+                          {plan.popular && (
+                            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                              <span className="fv-badge fv-badge--gold inline-flex items-center gap-1 text-xs px-2 py-0.5">
+                                <Zap className="h-3 w-3" /> Most Popular
+                              </span>
+                            </div>
+                          )}
+                          <div className="mb-3 pt-2">
+                            <h3 className="text-lg font-bold text-foreground">{plan.name}</h3>
+                            <p className="text-xs text-muted-foreground mt-1">{plan.description}</p>
+                            <div className="mt-3">
+                              <span className="text-xl font-bold">{plan.price}</span>
+                              <span className="text-muted-foreground text-xs">{plan.period}</span>
+                            </div>
+                          </div>
+                          <ul className="space-y-1.5 mb-3">
+                            {plan.features.slice(0, 4).map((f) => (
+                              <li key={f} className="flex items-center gap-2 text-xs">
+                                <Check className="h-3.5 w-3.5 text-fv-success shrink-0" />
+                                <span>{f}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className={cn(
+                            'py-2 rounded-lg text-center text-sm font-medium',
+                            isSelected ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
+                          )}>
+                            {isSelected ? 'Selected' : 'Click to select'}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -338,7 +405,7 @@ export default function SetupCompany() {
               <OnboardingNavButtons
                 onBack={step > 1 ? handleBack : undefined}
                 onContinue={handleContinue}
-                continueLabel={step === 3 ? 'Create Company Account' : 'Continue'}
+                continueLabel={step === 4 ? 'Create Company Account' : 'Continue'}
                 canContinue={canContinue}
                 isLoading={loading}
                 showBack={step > 1}

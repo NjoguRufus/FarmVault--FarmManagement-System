@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package, Info } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -211,6 +211,13 @@ export default function OperationsPage() {
   }, [workLogs, workCardsForProject, totalLabourFromWorkCards]);
 
   const [addCardOpen, setAddCardOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('add') === '1') {
+      setAddCardOpen(true);
+      setSearchParams((p) => { p.delete('add'); return p; }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
   const [selectedWorkCard, setSelectedWorkCard] = useState<OperationsWorkCard | null>(null);
   const [workCardModalOpen, setWorkCardModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');

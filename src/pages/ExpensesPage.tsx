@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,6 +44,7 @@ export default function ExpensesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: allExpenses = [], isLoading } = useCollection<Expense>('expenses', 'expenses');
   const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
@@ -124,6 +125,15 @@ export default function ExpensesPage() {
   };
 
   const [addOpen, setAddOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('add') === '1') {
+      setAddOpen(true);
+      setSearchParams((p) => {
+        p.delete('add');
+        return p;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('labour');

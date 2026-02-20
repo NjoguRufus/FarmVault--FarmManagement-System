@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MoreHorizontal } from 'lucide-react';
@@ -7,6 +7,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getMainNavItems, getMoreNavItems } from '@/config/navConfig';
 import { MobileMoreDrawer } from './MobileMoreDrawer';
 
+const POP_EASING = [0.2, 0.9, 0.2, 1] as const;
+const POP_DURATION = 0.22;
+
 export function BottomNav() {
   const { user } = useAuth();
   const location = useLocation();
@@ -14,148 +17,205 @@ export function BottomNav() {
   const moreItems = getMoreNavItems(user);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const handleMoreTap = () => {
+  const tabs = useMemo(() => {
+    const list = mainItems.map((item) => ({ ...item, type: 'link' as const }));
     if (moreItems.length > 0) {
-      setMoreOpen(true);
+      list.push({
+        label: 'More',
+        path: '',
+        icon: MoreHorizontal,
+        group: 'main' as const,
+        type: 'more' as const,
+      });
     }
+    return list;
+  }, [mainItems, moreItems.length]);
+
+  const handleMoreTap = () => {
+    if (moreItems.length > 0) setMoreOpen(true);
   };
 
-  const isMoreActive = moreItems.some((item) => {
-    const itemPath = item.path.replace(/\/+/g, '/');
-    const path = location.pathname.replace(/\/+/g, '/');
-    return path === itemPath || (itemPath !== '/' && path.startsWith(itemPath + '/'));
-  });
+  const isMoreActive = useMemo(() => {
+    return moreItems.some((m) => {
+      const mp = m.path.replace(/\/+/g, '/');
+      const path = location.pathname.replace(/\/+/g, '/');
+      return path === mp || (mp !== '/' && path.startsWith(mp + '/'));
+    });
+  }, [moreItems, location.pathname]);
 
   return (
     <>
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 md:hidden flex items-center justify-around px-2 pt-2 bg-white/80 dark:bg-black/60 backdrop-blur-xl border-t border-border/50 rounded-t-2xl shadow-2xl safe-area-bottom"
-        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        className="fixed left-1/2 -translate-x-1/2 z-40 md:hidden w-[92%] max-w-[480px] rounded-[18px] min-h-[52px] flex items-center justify-around px-1 py-1.5 gap-1"
+        style={{
+          bottom: 'max(14px, calc(14px + env(safe-area-inset-bottom, 0px)))',
+          background: 'linear-gradient(to bottom, #174f3a, #0e2f22)',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+        }}
         aria-label="Bottom navigation"
       >
-        {mainItems.map((item) => {
-          const itemPath = item.path.replace(/\/+/g, '/');
-          const path = location.pathname.replace(/\/+/g, '/');
-          const isActive =
-            path === itemPath ||
-            (itemPath !== '/' && path.startsWith(itemPath + '/'));
-          const Icon = item.icon;
-
+        {tabs.map((item) => {
+          if (item.type === 'more') {
+            return (
+              <NavItem
+                key="more"
+                item={item}
+                active={isMoreActive}
+                asButton
+                onPress={handleMoreTap}
+              />
+            );
+          }
           return (
-            <NavLink
+            <NavItem
               key={item.path}
-              to={itemPath}
-              end={itemPath === '/'}
-              className={({ isActive: navActive }) => {
-                const active = navActive || isActive;
-                return cn(
-                  'relative flex flex-col items-center justify-center min-w-0 flex-1 py-3 px-2 rounded-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
-                  active && 'text-primary'
-                );
-              }}
-              aria-label={item.label}
-            >
-              {({ isActive: navActive }) => {
-                const active = navActive || isActive;
-                return (
-                  <>
-                    {active && (
-                      <motion.div
-                        layoutId="bottom-nav-pill"
-                        className="absolute inset-0 rounded-xl bg-primary/15 dark:bg-primary/20 shadow-[0_0_12px_rgba(45,74,62,0.25)] dark:shadow-[0_0_12px_rgba(45,74,62,0.35)]"
-                        transition={{
-                          type: 'spring',
-                          stiffness: 400,
-                          damping: 30,
-                        }}
-                      />
-                    )}
-                    <motion.span
-                      className="relative z-10 flex flex-col items-center gap-0.5"
-                      whileTap={{ scale: 0.9 }}
-                      animate={{
-                        scale: active ? 1.05 : 1,
-                        y: active ? -2 : 0,
-                      }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    >
-                      <Icon
-                        className={cn(
-                          'h-5 w-5 shrink-0 transition-colors',
-                          active ? 'text-primary' : 'text-muted-foreground'
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          'text-[10px] font-medium truncate max-w-full',
-                          active ? 'text-primary' : 'text-muted-foreground'
-                        )}
-                      >
-                        {item.label}
-                      </span>
-                    </motion.span>
-                  </>
-                );
-              }}
-            </NavLink>
+              item={item}
+              active={false}
+              to={item.path}
+            />
           );
         })}
-
-        {moreItems.length > 0 && (
-          <button
-            type="button"
-            onClick={handleMoreTap}
-            className={cn(
-              'relative flex flex-col items-center justify-center min-w-0 flex-1 py-3 px-2 rounded-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
-              isMoreActive && 'text-primary'
-            )}
-            aria-label="More menu"
-            aria-expanded={moreOpen}
-          >
-            {isMoreActive && (
-              <motion.div
-                layoutId="bottom-nav-pill"
-                className="absolute inset-0 rounded-xl bg-primary/15 dark:bg-primary/20 shadow-[0_0_12px_rgba(45,74,62,0.25)] dark:shadow-[0_0_12px_rgba(45,74,62,0.35)]"
-                transition={{
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 30,
-                }}
-              />
-            )}
-            <motion.span
-              className="relative z-10 flex flex-col items-center gap-0.5"
-              whileTap={{ scale: 0.9 }}
-              animate={{
-                scale: isMoreActive ? 1.05 : 1,
-                y: isMoreActive ? -2 : 0,
-              }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-            >
-              <MoreHorizontal
-                className={cn(
-                  'h-5 w-5 shrink-0 transition-colors',
-                  isMoreActive ? 'text-primary' : 'text-muted-foreground'
-                )}
-              />
-              <span
-                className={cn(
-                  'text-[10px] font-medium',
-                  isMoreActive ? 'text-primary' : 'text-muted-foreground'
-                )}
-              >
-                More
-              </span>
-            </motion.span>
-          </button>
-        )}
       </nav>
 
-      <MobileMoreDrawer
-        open={moreOpen}
-        onOpenChange={setMoreOpen}
-        items={moreItems}
-      />
+      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={moreItems} />
     </>
+  );
+}
+
+const GLASS_BG = 'rgba(255, 255, 255, 0.2)';
+const ACTIVE_SHADOW =
+  '0 8px 24px rgba(0,0,0,0.35), 0 4px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.5)';
+const POP_KEYFRAMES = {
+  scale: [1, 1.08, 1],
+  y: [0, -4, -2],
+};
+const POP_TRANSITION = {
+  duration: POP_DURATION,
+  ease: POP_EASING,
+};
+
+function NavItem({
+  item,
+  active: activeProp,
+  to,
+  asButton,
+  onPress,
+}: {
+  item: { label: string; icon: React.ComponentType<{ className?: string }> };
+  active?: boolean;
+  to?: string;
+  asButton?: boolean;
+  onPress?: () => void;
+}) {
+  const Icon = item.icon;
+
+  if (asButton && onPress) {
+    return (
+      <motion.button
+        type="button"
+        onClick={onPress}
+        className={cn(
+          'flex flex-1 min-w-0 min-h-[40px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
+          activeProp && 'backdrop-blur-xl border border-white/30'
+        )}
+        aria-label={item.label}
+        initial={false}
+        key={activeProp ? 'active' : 'inactive'}
+        animate={
+          activeProp
+            ? {
+                background: GLASS_BG,
+                boxShadow: ACTIVE_SHADOW,
+                ...POP_KEYFRAMES,
+              }
+            : {
+                background: 'transparent',
+                boxShadow: 'none',
+                y: 0,
+                scale: 1,
+              }
+        }
+        transition={POP_TRANSITION}
+        whileTap={{ scale: 0.98 }}
+      >
+        <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[40px] py-1 px-2">
+          <span className="flex items-center justify-center h-5 w-5 shrink-0">
+            <Icon
+              className={cn(
+                'h-5 w-5 shrink-0 transition-colors duration-200',
+                activeProp ? 'text-white' : 'text-white/70'
+              )}
+            />
+          </span>
+          <span
+            className={cn(
+              'text-[10px] font-medium truncate max-w-[72px] text-center transition-colors duration-200',
+              activeProp ? 'text-white' : 'text-white/70'
+            )}
+          >
+            {item.label}
+          </span>
+        </span>
+      </motion.button>
+    );
+  }
+
+  if (!to) return null;
+
+  const itemPath = to.replace(/\/+/g, '/');
+
+  return (
+    <NavLink
+      to={itemPath}
+      end={itemPath === '/'}
+        className="flex flex-1 min-w-0 min-h-[40px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+      aria-label={item.label}
+    >
+      {({ isActive }) => (
+        <motion.span
+          className={cn(
+            'flex flex-1 min-w-0 w-full h-full rounded-xl',
+            isActive && 'backdrop-blur-xl border border-white/30'
+          )}
+          initial={false}
+          key={isActive ? 'active' : 'inactive'}
+          animate={
+            isActive
+              ? {
+                  background: GLASS_BG,
+                  boxShadow: ACTIVE_SHADOW,
+                  ...POP_KEYFRAMES,
+                }
+              : {
+                  background: 'transparent',
+                  boxShadow: 'none',
+                  y: 0,
+                  scale: 1,
+                }
+          }
+          transition={POP_TRANSITION}
+          whileTap={{ scale: 0.98 }}
+        >
+          <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[40px] py-1 px-2">
+            <span className="flex items-center justify-center h-5 w-5 shrink-0">
+              <Icon
+                className={cn(
+                  'h-5 w-5 shrink-0 transition-colors duration-200',
+                  isActive ? 'text-white' : 'text-white/70'
+                )}
+              />
+            </span>
+            <span
+              className={cn(
+                'text-[10px] font-medium truncate max-w-[72px] text-center transition-colors duration-200',
+                isActive ? 'text-white' : 'text-white/70'
+              )}
+            >
+              {item.label}
+            </span>
+          </span>
+        </motion.span>
+      )}
+    </NavLink>
   );
 }

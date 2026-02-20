@@ -15,6 +15,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { Expense, Harvest, Project, Sale } from '@/types';
+import type { CropType } from '@/types';
 import {
   Select,
   SelectTrigger,
@@ -199,21 +200,36 @@ export function CompanyDashboard() {
   const projectSelectorValue =
     projectFilter === 'selected' && activeProject ? activeProject.id : 'all';
 
+  const getCropIcon = (cropType?: CropType | null) => {
+    const icons: Record<string, string> = {
+      tomatoes: '🍅',
+      'french-beans': '🌱',
+      capsicum: '🫑',
+      maize: '🌽',
+      watermelons: '🍉',
+      rice: '🍚',
+    };
+    return cropType ? icons[cropType] ?? '🌾' : '🌾';
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Unified header: Greeting + Project selector + New Operation (desktop & mobile) */}
+      {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <DashboardGreeting firstName={firstName} />
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
           <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
-            <SelectTrigger className="h-9 w-[140px] sm:w-[180px] rounded-xl border border-border/50 bg-card/80 text-sm">
+            <SelectTrigger className="h-9 w-[140px] sm:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm">
               <SelectValue placeholder="Project" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-md">
               <SelectItem value="all">All Projects</SelectItem>
               {companyProjects.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
-                  {p.name}
+                  <span className="flex items-center gap-2">
+                    <span className="text-base" aria-hidden>{getCropIcon(p.cropType)}</span>
+                    {p.name}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>

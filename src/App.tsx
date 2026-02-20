@@ -131,7 +131,7 @@ const App = () => (
               <Route path="/login" element={<LoginPage />} />
               <Route path="/choose-plan" element={<ChoosePlan />} />
               <Route path="/setup-company" element={<SetupCompany />} />
-              <Route path="/setup" element={<Navigate to="/choose-plan" replace />} />
+              <Route path="/setup" element={<Navigate to="/setup-company" replace />} />
 
               {/* Protected app routes (company-level) */}
               <Route

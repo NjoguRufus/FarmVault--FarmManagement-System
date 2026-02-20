@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, List } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,7 @@ export default function HarvestSalesPage() {
   const { activeProject } = useProject();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
   const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
@@ -146,6 +147,16 @@ export default function HarvestSalesPage() {
 
   const [harvestOpen, setHarvestOpen] = useState(false);
   const [saleOpen, setSaleOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('harvest') === '1') {
+      setHarvestOpen(true);
+      setSearchParams((p) => { p.delete('harvest'); return p; }, { replace: true });
+    }
+    if (searchParams.get('sale') === '1') {
+      setSaleOpen(true);
+      setSearchParams((p) => { p.delete('sale'); return p; }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
   const [harvestQty, setHarvestQty] = useState('');
   const [harvestUnit, setHarvestUnit] = useState('kg');
   const [harvestQuality, setHarvestQuality] = useState<'A' | 'B' | 'C'>('A');

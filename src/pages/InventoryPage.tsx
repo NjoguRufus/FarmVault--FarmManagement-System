@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Package, MoreHorizontal, AlertTriangle, ShoppingCart, Minus, Trash2, ScrollText, History, Box } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -48,6 +49,7 @@ export default function InventoryPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: allInventory = [], isLoading } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
   const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
   const { data: neededItems = [] } = useCollection<NeededItem>('neededItems', 'neededItems');
@@ -179,6 +181,15 @@ export default function InventoryPage() {
   };
 
   const [addOpen, setAddOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('add') === '1') {
+      setAddOpen(true);
+      setSearchParams((p) => {
+        p.delete('add');
+        return p;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<string>('fertilizer');
   const [newCategoryName, setNewCategoryName] = useState('');

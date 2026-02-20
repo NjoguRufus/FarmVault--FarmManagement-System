@@ -96,8 +96,8 @@ export function MainLayout() {
       <main
         className={cn(
           'pt-16 min-h-screen transition-all duration-300',
-          // On mobile: bottom padding for fixed bottom nav + safe area
-          'pb-[max(5.5rem,calc(5.5rem+env(safe-area-inset-bottom)))] md:pb-0',
+          // On mobile: bottom padding so content never hides behind bottom nav (110px)
+          'pb-[110px] md:pb-0',
           // On desktop: add padding based on sidebar state
           sidebarCollapsed ? 'md:pl-16' : 'md:pl-60'
         )}
