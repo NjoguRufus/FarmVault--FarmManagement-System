@@ -3,15 +3,20 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee } from '@/types';
+import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 
 interface RequireBrokerProps {
   children: React.ReactElement;
 }
 
 export function RequireBroker({ children }: RequireBrokerProps) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, authReady } = useAuth();
   const location = useLocation();
   const { data: employees = [], isLoading: employeesLoading } = useCollection<Employee>('employees', 'employees');
+
+  if (!authReady) {
+    return <AuthLoadingScreen />;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
@@ -36,11 +41,7 @@ export function RequireBroker({ children }: RequireBrokerProps) {
       }
     } else {
       // Still loading employees: show loading so we don't redirect to /dashboard and cause glitch
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-background">
-          <div className="text-muted-foreground">Loading…</div>
-        </div>
-      );
+      return <AuthLoadingScreen />;
     }
   }
 

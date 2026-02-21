@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
+      strategies: "generateSW",
       registerType: "autoUpdate",
       includeAssets: [
         "favicon.ico",
@@ -24,48 +25,46 @@ export default defineConfig(({ mode }) => ({
         "placeholder.svg",
         "farm-background-desktop.jpg",
         "farm-backgroundmobile.jpg",
+        "icons/icon-192.png",
+        "icons/icon-512.png",
+        "icons/icon-512-maskable.png",
       ],
       manifest: {
         name: "FarmVault",
         short_name: "FarmVault",
         description: "FarmVault smart farm management app",
-        theme_color: "#2D4A3E",
-        background_color: "#F5F1EB",
+        theme_color: "#0b1d14",
+        background_color: "#0b1d14",
         display: "standalone",
         start_url: "/",
         icons: [
           {
-            src: "favicon.ico",
-            sizes: "64x64 32x32 24x24 16x16",
-            type: "image/x-icon",
+            src: "/icons/icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
           },
           {
-            src: "placeholder.svg",
+            src: "/icons/icon-512.png",
             sizes: "512x512",
-            type: "image/svg+xml",
-            purpose: "any",
+            type: "image/png",
+          },
+          {
+            src: "/icons/icon-512-maskable.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
       },
       workbox: {
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2}"],
-        navigateFallback: "index.html",
+        navigateFallback: "/index.html",
+        navigateFallbackAllowlist: [/^\/.*/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/__/],
         runtimeCaching: [
-          {
-            urlPattern: ({ request }) => request.mode === "navigate",
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "app-pages",
-              networkTimeoutSeconds: 4,
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 7 * 24 * 60 * 60,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
           {
             urlPattern: ({ request }) =>
               ["script", "style", "image", "font", "worker"].includes(request.destination),
@@ -84,7 +83,9 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       devOptions: {
-        enabled: false,
+        enabled: mode === "development",
+        type: "module",
+        navigateFallback: "/index.html",
       },
     }),
   ].filter(Boolean),
