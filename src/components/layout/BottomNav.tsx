@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMainNavItems, getMoreNavItems } from '@/config/navConfig';
+import { getMainNavItems, getMoreNavItems, type NavItem as BottomNavItem } from '@/config/navConfig';
 import { MobileMoreDrawer } from './MobileMoreDrawer';
 
 const ACTIVE_TAB_SCALE = 1.04;
@@ -14,6 +14,7 @@ const NAV_ITEM_TRANSITION = {
   ease: 'easeInOut' as const,
 };
 const ACTIVE_TAB_SHADOW = '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
+const MAX_BOTTOM_TABS = 5;
 
 function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undefined {
   if (type === 'more') return 'mobile-nav-more';
@@ -44,13 +45,28 @@ export function BottomNav() {
     setMounted(true);
   }, []);
 
+  const visibleMainItems = useMemo(() => {
+    const slotForMore = moreItems.length > 0 || mainItems.length > MAX_BOTTOM_TABS ? 1 : 0;
+    const maxDirectTabs = Math.max(1, MAX_BOTTOM_TABS - slotForMore);
+    return mainItems.slice(0, maxDirectTabs);
+  }, [mainItems, moreItems.length]);
+
+  const drawerItems = useMemo(() => {
+    const overflowMainItems = mainItems.slice(visibleMainItems.length);
+    const deduped = new Map<string, BottomNavItem>();
+    [...moreItems, ...overflowMainItems].forEach((item) => {
+      deduped.set(item.path, item);
+    });
+    return Array.from(deduped.values());
+  }, [mainItems, moreItems, visibleMainItems.length]);
+
   const tabs = useMemo(() => {
-    const list = mainItems.map((item) => ({
+    const list = visibleMainItems.map((item) => ({
       ...item,
       type: 'link' as const,
       tourId: getBottomNavTourId(item.path, 'link'),
     }));
-    if (moreItems.length > 0) {
+    if (drawerItems.length > 0) {
       list.push({
         label: 'More',
         path: '',
@@ -61,19 +77,19 @@ export function BottomNav() {
       });
     }
     return list;
-  }, [mainItems, moreItems.length]);
+  }, [visibleMainItems, drawerItems.length]);
 
   const handleMoreTap = () => {
-    if (moreItems.length > 0) setMoreOpen(true);
+    if (drawerItems.length > 0) setMoreOpen(true);
   };
 
   const isMoreActive = useMemo(() => {
-    return moreItems.some((m) => {
+    return drawerItems.some((m) => {
       const mp = m.path.replace(/\/+/g, '/');
       const path = location.pathname.replace(/\/+/g, '/');
       return path === mp || (mp !== '/' && path.startsWith(mp + '/'));
     });
-  }, [moreItems, location.pathname]);
+  }, [drawerItems, location.pathname]);
 
   const navNode = (
     <div
@@ -125,7 +141,7 @@ export function BottomNav() {
   return (
     <>
       {mounted ? createPortal(navNode, document.body) : null}
-      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={moreItems} />
+      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={drawerItems} />
     </>
   );
 }
