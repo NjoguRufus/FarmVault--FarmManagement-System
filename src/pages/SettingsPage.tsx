@@ -7,6 +7,7 @@ import { db } from '@/lib/firebase';
 import { deleteAllCompanyData } from '@/services/companyDataService';
 import { updateCompany } from '@/services/companyService';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { useTour } from '@/onboarding/TourProvider';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -24,6 +25,7 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { addNotification } = useNotifications();
+  const { startTour } = useTour();
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -114,6 +116,25 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">
           Edit your company details and preferences
         </p>
+      </div>
+
+      <div className="fv-card">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Guided Tour</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Walk through the main pages with a guided, step-by-step tour.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="fv-btn fv-btn--secondary"
+            onClick={() => startTour()}
+            data-tour="settings-take-tour"
+          >
+            Take a Tour
+          </button>
+        </div>
       </div>
 
       {/* Company settings - editable */}

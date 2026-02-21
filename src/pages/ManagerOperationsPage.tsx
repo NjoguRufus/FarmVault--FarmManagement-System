@@ -1014,7 +1014,7 @@ export default function ManagerOperationsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4" data-tour="manager-operations-header">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Operations Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -1027,6 +1027,7 @@ export default function ManagerOperationsPage() {
         </div>
         <div className="flex gap-2">
           <Button
+            data-tour="manager-log-work-button"
             onClick={() => {
               setLogDailyWorkOpen(true);
               setLogDate(new Date());
@@ -1053,7 +1054,7 @@ export default function ManagerOperationsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-tour="manager-operations-stats">
         <div
           onClick={() => {
             setDrawerType('total');
@@ -1118,7 +1119,7 @@ export default function ManagerOperationsPage() {
 
       {/* Work Cards (Admin or manager created; manager only submits execution for admin cards) */}
       {user && (user.companyId || managerIdsArray.length > 0) && (
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="manager-work-cards">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-foreground">My Work Cards</h2>
             <Popover>

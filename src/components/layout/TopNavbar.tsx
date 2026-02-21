@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { useTour } from '@/onboarding/TourProvider';
 import { cn, getDisplayRole } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -22,6 +23,7 @@ interface TopNavbarProps {
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
   const { user, logout } = useAuth();
+  const { startTour } = useTour();
   const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
   const { notifications, markAsRead, markAllRead, unreadCount } = useNotifications();
@@ -79,7 +81,10 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </div>
           ) : (
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-border bg-background px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm hover:bg-muted transition-colors">
+            <DropdownMenuTrigger
+              data-tour="project-selector"
+              className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-border bg-background px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm hover:bg-muted transition-colors"
+            >
               {activeProject ? (
                 <>
                   <span className="text-base sm:text-lg">{getCropEmoji(activeProject.cropType)}</span>
@@ -214,6 +219,14 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => startTour()}
+                data-tour="take-tour-menu-item"
+              >
+                <HelpCircle className="mr-2 h-4 w-4" />
+                Take a Tour
               </DropdownMenuItem>
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/support')}>
                 <HelpCircle className="mr-2 h-4 w-4" />

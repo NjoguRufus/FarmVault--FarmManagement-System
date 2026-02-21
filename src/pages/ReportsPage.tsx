@@ -61,7 +61,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Report Types: 2 per row on mobile (compact), full content on desktop */}
-      <div className="grid grid-cols-2 md:grid-cols-2 gap-3 md:gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 gap-3 md:gap-6" data-tour="reports-export">
         {reportTypes.map((report) => (
           <div key={report.title} className="fv-card hover:shadow-card-hover transition-shadow cursor-pointer p-3 md:p-4 flex flex-col gap-3">
             <div className="flex items-start gap-2 md:gap-4">

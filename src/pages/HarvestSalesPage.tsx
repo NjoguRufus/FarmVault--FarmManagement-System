@@ -507,7 +507,10 @@ export default function HarvestSalesPage() {
           )}
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--secondary h-9 px-3 text-sm sm:h-10 sm:px-4">
+              <button
+                className="fv-btn fv-btn--secondary h-9 px-3 text-sm sm:h-10 sm:px-4"
+                data-tour="harvest-record-button"
+              >
                 <Plus className="h-4 w-4 mr-1.5" />
                 Record Harvest
               </button>
@@ -1434,7 +1437,7 @@ export default function HarvestSalesPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3" data-tour="harvest-summary">
         <SimpleStatCard
           title="Total Harvest"
           value={`${totalHarvest.toLocaleString()} kg`}

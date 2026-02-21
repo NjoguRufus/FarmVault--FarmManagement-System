@@ -133,13 +133,14 @@ export default function BrokerExpensesPage() {
         <button
           className="fv-btn fv-btn--primary flex items-center gap-2"
           onClick={() => setAddOpen(true)}
+          data-tour="broker-add-expense"
         >
           <Plus className="h-4 w-4" />
           Add Market Expense
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3" data-tour="broker-expenses-summary">
         <SimpleStatCard
           title="Total Expenses"
           value={formatCurrency(totalExpenses)}

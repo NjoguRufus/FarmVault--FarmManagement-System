@@ -996,7 +996,11 @@ export default function OperationsPage() {
         <div className="flex gap-2">
           <Dialog open={addCardOpen} onOpenChange={setAddCardOpen}>
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--primary" type="button">
+              <button
+                className="fv-btn fv-btn--primary"
+                type="button"
+                data-tour="operations-plan-work-button"
+              >
                 <Plus className="h-4 w-4" />
                 Plan Today&apos;s Work
               </button>
@@ -1188,7 +1192,7 @@ export default function OperationsPage() {
 
       {/* Work Cards (in progress only: planned, submitted, rejected) */}
       {workCardsInProgress.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="operations-work-cards">
           <div className="flex items-center gap-2">
             <h2 className="font-heading font-semibold text-foreground text-lg">Work cards</h2>
             <Popover>
@@ -1327,6 +1331,7 @@ export default function OperationsPage() {
             type="text"
             placeholder="Search work logs..."
             className="fv-input pl-10"
+            data-tour="operations-search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

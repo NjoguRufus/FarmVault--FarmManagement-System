@@ -116,7 +116,7 @@ export function BrokerDashboard() {
       </div>
 
       {/* Primary Stats – smaller and responsive on mobile */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3" data-tour="broker-dashboard-stats">
         <SimpleStatCard
           title="Total Sales (KES)"
           value={totalSales.toLocaleString()}

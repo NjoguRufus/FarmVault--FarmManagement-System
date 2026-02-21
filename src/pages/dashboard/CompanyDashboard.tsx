@@ -239,7 +239,7 @@ export function CompanyDashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="space-y-3">
+      <div className="space-y-3" data-tour="dashboard-stats">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <StatCard
             title="Total Revenue"
@@ -292,7 +292,9 @@ export function CompanyDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <CropStageSection stages={activeProject ? activeProjectStages : filteredStages} />
         <InventoryOverview inventoryItems={filteredInventory} />
-        <RecentTransactions transactions={recentTransactions} />
+        <div data-tour="recent-transactions">
+          <RecentTransactions transactions={recentTransactions} />
+        </div>
       </div>
 
       {/* Projects Table */}

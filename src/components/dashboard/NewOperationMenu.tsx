@@ -33,6 +33,7 @@ export function NewOperationMenu({ variant = 'default', className = '' }: NewOpe
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          data-tour="new-operation-button"
           size={isMobile ? 'sm' : 'default'}
           className={
             className ||

@@ -11,6 +11,24 @@ interface AppSidebarProps {
   onToggle: () => void;
 }
 
+function getSidebarTourId(path: string): string | undefined {
+  const normalized = path.replace(/\/+/g, '/');
+  const map: Record<string, string> = {
+    '/dashboard': 'nav-dashboard',
+    '/projects': 'nav-projects',
+    '/operations': 'nav-operations',
+    '/manager/operations': 'nav-operations',
+    '/inventory': 'nav-inventory',
+    '/harvest-sales': 'nav-harvest-sales',
+    '/reports': 'nav-reports',
+    '/settings': 'nav-settings',
+    '/broker': 'nav-broker-dashboard',
+    '/broker/harvest-sales': 'nav-broker-harvest-sales',
+    '/broker/expenses': 'nav-broker-expenses',
+  };
+  return map[normalized];
+}
+
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const location = useLocation();
   const { user } = useAuth();
@@ -72,6 +90,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
                 <Link
                   to={itemPath}
                   onClick={() => isMobile && onToggle()}
+                  data-tour={getSidebarTourId(itemPath)}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                     isActive

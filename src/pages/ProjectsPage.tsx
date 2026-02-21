@@ -59,6 +59,7 @@ export default function ProjectsPage() {
         <button
           className="fv-btn fv-btn--primary"
           onClick={() => navigate('/projects/new')}
+          data-tour="projects-new-button"
         >
           <Plus className="h-4 w-4" />
           New Project
@@ -96,7 +97,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Projects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-tour="projects-grid">
         {visibleProjects.map((project) => {
           const isCreating = (project as Project & { setupComplete?: boolean }).setupComplete === false;
           return (

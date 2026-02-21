@@ -295,7 +295,7 @@ export default function BrokerHarvestSalesPage() {
       </div>
 
       {/* Harvests Allocated to You – no container, list/card toggle */}
-      <div>
+      <div data-tour="broker-harvest-list">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <h3 className="text-lg font-semibold">Harvests Allocated to You</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -647,7 +647,7 @@ export default function BrokerHarvestSalesPage() {
       </Dialog>
 
       {/* Your Sales – no container, list/card toggle */}
-      <div>
+      <div data-tour="broker-sales-section">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <h3 className="text-lg font-semibold">Your Sales</h3>
           <div className="flex flex-wrap items-center gap-2">

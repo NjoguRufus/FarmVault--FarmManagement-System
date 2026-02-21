@@ -828,7 +828,7 @@ export default function InventoryPage() {
             }}
           >
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--primary">
+              <button className="fv-btn fv-btn--primary" data-tour="inventory-add-item">
                 <Plus className="h-4 w-4" />
                 Add Item
               </button>
@@ -1824,7 +1824,7 @@ export default function InventoryPage() {
       </Dialog>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-6" data-tour="inventory-overview">
         <div
           className="relative overflow-hidden rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm transition-all p-3 sm:p-4 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-gradient-to-r after:from-primary/60 after:via-primary/20 after:to-transparent"
         >
