@@ -226,6 +226,8 @@ export default function ProjectDetailsPage() {
     };
     return <span className="text-2xl" aria-hidden>{icons[type] || icons.other}</span>;
   };
+  const isPreSeasonChallenge = (challenge: SeasonChallenge) =>
+    String((challenge as any).source ?? '') === 'preseason-plan';
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'resolved':
@@ -641,6 +643,7 @@ export default function ProjectDetailsPage() {
               const stage = sortedStages.find((s) => s.stageIndex === (c as any).stageIndex);
               const challengeDate = c.dateIdentified ? normalizeDate(c.dateIdentified as any) : null;
               const isExpanded = expandedChallenges.has(c.id);
+              const preSeason = isPreSeasonChallenge(c);
               const toggleExpand = () => {
                 const next = new Set(expandedChallenges);
                 if (next.has(c.id)) next.delete(c.id);
@@ -649,7 +652,14 @@ export default function ProjectDetailsPage() {
               };
 
               return (
-                <div key={c.id} className="fv-card p-4 sm:p-5 rounded-lg border border-border/60 shadow-sm">
+                <div key={c.id} className="fv-card p-4 sm:p-5 rounded-lg border border-border/60 shadow-sm relative overflow-hidden">
+                  {preSeason && (
+                    <div className="pointer-events-none absolute right-0 top-0 h-20 w-20 overflow-hidden">
+                      <div className="absolute right-[-26px] top-[14px] rotate-45 bg-primary px-8 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-sm">
+                        PRE-SEASON
+                      </div>
+                    </div>
+                  )}
                   <div
                     role="button"
                     tabIndex={0}
@@ -1075,4 +1085,3 @@ export default function ProjectDetailsPage() {
     </div>
   );
 }
-

@@ -1,31 +1,84 @@
-import { useQuery } from '@tanstack/react-query';
-import { collection, getDocs } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { toast } from '@/hooks/use-toast';
+
+const offlineUnavailableToastByPath = new Set<string>();
 
 export type UseCollectionOptions = {
-  /** Refetch interval in ms (e.g. 3000 for near real-time). */
+  /** Deprecated: polling is ignored; realtime snapshots drive updates. */
   refetchInterval?: number;
+  enabled?: boolean;
+};
+
+export type UseCollectionResult<T> = {
+  data: T[];
+  isLoading: boolean;
+  error: Error | null;
+  fromCache: boolean;
+  hasPendingWrites: boolean;
 };
 
 export function useCollection<T = any>(
   key: string,
   path: string,
-  options?: UseCollectionOptions & { enabled?: boolean }
-) {
-  return useQuery({
-    queryKey: [key, path],
-    queryFn: async () => {
-      try {
-        const snap = await getDocs(collection(db, path));
-        return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as T[];
-      } catch (err) {
-        console.error(`[useCollection] Error fetching ${path}:`, err);
-        return [] as T[];
-      }
-    },
-    refetchInterval: options?.refetchInterval,
-    enabled: options?.enabled ?? true,
-    staleTime: 30_000,
-  });
-}
+  options?: UseCollectionOptions
+): UseCollectionResult<T> {
+  const [data, setData] = useState<T[]>([]);
+  const [isLoading, setIsLoading] = useState(options?.enabled ?? true);
+  const [error, setError] = useState<Error | null>(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [hasPendingWrites, setHasPendingWrites] = useState(false);
 
+  useEffect(() => {
+    if (options?.enabled === false) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    const unsub = onSnapshot(
+      collection(db, path),
+      { includeMetadataChanges: true },
+      (snap) => {
+        setData(
+          snap.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+            pending: docSnap.metadata.hasPendingWrites,
+            fromCache: snap.metadata.fromCache,
+          })) as T[]
+        );
+        setFromCache(snap.metadata.fromCache);
+        setHasPendingWrites(snap.metadata.hasPendingWrites);
+        setIsLoading(false);
+        setError(null);
+      },
+      (err) => {
+        console.error(`[useCollection] Snapshot error for ${path} (key: ${key}):`, err);
+        // Preserve last known data on errors/offline.
+        setIsLoading(false);
+        setError(err);
+        if (typeof navigator !== 'undefined' && !navigator.onLine && !offlineUnavailableToastByPath.has(path)) {
+          offlineUnavailableToastByPath.add(path);
+          toast({
+            title: 'Offline data unavailable',
+            description: "This data isn't available offline yet.",
+          });
+        }
+      }
+    );
+
+    return () => unsub();
+  }, [key, path, options?.enabled]);
+
+  return {
+    data,
+    isLoading,
+    error,
+    fromCache,
+    hasPendingWrites,
+  };
+}

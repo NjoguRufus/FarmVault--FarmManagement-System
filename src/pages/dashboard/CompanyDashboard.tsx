@@ -24,6 +24,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { toDate } from '@/lib/dateUtils';
+import { getSortTime, safeToDate } from '@/lib/safeTime';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
@@ -117,27 +118,27 @@ export function CompanyDashboard() {
   const recentTransactions = useMemo((): RecentTransactionItem[] => {
     const items: RecentTransactionItem[] = [];
     filteredSales.forEach((s) => {
-      const d = toDate(s.date);
+      const d = safeToDate(s.date);
       items.push({
         id: `sale-${s.id}`,
         type: 'sale',
-        date: d || new Date(),
+        date: d ?? new Date(0),
         label: s.buyerName || 'Sale',
         amount: s.totalAmount,
         status: s.status,
       });
     });
     filteredExpenses.forEach((e) => {
-      const d = toDate(e.date);
+      const d = safeToDate(e.date);
       items.push({
         id: `expense-${e.id}`,
         type: 'expense',
-        date: d || new Date(),
+        date: d ?? new Date(0),
         label: e.description || e.category || 'Expense',
         amount: e.amount,
       });
     });
-    return items.sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 15);
+    return items.sort((a, b) => getSortTime(b.date) - getSortTime(a.date)).slice(0, 15);
   }, [filteredSales, filteredExpenses]);
 
   const expensesByCategory = useMemo(() => {
@@ -217,7 +218,7 @@ export function CompanyDashboard() {
       {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <DashboardGreeting firstName={firstName} />
-        <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+        <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end sm:ml-auto">
           <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
             <SelectTrigger className="h-9 w-[140px] sm:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm">
               <SelectValue placeholder="Project" />

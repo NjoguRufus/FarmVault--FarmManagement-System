@@ -9,15 +9,23 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { safeFormatDate, safeToDate } from '@/lib/safeTime';
 import { WorkLog, Expense, ExpenseCategory } from '@/types';
 
 type CreateWorkLogInput = Omit<WorkLog, 'id' | 'createdAt'>;
 
 export async function createWorkLog(input: CreateWorkLogInput) {
+  const normalizedDate = safeToDate(input.date);
+  if (!normalizedDate) {
+    throw new Error('Invalid work log date.');
+  }
+
   const payload = {
     ...input,
     createdAt: serverTimestamp(),
-    date: input.date instanceof Date ? input.date : new Date(input.date),
+    createdAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
+    date: normalizedDate,
   };
   await addDoc(collection(db, 'workLogs'), payload);
 }
@@ -69,7 +77,7 @@ export async function syncTodaysLabourExpenses({
       projectId: data.projectId,
       cropType: data.cropType,
       category: 'labour' as ExpenseCategory,
-      description: `Labour - ${data.workCategory} on ${new Date(data.date).toLocaleDateString()}`,
+      description: `Labour - ${data.workCategory} on ${safeFormatDate(data.date)}`,
       amount,
       date: data.date,
       stageIndex: data.stageIndex,
@@ -87,6 +95,8 @@ export async function syncTodaysLabourExpenses({
       ...expense,
       date: expense.date,
       createdAt: serverTimestamp(),
+      createdAtLocal: Date.now(),
+      dateLocalISO: new Date().toISOString(),
       paidAt: serverTimestamp(),
     });
 

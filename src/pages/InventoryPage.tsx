@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { formatDate } from '@/lib/dateUtils';
+import { getSortTime, safeToDate } from '@/lib/safeTime';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -62,12 +63,10 @@ export default function InventoryPage() {
     return allInventoryUsage
       .filter((u) => u.inventoryItemId === usageModalItem.id && u.companyId === user.companyId)
       .sort((a, b) => {
-        const da = (a.date as any)?.toDate?.() ?? new Date(a.date as any);
-        const db = (b.date as any)?.toDate?.() ?? new Date(b.date as any);
-        const byDate = db.getTime() - da.getTime();
+        const byDate = getSortTime(b.date) - getSortTime(a.date);
         if (byDate !== 0) return byDate;
-        const ca = (a as any).createdAt?.toDate?.()?.getTime() ?? 0;
-        const cb = (b as any).createdAt?.toDate?.()?.getTime() ?? 0;
+        const ca = getSortTime((a as any).createdAt);
+        const cb = getSortTime((b as any).createdAt);
         return cb - ca;
       });
   }, [allInventoryUsage, usageModalItem?.id, user?.companyId]);
@@ -609,9 +608,11 @@ export default function InventoryPage() {
           description: `Initial stock - ${name} (${descQty} ${descUnit})`,
           amount,
           date: serverTimestamp(),
+          dateLocalISO: new Date().toISOString(),
           synced: false,
           paid: false,
           createdAt: serverTimestamp(),
+          createdAtLocal: Date.now(),
         };
         if (activeProject.cropType) expenseData.cropType = activeProject.cropType;
         await addDoc(collection(db, 'expenses'), expenseData);
@@ -777,9 +778,11 @@ export default function InventoryPage() {
           description: `Restock ${restockItem.name} (${qty} ${restockItem.unit})`,
           amount: total,
           date: serverTimestamp(),
+          dateLocalISO: new Date().toISOString(),
           synced: false,
           paid: false,
           createdAt: serverTimestamp(),
+          createdAtLocal: Date.now(),
         });
       }
 
@@ -1805,11 +1808,11 @@ export default function InventoryPage() {
                 </thead>
                 <tbody>
                   {usageForSelectedItem.map((u) => {
-                    const date = (u.date as any)?.toDate?.() ?? new Date(u.date as any);
+                    const date = safeToDate(u.date);
                     const sourceLabel = u.source === 'workCard' ? 'Work card' : u.source === 'workLog' ? 'Work log' : 'Manual';
                     return (
                       <tr key={u.id} className="border-b border-border/50">
-                        <td className="py-2 text-muted-foreground">{formatDate(date)}</td>
+                        <td className="py-2 text-muted-foreground">{date ? formatDate(date) : '—'}</td>
                         <td className="py-2 font-medium">{u.quantity} {u.unit}</td>
                         <td className="py-2 text-muted-foreground">{sourceLabel}{u.stageName ? ` · ${u.stageName}` : ''}</td>
                         <td className="py-2 text-muted-foreground">{u.managerName ?? '—'}</td>

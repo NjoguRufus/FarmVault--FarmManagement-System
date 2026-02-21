@@ -1,7 +1,4 @@
-import {
-  db,
-  auth,
-} from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import {
   collection,
   addDoc,
@@ -16,12 +13,16 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import type { HarvestCollectionStatus } from '@/types';
+import {
+  addWalletCredit,
+  addWalletDebit,
+  getWalletSummaryOnce,
+} from '@/services/projectWalletService';
 
 const COLLECTIONS = 'harvestCollections';
 const PICKERS = 'harvestPickers';
 const WEIGH_ENTRIES = 'pickerWeighEntries';
 const PAYMENT_BATCHES = 'harvestPaymentBatches';
-const CASH_POOLS = 'harvestCashPools';
 
 /** Create a new day collection session */
 export async function createHarvestCollection(params: {
@@ -43,6 +44,8 @@ export async function createHarvestCollection(params: {
     totalPickerCost: 0,
     status: 'collecting',
     createdAt: serverTimestamp(),
+    createdAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
   });
   return ref.id;
 }
@@ -81,29 +84,10 @@ export async function addPickerWeighEntry(params: {
     weightKg: params.weightKg,
     tripNumber: params.tripNumber,
     recordedAt: serverTimestamp(),
+    recordedAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
   });
-  await recalcPickerAndCollection(params.pickerId, params.collectionId);
   return ref.id;
-}
-
-/** Recompute picker totalKg/totalPay from weigh entries, then collection totals */
-async function recalcPickerAndCollection(pickerId: string, collectionId: string): Promise<void> {
-  const pricePerKg = await getPricePerKgPicker(collectionId);
-
-  const entriesSnap = await getDocs(
-    query(
-      collection(db, WEIGH_ENTRIES),
-      where('pickerId', '==', pickerId)
-    )
-  );
-  const totalKg = entriesSnap.docs.reduce((sum, d) => sum + (d.data().weightKg ?? 0), 0);
-  const totalPay = Math.round(totalKg * pricePerKg);
-
-  const batch = writeBatch(db);
-  batch.update(doc(db, PICKERS, pickerId), { totalKg, totalPay });
-  await batch.commit();
-
-  await recalcCollectionTotals(collectionId);
 }
 
 /** Get pricePerKgPicker from collection */
@@ -113,18 +97,41 @@ async function getPricePerKgPicker(collectionId: string): Promise<number> {
   return data?.pricePerKgPicker ?? 0;
 }
 
+async function computeCollectionTotalsFromWeighEntries(
+  collectionId: string,
+  pricePerKgPicker: number,
+): Promise<{ totalHarvestKg: number; totalPickerCost: number }> {
+  const entriesSnap = await getDocs(
+    query(collection(db, WEIGH_ENTRIES), where('collectionId', '==', collectionId))
+  );
+
+  const pickerKgMap = new Map<string, number>();
+  let totalHarvestKg = 0;
+
+  entriesSnap.docs.forEach((d) => {
+    const data = d.data() as Record<string, unknown>;
+    const pickerId = String(data.pickerId ?? '');
+    const kg = Number(data.weightKg ?? 0);
+    if (!pickerId || !Number.isFinite(kg) || kg <= 0) return;
+    totalHarvestKg += kg;
+    pickerKgMap.set(pickerId, (pickerKgMap.get(pickerId) ?? 0) + kg);
+  });
+
+  let totalPickerCost = 0;
+  pickerKgMap.forEach((kg) => {
+    totalPickerCost += Math.round(kg * pricePerKgPicker);
+  });
+
+  return { totalHarvestKg, totalPickerCost };
+}
+
 /** Recompute collection totalHarvestKg and totalPickerCost from all pickers */
 export async function recalcCollectionTotals(collectionId: string): Promise<void> {
-  const pickersSnap = await getDocs(
-    query(collection(db, PICKERS), where('collectionId', '==', collectionId))
+  const pricePerKgPicker = await getPricePerKgPicker(collectionId);
+  const { totalHarvestKg, totalPickerCost } = await computeCollectionTotalsFromWeighEntries(
+    collectionId,
+    pricePerKgPicker,
   );
-  let totalHarvestKg = 0;
-  let totalPickerCost = 0;
-  pickersSnap.docs.forEach((d) => {
-    const dta = d.data();
-    totalHarvestKg += dta.totalKg ?? 0;
-    totalPickerCost += dta.totalPay ?? 0;
-  });
 
   await updateDoc(doc(db, COLLECTIONS, collectionId), {
     totalHarvestKg,
@@ -156,6 +163,8 @@ export async function markPickersPaidInBatch(params: {
     pickerIds,
     totalAmount,
     paidAt: serverTimestamp(),
+    paidAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
   });
 
   const wb = writeBatch(db);
@@ -176,6 +185,8 @@ export async function setBuyerPriceAndMaybeClose(params: {
   collectionId: string;
   pricePerKgBuyer: number;
   markBuyerPaid: boolean;
+  totalHarvestKg?: number;
+  totalPickerCost?: number;
 }): Promise<void> {
   const collectionId = params?.collectionId != null ? String(params.collectionId).trim() : '';
   if (!collectionId) {
@@ -204,13 +215,17 @@ export async function setBuyerPriceAndMaybeClose(params: {
       throw new Error('Collection not found.');
     }
     const col = colSnap.data() as Record<string, unknown>;
-    const totalHarvestKg = Number(col?.totalHarvestKg ?? 0);
-    const totalPickerCost = col?.totalPickerCost ?? 0;
+    const totalHarvestKg =
+      Number.isFinite(params.totalHarvestKg) ? Number(params.totalHarvestKg) : Number(col?.totalHarvestKg ?? 0);
+    const totalPickerCost =
+      Number.isFinite(params.totalPickerCost) ? Number(params.totalPickerCost) : Number(col?.totalPickerCost ?? 0);
     const totalRevenue = totalHarvestKg * params.pricePerKgBuyer;
     const profit = totalRevenue - totalPickerCost;
 
     const update: Record<string, unknown> = {
       pricePerKgBuyer: params.pricePerKgBuyer,
+      totalHarvestKg,
+      totalPickerCost,
       totalRevenue,
       profit,
       status: params.markBuyerPaid ? 'closed' : 'sold',
@@ -237,6 +252,8 @@ export async function setBuyerPriceAndMaybeClose(params: {
           destination: 'market',
           date: harvestDate,
           createdAt: serverTimestamp(),
+          createdAtLocal: Date.now(),
+          dateLocalISO: new Date().toISOString(),
           notes,
           farmPricingMode: 'total',
           farmPriceUnitType: 'kg',
@@ -256,6 +273,8 @@ export async function setBuyerPriceAndMaybeClose(params: {
           cropType,
           date: harvestDate,
           createdAt: serverTimestamp(),
+          createdAtLocal: Date.now(),
+          dateLocalISO: new Date().toISOString(),
         });
 
         update.harvestId = harvestRef.id;
@@ -302,6 +321,8 @@ export async function syncClosedCollectionToHarvestSale(collectionId: string): P
       destination: 'market',
       date: col.harvestDate ?? serverTimestamp(),
       createdAt: serverTimestamp(),
+      createdAtLocal: Date.now(),
+      dateLocalISO: new Date().toISOString(),
       notes: col.name ? `From picker collection: ${col.name}` : 'From picker collection',
       farmPricingMode: 'total',
       farmPriceUnitType: 'kg',
@@ -322,6 +343,8 @@ export async function syncClosedCollectionToHarvestSale(collectionId: string): P
       cropType: col.cropType,
       date: col.harvestDate ?? serverTimestamp(),
       createdAt: serverTimestamp(),
+      createdAtLocal: Date.now(),
+      dateLocalISO: new Date().toISOString(),
     });
 
     tx.update(colRef, { harvestId: harvestRef.id });
@@ -352,63 +375,28 @@ export async function registerHarvestCash(params: {
   source: string;
   receivedBy: string;
 }): Promise<void> {
-  const snap = await getDocs(
-    query(collection(db, CASH_POOLS), where('collectionId', '==', params.collectionId))
-  );
-  if (snap.empty) {
-    await addDoc(collection(db, CASH_POOLS), {
-      collectionId: params.collectionId,
-      projectId: params.projectId,
-      cropType: params.cropType,
-      companyId: params.companyId,
-      cashReceived: params.cashReceived,
-      totalPaidOut: 0,
-      remainingBalance: params.cashReceived,
-      source: params.source,
-      receivedAt: serverTimestamp(),
-      receivedBy: params.receivedBy,
-    });
-    return;
+  const amount = Number(params.cashReceived ?? 0);
+  if (amount <= 0) {
+    throw new Error('Cash received must be greater than 0.');
   }
 
-  const docSnap = snap.docs[0];
-  const data = docSnap.data() as any;
-  const totalPaidOut = Number(data.totalPaidOut ?? 0);
-  await updateDoc(docSnap.ref, {
-    cashReceived: params.cashReceived,
-    remainingBalance: params.cashReceived - totalPaidOut,
-    source: params.source,
-    receivedAt: serverTimestamp(),
-    receivedBy: params.receivedBy,
-  });
-}
-
-/**
- * Internal helper: mirror a wallet deduction into the per-collection cash pool
- * so that UI balances (cashReceived, totalPaidOut, remainingBalance) stay in sync.
- */
-async function mirrorWalletDeductionToCashPool(collectionId: string, amount: number): Promise<void> {
-  if (amount <= 0) return;
-
-  const snap = await getDocs(
-    query(collection(db, CASH_POOLS), where('collectionId', '==', collectionId))
+  await addWalletCredit(
+    params.projectId,
+    params.companyId,
+    amount,
+    `Harvest cash registered (${params.source})`,
+    {
+      refType: 'COLLECTION',
+      refId: params.collectionId,
+      createdByName: params.receivedBy,
+      source: params.source,
+      cropType: params.cropType,
+      reasonType: 'HARVEST_CASH',
+    },
   );
-  if (snap.empty) return;
-
-  const docSnap = snap.docs[0];
-  const data = docSnap.data() as any;
-  const cashReceived = Number(data.cashReceived ?? 0);
-  const prevPaidOut = Number(data.totalPaidOut ?? 0);
-  const newPaidOut = prevPaidOut + amount;
-  const remainingBalance = Math.max(0, cashReceived - newPaidOut);
-
-  await updateDoc(docSnap.ref, {
-    totalPaidOut: newPaidOut,
-    remainingBalance,
-  });
 }
 
-/** Apply a picker payout from the single master harvest wallet (per project/crop). */
+/** Apply a picker payout from the single project wallet ledger. */
 export async function applyHarvestCashPayment(params: {
   companyId: string;
   projectId: string;
@@ -416,57 +404,26 @@ export async function applyHarvestCashPayment(params: {
   collectionId: string;
   amount: number;
 }): Promise<void> {
-  const { companyId, projectId, cropType, collectionId, amount } = params;
+  const amount = Number(params.amount ?? 0);
   if (amount <= 0) return;
 
-  const walletId = `${companyId}_${projectId}_${cropType}`;
-  const walletRef = doc(db, 'harvestWallets', walletId);
-  const usageRef = doc(db, 'collectionCashUsage', `${walletId}_${collectionId}`);
+  const summary = await getWalletSummaryOnce(params.projectId, params.companyId);
+  if (summary.currentBalance < amount) {
+    throw new Error('Not enough cash in Project Wallet.');
+  }
 
-  await runTransaction(db, async (tx) => {
-    // 1) Read wallet and usage before any writes (required by Firestore)
-    const walletSnap = await tx.get(walletRef);
-    if (!walletSnap.exists()) {
-      throw new Error('No harvest wallet found for this project/crop. Add cash first.');
-    }
-    const wallet = walletSnap.data() as any;
-    const currentBalance = wallet.currentBalance ?? 0;
-    const cashPaidOutTotal = wallet.cashPaidOutTotal ?? 0;
-    if (currentBalance < amount) {
-      throw new Error('Not enough cash in Harvest Wallet.');
-    }
-
-    const usageSnap = await tx.get(usageRef);
-
-    // 2) Writes
-    tx.update(walletRef, {
-      currentBalance: currentBalance - amount,
-      cashPaidOutTotal: cashPaidOutTotal + amount,
-      lastUpdatedAt: new Date(),
-    });
-
-    if (!usageSnap.exists()) {
-      tx.set(usageRef, {
-        companyId,
-        projectId,
-        cropType,
-        walletId,
-        collectionId,
-        totalDeducted: amount,
-        lastUpdatedAt: new Date(),
-      });
-    } else {
-      const usage = usageSnap.data() as any;
-      const totalDeducted = (usage.totalDeducted ?? 0) + amount;
-      tx.update(usageRef, {
-        totalDeducted,
-        lastUpdatedAt: new Date(),
-      });
-    }
-  });
-
-  // Also reflect this deduction in the collection's cash pool (if any)
-  await mirrorWalletDeductionToCashPool(collectionId, amount);
+  await addWalletDebit(
+    params.projectId,
+    params.companyId,
+    amount,
+    'Picker cash payout',
+    {
+      refType: 'COLLECTION',
+      refId: params.collectionId,
+      cropType: params.cropType,
+      reasonType: 'PICKER_PAYMENT',
+    },
+  );
 }
 
 export async function payPickersFromWalletBatchFirestore(params: {
@@ -475,165 +432,116 @@ export async function payPickersFromWalletBatchFirestore(params: {
   cropType: string;
   collectionId: string;
   pickerIds: string[];
+  pickerAmountsById?: Record<string, number>;
 }): Promise<void> {
-  const { companyId, projectId, cropType, collectionId, pickerIds } = params;
+  const { companyId, projectId, cropType, collectionId, pickerIds, pickerAmountsById } = params;
   if (!pickerIds.length) return;
 
-  const walletId = `${companyId}_${projectId}_${cropType}`;
-  const walletRef = doc(db, 'harvestWallets', walletId);
-  const usageRef = doc(db, 'collectionCashUsage', `${walletId}_${collectionId}`);
+  const pickerRefs = pickerIds.map((id) => doc(db, PICKERS, id));
+  const pickerSnaps = await Promise.all(pickerRefs.map((ref) => getDoc(ref)));
 
-  // Track total amount deducted inside the transaction so we can mirror it
-  // into the collection cash pool afterwards.
-  let totalAmountForCashPool = 0;
-
-  await runTransaction(db, async (tx) => {
-    // 1) Read wallet, pickers, and usage before any writes
-    const walletSnap = await tx.get(walletRef);
-    if (!walletSnap.exists()) {
-      throw new Error('No harvest wallet found for this project/crop. Add cash first.');
+  const toPay: { ref: any; amount: number }[] = [];
+  pickerSnaps.forEach((snap) => {
+    if (!snap.exists()) return;
+    const picker = snap.data() as any;
+    if (picker.isPaid) return;
+    const amountFromInput = Number(pickerAmountsById?.[snap.id] ?? NaN);
+    const amount = Number.isFinite(amountFromInput) ? amountFromInput : Number(picker.totalPay ?? 0);
+    if (amount > 0) {
+      toPay.push({ ref: snap.ref, amount });
     }
-    const wallet = walletSnap.data() as any;
-    let currentBalance = wallet.currentBalance ?? 0;
-    let cashPaidOutTotal = wallet.cashPaidOutTotal ?? 0;
+  });
 
-    // Load pickers
-    const pickerRefs = pickerIds.map((id) => doc(db, 'harvestPickers', id));
-    const pickerSnaps = await Promise.all(pickerRefs.map((r) => tx.get(r)));
-    const toPay: { ref: any; amount: number }[] = [];
-    for (const snap of pickerSnaps) {
-      if (!snap.exists()) continue;
-      const p = snap.data() as any;
-      if (p.isPaid) continue;
-      const amount = p.totalPay ?? 0;
-      if (amount > 0) {
-        toPay.push({ ref: snap.ref, amount });
-      }
-    }
-    if (!toPay.length) {
-      throw new Error('All selected pickers are already paid or zero.');
-    }
+  if (!toPay.length) {
+    throw new Error('All selected pickers are already paid or zero.');
+  }
 
-    const totalAmount = toPay.reduce((s, p) => s + p.amount, 0);
-    if (currentBalance < totalAmount) {
-      throw new Error('Not enough cash in Harvest Wallet.');
-    }
+  const totalAmount = toPay.reduce((sum, p) => sum + p.amount, 0);
+  const summary = await getWalletSummaryOnce(projectId, companyId);
+  if (summary.currentBalance < totalAmount) {
+    throw new Error('Not enough cash in Project Wallet.');
+  }
 
-    // Remember total amount so we can update the collection cash pool later
-    totalAmountForCashPool = totalAmount;
+  // Create a payment batch + mark pickers paid first, then append one ledger DEBIT entry.
+  const paymentBatchRef = doc(collection(db, PAYMENT_BATCHES));
+  const paidPickerIds = toPay.map((p) => p.ref.id);
+  const wb = writeBatch(db);
 
-    const usageSnap = await tx.get(usageRef);
+  wb.set(paymentBatchRef, {
+    companyId,
+    collectionId,
+    pickerIds: paidPickerIds,
+    totalAmount,
+    paidAt: serverTimestamp(),
+    paidAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
+  });
 
-    // 2) Writes
-    // Update wallet
-    currentBalance -= totalAmount;
-    cashPaidOutTotal += totalAmount;
-    tx.update(walletRef, {
-      currentBalance,
-      cashPaidOutTotal,
-      lastUpdatedAt: new Date(),
-    });
-
-    // Update collection usage
-    if (!usageSnap.exists()) {
-      tx.set(usageRef, {
-        companyId,
-        projectId,
-        cropType,
-        walletId,
-        collectionId,
-        totalDeducted: totalAmount,
-        lastUpdatedAt: new Date(),
-      });
-    } else {
-      const usage = usageSnap.data() as any;
-      const totalDeducted = (usage.totalDeducted ?? 0) + totalAmount;
-      tx.update(usageRef, {
-        totalDeducted,
-        lastUpdatedAt: new Date(),
-      });
-    }
-
-    // Create a payment batch so this group is tracked (1 picker = individual, 2+ = group)
-    const batchRef = doc(collection(db, PAYMENT_BATCHES));
-    tx.set(batchRef, {
-      companyId,
-      collectionId,
-      pickerIds: toPay.map((p) => p.ref.id),
-      totalAmount,
+  toPay.forEach(({ ref }) => {
+    wb.update(ref, {
+      isPaid: true,
       paidAt: serverTimestamp(),
-    });
-
-    // Mark pickers paid and link to this batch
-    toPay.forEach(({ ref }) => {
-      tx.update(ref, {
-        isPaid: true,
-        paidAt: new Date(),
-        paymentBatchId: batchRef.id,
-      });
+      paymentBatchId: paymentBatchRef.id,
     });
   });
 
-  // Also reflect this deduction in the collection's cash pool (if any)
-  if (totalAmountForCashPool > 0) {
-    await mirrorWalletDeductionToCashPool(collectionId, totalAmountForCashPool);
-  }
+  await wb.commit();
+
+  await addWalletDebit(
+    projectId,
+    companyId,
+    totalAmount,
+    'Picker batch payout',
+    {
+      refType: 'COLLECTION',
+      refId: collectionId,
+      paymentBatchId: paymentBatchRef.id,
+      idempotencyKey: `paymentBatch:${paymentBatchRef.id}`,
+      pickerIds: paidPickerIds,
+      cropType,
+      reasonType: 'PICKER_BATCH_PAYMENT',
+    },
+  );
 }
 
-/** Get the shared harvest wallet for a project/crop (used for balance display across all collections). */
+/** Get project wallet summary (compat wrapper for existing callers). */
 export async function getHarvestWallet(params: {
   companyId: string;
   projectId: string;
   cropType: string;
 }): Promise<{ id: string; currentBalance: number; cashPaidOutTotal: number; cashReceivedTotal: number } | null> {
-  const walletId = `${params.companyId}_${params.projectId}_${params.cropType}`;
-  const snap = await getDoc(doc(db, 'harvestWallets', walletId));
-  if (!snap.exists()) return null;
-  const d = snap.data() as any;
+  if (!params.companyId || !params.projectId) return null;
+  const summary = await getWalletSummaryOnce(params.projectId, params.companyId);
   return {
-    id: snap.id,
-    currentBalance: Number(d.currentBalance ?? 0),
-    cashPaidOutTotal: Number(d.cashPaidOutTotal ?? 0),
-    cashReceivedTotal: Number(d.cashReceivedTotal ?? 0),
+    id: `${params.companyId}_${params.projectId}`,
+    currentBalance: summary.currentBalance,
+    cashPaidOutTotal: summary.cashPaidOutTotal,
+    cashReceivedTotal: summary.cashReceivedTotal,
   };
 }
 
-/** Top up (or create) the master harvest wallet for a project/crop. */
+/** Top up project wallet (compat wrapper for existing callers). */
 export async function topUpHarvestWallet(params: {
   companyId: string;
   projectId: string;
   cropType: string;
   amount: number;
 }): Promise<void> {
-  const { companyId, projectId, cropType, amount } = params;
+  const amount = Number(params.amount ?? 0);
   if (amount <= 0) {
     throw new Error('Top up amount must be greater than 0.');
   }
 
-  const walletId = `${companyId}_${projectId}_${cropType}`;
-  const walletRef = doc(db, 'harvestWallets', walletId);
-
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(walletRef);
-    if (!snap.exists()) {
-      tx.set(walletRef, {
-        companyId,
-        projectId,
-        cropType,
-        cashReceivedTotal: amount,
-        cashPaidOutTotal: 0,
-        currentBalance: amount,
-        lastUpdatedAt: new Date(),
-      });
-    } else {
-      const w = snap.data() as any;
-      const cashReceivedTotal = (w.cashReceivedTotal ?? 0) + amount;
-      const currentBalance = (w.currentBalance ?? 0) + amount;
-      tx.update(walletRef, {
-        cashReceivedTotal,
-        currentBalance,
-        lastUpdatedAt: new Date(),
-      });
-    }
-  });
+  await addWalletCredit(
+    params.projectId,
+    params.companyId,
+    amount,
+    'Project wallet top-up',
+    {
+      refType: 'MANUAL',
+      refId: params.projectId,
+      cropType: params.cropType,
+      reasonType: 'PROJECT_TOP_UP',
+    },
+  );
 }

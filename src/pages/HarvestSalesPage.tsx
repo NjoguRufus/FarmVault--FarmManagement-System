@@ -49,7 +49,7 @@ export default function HarvestSalesPage() {
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
   const { data: allUsers = [] } = useCollection<User>('harvest-page-users', 'users');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'harvest-inventory');
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('harvest-inventory', 'inventoryItems');
 
   const harvests = activeProject
     ? allHarvests.filter((h) => h.projectId === activeProject.id)

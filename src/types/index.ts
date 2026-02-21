@@ -57,7 +57,11 @@ export interface Project {
     };
     expectedChallenges?: {
       id: string;
+      title?: string;
       description: string;
+      challengeType?: ChallengeType;
+      severity?: 'low' | 'medium' | 'high';
+      status?: 'identified' | 'mitigating' | 'resolved';
       addedAt: Date;
       addedBy: string;
     }[];
@@ -468,6 +472,13 @@ export interface SeasonChallenge {
     needsPurchase?: boolean; // True if item doesn't exist in inventory
   }>;
   plan2IfFails?: string; // Backup plan if current solution fails
+  /** Origin marker for planned/pre-season imported challenges */
+  source?: string;
+  sourcePlanChallengeId?: string;
+  createdBy?: string;
+  createdByName?: string;
+  /** Local snapshot metadata (set by useCollection mapping) */
+  pending?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }

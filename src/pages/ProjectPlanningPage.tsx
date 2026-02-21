@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { CropStage, Project, Supplier } from '@/types';
+import { ChallengeType, CropStage, Project, SeasonChallenge, Supplier } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
 import { useCollection } from '@/hooks/useCollection';
 import { useQueryClient } from '@tanstack/react-query';
@@ -54,19 +54,15 @@ export default function ProjectPlanningPage() {
   );
 
   const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
+  const { data: allSeasonChallenges = [] } = useCollection<SeasonChallenge>(
+    'project-planning-season-challenges',
+    'seasonChallenges'
+  );
   const companySuppliers = useMemo(
     () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
     [suppliers, companyId],
   );
   const supplierNames = useMemo(() => companySuppliers.map((s) => s.name).filter(Boolean), [companySuppliers]);
-
-  const filteredSuppliersForInput = useMemo(() => {
-    const q = (seedSupplier || '').trim().toLowerCase();
-    if (!q) return companySuppliers;
-    return companySuppliers.filter((s) => s.name.toLowerCase().includes(q));
-  }, [companySuppliers, seedSupplier]);
-
-  const noSupplierMatch = (seedSupplier || '').trim() && filteredSuppliersForInput.length === 0;
 
   const handleAddNewSupplier = async () => {
     const name = seedSupplier.trim();
@@ -113,15 +109,80 @@ export default function ProjectPlanningPage() {
   const [savingSeed, setSavingSeed] = useState(false);
   const [changeSeedModalOpen, setChangeSeedModalOpen] = useState(false);
 
+  const filteredSuppliersForInput = useMemo(() => {
+    const q = (seedSupplier || '').trim().toLowerCase();
+    if (!q) return companySuppliers;
+    return companySuppliers.filter((s) => s.name.toLowerCase().includes(q));
+  }, [companySuppliers, seedSupplier]);
+
+  const noSupplierMatch = (seedSupplier || '').trim() && filteredSuppliersForInput.length === 0;
+
   const expectedChallenges = project?.planning?.expectedChallenges ?? [];
   const planHistory = project?.planning?.planHistory ?? [];
-  const [newChallenge, setNewChallenge] = useState('');
+  const [newChallengeTitle, setNewChallengeTitle] = useState('');
+  const [newChallengeDescription, setNewChallengeDescription] = useState('');
+  const [newChallengeType, setNewChallengeType] = useState<ChallengeType>('other');
+  const [newChallengeSeverity, setNewChallengeSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [savingChallenge, setSavingChallenge] = useState(false);
+  const [showAddPreSeasonForm, setShowAddPreSeasonForm] = useState(false);
   const [editingSeed, setEditingSeed] = useState(false);
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [addingSupplier, setAddingSupplier] = useState(false);
   const supplierInputRef = useRef<HTMLInputElement>(null);
   const supplierDropdownRef = useRef<HTMLDivElement>(null);
+
+  const toChallengeTime = (value: any): number => {
+    if (!value) return 0;
+    const raw = value as any;
+    const d = raw && typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+  };
+
+  const preSeasonChallenges = useMemo(() => {
+    if (!project) return [];
+
+    const fromSeason = allSeasonChallenges
+      .filter(
+        (c) => c.projectId === project.id && String((c as any).source ?? '') === 'preseason-plan'
+      )
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        challengeType: c.challengeType,
+        severity: c.severity,
+        status: c.status,
+        addedAt: (c as any).dateIdentified ?? c.createdAt,
+        addedBy: c.createdByName || c.createdBy || 'unknown',
+        sourcePlanChallengeId: c.sourcePlanChallengeId,
+        pending: Boolean((c as any).pending),
+      }));
+
+    const linkedPlanningIds = new Set(
+      fromSeason
+        .map((c) => c.sourcePlanChallengeId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+
+    const fromPlanning = expectedChallenges
+      .filter((c: any) => !linkedPlanningIds.has(String(c.id ?? '')))
+      .map((c: any) => ({
+        id: String(c.id ?? ''),
+        title: String(c.title ?? c.description ?? ''),
+        description: String(c.description ?? ''),
+        challengeType: c.challengeType as ChallengeType | undefined,
+        severity: c.severity as 'low' | 'medium' | 'high' | undefined,
+        status: c.status as 'identified' | 'mitigating' | 'resolved' | undefined,
+        addedAt: c.addedAt,
+        addedBy: String(c.addedBy ?? 'unknown'),
+        sourcePlanChallengeId: c.id,
+        pending: false,
+      }));
+
+    return [...fromSeason, ...fromPlanning].sort(
+      (a, b) => toChallengeTime(b.addedAt) - toChallengeTime(a.addedAt)
+    );
+  }, [allSeasonChallenges, expectedChallenges, project]);
 
   const hasPlantingDate = Boolean(project?.plantingDate);
   const hasExistingSeed = Boolean(project?.planning?.seed && (project.planning.seed as any)?.name);
@@ -154,6 +215,12 @@ export default function ProjectPlanningPage() {
     }
   }, [project?.planning?.seed]);
 
+  useEffect(() => {
+    if (preSeasonChallenges.length === 0) {
+      setShowAddPreSeasonForm(true);
+    }
+  }, [preSeasonChallenges.length]);
+
   const handleSavePlantingDate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!project || !companyId || !projectId) return;
@@ -179,12 +246,13 @@ export default function ProjectPlanningPage() {
     setSavingPlanting(true);
     try {
       const projectRef = doc(db, 'projects', projectId);
+      const changedAt = new Date().toISOString();
       const historyEntry = {
         field: 'plantingDate',
         oldValue: oldDate && !isNaN(oldDate.getTime()) ? oldDate.toISOString() : null,
         newValue: newDate.toISOString(),
         reason: plantingReason.trim() || (oldDate ? '' : 'Initial planting date'),
-        changedAt: serverTimestamp(),
+        changedAt,
         changedBy: user?.id ?? 'unknown',
       };
 
@@ -269,6 +337,7 @@ export default function ProjectPlanningPage() {
 
       const isFirstTimeSeed = !(project.planning?.seed && (project.planning.seed as any).name);
       const reasonForHistory = isFirstTimeSeed ? 'Initial seed plan' : seedReason;
+      const changedAt = new Date().toISOString();
       const historyEntries = [];
       const fields: (keyof typeof newSeed)[] = ['name', 'variety', 'supplier', 'batchNumber'];
       for (const f of fields) {
@@ -280,7 +349,7 @@ export default function ProjectPlanningPage() {
             oldValue: oldVal,
             newValue: newVal,
             reason: reasonForHistory,
-            changedAt: serverTimestamp(),
+            changedAt,
             changedBy: user?.id ?? 'unknown',
           });
         }
@@ -297,7 +366,7 @@ export default function ProjectPlanningPage() {
           oldValue: null,
           newValue: seedName,
           reason: 'Initial seed plan',
-          changedAt: serverTimestamp(),
+          changedAt,
           changedBy: user?.id ?? 'unknown',
         });
       }
@@ -312,34 +381,66 @@ export default function ProjectPlanningPage() {
     }
   };
 
-  const handleAddExpectedChallenge = async (e: React.MouseEvent) => {
+  const handleAddExpectedChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!project || !companyId || !projectId) return;
-    if (!newChallenge.trim()) return;
+    if (!newChallengeTitle.trim()) return;
 
     setSavingChallenge(true);
     try {
       const projectRef = doc(db, 'projects', projectId);
+      const seasonChallengeRef = doc(collection(db, 'seasonChallenges'));
+      const changedAt = new Date().toISOString();
+      const challengeId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const entry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        description: newChallenge.trim(),
-        addedAt: serverTimestamp(),
+        id: challengeId,
+        title: newChallengeTitle.trim(),
+        description: newChallengeDescription.trim(),
+        challengeType: newChallengeType,
+        severity: newChallengeSeverity,
+        status: 'identified' as const,
+        addedAt: changedAt,
         addedBy: user?.id ?? 'unknown',
       };
       const historyEntry = {
         field: 'planning.expectedChallenges',
         oldValue: null,
-        newValue: entry.description,
-        reason: 'Added expected challenge',
-        changedAt: serverTimestamp(),
+        newValue: entry.title,
+        reason: `Added expected challenge (${entry.challengeType})`,
+        changedAt,
         changedBy: user?.id ?? 'unknown',
       };
-      await updateDoc(projectRef, {
+
+      const batch = writeBatch(db);
+      batch.set(seasonChallengeRef, {
+        title: entry.title,
+        description: entry.description || entry.title,
+        challengeType: entry.challengeType,
+        severity: entry.severity,
+        status: 'identified',
+        projectId: project.id,
+        companyId: project.companyId,
+        cropType: project.cropType,
+        stageIndex: project.startingStageIndex || 0,
+        createdBy: user?.id ?? 'unknown',
+        createdByName: user?.name ?? user?.email ?? 'Unknown',
+        dateIdentified: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        source: 'preseason-plan',
+        sourcePlanChallengeId: entry.id,
+      });
+      batch.update(projectRef, {
         'planning.expectedChallenges': arrayUnion(entry),
         'planning.planHistory': arrayUnion(historyEntry),
       });
+      await batch.commit();
       await refetchProject();
-      setNewChallenge('');
+      queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
+      setNewChallengeTitle('');
+      setNewChallengeDescription('');
+      setNewChallengeType('other');
+      setNewChallengeSeverity('medium');
+      setShowAddPreSeasonForm(false);
     } finally {
       setSavingChallenge(false);
     }
@@ -398,7 +499,7 @@ export default function ProjectPlanningPage() {
   };
 
   const totalPlanChanges = planHistory.length;
-  const totalExpectedChallenges = expectedChallenges.length;
+  const totalExpectedChallenges = preSeasonChallenges.length;
 
   return (
     <div className="space-y-8 animate-fade-in" role="main">
@@ -730,35 +831,122 @@ export default function ProjectPlanningPage() {
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex flex-col md:flex-row gap-2">
-              <input
-                className="fv-input flex-1"
-                placeholder="E.g. High whitefly pressure expected in early vegetative stage"
-                value={newChallenge}
-                onChange={(e) => setNewChallenge(e.target.value)}
-              />
-              <button
-                type="button"
-                className="fv-btn fv-btn--secondary"
-                disabled={savingChallenge}
-                onClick={handleAddExpectedChallenge}
-              >
-                {savingChallenge ? 'Adding…' : 'Add'}
-              </button>
-            </div>
+            {showAddPreSeasonForm ? (
+              <form onSubmit={handleAddExpectedChallenge} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Title</label>
+                  <input
+                    className="fv-input"
+                    placeholder="E.g. High whitefly pressure expected"
+                    value={newChallengeTitle}
+                    onChange={(e) => setNewChallengeTitle(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Description</label>
+                  <textarea
+                    className="fv-input resize-none"
+                    rows={2}
+                    placeholder="Add details for this planned challenge"
+                    value={newChallengeDescription}
+                    onChange={(e) => setNewChallengeDescription(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Challenge type</label>
+                    <select
+                      className="fv-select w-full"
+                      value={newChallengeType}
+                      onChange={(e) => setNewChallengeType(e.target.value as ChallengeType)}
+                    >
+                      <option value="weather">Weather</option>
+                      <option value="pests">Pests</option>
+                      <option value="diseases">Diseases</option>
+                      <option value="prices">Prices</option>
+                      <option value="labor">Labour / People</option>
+                      <option value="equipment">Equipment</option>
+                      <option value="other">Custom (not listed)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Severity</label>
+                    <select
+                      className="fv-select w-full"
+                      value={newChallengeSeverity}
+                      onChange={(e) => setNewChallengeSeverity(e.target.value as 'low' | 'medium' | 'high')}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  {preSeasonChallenges.length > 0 && (
+                    <button
+                      type="button"
+                      className="fv-btn fv-btn--secondary"
+                      onClick={() => setShowAddPreSeasonForm(false)}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="fv-btn fv-btn--secondary"
+                    disabled={savingChallenge || !newChallengeTitle.trim()}
+                  >
+                    {savingChallenge ? 'Adding…' : 'Add planned challenge'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="fv-btn fv-btn--secondary"
+                  onClick={() => setShowAddPreSeasonForm(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add another challenge
+                </button>
+              </div>
+            )}
             <div className="space-y-2">
-              {expectedChallenges.length === 0 && (
+              {preSeasonChallenges.length === 0 && (
                 <p className="text-sm text-muted-foreground">
                   No pre-season challenges recorded yet.
                 </p>
               )}
-              {expectedChallenges.map((c) => (
+              {preSeasonChallenges.map((c) => (
                 <div key={c.id} className="flex items-start justify-between gap-3 border border-border/60 rounded-lg px-3 py-2">
                   <div>
-                    <p className="text-sm text-foreground">{c.description}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Added on {formatDate(c.addedAt)} by {c.addedBy}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <p className="text-sm font-medium text-foreground">{c.title || c.description}</p>
+                      {c.challengeType && (
+                        <span className="fv-badge text-xs bg-muted text-muted-foreground capitalize">
+                          {c.challengeType}
+                        </span>
+                      )}
+                      {c.severity && (
+                        <span className="fv-badge text-xs capitalize">{c.severity}</span>
+                      )}
+                    </div>
+                    {c.title && c.description && (
+                      <p className="text-sm text-muted-foreground">{c.description}</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <p className="text-xs text-muted-foreground">
+                        Added on {formatDate(c.addedAt)} by {c.addedBy}
+                      </p>
+                      {(c as any).pending && (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                          Syncing...
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

@@ -21,7 +21,7 @@ import {
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import type { HarvestCollection, HarvestPicker, PickerWeighEntry } from '@/types';
@@ -30,15 +30,18 @@ import {
   addHarvestPicker,
   addPickerWeighEntry,
   markPickerCashPaid,
+  markPickersPaidInBatch,
   setBuyerPriceAndMaybeClose,
-  recalcCollectionTotals,
   registerHarvestCash,
   applyHarvestCashPayment,
   payPickersFromWalletBatchFirestore,
-  topUpHarvestWallet,
-  getHarvestWallet,
   syncClosedCollectionToHarvestSale,
 } from '@/services/harvestCollectionService';
+import {
+  computeWalletSummary,
+  subscribeWalletLedger,
+  type ProjectWalletLedgerEntry,
+} from '@/services/projectWalletService';
 import {
   Dialog,
   DialogContent,
@@ -116,12 +119,12 @@ export default function HarvestCollectionsPage() {
   const [statsExpanded, setStatsExpanded] = useState(true);
   const [paySelectedIds, setPaySelectedIds] = useState<Set<string>>(new Set());
   const [cashAmount, setCashAmount] = useState('');
-  const [cashPreviousAmount, setCashPreviousAmount] = useState(0);
   const [cashSource, setCashSource] = useState<'bank' | 'custom'>('bank');
   const [cashSourceCustom, setCashSourceCustom] = useState('');
   const [cashDialogCollection, setCashDialogCollection] = useState<HarvestCollection | null>(null);
   const [cashDialogVisible, setCashDialogVisible] = useState(false);
   const [cashDialogSaving, setCashDialogSaving] = useState(false);
+  const [walletLedgerEntries, setWalletLedgerEntries] = useState<ProjectWalletLedgerEntry[]>([]);
   const [payingSelected, setPayingSelected] = useState(false);
   const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
   const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
@@ -140,32 +143,16 @@ export default function HarvestCollectionsPage() {
           ? cashSourceCustom.trim()
           : cashSource;
 
-      const previousTotal = cashPreviousAmount || 0;
-      const topUp = amount;
-      const newTotal = previousTotal + topUp;
-
       await registerHarvestCash({
         collectionId: cashDialogCollection.id,
         projectId: cashDialogCollection.projectId,
         companyId: cashDialogCollection.companyId,
         cropType: String(cashDialogCollection.cropType),
-        cashReceived: newTotal,
+        cashReceived: amount,
         source: resolvedSource,
         receivedBy: user?.name || user?.email || user?.id || 'unknown',
       });
-      // Top up the master harvest wallet by the new cash amount only (do not overwrite)
-      if (topUp > 0) {
-        await topUpHarvestWallet({
-          companyId: cashDialogCollection.companyId,
-          projectId: cashDialogCollection.projectId,
-          cropType: String(cashDialogCollection.cropType),
-          amount: topUp,
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
-      queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
       setCashDialogCollection(null);
-      setCashPreviousAmount(newTotal);
       setCashAmount('');
       toast({ title: 'Cash registered' });
     } catch (e: any) {
@@ -182,45 +169,31 @@ export default function HarvestCollectionsPage() {
 
   const { data: allCollections = [], isLoading: loadingCollections } = useCollection<HarvestCollection>(
     'harvestCollections',
-    'harvestCollections',
-    { refetchInterval: 5000 }
+    'harvestCollections'
   );
-  const { data: allPickers = [] } = useCollection<HarvestPicker>('harvestPickers', 'harvestPickers', {
-    refetchInterval: 5000,
-  });
+  const { data: allPickers = [] } = useCollection<HarvestPicker>('harvestPickers', 'harvestPickers');
   const { data: allWeighEntries = [] } = useCollection<PickerWeighEntry>(
     'pickerWeighEntries',
-    'pickerWeighEntries',
-    { refetchInterval: 5000 }
+    'pickerWeighEntries'
   );
 
-  const { data: allCashPools = [] } = useCollection<any>('harvestCashPools', 'harvestCashPools', {
-    refetchInterval: 5000,
-  });
-
   const companyId = user?.companyId ?? '';
+  const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
 
-  // Shared harvest wallet (one per project+crop) — balance deducts when paying from any collection
-  const harvestWalletQueryKey = [
-    'harvestWallet',
-    companyId,
-    effectiveProject?.id ?? '',
-    String(effectiveProject?.cropType ?? ''),
-  ] as const;
-  const { data: harvestWallet } = useQuery({
-    queryKey: harvestWalletQueryKey,
-    queryFn: () =>
-      getHarvestWallet({
-        companyId,
-        projectId: effectiveProject!.id,
-        cropType: String(effectiveProject!.cropType),
-      }),
-    enabled:
-      !!companyId &&
-      !!effectiveProject?.id &&
-      String(effectiveProject?.cropType).toLowerCase() === 'french-beans',
-    refetchInterval: 5000,
-  });
+  useEffect(() => {
+    if (!companyId || !effectiveProject?.id || !isFrenchBeansProject) {
+      setWalletLedgerEntries([]);
+      return;
+    }
+    return subscribeWalletLedger(effectiveProject.id, companyId, (entries) => {
+      setWalletLedgerEntries(entries);
+    });
+  }, [companyId, effectiveProject?.id, isFrenchBeansProject]);
+
+  const walletSummary = useMemo(
+    () => computeWalletSummary(walletLedgerEntries),
+    [walletLedgerEntries]
+  );
 
   const collections = useMemo(() => {
     if (!effectiveProject) return allCollections;
@@ -241,6 +214,37 @@ export default function HarvestCollectionsPage() {
     () => collections.filter((c) => c.status === 'closed'),
     [collections]
   );
+
+  const collectionTotalsById = useMemo(() => {
+    const priceByCollection = new Map<string, number>();
+    allCollections.forEach((c) => {
+      priceByCollection.set(c.id, Number(c.pricePerKgPicker ?? 0));
+    });
+
+    const pickerKgByCollectionPicker = new Map<string, number>();
+    allWeighEntries.forEach((entry) => {
+      const collectionId = String(entry.collectionId ?? '');
+      const pickerId = String(entry.pickerId ?? '');
+      const kg = Number(entry.weightKg ?? 0);
+      if (!collectionId || !pickerId || !Number.isFinite(kg) || kg <= 0) return;
+      const key = `${collectionId}::${pickerId}`;
+      pickerKgByCollectionPicker.set(key, (pickerKgByCollectionPicker.get(key) ?? 0) + kg);
+    });
+
+    const totals: Record<string, { totalHarvestKg: number; totalPickerCost: number }> = {};
+    pickerKgByCollectionPicker.forEach((kg, key) => {
+      const separator = key.indexOf('::');
+      const collectionId = separator === -1 ? key : key.slice(0, separator);
+      const pricePerKg = priceByCollection.get(collectionId) ?? 0;
+      if (!totals[collectionId]) {
+        totals[collectionId] = { totalHarvestKg: 0, totalPickerCost: 0 };
+      }
+      totals[collectionId].totalHarvestKg += kg;
+      totals[collectionId].totalPickerCost += Math.round(kg * pricePerKg);
+    });
+
+    return totals;
+  }, [allCollections, allWeighEntries]);
 
   // Backfill: sync already-closed French beans collections (without harvestId) to Harvest & Sales so they appear and are counted
   const backfillSyncedRef = React.useRef<Set<string>>(new Set());
@@ -285,19 +289,6 @@ export default function HarvestCollectionsPage() {
     [selectedCollection?.cropType]
   );
 
-  const cashPoolForCollection = useMemo(() => {
-    if (!selectedCollectionId) return null;
-    return allCashPools.find((p: any) => p.collectionId === selectedCollectionId) ?? null;
-  }, [allCashPools, selectedCollectionId]);
-
-  const cashPoolByCollection = useMemo(() => {
-    const map: Record<string, any> = {};
-    (allCashPools as any[]).forEach((p) => {
-      if (p.collectionId) map[p.collectionId] = p;
-    });
-    return map;
-  }, [allCashPools]);
-
   const hasFrenchBeansCollections = useMemo(
     () => collections.some((c) => String(c.cropType).toLowerCase() === 'french-beans'),
     [collections]
@@ -310,15 +301,44 @@ export default function HarvestCollectionsPage() {
       .sort((a, b) => (a.pickerNumber ?? 0) - (b.pickerNumber ?? 0));
   }, [allPickers, selectedCollectionId]);
 
+  const weighEntriesForCollection = useMemo(() => {
+    if (!selectedCollectionId) return [];
+    return allWeighEntries.filter((e) => e.collectionId === selectedCollectionId);
+  }, [allWeighEntries, selectedCollectionId]);
+
+  const pickerTotalsById = useMemo(() => {
+    const totals: Record<string, { totalKg: number; totalPay: number }> = {};
+    const pricePerKgPicker = Number(selectedCollection?.pricePerKgPicker ?? 0);
+
+    weighEntriesForCollection.forEach((entry) => {
+      const pickerId = String(entry.pickerId ?? '');
+      const kg = Number(entry.weightKg ?? 0);
+      if (!pickerId || !Number.isFinite(kg) || kg <= 0) return;
+
+      if (!totals[pickerId]) {
+        totals[pickerId] = { totalKg: 0, totalPay: 0 };
+      }
+      totals[pickerId].totalKg += kg;
+    });
+
+    Object.keys(totals).forEach((pickerId) => {
+      totals[pickerId].totalPay = Math.round(totals[pickerId].totalKg * pricePerKgPicker);
+    });
+
+    return totals;
+  }, [weighEntriesForCollection, selectedCollection?.pricePerKgPicker]);
+
+  const getPickerTotals = (pickerId: string): { totalKg: number; totalPay: number } => {
+    return pickerTotalsById[pickerId] ?? { totalKg: 0, totalPay: 0 };
+  };
+
   /** Amount paid out for the selected collection (for Wallet popover inside pickers) */
   const amountPaidOutThisCollection = useMemo(() => {
     if (!selectedCollectionId) return 0;
-    const fromPool = cashPoolForCollection?.totalPaidOut;
-    if (fromPool != null && Number(fromPool) >= 0) return Number(fromPool);
     return pickersForCollection
       .filter((p) => p.isPaid)
-      .reduce((s, p) => s + (p.totalPay ?? 0), 0);
-  }, [selectedCollectionId, cashPoolForCollection?.totalPaidOut, pickersForCollection]);
+      .reduce((s, p) => s + getPickerTotals(p.id).totalPay, 0);
+  }, [selectedCollectionId, pickersForCollection, pickerTotalsById]);
 
   const filteredPickers = useMemo(() => {
     const q = (pickerSearch || '').trim().toLowerCase();
@@ -392,11 +412,10 @@ export default function HarvestCollectionsPage() {
   const selectedTotalPay = useMemo(() => {
     let sum = 0;
     paySelectedIds.forEach((id) => {
-      const p = pickersForCollection.find((x) => x.id === id);
-      if (p) sum += p.totalPay ?? 0;
+      sum += getPickerTotals(id).totalPay;
     });
     return sum;
-  }, [paySelectedIds, pickersForCollection]);
+  }, [paySelectedIds, pickerTotalsById]);
 
   const nextPickerNumber = useMemo(() => {
     const max = pickersForCollection.length
@@ -404,11 +423,6 @@ export default function HarvestCollectionsPage() {
       : 0;
     return max + 1;
   }, [pickersForCollection]);
-
-  const weighEntriesForCollection = useMemo(() => {
-    if (!selectedCollectionId) return [];
-    return allWeighEntries.filter((e) => e.collectionId === selectedCollectionId);
-  }, [allWeighEntries, selectedCollectionId]);
 
   const nextTripForPicker = useMemo(() => {
     const map: Record<string, number> = {};
@@ -442,11 +456,12 @@ export default function HarvestCollectionsPage() {
     let totalKg = 0;
     let totalPay = 0;
     pickersForCollection.forEach((p) => {
-      totalKg += p.totalKg ?? 0;
-      totalPay += p.totalPay ?? 0;
+      const totals = getPickerTotals(p.id);
+      totalKg += totals.totalKg;
+      totalPay += totals.totalPay;
     });
     return { totalKg, totalPay };
-  }, [pickersForCollection]);
+  }, [pickersForCollection, pickerTotalsById]);
 
   const allPickersPaid = useMemo(
     () => pickersForCollection.length > 0 && pickersForCollection.every((p) => p.isPaid),
@@ -488,41 +503,6 @@ export default function HarvestCollectionsPage() {
         harvestDate,
         pricePerKgPicker: price,
       });
-
-      // For French Beans: auto-carry forward current MAIN wallet balance as starting balance.
-      // The main wallet is the one shown next to the "New collection" button, which is tied
-      // to the first French Beans collection's cash pool.
-      const isFrenchBeans = String(effectiveProject.cropType).toLowerCase() === 'french-beans';
-      if (isFrenchBeans) {
-        const mainFbCollection = collections.find(
-          (c) => String(c.cropType).toLowerCase() === 'french-beans'
-        );
-        const mainPool =
-          mainFbCollection != null ? cashPoolByCollection[mainFbCollection.id] : undefined;
-        const mainRemaining = Number(mainPool?.remainingBalance ?? 0);
-
-        if (mainRemaining > 0) {
-          try {
-            await registerHarvestCash({
-              collectionId: id,
-              projectId: effectiveProject.id,
-              companyId,
-              cropType: String(effectiveProject.cropType),
-              cashReceived: mainRemaining,
-              source: 'carry-forward',
-              receivedBy: user?.name || user?.email || user?.id || 'system',
-            });
-            queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
-          } catch (e: any) {
-            // If auto wallet setup fails, continue but inform the user
-            toast({
-              title: 'Wallet not linked automatically',
-              description: e?.message ?? 'You may need to register harvest cash for this collection manually.',
-              variant: 'destructive',
-            });
-          }
-        }
-      }
 
       queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       setSelectedCollectionId(id);
@@ -584,41 +564,6 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Invalid weight', description: 'Weight must be > 0', variant: 'destructive' });
       return;
     }
-    const pricePerKg = selectedCollection.pricePerKgPicker ?? 0;
-
-    // Optimistic update: apply new totals in cache so UI updates instantly
-    const updatedPickers = allPickers.map((p) =>
-      p.id === weighPickerId
-        ? {
-            ...p,
-            totalKg: (p.totalKg ?? 0) + kg,
-            totalPay: Math.round(((p.totalKg ?? 0) + kg) * pricePerKg),
-          }
-        : p
-    );
-    const pickersInCollection = updatedPickers.filter((p) => p.collectionId === selectedCollectionId);
-    const totalHarvestKg = pickersInCollection.reduce((s, p) => s + (p.totalKg ?? 0), 0);
-    const totalPickerCost = pickersInCollection.reduce((s, p) => s + (p.totalPay ?? 0), 0);
-    const updatedCollections = allCollections.map((c) =>
-      c.id === selectedCollectionId ? { ...c, totalHarvestKg, totalPickerCost } : c
-    );
-
-    queryClient.setQueryData(['harvestPickers'], updatedPickers);
-    queryClient.setQueryData(['harvestCollections'], updatedCollections);
-
-    // Optimistic: add this weigh entry to cache so next trip number is correct when reopening quickly
-    queryClient.setQueryData<PickerWeighEntry[]>(['pickerWeighEntries'], (old = []) => [
-      ...old,
-      {
-        id: `opt-${weighPickerId}-${Date.now()}`,
-        companyId: companyId!,
-        pickerId: weighPickerId,
-        collectionId: selectedCollectionId,
-        weightKg: kg,
-        tripNumber: trip,
-        recordedAt: new Date(),
-      },
-    ]);
 
     setAddWeighOpen(false);
     setWeighPickerId('');
@@ -638,15 +583,10 @@ export default function HarvestCollectionsPage() {
       tripNumber: trip,
     })
       .then(() => {
-        queryClient.invalidateQueries({ queryKey: ['pickerWeighEntries'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+        // Realtime snapshots (includeMetadataChanges) drive UI updates, including offline pending writes.
       })
       .catch((e: any) => {
         toast({ title: 'Save failed', description: e?.message ?? 'Could not save weight', variant: 'destructive' });
-        queryClient.invalidateQueries({ queryKey: ['pickerWeighEntries'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       });
   };
 
@@ -663,7 +603,7 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
-    const payAmount = picker.totalPay ?? 0;
+    const payAmount = getPickerTotals(picker.id).totalPay;
 
     if (isFrenchBeansCollection && selectedCollectionId && effectiveProject && user?.companyId) {
       try {
@@ -674,9 +614,6 @@ export default function HarvestCollectionsPage() {
           collectionId: selectedCollectionId,
           amount: payAmount,
         });
-        // Refresh harvest cash pools and shared wallet so balances update in UI
-        queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
-        queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
       } catch (e: any) {
         const isPermissionDenied =
           e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
@@ -691,15 +628,14 @@ export default function HarvestCollectionsPage() {
       }
     }
 
-    const updatedPickers = allPickers.map((p) =>
-      p.id === pickerId ? { ...p, isPaid: true, paidAt: new Date() } : p
-    );
-    queryClient.setQueryData(['harvestPickers'], updatedPickers);
-    toast({ title: 'Paid' });
-    markPickerCashPaid(pickerId).catch((e: any) => {
-      toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
-      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-    });
+    markPickerCashPaid(pickerId)
+      .then(() => {
+        toast({ title: 'Paid' });
+      })
+      .catch((e: any) => {
+        toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
+        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      });
   };
 
   const togglePaySelection = (pickerId: string) => {
@@ -716,12 +652,38 @@ export default function HarvestCollectionsPage() {
 
     // Only operate on pickers that are not yet paid to avoid
     // duplicate payment batches and "document already exists" errors.
-    const unpaidIds = pickerIds.filter((id) => {
-      const p = allPickers.find((x) => x.id === id);
-      return p && !p.isPaid;
+    const unpaidPickers = pickerIds
+      .map((id) => allPickers.find((x) => x.id === id))
+      .filter((p): p is HarvestPicker => Boolean(p && !p.isPaid));
+    const unpaidIds = unpaidPickers.map((p) => p.id);
+
+    const pickerAmountsById: Record<string, number> = {};
+    let totalAmount = 0;
+    unpaidIds.forEach((id) => {
+      const payAmount = getPickerTotals(id).totalPay;
+      if (payAmount > 0) {
+        pickerAmountsById[id] = payAmount;
+        totalAmount += payAmount;
+      }
     });
 
-    if (unpaidIds.length === 0) {
+    const payableIds = unpaidIds.filter((id) => Number(pickerAmountsById[id] ?? 0) > 0);
+
+    if (payableIds.length === 0 || totalAmount <= 0) {
+      toast({
+        title: 'Nothing to pay',
+        description: 'Selected pickers have no payable amount yet.',
+      });
+      setPaySelectedIds(new Set());
+      return;
+    }
+
+    const alreadyPaidSelection = pickerIds.filter((id) => {
+      const p = allPickers.find((x) => x.id === id);
+      return p?.isPaid;
+    });
+
+    if (alreadyPaidSelection.length === pickerIds.length) {
       toast({
         title: 'Nothing to pay',
         description: 'All selected pickers are already marked as paid.',
@@ -730,44 +692,43 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
-    // Optimistic update: update UI immediately so the button doesn't feel delayed
-    const updatedPickers = allPickers.map((p) =>
-      unpaidIds.includes(p.id) ? { ...p, isPaid: true, paidAt: new Date() } : p
-    );
-    queryClient.setQueryData(['harvestPickers'], updatedPickers);
-    setPaySelectedIds(new Set());
-    setPayingSelected(false);
-    toast({ title: `${unpaidIds.length} marked paid` });
+    setPayingSelected(true);
 
-    if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
-      payPickersFromWalletBatchFirestore({
-        companyId,
-        projectId: effectiveProject.id,
-        cropType: String(effectiveProject.cropType),
-        collectionId: selectedCollectionId,
-        pickerIds: unpaidIds,
-      })
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: ['harvestCashPools'] });
-          queryClient.invalidateQueries({ queryKey: harvestWalletQueryKey });
-        })
-        .catch((e: any) => {
-          console.error('payPickersFromWalletBatchFirestore error', e);
-          queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-          const isPermissionDenied =
-            e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
-          toast({
-            title: 'Payment failed',
-            description: isPermissionDenied
-              ? 'Insufficient permissions. You may not have access to update harvest payments.'
-              : (e?.message ?? 'Not enough cash in Harvest Wallet.'),
-            variant: 'destructive',
-          });
+    try {
+      if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
+        await payPickersFromWalletBatchFirestore({
+          companyId,
+          projectId: effectiveProject.id,
+          cropType: String(effectiveProject.cropType),
+          collectionId: selectedCollectionId,
+          pickerIds: payableIds,
+          pickerAmountsById,
         });
-      return;
-    }
+      } else {
+        await markPickersPaidInBatch({
+          companyId,
+          collectionId: selectedCollectionId,
+          pickerIds: payableIds,
+          totalAmount,
+        });
+      }
 
-    // Non-wallet collections: UI-only update (no wallet to deduct)
+      setPaySelectedIds(new Set());
+      toast({ title: `${payableIds.length} marked paid` });
+    } catch (e: any) {
+      console.error('Batch payment failed', e);
+      const isPermissionDenied =
+        e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
+      toast({
+        title: 'Payment failed',
+        description: isPermissionDenied
+          ? 'Insufficient permissions. You may not have access to update harvest payments.'
+          : (e?.message ?? 'Failed to persist picker payment batch.'),
+        variant: 'destructive',
+      });
+    } finally {
+      setPayingSelected(false);
+    }
   };
 
   const handleSetBuyerPrice = async (markBuyerPaid: boolean) => {
@@ -795,6 +756,8 @@ export default function HarvestCollectionsPage() {
         collectionId,
         pricePerKgBuyer: price,
         markBuyerPaid,
+        totalHarvestKg: totalsFromPickers.totalKg,
+        totalPickerCost: totalsFromPickers.totalPay,
       });
       queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       if (markBuyerPaid) {
@@ -810,17 +773,6 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Error', description: e?.message ?? 'Failed', variant: 'destructive' });
     } finally {
       setMarkingBuyerPaid(false);
-    }
-  };
-
-  const syncTotals = async () => {
-    if (!selectedCollectionId) return;
-    try {
-      await recalcCollectionTotals(selectedCollectionId);
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
-      toast({ title: 'Totals synced' });
-    } catch (e: any) {
-      toast({ title: 'Error', description: e?.message ?? 'Failed to sync', variant: 'destructive' });
     }
   };
 
@@ -889,11 +841,9 @@ export default function HarvestCollectionsPage() {
                 (c) => String(c.cropType).toLowerCase() === 'french-beans'
               );
               if (!fb) return null;
-              const pool = cashPoolByCollection[fb.id];
-              // Use shared harvest wallet so balance deducts when paying from any collection
-              const totalPaidOut = harvestWallet?.cashPaidOutTotal ?? pool?.totalPaidOut ?? 0;
-              const remaining = harvestWallet?.currentBalance ?? pool?.remainingBalance ?? 0;
-              const cashReceived = harvestWallet?.cashReceivedTotal ?? pool?.cashReceived ?? 0;
+              const totalPaidOut = walletSummary.cashPaidOutTotal;
+              const remaining = walletSummary.currentBalance;
+              const cashReceived = walletSummary.cashReceivedTotal;
               return (
                 <Popover>
                   <PopoverTrigger asChild>
@@ -903,10 +853,9 @@ export default function HarvestCollectionsPage() {
                       className="text-xs min-h-8 px-3 rounded-lg inline-flex items-center gap-1"
                       onClick={() => {
                         setCashDialogCollection(fb as any);
-                        setCashPreviousAmount(cashReceived);
                         // For top-up UX, start with empty input so user types the new amount to add
                         setCashAmount('');
-                        setCashSource((pool?.source as 'bank' | 'custom') ?? 'bank');
+                        setCashSource('bank');
                         setCashDialogVisible(false);
                       }}
                     >
@@ -1104,8 +1053,9 @@ export default function HarvestCollectionsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
                       {activeCollections.map((c, index) => {
                         const displayName = c.name?.trim() || formatDate(c.harvestDate);
-                        const totalPay = (c.totalPickerCost ?? 0);
-                        const totalWeight = (c.totalHarvestKg ?? 0);
+                        const derivedTotals = collectionTotalsById[c.id];
+                        const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
+                        const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
                         const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
                         return (
                           <Card
@@ -1160,8 +1110,9 @@ export default function HarvestCollectionsPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
                       {closedCollections.map((c, index) => {
                         const displayName = c.name?.trim() || formatDate(c.harvestDate);
-                        const totalPay = (c.totalPickerCost ?? 0);
-                        const totalWeight = (c.totalHarvestKg ?? 0);
+                        const derivedTotals = collectionTotalsById[c.id];
+                        const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
+                        const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
                         const Icon = COLLECTION_ICONS[(activeCollections.length + index) % COLLECTION_ICONS.length];
                         return (
                           <Card
@@ -1304,11 +1255,9 @@ export default function HarvestCollectionsPage() {
                     className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
                     onClick={() => {
                       setCashDialogCollection(selectedCollection as any);
-                      const existingReceived = Number(cashPoolForCollection?.cashReceived ?? 0);
-                      setCashPreviousAmount(existingReceived);
                       // For top-up UX, keep input empty so user types the new amount to add
                       setCashAmount('');
-                      setCashSource((cashPoolForCollection?.source as 'bank' | 'custom') ?? 'bank');
+                      setCashSource('bank');
                       setCashDialogVisible(false);
                     }}
                   >
@@ -1433,6 +1382,7 @@ export default function HarvestCollectionsPage() {
                         const tripCount = tripCountForPicker[p.id] ?? 0;
                         const nextTrip = nextTripForPicker[p.id] ?? 1;
                         const isPaid = p.isPaid;
+                        const pickerTotals = getPickerTotals(p.id);
                         return (
                           <Card
                             key={p.id}
@@ -1463,7 +1413,7 @@ export default function HarvestCollectionsPage() {
                                 {p.pickerName}
                               </div>
                               <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
-                                {(p.totalKg ?? 0).toFixed(1)} kg · KES {(p.totalPay ?? 0).toLocaleString()}
+                                {pickerTotals.totalKg.toFixed(1)} kg · KES {pickerTotals.totalPay.toLocaleString()}
                               </div>
                               <div className={cn(
                                 'text-[10px] border-t border-border pt-1.5 mt-1',
@@ -1526,6 +1476,7 @@ export default function HarvestCollectionsPage() {
                           {payUnpaidAndGroups.unpaid.map((p) => {
                             const selected = paySelectedIds.has(p.id);
                             const tripCount = tripCountForPicker[p.id] ?? 0;
+                            const pickerTotals = getPickerTotals(p.id);
                             return (
                               <Card
                                 key={p.id}
@@ -1549,10 +1500,10 @@ export default function HarvestCollectionsPage() {
                                   </div>
                                   <div className="border-t border-border pt-1.5 mt-1 space-y-0.5">
                                     <div className="text-lg font-bold text-foreground tabular-nums leading-none">
-                                      KES {(p.totalPay ?? 0).toLocaleString()}
+                                      KES {pickerTotals.totalPay.toLocaleString()}
                                     </div>
                                     <div className="text-[10px] text-muted-foreground tabular-nums">
-                                      {(p.totalKg ?? 0).toFixed(1)} kg
+                                      {pickerTotals.totalKg.toFixed(1)} kg
                                     </div>
                                   </div>
                                   <div className="min-h-7 flex items-center justify-center rounded bg-muted text-muted-foreground font-medium text-[10px] pt-1">
@@ -1574,6 +1525,7 @@ export default function HarvestCollectionsPage() {
                           {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
                             const p = pickers[0];
                             const tripCount = tripCountForPicker[p.id] ?? 0;
+                            const pickerTotals = getPickerTotals(p.id);
                             return (
                               <Card
                                 key={p.id}
@@ -1591,7 +1543,7 @@ export default function HarvestCollectionsPage() {
                                   <p className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-0.5">{p.pickerName}</p>
                                   <div className="border-t border-border pt-1 mt-1 space-y-0.5">
                                     <div className="text-sm font-bold text-foreground tabular-nums leading-none">
-                                      KES {(p.totalPay ?? 0).toLocaleString()}
+                                      KES {pickerTotals.totalPay.toLocaleString()}
                                     </div>
                                     <div className="inline-flex items-center justify-center gap-0.5 text-[10px] text-green-700 dark:text-green-400 font-medium">
                                       <CheckCircle2 className="h-3 w-3 shrink-0" />
@@ -1620,6 +1572,7 @@ export default function HarvestCollectionsPage() {
                               <div className="flex flex-wrap gap-2 justify-center">
                                 {pickers.map((p) => {
                                   const tripCount = tripCountForPicker[p.id] ?? 0;
+                                  const pickerTotals = getPickerTotals(p.id);
                                   return (
                                     <Card
                                       key={p.id}
@@ -1636,7 +1589,7 @@ export default function HarvestCollectionsPage() {
                                         </div>
                                         <p className="font-medium text-foreground text-[10px] leading-tight line-clamp-2">{p.pickerName}</p>
                                         <div className="text-[10px] font-bold tabular-nums text-foreground">
-                                          KES {(p.totalPay ?? 0).toLocaleString()}
+                                          KES {pickerTotals.totalPay.toLocaleString()}
                                         </div>
                                         <div className="inline-flex items-center justify-center gap-0.5 text-[9px] text-green-700 dark:text-green-400 font-medium">
                                           <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />

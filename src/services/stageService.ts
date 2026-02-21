@@ -1,6 +1,7 @@
 import { CropStage, CropType } from '@/types';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { safeToDate } from '@/lib/safeTime';
 
 /** Derive display status: respect stored status first, then dates (aligned with CropStagesPage). */
 function getDerivedStatus(
@@ -8,8 +9,8 @@ function getDerivedStatus(
   today: Date,
 ): 'pending' | 'in-progress' | 'completed' {
   if (stage.status === 'completed') return 'completed';
-  const start = stage.startDate ? new Date(stage.startDate) : undefined;
-  const end = stage.endDate ? new Date(stage.endDate) : undefined;
+  const start = safeToDate(stage.startDate) ?? undefined;
+  const end = safeToDate(stage.endDate) ?? undefined;
   if (!start || !end) return 'pending';
   if (today < start) return 'pending';
   if (today > end) return 'completed';

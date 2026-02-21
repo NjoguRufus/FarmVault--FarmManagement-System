@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useTour } from '@/onboarding/TourProvider';
+import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { cn, getDisplayRole } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -142,11 +143,13 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3">
+          <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
+
           {/* Notifications */}
           <DropdownMenu>
-            <DropdownMenuTrigger className="relative flex h-10 w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors">
-              <Bell className="h-5 w-5 text-muted-foreground" />
+            <DropdownMenuTrigger className="relative mr-1 md:mr-0 flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors">
+              <Bell className="h-4 w-4 md:h-5 md:w-5 text-muted-foreground" />
               {unreadCount > 0 && (
                 <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
                   {unreadCount > 99 ? '99+' : unreadCount}
@@ -197,8 +200,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
 
           {/* User Menu */}
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted transition-colors">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground font-medium text-sm">
+            <DropdownMenuTrigger className="flex items-center gap-1.5 md:gap-2 rounded-lg px-1.5 md:px-2 py-1.5 hover:bg-muted transition-colors">
+              <div className="flex h-7 w-7 md:h-8 md:w-8 items-center justify-center rounded-full bg-primary text-primary-foreground font-medium text-xs md:text-sm">
                 {user?.name.charAt(0)}
               </div>
               <div className="hidden md:flex flex-col items-start">

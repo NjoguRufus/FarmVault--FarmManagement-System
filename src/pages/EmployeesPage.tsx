@@ -57,7 +57,7 @@ export default function EmployeesPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees');
-  const { data: allUsers = [] } = useCollection<User>('users', 'employees-page-users');
+  const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users');
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
