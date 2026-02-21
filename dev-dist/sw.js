@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-9a003ab8'], (function (workbox) { 'use strict';
+define(['./workbox-ca84f546'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -78,25 +78,14 @@ define(['./workbox-9a003ab8'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "index.html",
-    "revision": "0.gpgtnt10lgo"
+    "url": "/index.html",
+    "revision": "0.1fkjbh9fl2o"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
-    allowlist: [/^\/$/]
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/index.html"), {
+    allowlist: [/^\/$/],
+    denylist: [/^\/api\//, /^\/__/]
   }));
-  workbox.registerRoute(({
-    request
-  }) => request.mode === "navigate", new workbox.NetworkFirst({
-    "cacheName": "app-pages",
-    "networkTimeoutSeconds": 4,
-    plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 50,
-      maxAgeSeconds: 604800
-    }), new workbox.CacheableResponsePlugin({
-      statuses: [0, 200]
-    })]
-  }), 'GET');
   workbox.registerRoute(({
     request
   }) => ["script", "style", "image", "font", "worker"].includes(request.destination), new workbox.CacheFirst({

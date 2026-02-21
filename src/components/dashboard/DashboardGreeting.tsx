@@ -15,6 +15,7 @@ export function DashboardGreeting({ firstName, className = '' }: DashboardGreeti
 
   return (
     <motion.h2
+      data-tour="dashboard-title"
       className={`text-xl sm:text-2xl font-semibold text-foreground ${className}`}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}

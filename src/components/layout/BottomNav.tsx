@@ -106,6 +106,7 @@ export function BottomNav() {
       }}
     >
       <nav
+        data-tour="bottom-navigation"
         className="pointer-events-auto w-[92%] max-w-[480px] rounded-2xl min-h-[56px] flex items-center justify-around px-1 py-1.5 gap-1 relative overflow-hidden bg-fv-cream dark:bg-card border border-primary/10 dark:border-emerald-200/10 border-t-primary/20 dark:border-t-emerald-200/15 shadow-[0_10px_24px_-16px_rgba(27,67,50,0.38),0_4px_10px_-6px_rgba(27,67,50,0.2)] dark:shadow-[0_12px_26px_-16px_rgba(0,0,0,0.65),0_4px_10px_-6px_rgba(0,0,0,0.5)]"
         aria-label="Bottom navigation"
       >

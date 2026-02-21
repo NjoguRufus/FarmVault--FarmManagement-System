@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useTour } from '@/onboarding/TourProvider';
+import { useTour } from '@/tour/TourProvider';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { cn, getDisplayRole } from '@/lib/utils';
 import {

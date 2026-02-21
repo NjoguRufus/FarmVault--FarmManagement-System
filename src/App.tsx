@@ -59,7 +59,7 @@ import AdminExpensesPage from "@/pages/admin/AdminExpensesPage";
 import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { TourProvider } from "@/onboarding/TourProvider";
+import { TourProvider } from "@/tour/TourProvider";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 
 const queryClient = new QueryClient();

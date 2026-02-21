@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon } from 'lucide-react';
+import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -29,10 +29,13 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { NewOperationMenu } from '@/components/dashboard/NewOperationMenu';
+import { Button } from '@/components/ui/button';
+import { useTour } from '@/tour/TourProvider';
 
 export function CompanyDashboard() {
   const { activeProject, setActiveProject } = useProject();
   const { user } = useAuth();
+  const { startTour } = useTour();
   const isMobile = useIsMobile();
   const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
@@ -220,7 +223,10 @@ export function CompanyDashboard() {
         <DashboardGreeting firstName={firstName} />
         <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end sm:ml-auto">
           <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
-            <SelectTrigger className="h-9 w-[140px] sm:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm">
+            <SelectTrigger
+              data-tour="dashboard-project-selector"
+              className="h-9 w-[140px] sm:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm"
+            >
               <SelectValue placeholder="Project" />
             </SelectTrigger>
             <SelectContent className="rounded-md">
@@ -236,6 +242,17 @@ export function CompanyDashboard() {
             </SelectContent>
           </Select>
           <NewOperationMenu variant={isMobile ? 'mobile' : 'default'} />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-9 px-3 rounded-md"
+            onClick={startTour}
+            data-tour="dashboard-take-tour"
+          >
+            <HelpCircle className="h-4 w-4 sm:mr-1.5" />
+            <span className="hidden sm:inline">Take a Tour</span>
+          </Button>
         </div>
       </div>
 
@@ -251,26 +268,30 @@ export function CompanyDashboard() {
             variant="gold"
             compact
           />
-          <StatCard
-            title="Total Expenses"
-            value={`KES ${totalExpenses.toLocaleString()}`}
-            change={12.5}
-            changeLabel="vs last month"
-            icon={<DollarSign className="h-4 w-4" />}
-            variant="default"
-            compact
-          />
+          <div data-tour="expenses-summary-card">
+            <StatCard
+              title="Total Expenses"
+              value={`KES ${totalExpenses.toLocaleString()}`}
+              change={12.5}
+              changeLabel="vs last month"
+              icon={<DollarSign className="h-4 w-4" />}
+              variant="default"
+              compact
+            />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            title="Profit and Loss"
-            value={`KES ${netBalance.toLocaleString()}`}
-            change={netBalance >= 0 ? 22.1 : -5.2}
-            changeLabel="vs last month"
-            icon={<Wallet className="h-4 w-4" />}
-            variant={netBalance >= 0 ? 'primary' : 'default'}
-            compact
-          />
+          <div data-tour="profit-loss-card">
+            <StatCard
+              title="Profit and Loss"
+              value={`KES ${netBalance.toLocaleString()}`}
+              change={netBalance >= 0 ? 22.1 : -5.2}
+              changeLabel="vs last month"
+              icon={<Wallet className="h-4 w-4" />}
+              variant={netBalance >= 0 ? 'primary' : 'default'}
+              compact
+            />
+          </div>
           <StatCard
             title="Remaining Budget"
             value={`KES ${remainingBudget.toLocaleString()}`}
@@ -292,7 +313,9 @@ export function CompanyDashboard() {
       {/* Bottom Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <CropStageSection stages={activeProject ? activeProjectStages : filteredStages} />
-        <InventoryOverview inventoryItems={filteredInventory} />
+        <div data-tour="inventory-overview">
+          <InventoryOverview inventoryItems={filteredInventory} />
+        </div>
         <div data-tour="recent-transactions">
           <RecentTransactions transactions={recentTransactions} />
         </div>
