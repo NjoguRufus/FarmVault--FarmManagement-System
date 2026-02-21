@@ -65,7 +65,7 @@ export const developerNavConfig: NavItem[] = [
 
 /** Manager nav. */
 export const managerNavConfig: NavItem[] = [
-  { label: 'Manager Operations', path: '/manager/operations', icon: Wrench, group: 'main' },
+  { label: 'Operations', path: '/manager/operations', icon: Wrench, group: 'main' },
   { label: 'Inventory', path: '/inventory', icon: Package, group: 'main' },
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
