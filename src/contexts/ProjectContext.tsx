@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { Project } from '@/types';
 import { useCollection } from '@/hooks/useCollection';
 
@@ -10,19 +10,70 @@ interface ProjectContextType {
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
+const PROJECTS_CACHE_KEY = 'farmvault:projects:cache:v1';
+
+function readCachedProjects(): Project[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(PROJECTS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Project[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const { data: projectsData = [] } = useCollection<Project>('projects', 'projects');
+  const {
+    data: projectsData = [],
+    isLoading,
+    error,
+    fromCache,
+    hasPendingWrites,
+  } = useCollection<Project>('projects', 'projects');
+  const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProject] = useState<Project | null>(null);
 
+  useEffect(() => {
+    if (isLoading) return;
+    // Persist only fully-synced snapshots (including empty arrays) to avoid stale cache drift.
+    if (!fromCache && !hasPendingWrites) {
+      setCachedProjects(projectsData);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(PROJECTS_CACHE_KEY, JSON.stringify(projectsData));
+        } catch {
+          // Ignore quota/private mode failures.
+        }
+      }
+    }
+  }, [projectsData, isLoading, fromCache, hasPendingWrites]);
+
+  const projects = useMemo(() => {
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const shouldUseCache =
+      projectsData.length === 0 &&
+      cachedProjects.length > 0 &&
+      (isOffline || error !== null);
+
+    return shouldUseCache ? cachedProjects : projectsData;
+  }, [projectsData, cachedProjects, error]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const stillExists = projects.some((p) => p.id === activeProject.id);
+    if (!stillExists) setActiveProject(null);
+  }, [projects, activeProject]);
+
   const getProjectsByCompany = (companyId: string) => {
-    return projectsData.filter(p => p.companyId === companyId);
+    return projects.filter((p) => p.companyId === companyId);
   };
 
   return (
     <ProjectContext.Provider
       value={{
-        projects: projectsData,
+        projects,
         activeProject,
         setActiveProject,
         getProjectsByCompany,

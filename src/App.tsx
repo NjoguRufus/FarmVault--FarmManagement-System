@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { ConnectivityProvider } from "@/contexts/ConnectivityContext";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompanyDashboard } from "@/pages/dashboard/CompanyDashboard";
 import { DeveloperDashboard } from "@/pages/dashboard/DeveloperDashboard";
@@ -121,6 +122,7 @@ const App = () => (
     <AuthProvider>
       <ProjectProvider>
         <NotificationProvider>
+        <ConnectivityProvider>
         <TooltipProvider>
           <Toaster />
           <Sonner />
@@ -229,6 +231,7 @@ const App = () => (
           </BrowserRouter>
           </ErrorBoundary>
         </TooltipProvider>
+        </ConnectivityProvider>
         </NotificationProvider>
       </ProjectProvider>
     </AuthProvider>

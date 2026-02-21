@@ -1,7 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getAnalytics, isSupported as isAnalyticsSupported } from 'firebase/analytics';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  persistentSingleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 
 // Firebase configuration for FarmVault
 // Consider moving these values into environment variables for production.
@@ -25,7 +32,33 @@ const appEmployeeCreate = initializeApp(firebaseConfig, 'EmployeeCreate');
 export const auth = getAuth(app);
 /** Use this when creating employee accounts so the company admin is not logged out. */
 export const authEmployeeCreate = getAuth(appEmployeeCreate);
-export const db = getFirestore(app);
+
+let dbInstance: Firestore;
+try {
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  });
+} catch (multiTabError) {
+  try {
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager(),
+      }),
+    });
+    console.warn(
+      '[firebase] Multi-tab persistence unavailable; falling back to single-tab persistence.',
+      multiTabError
+    );
+  } catch (singleTabError) {
+    // Final fallback for unsupported browsers or initialization races.
+    console.warn('[firebase] Firestore persistence unavailable; using standard Firestore.', singleTabError);
+    dbInstance = getFirestore(app);
+  }
+}
+
+export const db = dbInstance;
 
 // Lazily enable Analytics only when supported (browser only)
 export const analyticsPromise = isAnalyticsSupported().then((supported) =>

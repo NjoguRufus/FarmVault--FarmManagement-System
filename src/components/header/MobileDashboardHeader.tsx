@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getGreetingText } from '@/lib/getTimeGreeting';
+import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { Project } from '@/types';
 
 const NEW_OPERATION_OPTIONS = [
@@ -44,8 +45,11 @@ export function MobileDashboardHeader({
 
   return (
     <div className="space-y-3">
-      {/* Greeting + name only */}
-      <h2 className="text-lg font-semibold text-foreground">{greeting}</h2>
+      {/* Greeting + status */}
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-foreground">{greeting}</h2>
+        <ConnectivityStatusPill />
+      </div>
 
       {/* Project selector (left) + New Operation button (right) */}
       <div className="flex flex-wrap items-center gap-3">

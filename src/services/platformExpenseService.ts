@@ -61,8 +61,10 @@ export async function addPlatformExpense(data: {
     category: data.category,
     amount: data.amount,
     date: data.date,
+    dateLocalISO: new Date().toISOString(),
     description: data.description ?? '',
     createdAt: serverTimestamp(),
+    createdAtLocal: Date.now(),
   });
   return ref.id;
 }

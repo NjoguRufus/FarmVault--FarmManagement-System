@@ -40,12 +40,17 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { toDate, formatDate } from '@/lib/dateUtils';
 
+type ExpenseWithSyncState = Expense & {
+  pending?: boolean;
+  fromCache?: boolean;
+};
+
 export default function ExpensesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: allExpenses = [], isLoading } = useCollection<Expense>('expenses', 'expenses');
+  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses');
   const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
 
@@ -574,7 +579,14 @@ export default function ExpensesPage() {
               {filteredExpenses.map((expense) => (
                 <tr key={expense.id}>
                   <td>
-                    <span className="font-medium text-foreground">{expense.description}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground">{expense.description}</span>
+                      {expense.pending && (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                          Syncing...
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <span className={cn('fv-badge', getCategoryColor(expense.category))}>
@@ -620,7 +632,14 @@ export default function ExpensesPage() {
             <div key={expense.id} className="p-4 bg-muted/30 rounded-lg">
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <p className="font-medium text-foreground">{expense.description}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-foreground">{expense.description}</p>
+                    {expense.pending && (
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                        Syncing...
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {formatDate(expense.date)}
                   </p>
@@ -671,7 +690,16 @@ export default function ExpensesPage() {
                           <tr key={e.id}>
                             <td className="text-muted-foreground">{formatDate(e.date)}</td>
                             <td>{getExpenseCategoryLabel(e.category)}</td>
-                            <td>{e.description || '—'}</td>
+                            <td>
+                              <div className="flex items-center gap-2">
+                                <span>{e.description || '—'}</span>
+                                {e.pending && (
+                                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                                    Syncing...
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="font-semibold">{formatCurrency(e.amount)}</td>
                           </tr>
                         ))}
@@ -683,7 +711,14 @@ export default function ExpensesPage() {
                       <div key={e.id} className="p-4 bg-muted/30 rounded-lg">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-medium">{getExpenseCategoryLabel(e.category)}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{getExpenseCategoryLabel(e.category)}</p>
+                              {e.pending && (
+                                <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                                  Syncing...
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-muted-foreground">{formatDate(e.date)}</p>
                             {e.description && <p className="text-sm mt-1">{e.description}</p>}
                           </div>

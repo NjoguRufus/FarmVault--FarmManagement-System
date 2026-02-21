@@ -29,13 +29,18 @@ import {
 
 const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
+type ExpenseWithSyncState = Expense & {
+  pending?: boolean;
+  fromCache?: boolean;
+};
+
 export default function BrokerExpensesPage() {
   const { user } = useAuth();
   const brokerId = user?.id ?? '';
   const queryClient = useQueryClient();
 
   const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allExpenses = [], isLoading } = useCollection<Expense>('expenses', 'expenses');
+  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses');
 
   const brokerHarvestIds = useMemo(() => {
     const harvests = allHarvests.filter(
@@ -214,7 +219,16 @@ export default function BrokerExpensesPage() {
                   <tr key={e.id}>
                     <td className="text-muted-foreground">{formatDate(e.date)}</td>
                     <td>{getExpenseCategoryLabel(e.category)}</td>
-                    <td>{e.description || '—'}</td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span>{e.description || '—'}</span>
+                        {e.pending && (
+                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                            Syncing...
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="font-semibold">{formatCurrency(e.amount)}</td>
                   </tr>
                 ))}
@@ -228,7 +242,14 @@ export default function BrokerExpensesPage() {
               <div key={e.id} className="p-3 sm:p-4 rounded-xl border border-border bg-card/60">
                 <div className="flex justify-between items-start gap-2">
                   <div>
-                    <p className="font-medium text-sm">{getExpenseCategoryLabel(e.category)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-sm">{getExpenseCategoryLabel(e.category)}</p>
+                      {e.pending && (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                          Syncing...
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">{formatDate(e.date)}</p>
                     {e.description && <p className="text-sm mt-1 line-clamp-2">{e.description}</p>}
                   </div>

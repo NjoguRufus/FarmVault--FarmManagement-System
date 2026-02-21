@@ -85,6 +85,9 @@ export default function SeasonChallengesPage() {
     return <span className="text-2xl">{icons[type] || icons.other}</span>;
   };
 
+  const isPreSeasonChallenge = (challenge: SeasonChallenge) =>
+    String((challenge as any).source ?? '') === 'preseason-plan';
+
   const toggleExpand = (challengeId: string) => {
     const newExpanded = new Set(expandedChallenges);
     if (newExpanded.has(challengeId)) {
@@ -470,8 +473,16 @@ export default function SeasonChallengesPage() {
         )}
         {challenges.map((challenge) => {
           const isExpanded = expandedChallenges.has(challenge.id);
+          const preSeason = isPreSeasonChallenge(challenge);
           return (
-            <div key={challenge.id} className="fv-card p-3 sm:p-4">
+            <div key={challenge.id} className="fv-card p-3 sm:p-4 relative overflow-hidden">
+              {preSeason && (
+                <div className="pointer-events-none absolute right-0 top-0 h-20 w-20 overflow-hidden">
+                  <div className="absolute right-[-26px] top-[14px] rotate-45 bg-primary px-8 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-sm">
+                    PRE-SEASON
+                  </div>
+                </div>
+              )}
               <div 
                 className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4 cursor-pointer"
                 onClick={() => toggleExpand(challenge.id)}
