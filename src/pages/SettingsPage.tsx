@@ -7,7 +7,7 @@ import { db } from '@/lib/firebase';
 import { deleteAllCompanyData } from '@/services/companyDataService';
 import { updateCompany } from '@/services/companyService';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useTour } from '@/onboarding/TourProvider';
+import { useTour } from '@/tour/TourProvider';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
