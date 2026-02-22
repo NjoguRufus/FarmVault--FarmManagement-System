@@ -1,43 +1,76 @@
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import {
-  getWorkCardsForManagers,
-  getWorkCardsForCompany,
-  getWorkCardsForProject,
-} from '@/services/operationsWorkCardService';
+import { useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { where, type QueryConstraint } from 'firebase/firestore';
+import type { OperationsWorkCard } from '@/types';
+import { useCollection } from '@/hooks/useCollection';
 
+const WORK_CARDS_PATH = 'operationsWorkCards';
 const WORK_CARDS_KEY = 'operationsWorkCards';
 
-/** Cached 30s so list appears instantly when reopening; placeholder keeps previous data while refetching. */
-const STALE_TIME_MS = 30 * 1000;
-
-export function useWorkCardsForManager(managerIds: string[]) {
-  return useQuery({
-    queryKey: [WORK_CARDS_KEY, 'manager', managerIds],
-    queryFn: () => getWorkCardsForManagers(managerIds),
-    enabled: managerIds.length > 0,
-    staleTime: STALE_TIME_MS,
-    refetchInterval: 5000,
-    placeholderData: keepPreviousData,
+function useWorkCardsCollection(
+  key: string,
+  constraints: QueryConstraint[],
+  enabled: boolean
+) {
+  const result = useCollection<OperationsWorkCard>(key, WORK_CARDS_PATH, {
+    enabled,
+    constraints,
   });
+
+  return {
+    data: result.data,
+    isLoading: result.isLoading,
+    error: result.error,
+    fromCache: result.fromCache,
+    hasPendingWrites: result.hasPendingWrites,
+  };
 }
 
-export function useWorkCardsForCompany(companyId: string | null, options?: { refetchInterval?: number }) {
-  return useQuery({
-    queryKey: [WORK_CARDS_KEY, 'company', companyId],
-    queryFn: () => getWorkCardsForCompany(companyId!),
-    enabled: !!companyId,
-    staleTime: STALE_TIME_MS,
-    refetchInterval: options?.refetchInterval,
-    placeholderData: keepPreviousData,
-  });
+export function useWorkCardsForManager(managerIds: string[]) {
+  const dedupedManagerIds = useMemo(
+    () => [...new Set(managerIds)].filter(Boolean).slice(0, 30),
+    [managerIds]
+  );
+
+  const constraints = useMemo<QueryConstraint[]>(() => {
+    if (dedupedManagerIds.length === 0) return [];
+    return [where('allocatedManagerId', 'in', dedupedManagerIds)];
+  }, [dedupedManagerIds]);
+
+  return useWorkCardsCollection(
+    `${WORK_CARDS_KEY}-manager-${dedupedManagerIds.join(',')}`,
+    constraints,
+    dedupedManagerIds.length > 0
+  );
+}
+
+export function useWorkCardsForCompany(
+  companyId: string | null,
+  _options?: { refetchInterval?: number }
+) {
+  const constraints = useMemo<QueryConstraint[]>(() => {
+    if (!companyId) return [];
+    return [where('companyId', '==', companyId)];
+  }, [companyId]);
+
+  return useWorkCardsCollection(
+    `${WORK_CARDS_KEY}-company-${companyId ?? 'none'}`,
+    constraints,
+    Boolean(companyId)
+  );
 }
 
 export function useWorkCardsForProject(projectId: string | null) {
-  return useQuery({
-    queryKey: [WORK_CARDS_KEY, 'project', projectId],
-    queryFn: () => getWorkCardsForProject(projectId!),
-    enabled: !!projectId,
-  });
+  const constraints = useMemo<QueryConstraint[]>(() => {
+    if (!projectId) return [];
+    return [where('projectId', '==', projectId)];
+  }, [projectId]);
+
+  return useWorkCardsCollection(
+    `${WORK_CARDS_KEY}-project-${projectId ?? 'none'}`,
+    constraints,
+    Boolean(projectId)
+  );
 }
 
 export function useInvalidateWorkCards() {

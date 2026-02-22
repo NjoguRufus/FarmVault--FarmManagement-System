@@ -478,7 +478,7 @@ export default function HarvestCollectionsPage() {
     [totalRevenue, totalsFromPickers.totalPay]
   );
 
-  const handleCreateCollection = () => {
+  const handleCreateCollection = async () => {
     if (!companyId || !effectiveProject) return;
 
     const name = (newCollectionName || '').trim();
@@ -494,33 +494,38 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setCreating(true);
     setNewCollectionOpen(false);
-    setNewCollectionName('');
-    setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
-    setNewPricePerKgPicker('140');
-    setCreating(false);
-
-    void createHarvestCollection({
-      companyId,
-      projectId: effectiveProject.id,
-      cropType: effectiveProject.cropType,
-      name,
-      harvestDate,
-      pricePerKgPicker: price,
-    })
-      .then((id) => {
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
-        setSelectedCollectionId(id);
-        setViewMode('intake');
-        toast({ title: 'Collection created', description: 'Add pickers and weigh entries.' });
-      })
-      .catch((e: any) => {
-        toast({ title: 'Error', description: e?.message ?? 'Failed to create collection', variant: 'destructive' });
+    try {
+      const id = await createHarvestCollection({
+        companyId,
+        projectId: effectiveProject.id,
+        cropType: effectiveProject.cropType,
+        name,
+        harvestDate,
+        pricePerKgPicker: price,
       });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+      setSelectedCollectionId(id);
+      setViewMode('intake');
+      setNewCollectionName('');
+      setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
+      setNewPricePerKgPicker('140');
+      toast({
+        title: isOffline ? 'Collection saved offline' : 'Collection created',
+        description: isOffline
+          ? 'It will sync when online. Add pickers and weigh entries.'
+          : 'Add pickers and weigh entries.',
+      });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message ?? 'Failed to create collection', variant: 'destructive' });
+    } finally {
+      setCreating(false);
+    }
   };
 
-  const handleAddPicker = () => {
+  const handleAddPicker = async () => {
     if (!companyId || !selectedCollectionId) return;
     const num = Number(newPickerNumber || '0');
     const name = (newPickerName || '').trim();
@@ -538,26 +543,28 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddingPicker(true);
-
     setAddPickerOpen(false);
-    setNewPickerNumber('');
-    setNewPickerName('');
-    setAddingPicker(false);
-
-    void addHarvestPicker({
-      companyId,
-      collectionId: selectedCollectionId,
-      pickerNumber: num,
-      pickerName: name,
-    })
-      .then(() => {
-        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-        toast({ title: 'Picker added' });
-      })
-      .catch((e: any) => {
-        toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
+    try {
+      await addHarvestPicker({
+        companyId,
+        collectionId: selectedCollectionId,
+        pickerNumber: num,
+        pickerName: name,
       });
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      setNewPickerNumber('');
+      setNewPickerName('');
+      toast({
+        title: isOffline ? 'Picker saved offline' : 'Picker added',
+        description: isOffline ? 'It will sync when online.' : undefined,
+      });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
+    } finally {
+      setAddingPicker(false);
+    }
   };
 
   const handleAddWeigh = () => {
@@ -608,6 +615,7 @@ export default function HarvestCollectionsPage() {
     }
 
     const payAmount = getPickerTotals(picker.id).totalPay;
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
     if (isFrenchBeansCollection && selectedCollectionId && effectiveProject && user?.companyId) {
       try {
@@ -632,14 +640,16 @@ export default function HarvestCollectionsPage() {
       }
     }
 
-    markPickerCashPaid(pickerId)
-      .then(() => {
-        toast({ title: 'Paid' });
-      })
-      .catch((e: any) => {
-        toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
-        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+    try {
+      await markPickerCashPaid(pickerId);
+      toast({
+        title: isOffline ? 'Payment saved offline' : 'Paid',
+        description: isOffline ? 'It will sync when online.' : undefined,
       });
+    } catch (e: any) {
+      toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+    }
   };
 
   const togglePaySelection = (pickerId: string) => {
@@ -653,6 +663,7 @@ export default function HarvestCollectionsPage() {
 
   const handleMarkMultiplePaid = async (pickerIds: string[]) => {
     if (pickerIds.length === 0 || !selectedCollectionId || !companyId || !effectiveProject) return;
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
     // Only operate on pickers that are not yet paid to avoid
     // duplicate payment batches and "document already exists" errors.
@@ -718,7 +729,10 @@ export default function HarvestCollectionsPage() {
       }
 
       setPaySelectedIds(new Set());
-      toast({ title: `${payableIds.length} marked paid` });
+      toast({
+        title: isOffline ? `${payableIds.length} payments saved offline` : `${payableIds.length} marked paid`,
+        description: isOffline ? 'They will sync when online.' : undefined,
+      });
     } catch (e: any) {
       console.error('Batch payment failed', e);
       const isPermissionDenied =

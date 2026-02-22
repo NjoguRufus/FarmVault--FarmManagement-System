@@ -39,6 +39,8 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { toDate, formatDate } from '@/lib/dateUtils';
+import { toast } from 'sonner';
+import { exportToExcel } from '@/lib/exportUtils';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -192,6 +194,8 @@ export default function ExpensesPage() {
     e.preventDefault();
     if (!activeProject) return;
     setSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setAddOpen(false);
     try {
       const categoryToSave =
         category === 'other' && customCategory.trim()
@@ -216,11 +220,18 @@ export default function ExpensesPage() {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
 
-      setAddOpen(false);
       setDescription('');
       setAmount('');
       setCategory('labour');
       setCustomCategory('');
+      toast.success(
+        isOffline
+          ? 'Expense saved offline. It will sync when online.'
+          : 'Expense added.',
+      );
+    } catch (error) {
+      console.error('Failed to add expense:', error);
+      toast.error('Failed to add expense.');
     } finally {
       setSaving(false);
     }
@@ -271,9 +282,33 @@ export default function ExpensesPage() {
       
       // Close dialog if no more unpaid work logs
       // Note: This will happen automatically when the query refetches and unpaidWorkLogs updates
+      toast.success('Work log marked as paid.');
+    } catch (error) {
+      console.error('Failed to mark work log as paid:', error);
+      toast.error('Failed to mark as paid.');
     } finally {
       setMarkingPaid(null);
     }
+  };
+
+  const handleExport = () => {
+    const rows = filteredExpenses.map((expense) => ({
+      Description: expense.description,
+      Category: expense.category,
+      AmountKES: expense.amount,
+      Date: formatDate(expense.date),
+      Project: activeProject?.name ?? 'All Projects',
+      Status: expense.paid ? 'paid' : 'pending',
+    }));
+
+    if (!rows.length) {
+      toast.error('No expenses to export.');
+      return;
+    }
+
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportToExcel(rows, `expenses-${dateTag}`);
+    toast.success('Expenses exported.');
   };
 
   return (
@@ -377,7 +412,7 @@ export default function ExpensesPage() {
             </Dialog>
           </>
           )}
-          <button className="fv-btn fv-btn--secondary">
+          <button className="fv-btn fv-btn--secondary" onClick={handleExport}>
             <Download className="h-4 w-4" />
             Export
           </button>

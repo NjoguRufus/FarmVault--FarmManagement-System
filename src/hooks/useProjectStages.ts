@@ -1,22 +1,26 @@
-import { useQuery } from '@tanstack/react-query';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { useCallback, useMemo } from 'react';
+import { where } from 'firebase/firestore';
+import { useCollection } from '@/hooks/useCollection';
 import { CropStage } from '@/types';
 
 export function useProjectStages(companyId: string | null | undefined, projectId: string | undefined) {
-  return useQuery({
-    queryKey: ['project-stages', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return [] as CropStage[];
-      const q = query(
-        collection(db, 'projectStages'),
-        where('companyId', '==', companyId),
-        where('projectId', '==', projectId),
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as any) })) as CropStage[];
-    },
+  const enabled = !!companyId && !!projectId;
+  const constraints = useMemo(
+    () =>
+      enabled
+        ? [where('companyId', '==', companyId), where('projectId', '==', projectId)]
+        : [],
+    [enabled, companyId, projectId],
+  );
+
+  const snapshot = useCollection<CropStage>('project-stages', 'projectStages', {
+    enabled,
+    constraints,
   });
+
+  // Keep the same surface expected by callers that previously used React Query.
+  const refetch = useCallback(async () => undefined, []);
+
+  return { ...snapshot, refetch };
 }
 

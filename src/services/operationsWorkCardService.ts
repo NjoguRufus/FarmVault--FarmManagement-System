@@ -30,6 +30,34 @@ export const AUDIT_EVENTS = {
   WORK_PAID: 'WORK_PAID',
 } as const;
 
+function isOfflineFirestoreError(error: unknown): boolean {
+  const code = String((error as { code?: string } | null)?.code ?? '').toLowerCase();
+  const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
+  return (
+    code === 'unavailable' ||
+    code === 'failed-precondition' ||
+    message.includes('offline') ||
+    message.includes('network request failed') ||
+    message.includes('client is offline')
+  );
+}
+
+async function createAuditLogSafe(params: {
+  actorEmail: string;
+  actorUid: string;
+  actionType: string;
+  targetType: string;
+  targetId: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await createAuditLog(params);
+  } catch (error) {
+    if (!isOfflineFirestoreError(error)) throw error;
+    console.warn('[operations] Audit log queued action not written while offline:', params.actionType);
+  }
+}
+
 function toDate(v: unknown): Date | null {
   if (!v) return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
@@ -151,7 +179,7 @@ export async function createWorkCard(params: {
     createdByAdminId: params.createdByAdminId,
     createdAt: serverTimestamp(),
   });
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: AUDIT_EVENTS.WORK_CREATED,
@@ -171,10 +199,11 @@ export async function updateWorkCard(params: {
   stageName?: string;
   planned?: Partial<WorkCardPlanned>;
   allocatedManagerId?: string | null;
+  existingCard?: OperationsWorkCard;
   actorEmail: string;
   actorUid: string;
 }): Promise<void> {
-  const card = await getWorkCard(params.cardId);
+  const card = params.existingCard ?? await getWorkCard(params.cardId);
   if (!card) throw new Error('Work card not found');
 
   const updates: Record<string, unknown> = {};
@@ -205,7 +234,7 @@ export async function updateWorkCard(params: {
   const cardRef = doc(db, COLLECTION, params.cardId);
   await updateDoc(cardRef, updates);
 
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: 'WORK_UPDATED',
@@ -217,6 +246,7 @@ export async function updateWorkCard(params: {
 /** Manager only: submit execution data to an existing card. NEVER creates. */
 export async function submitExecution(params: {
   cardId: string;
+  currentCard?: OperationsWorkCard;
   managerId: string;
   managerName: string;
   /** All ids that represent this manager (user.id + employee.id) for allocation check */
@@ -236,7 +266,7 @@ export async function submitExecution(params: {
   actorEmail: string;
   actorUid: string;
 }): Promise<void> {
-  const card = await getWorkCard(params.cardId);
+  const card = params.currentCard ?? await getWorkCard(params.cardId);
   if (!card) throw new Error('Work card not found');
   const managerIds = new Set(params.managerIds && params.managerIds.length > 0 ? params.managerIds : [params.managerId]);
   if (!canManagerSubmit(card, managerIds)) {
@@ -265,7 +295,7 @@ export async function submitExecution(params: {
     actual: actualPayload,
     status: 'submitted',
   });
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: AUDIT_EVENTS.WORK_SUBMITTED,
@@ -278,11 +308,12 @@ export async function submitExecution(params: {
 /** Admin: approve a submitted card. Deducts inventory if manager recorded resource usage. */
 export async function approveWorkCard(params: {
   cardId: string;
+  currentCard?: OperationsWorkCard;
   approvedBy: string;
   actorEmail: string;
   actorUid: string;
 }): Promise<void> {
-  const card = await getWorkCard(params.cardId);
+  const card = params.currentCard ?? await getWorkCard(params.cardId);
   if (!card) throw new Error('Work card not found');
 
   const cardRef = doc(db, COLLECTION, params.cardId);
@@ -308,12 +339,16 @@ export async function approveWorkCard(params: {
         managerName: card.actual?.managerName,
       });
     } catch (err) {
-      console.error('Work card approve: inventory deduction failed', err);
-      throw err;
+      if (isOfflineFirestoreError(err) || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        console.warn('[operations] Inventory deduction will retry when online.');
+      } else {
+        console.error('Work card approve: inventory deduction failed', err);
+        throw err;
+      }
     }
   }
 
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: AUDIT_EVENTS.WORK_APPROVED,
@@ -334,7 +369,7 @@ export async function rejectWorkCard(params: {
     status: 'rejected',
     rejectionReason: params.rejectionReason,
   });
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: AUDIT_EVENTS.WORK_REJECTED,
@@ -347,12 +382,13 @@ export async function rejectWorkCard(params: {
 /** Manager or Admin: mark card as paid (only when status === 'approved' && !payment.isPaid). Creates a labour expense when amount > 0. */
 export async function markWorkCardPaid(params: {
   cardId: string;
+  currentCard?: OperationsWorkCard;
   paidBy: string;
   paidByName?: string;
   actorEmail: string;
   actorUid: string;
 }): Promise<void> {
-  const card = await getWorkCard(params.cardId);
+  const card = params.currentCard ?? await getWorkCard(params.cardId);
   if (!card) throw new Error('Work card not found');
   if (!canMarkAsPaid(card)) throw new Error('Card must be approved and not already paid.');
   const cardRef = doc(db, COLLECTION, params.cardId);
@@ -387,7 +423,7 @@ export async function markWorkCardPaid(params: {
     });
   }
 
-  await createAuditLog({
+  await createAuditLogSafe({
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: AUDIT_EVENTS.WORK_PAID,

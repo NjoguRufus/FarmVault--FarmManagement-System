@@ -31,6 +31,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 const CATEGORIES = ['Seeds', 'Fertilizers', 'Pesticides', 'Equipment'];
 
@@ -128,6 +129,8 @@ export default function SuppliersPage() {
     e.preventDefault();
     if (!user?.companyId) return;
     setSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setAddOpen(false);
     try {
       await addDoc(collection(db, 'suppliers'), {
         name,
@@ -141,11 +144,18 @@ export default function SuppliersPage() {
         createdAt: serverTimestamp(),
       });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      setAddOpen(false);
       setName('');
       setContact('');
       setEmail('');
       setCategories(['Seeds']);
+      toast.success(
+        isOffline
+          ? 'Supplier saved offline. It will sync when online.'
+          : 'Supplier added.',
+      );
+    } catch (error) {
+      console.error('Failed to add supplier:', error);
+      toast.error('Failed to add supplier.');
     } finally {
       setSaving(false);
     }
@@ -154,6 +164,7 @@ export default function SuppliersPage() {
   const handleSaveEdit = async () => {
     if (!selectedSupplier) return;
     setEditSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       await updateDoc(doc(db, 'suppliers', selectedSupplier.id), {
         name: editName.trim(),
@@ -165,6 +176,14 @@ export default function SuppliersPage() {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       setSelectedSupplier({ ...selectedSupplier, name: editName.trim(), contact: editContact.trim(), email: editEmail.trim() || undefined, category: editCategories[0], categories: editCategories });
       setIsEditingSupplier(false);
+      toast.success(
+        isOffline
+          ? 'Supplier changes saved offline. They will sync when online.'
+          : 'Supplier updated.',
+      );
+    } catch (error) {
+      console.error('Failed to update supplier:', error);
+      toast.error('Failed to update supplier.');
     } finally {
       setEditSaving(false);
     }
@@ -173,6 +192,7 @@ export default function SuppliersPage() {
   const handleSaveReview = async () => {
     if (!selectedSupplier) return;
     setReviewSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       await updateDoc(doc(db, 'suppliers', selectedSupplier.id), {
         rating: reviewRating,
@@ -180,6 +200,14 @@ export default function SuppliersPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       setSelectedSupplier({ ...selectedSupplier, rating: reviewRating, reviewNotes: reviewNotes.trim() || undefined });
+      toast.success(
+        isOffline
+          ? 'Review saved offline. It will sync when online.'
+          : 'Review saved.',
+      );
+    } catch (error) {
+      console.error('Failed to save supplier review:', error);
+      toast.error('Failed to save review.');
     } finally {
       setReviewSaving(false);
     }

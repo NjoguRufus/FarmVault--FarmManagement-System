@@ -455,6 +455,9 @@ export default function InventoryPage() {
       return;
     }
     setSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    // Close immediately; Firestore persistence will sync pending writes when back online.
+    setAddOpen(false);
     try {
       // If a new category was entered, add it first
       let finalCategory = category.toLowerCase();
@@ -642,7 +645,14 @@ export default function InventoryPage() {
       setBags('');
       setKgs('');
       setBoxSize('big');
-      setAddOpen(false);
+      toast.success(
+        isOffline
+          ? 'Inventory item saved offline. It will sync when online.'
+          : 'Inventory item added.',
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to add inventory item.');
     } finally {
       setSaving(false);
     }
@@ -665,6 +675,7 @@ export default function InventoryPage() {
   const handleDeduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deductItem || !user?.companyId) return;
+    const item = deductItem;
     const qty = parseQuantityOrFraction(deductQuantity);
     if (qty <= 0) {
       toast.error('Enter a valid quantity to deduct.');
@@ -675,23 +686,28 @@ export default function InventoryPage() {
       return;
     }
     setDeductSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setDeductOpen(false);
+    setDeductItem(null);
     try {
-      const itemRef = doc(db, 'inventoryItems', deductItem.id);
+      const itemRef = doc(db, 'inventoryItems', item.id);
       await updateDoc(itemRef, {
         quantity: increment(-qty),
         lastUpdated: serverTimestamp(),
       });
-      await logInventoryAudit('DEDUCT', deductItem.id, deductItem.name, {
+      await logInventoryAudit('DEDUCT', item.id, item.name, {
         quantityDeducted: qty,
-        unit: deductItem.unit,
+        unit: item.unit,
         reason: deductReason.trim() || undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-audit-logs'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-inventory'] });
-      setDeductOpen(false);
-      setDeductItem(null);
-      toast.success('Quantity deducted.');
+      toast.success(
+        isOffline
+          ? 'Deduction saved offline. It will sync when online.'
+          : 'Quantity deducted.',
+      );
     } catch (err) {
       console.error(err);
       toast.error('Failed to deduct.');
@@ -728,15 +744,19 @@ export default function InventoryPage() {
   const handleRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!restockItem) return;
+    const item = restockItem;
     const qty = Number(restockQuantity || '0');
     const total = Number(restockTotalCost || '0');
     if (!qty || !total) return;
 
     setRestockSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setRestockOpen(false);
+    setRestockItem(null);
     try {
       const batch = writeBatch(db);
 
-      const itemRef = doc(db, 'inventoryItems', restockItem.id);
+      const itemRef = doc(db, 'inventoryItems', item.id);
       batch.update(itemRef, {
         quantity: increment(qty),
         lastUpdated: serverTimestamp(),
@@ -744,10 +764,10 @@ export default function InventoryPage() {
 
       const purchaseRef = doc(collection(db, 'inventoryPurchases'));
       const purchaseData: Record<string, unknown> = {
-        companyId: restockItem.companyId,
-        inventoryItemId: restockItem.id,
+        companyId: item.companyId,
+        inventoryItemId: item.id,
         quantityAdded: qty,
-        unit: restockItem.unit,
+        unit: item.unit,
         totalCost: total,
         date: serverTimestamp(),
         createdAt: serverTimestamp(),
@@ -771,11 +791,11 @@ export default function InventoryPage() {
         };
         const expenseRef = doc(collection(db, 'expenses'));
         batch.set(expenseRef, {
-          companyId: restockItem.companyId,
+          companyId: item.companyId,
           projectId: activeProject.id,
           cropType: activeProject.cropType,
-          category: categoryMap[restockItem.category] ?? 'other',
-          description: `Restock ${restockItem.name} (${qty} ${restockItem.unit})`,
+          category: categoryMap[item.category] ?? 'other',
+          description: `Restock ${item.name} (${qty} ${item.unit})`,
           amount: total,
           date: serverTimestamp(),
           dateLocalISO: new Date().toISOString(),
@@ -787,14 +807,20 @@ export default function InventoryPage() {
       }
 
       await batch.commit();
-      await logInventoryAudit('RESTOCK', restockItem.id, restockItem.name, { quantityAdded: qty, totalCost: total, unit: restockItem.unit });
+      await logInventoryAudit('RESTOCK', item.id, item.name, { quantityAdded: qty, totalCost: total, unit: item.unit });
       queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-audit-logs'] });
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-inventory'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
-      setRestockOpen(false);
-      toast.success('Restocked successfully');
+      toast.success(
+        isOffline
+          ? 'Restock saved offline. It will sync when online.'
+          : 'Restocked successfully',
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to restock inventory.');
     } finally {
       setRestockSaving(false);
     }
@@ -817,18 +843,7 @@ export default function InventoryPage() {
         <div className="flex gap-2">
           <Dialog 
             open={addOpen} 
-            onOpenChange={(open) => {
-              // Allow opening the dialog
-              if (open) {
-                setAddOpen(true);
-              } else {
-                // Only allow closing if not currently saving
-                // This prevents the dialog from closing during form submission or select interactions
-                if (!saving) {
-                  setAddOpen(false);
-                }
-              }
-            }}
+            onOpenChange={setAddOpen}
           >
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--primary" data-tour="inventory-add-item">

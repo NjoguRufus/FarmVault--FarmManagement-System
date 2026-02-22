@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { toast } from 'sonner';
 
 export default function SeasonChallengesPage() {
   const { activeProject } = useProject();
@@ -120,6 +121,8 @@ export default function SeasonChallengesPage() {
     e.preventDefault();
     if (!activeProject) return;
     setSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setAddOpen(false);
     try {
       await addDoc(collection(db, 'seasonChallenges'), {
         title,
@@ -136,12 +139,18 @@ export default function SeasonChallengesPage() {
       });
       
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
-      
-      setAddOpen(false);
       setTitle('');
       setDescription('');
       setChallengeType('other');
       setSeverity('medium');
+      toast.success(
+        isOffline
+          ? 'Challenge saved offline. It will sync when online.'
+          : 'Challenge reported.',
+      );
+    } catch (error) {
+      console.error('Failed to report challenge:', error);
+      toast.error('Failed to report challenge.');
     } finally {
       setSaving(false);
     }
@@ -323,7 +332,7 @@ export default function SeasonChallengesPage() {
       setEditItemsUsed([]);
     } catch (error) {
       console.error('Error saving challenge:', error);
-      alert('Failed to save challenge. Please try again.');
+      toast.error('Failed to save challenge. Please try again.');
     } finally {
       setEditingSaving(false);
     }
