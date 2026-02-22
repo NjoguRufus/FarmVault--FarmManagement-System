@@ -2,10 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db, authEmployeeCreate } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { serverTimestamp, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useCollection } from '@/hooks/useCollection';
-import { Employee, User } from '@/types';
+import { Employee, PermissionMap, PermissionPresetKey, User } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,12 +30,82 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import { formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
+import { PermissionEditor } from '@/components/permissions/PermissionEditor';
+import { getDefaultPermissions, getPresetPermissions, resolvePermissions } from '@/lib/permissions';
+
+type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker';
+type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
+type PermissionEditorPreset = PermissionPresetKey | 'custom';
+
+const ROLE_OPTIONS: Array<{
+  value: ManagedEmployeeRole;
+  label: string;
+  department: string;
+}> = [
+  { value: 'operations-manager', label: 'Operations (Manager)', department: 'Operations' },
+  { value: 'logistics-driver', label: 'Logistics (Driver)', department: 'Logistics' },
+  { value: 'sales-broker', label: 'Sales (Broker)', department: 'Sales' },
+];
+
+const DEFAULT_PERMISSIONS = resolvePermissions(null, getDefaultPermissions());
+
+function mapEmployeeRoleToAppRole(role: ManagedEmployeeRole | null): 'manager' | 'broker' | 'employee' {
+  if (role === 'operations-manager') return 'manager';
+  if (role === 'sales-broker') return 'broker';
+  return 'employee';
+}
+
+function normalizeEmployeeRole(role: string | null | undefined): ManagedEmployeeRole | null {
+  if (!role) return null;
+  if (role === 'operations-manager' || role === 'manager') return 'operations-manager';
+  if (role === 'logistics-driver' || role === 'driver') return 'logistics-driver';
+  if (role === 'sales-broker' || role === 'broker') return 'sales-broker';
+  return null;
+}
+
+function getEmployeeRole(employee: Employee): ManagedEmployeeRole | null {
+  return normalizeEmployeeRole(employee.employeeRole ?? employee.role);
+}
+
+function resolveRoleForSave(
+  selection: EmployeeRoleSelection,
+  employee: Employee | null,
+): string | null {
+  if (selection !== 'none') return selection;
+  const existingRawRole = employee?.employeeRole ?? employee?.role ?? null;
+  if (!existingRawRole) return null;
+  // Preserve unknown legacy roles unless the admin explicitly maps them first.
+  if (!normalizeEmployeeRole(existingRawRole)) return existingRawRole;
+  return null;
+}
+
+function getEmployeeName(employee: Employee): string {
+  return employee.fullName || employee.name || 'Employee';
+}
+
+function getEmployeePhone(employee: Employee): string {
+  return employee.phone || employee.contact || '';
+}
+
+function getRoleLabel(role: string | null | undefined): string {
+  if (!role) return 'Custom permissions';
+  return ROLE_OPTIONS.find((option) => option.value === role)?.label || role;
+}
+
+function getDepartmentFromRole(role: ManagedEmployeeRole | null): string {
+  if (!role) return 'General';
+  return ROLE_OPTIONS.find((option) => option.value === role)?.department || 'General';
+}
 
 export default function EmployeesPage() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const canCreateEmployees = can('employees', 'create');
+  const canEditEmployees = can('employees', 'edit');
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       active: 'fv-badge--active',
@@ -47,15 +117,15 @@ export default function EmployeesPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'operations-manager' | 'logistics-driver' | 'sales-broker'>(
-    'operations-manager',
-  );
-  const [department, setDepartment] = useState('Operations');
+  const [role, setRole] = useState<EmployeeRoleSelection>('none');
+  const [department, setDepartment] = useState('');
   const [contact, setContact] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [addPermissions, setAddPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
+  const [addPreset, setAddPreset] = useState<PermissionEditorPreset>('custom');
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees');
   const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users');
 
@@ -66,61 +136,117 @@ export default function EmployeesPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editName, setEditName] = useState('');
-  const [editRole, setEditRole] = useState<'operations-manager' | 'logistics-driver' | 'sales-broker'>('operations-manager');
+  const [editRole, setEditRole] = useState<EmployeeRoleSelection>('none');
   const [editDepartment, setEditDepartment] = useState('');
   const [editContact, setEditContact] = useState('');
   const [editStatus, setEditStatus] = useState<'active' | 'on-leave' | 'inactive'>('active');
   const [editSaving, setEditSaving] = useState(false);
-
-  const ROLE_OPTIONS = [
-    { value: 'operations-manager', label: 'Operations (Manager)', department: 'Operations' },
-    { value: 'logistics-driver', label: 'Logistics (Driver)', department: 'Logistics' },
-    { value: 'sales-broker', label: 'Sales (Broker)', department: 'Sales' },
-  ] as const;
-
-  const getRoleLabel = (value: string) =>
-    ROLE_OPTIONS.find(r => r.value === value)?.label || value;
+  const [editPermissions, setEditPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
+  const [editPreset, setEditPreset] = useState<PermissionEditorPreset>('custom');
 
   const openEdit = (employee: Employee) => {
+    const employeeRole = getEmployeeRole(employee);
     setEditingEmployee(employee);
-    setEditName(employee.name);
-    setEditRole((employee.role as typeof editRole) || 'operations-manager');
-    setEditDepartment(employee.department || '');
-    setEditContact(employee.contact || '');
+    setEditName(getEmployeeName(employee));
+    setEditRole(employeeRole || 'none');
+    setEditDepartment(employee.department || getDepartmentFromRole(employeeRole));
+    setEditContact(getEmployeePhone(employee));
     setEditStatus((employee.status as typeof editStatus) || 'active');
+    setEditPermissions(resolvePermissions(employeeRole, employee.permissions ?? getDefaultPermissions()));
+    setEditPreset('custom');
     setEditOpen(true);
+  };
+
+  const resetAddForm = () => {
+    setName('');
+    setRole('none');
+    setDepartment('');
+    setContact('');
+    setEmail('');
+    setPassword('');
+    setShowPassword(false);
+    setAddPermissions(DEFAULT_PERMISSIONS);
+    setAddPreset('custom');
+  };
+
+  const handleRoleChange = (value: string) => {
+    const normalized = value === 'none' ? null : normalizeEmployeeRole(value);
+    setRole((normalized ?? 'none') as EmployeeRoleSelection);
+    setDepartment(getDepartmentFromRole(normalized));
+    setAddPermissions(resolvePermissions(normalized, getDefaultPermissions()));
+    setAddPreset('custom');
+  };
+
+  const handleEditRoleChange = (value: string) => {
+    const normalized = value === 'none' ? null : normalizeEmployeeRole(value);
+    setEditRole((normalized ?? 'none') as EmployeeRoleSelection);
+    setEditDepartment(getDepartmentFromRole(normalized));
+    setEditPermissions(resolvePermissions(normalized, getDefaultPermissions()));
+    setEditPreset('custom');
+  };
+
+  const handleAddPresetChange = (next: PermissionEditorPreset) => {
+    setAddPreset(next);
+    if (next === 'custom') return;
+    const selectedRole = role === 'none' ? null : role;
+    setAddPermissions(resolvePermissions(selectedRole, getPresetPermissions(next)));
+  };
+
+  const handleEditPresetChange = (next: PermissionEditorPreset) => {
+    setEditPreset(next);
+    if (next === 'custom') return;
+    const selectedRole = editRole === 'none' ? null : editRole;
+    setEditPermissions(resolvePermissions(selectedRole, getPresetPermissions(next)));
+  };
+
+  const handleAddPermissionChange = (next: PermissionMap) => {
+    const selectedRole = role === 'none' ? null : role;
+    setAddPermissions(resolvePermissions(selectedRole, next));
+    if (addPreset !== 'custom') setAddPreset('custom');
+  };
+
+  const handleEditPermissionChange = (next: PermissionMap) => {
+    const selectedRole = editRole === 'none' ? null : editRole;
+    setEditPermissions(resolvePermissions(selectedRole, next));
+    if (editPreset !== 'custom') setEditPreset('custom');
   };
 
   const handleUpdateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEmployee) return;
+    if (!canEditEmployees) {
+      toast.error('Permission denied', { description: 'You cannot edit employee records.' });
+      return;
+    }
     setEditSaving(true);
     try {
-      const roleConfig = ROLE_OPTIONS.find(r => r.value === editRole);
-      const department = roleConfig?.department ?? editDepartment;
-      const empRef = doc(db, 'employees', editingEmployee.id);
-      await updateDoc(empRef, {
+      const selectedRole = resolveRoleForSave(editRole, editingEmployee);
+      const normalizedSelectedRole = normalizeEmployeeRole(selectedRole);
+      const resolvedPermissions = resolvePermissions(selectedRole, editPermissions);
+      const resolvedDepartment = editDepartment || getDepartmentFromRole(normalizedSelectedRole);
+
+      await updateDoc(doc(db, 'employees', editingEmployee.id), {
+        fullName: editName,
         name: editName,
-        role: editRole,
-        department,
-        contact: editContact,
+        role: selectedRole,
+        employeeRole: selectedRole,
+        department: resolvedDepartment,
+        phone: editContact || null,
+        contact: editContact || null,
         status: editStatus,
+        permissions: resolvedPermissions,
       });
-      const authUserId = (editingEmployee as Employee & { authUserId?: string }).authUserId;
+
+      const authUserId = editingEmployee.authUserId || editingEmployee.id;
       if (authUserId) {
-        const appRole =
-          editRole === 'operations-manager'
-            ? 'manager'
-            : editRole === 'sales-broker'
-            ? 'broker'
-            : 'employee';
-        await updateDoc(doc(db, 'users', authUserId), {
-          name: editName,
-          role: appRole,
-          employeeRole: editRole,
-        });
+        await setDoc(doc(db, 'users', authUserId), {
+          permissions: resolvedPermissions,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
       }
+
       queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['employees-page-users'] });
       toast.success('Employee updated');
       setEditOpen(false);
       setEditingEmployee(null);
@@ -134,66 +260,62 @@ export default function EmployeesPage() {
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateEmployees) {
+      toast.error('Permission denied', { description: 'You cannot create employees.' });
+      return;
+    }
     setSaving(true);
     try {
-      // Company admin must have companyId set (Firestore rules require it to match)
       const companyId = user?.companyId ?? null;
       if (!companyId && user?.role !== 'developer') {
         toast.error('Cannot add employee', {
           description: 'Your account is not linked to a company. Please contact support or sign in with a company admin account.',
         });
-        setSaving(false);
         return;
       }
 
-      const roleConfig = ROLE_OPTIONS.find(r => r.value === role)!;
-      // Use secondary auth so the company admin stays signed in (createUserWithEmailAndPassword signs in the new user on that instance)
+      const selectedRole = role === 'none' ? null : role;
+      const appRole = mapEmployeeRoleToAppRole(selectedRole);
+      const resolvedPermissions = resolvePermissions(selectedRole, addPermissions);
+      const resolvedDepartment = department || getDepartmentFromRole(selectedRole);
+
       const credential = await createUserWithEmailAndPassword(authEmployeeCreate, email, password);
       const uid = credential.user.uid;
 
-      // Core employee record (for HR/operations views) — companyId must match current user's for rules
-      await addDoc(collection(db, 'employees'), {
+      await setDoc(doc(db, 'employees', uid), {
+        fullName: name,
         name,
-        role,
-        department: roleConfig.department,
-        contact,
+        email,
+        phone: contact || null,
+        contact: contact || null,
+        role: selectedRole,
+        employeeRole: selectedRole,
         status: 'active',
+        department: resolvedDepartment,
         companyId,
-        joinDate: serverTimestamp(),
+        permissions: resolvedPermissions,
+        createdBy: user?.id ?? null,
         createdAt: serverTimestamp(),
+        joinDate: serverTimestamp(),
         authUserId: uid,
-      });
+      }, { merge: true });
 
-      // Map employee role to top-level app role for routing/guards
-      // - operations-manager -> manager dashboard
-      // - sales-broker      -> broker dashboard
-      // - logistics-driver  -> employee (checked separately for driver dashboard)
-      const appRole =
-        role === 'operations-manager'
-          ? 'manager'
-          : role === 'sales-broker'
-          ? 'broker'
-          : 'employee';
-
-      // User profile used for login + role-based dashboards
       await setDoc(doc(db, 'users', uid), {
         email,
         name,
         role: appRole,
-        employeeRole: role,
+        employeeRole: selectedRole,
+        permissions: resolvedPermissions,
         companyId,
         createdAt: serverTimestamp(),
-      });
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
 
       queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['employees-page-users'] });
       toast.success('Employee added successfully');
       setAddOpen(false);
-      setName('');
-      setRole('operations-manager');
-      setDepartment('Operations');
-      setContact('');
-      setEmail('');
-      setPassword('');
+      resetAddForm();
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
       const message = (err as { message?: string })?.message ?? '';
@@ -237,21 +359,32 @@ export default function EmployeesPage() {
   }, [allUsers]);
 
   const getEmployeeEmail = (emp: Employee) => {
-    const authId = (emp as Employee & { authUserId?: string }).authUserId;
-    return authId ? authUserIdToEmail.get(authId) : undefined;
+    if (emp.email) return emp.email;
+    const authId = emp.authUserId || emp.id;
+    return authUserIdToEmail.get(authId);
   };
 
   const filteredEmployees = useMemo(
     () =>
       companyEmployees.filter((e) => {
+        const employeeName = getEmployeeName(e).toLowerCase();
+        const employeePhone = getEmployeePhone(e).toLowerCase();
+        const employeeEmail = (getEmployeeEmail(e) || '').toLowerCase();
+        const employeeRole = getEmployeeRole(e);
         const matchesSearch =
           !search ||
-          e.name.toLowerCase().includes(search.toLowerCase()) ||
-          (e.contact && e.contact.toLowerCase().includes(search.toLowerCase()));
-        const matchesRole = roleFilter === 'all' || e.role === roleFilter;
+          employeeName.includes(search.toLowerCase()) ||
+          employeePhone.includes(search.toLowerCase()) ||
+          employeeEmail.includes(search.toLowerCase());
+        const matchesRole =
+          roleFilter === 'all'
+            ? true
+            : roleFilter === 'none'
+            ? !employeeRole
+            : employeeRole === roleFilter;
         return matchesSearch && matchesRole;
       }),
-    [companyEmployees, search, roleFilter],
+    [companyEmployees, search, roleFilter, authUserIdToEmail],
   );
 
   return (
@@ -264,14 +397,21 @@ export default function EmployeesPage() {
             Manage your team members
           </p>
         </div>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        {canCreateEmployees && (
+        <Dialog
+          open={addOpen}
+          onOpenChange={(open) => {
+            setAddOpen(open);
+            if (!open) resetAddForm();
+          }}
+        >
           <DialogTrigger asChild>
             <button className="fv-btn fv-btn--primary">
               <Plus className="h-4 w-4" />
               Add Employee
             </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add Employee</DialogTitle>
             </DialogHeader>
@@ -287,30 +427,30 @@ export default function EmployeesPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Role</label>
-              <Select
-                value={role}
-                onValueChange={(val) => {
-                  const selected = ROLE_OPTIONS.find(r => r.value === val as typeof role);
-                  setRole(val as typeof role);
-                  if (selected) {
-                    setDepartment(selected.department);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <label className="text-sm font-medium text-foreground">Role (optional)</label>
+                  <Select value={role} onValueChange={handleRoleChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="No role (custom permissions)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No role (custom permissions)</SelectItem>
+                      {ROLE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              {/* Department is derived from role; no manual input */}
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Department</label>
+                  <input
+                    className="fv-input"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    placeholder="General"
+                  />
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Email (for login)</label>
@@ -350,12 +490,21 @@ export default function EmployeesPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Contact</label>
+                <label className="text-sm font-medium text-foreground">Phone / Contact</label>
                 <input
                   className="fv-input"
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
                   placeholder="+254 700 000 000"
+                />
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                <PermissionEditor
+                  value={addPermissions}
+                  onChange={handleAddPermissionChange}
+                  preset={addPreset}
+                  onPresetChange={handleAddPresetChange}
+                  lockedRole={role === 'none' ? null : role}
                 />
               </div>
               <DialogFooter>
@@ -377,6 +526,7 @@ export default function EmployeesPage() {
             </form>
           </DialogContent>
         </Dialog>
+        )}
 
         {/* View details modal */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
@@ -388,17 +538,17 @@ export default function EmployeesPage() {
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-lg">
-                    {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
+                    {getEmployeeName(selectedEmployee).split(' ').map(n => n[0]).join('')}
                   </div>
                   <div>
-                    <p className="font-semibold text-foreground">{selectedEmployee.name}</p>
-                    <p className="text-sm text-muted-foreground">{getRoleLabel(selectedEmployee.role)}</p>
+                    <p className="font-semibold text-foreground">{getEmployeeName(selectedEmployee)}</p>
+                    <p className="text-sm text-muted-foreground">{getRoleLabel(getEmployeeRole(selectedEmployee))}</p>
                   </div>
                 </div>
                 <dl className="grid gap-3 text-sm">
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Department</dt>
-                    <dd className="font-medium">{selectedEmployee.department}</dd>
+                    <dd className="font-medium">{selectedEmployee.department || 'General'}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Email</dt>
@@ -406,7 +556,7 @@ export default function EmployeesPage() {
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Contact</dt>
-                    <dd className="font-medium">{selectedEmployee.contact || '—'}</dd>
+                    <dd className="font-medium">{getEmployeePhone(selectedEmployee) || '—'}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Status</dt>
@@ -429,6 +579,7 @@ export default function EmployeesPage() {
                   >
                     Close
                   </button>
+                  {canEditEmployees && (
                   <button
                     type="button"
                     className="fv-btn fv-btn--primary"
@@ -439,6 +590,7 @@ export default function EmployeesPage() {
                   >
                     Edit employee
                   </button>
+                  )}
                 </DialogFooter>
               </div>
             )}
@@ -447,7 +599,7 @@ export default function EmployeesPage() {
 
         {/* Edit employee modal */}
         <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditingEmployee(null); }}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit employee</DialogTitle>
             </DialogHeader>
@@ -462,19 +614,16 @@ export default function EmployeesPage() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Role</label>
+                <label className="text-sm font-medium text-foreground">Role (optional)</label>
                 <Select
                   value={editRole}
-                  onValueChange={(val) => {
-                    const selected = ROLE_OPTIONS.find(r => r.value === val as typeof editRole);
-                    setEditRole(val as typeof editRole);
-                    if (selected) setEditDepartment(selected.department);
-                  }}
+                  onValueChange={handleEditRoleChange}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select role" />
+                    <SelectValue placeholder="No role (custom permissions)" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">No role (custom permissions)</SelectItem>
                     {ROLE_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
@@ -498,6 +647,15 @@ export default function EmployeesPage() {
                   value={editContact}
                   onChange={(e) => setEditContact(e.target.value)}
                   placeholder="+254 700 000 000"
+                />
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                <PermissionEditor
+                  value={editPermissions}
+                  onChange={handleEditPermissionChange}
+                  preset={editPreset}
+                  onPresetChange={handleEditPresetChange}
+                  lockedRole={editRole === 'none' ? null : editRole}
                 />
               </div>
               <div className="space-y-1">
@@ -568,11 +726,12 @@ export default function EmployeesPage() {
           />
         </div>
         <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-56">
             <SelectValue placeholder="All Roles" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Roles</SelectItem>
+            <SelectItem value="none">No role (custom)</SelectItem>
             {ROLE_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
@@ -609,18 +768,18 @@ export default function EmployeesPage() {
                   <td>
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                        {employee.name.split(' ').map(n => n[0]).join('')}
+                        {getEmployeeName(employee).split(' ').map(n => n[0]).join('')}
                       </div>
                       <div>
-                        <span className="font-medium text-foreground">{employee.name}</span>
+                        <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
                         <p className="text-xs text-muted-foreground">
                           Joined {formatDate(employee.joinDate, { month: 'short', year: 'numeric' })}
                         </p>
                       </div>
                     </div>
                   </td>
-                  <td>{getRoleLabel(employee.role)}</td>
-                  <td>{employee.department}</td>
+                  <td>{getRoleLabel(getEmployeeRole(employee))}</td>
+                  <td>{employee.department || 'General'}</td>
                   <td>
                     <div className="flex flex-col gap-0.5">
                       {getEmployeeEmail(employee) && (
@@ -631,7 +790,7 @@ export default function EmployeesPage() {
                       )}
                       <div className="flex items-center gap-2">
                         <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-sm">{employee.contact || '—'}</span>
+                        <span className="text-sm">{getEmployeePhone(employee) || '—'}</span>
                       </div>
                     </div>
                   </td>
@@ -660,12 +819,14 @@ export default function EmployeesPage() {
                         >
                           View details
                         </DropdownMenuItem>
+                        {canEditEmployees && (
                         <DropdownMenuItem
                           className="cursor-pointer"
                           onClick={() => openEdit(employee)}
                         >
                           Edit
                         </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </td>
@@ -682,11 +843,11 @@ export default function EmployeesPage() {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                    {employee.name.split(' ').map(n => n[0]).join('')}
+                    {getEmployeeName(employee).split(' ').map(n => n[0]).join('')}
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">{employee.name}</p>
-                    <p className="text-xs text-muted-foreground">{getRoleLabel(employee.role)}</p>
+                    <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
+                    <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -703,25 +864,27 @@ export default function EmployeesPage() {
                       <DropdownMenuItem className="cursor-pointer" onClick={() => { setSelectedEmployee(employee); setDetailsOpen(true); }}>
                         View details
                       </DropdownMenuItem>
+                      {canEditEmployees && (
                       <DropdownMenuItem className="cursor-pointer" onClick={() => openEdit(employee)}>
                         Edit
                       </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
               </div>
               <div className="text-sm text-muted-foreground space-y-1">
-                <div>{employee.department}</div>
+                <div>{employee.department || 'General'}</div>
                 {getEmployeeEmail(employee) && (
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 shrink-0" />
                     <span>{getEmployeeEmail(employee)}</span>
                   </div>
                 )}
-                {employee.contact && (
+                {getEmployeePhone(employee) && (
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 shrink-0" />
-                    <span>{employee.contact}</span>
+                    <span>{getEmployeePhone(employee)}</span>
                   </div>
                 )}
               </div>

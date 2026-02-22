@@ -70,6 +70,24 @@ export const managerNavConfig: NavItem[] = [
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
+const managerExtraNavConfig: NavItem[] = companyNavConfig.filter(
+  (item) =>
+    item.path !== '/dashboard' &&
+    item.path !== '/employee-dashboard' &&
+    item.path !== '/operations' &&
+    item.path !== '/inventory' &&
+    item.path !== '/feedback'
+);
+
+function getMergedManagerNav(): NavItem[] {
+  const merged = [...managerNavConfig, ...managerExtraNavConfig];
+  const deduped = new Map<string, NavItem>();
+  merged.forEach((item) => {
+    deduped.set(item.path, item);
+  });
+  return Array.from(deduped.values());
+}
+
 /** Broker nav. */
 export const brokerNavConfig: NavItem[] = [
   { label: 'Broker Dashboard', path: '/broker', icon: LayoutDashboard, group: 'main' },
@@ -100,7 +118,7 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
     emp === 'manager' ||
     emp === 'operations-manager'
   )
-    return managerNavConfig;
+    return getMergedManagerNav();
   if (
     user.role === 'broker' ||
     emp === 'sales-broker' ||
@@ -112,6 +130,10 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
     (emp === 'logistics-driver' || emp === 'driver')
   )
     return driverNavConfig;
+
+  if (user.role === 'employee' || user.role === ('user' as any)) {
+    return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
+  }
 
   return companyNavConfig.filter((i) => i.path === '/dashboard');
 }

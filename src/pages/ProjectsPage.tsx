@@ -1,13 +1,12 @@
 import React from 'react';
-import { Plus, Search, Filter, MoreHorizontal, ExternalLink, Star, Loader2 } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, ExternalLink, Star, Loader2 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Project } from '@/types';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { formatDate } from '@/lib/dateUtils';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +16,10 @@ import {
 
 export default function ProjectsPage() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const { projects, setActiveProject } = useProject();
   const navigate = useNavigate();
+  const canCreateProject = can('projects', 'create');
 
   const visibleProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
 
@@ -56,14 +57,16 @@ export default function ProjectsPage() {
             Manage all your agricultural projects
           </p>
         </div>
-        <button
-          className="fv-btn fv-btn--primary"
-          onClick={() => navigate('/projects/new')}
-          data-tour="projects-new-button"
-        >
-          <Plus className="h-4 w-4" />
-          New Project
-        </button>
+        {canCreateProject && (
+          <button
+            className="fv-btn fv-btn--primary"
+            onClick={() => navigate('/projects/new')}
+            data-tour="projects-new-button"
+          >
+            <Plus className="h-4 w-4" />
+            New Project
+          </button>
+        )}
       </div>
 
       {/* Filters */}

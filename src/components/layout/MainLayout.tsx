@@ -39,17 +39,6 @@ export function MainLayout() {
       return null;
     }
 
-    // Manager: only manager dashboard + operations + inventory
-    if (user.role === 'manager') {
-      const allowedPrefixes = ['/manager', '/operations', '/inventory'];
-      const allowed = allowedPrefixes.some(
-        (prefix) => path === prefix || path.startsWith(prefix + '/'),
-      );
-      if (!allowed) {
-        return '/manager';
-      }
-    }
-
     // Broker: only broker dashboard + broker harvest-sales + expenses
     if (isBroker) {
       const allowedPrefixes = ['/broker', '/expenses'];

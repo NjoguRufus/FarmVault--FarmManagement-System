@@ -5,6 +5,8 @@ import { cn, getDisplayRole } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getNavItemsForSidebar } from '@/config/navConfig';
+import { usePermissions } from '@/hooks/usePermissions';
+import { getModuleForPath } from '@/lib/permissions';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -32,9 +34,14 @@ function getSidebarTourId(path: string): string | undefined {
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const location = useLocation();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const isMobile = useIsMobile();
 
-  const navItems = getNavItemsForSidebar(user);
+  const navItems = getNavItemsForSidebar(user).filter((item) => {
+    const module = getModuleForPath(item.path);
+    if (!module) return true;
+    return can(module, 'view');
+  });
 
   return (
     <div className="hidden md:block">

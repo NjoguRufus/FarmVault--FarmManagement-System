@@ -58,8 +58,8 @@ export default function LoginPage() {
       return;
     }
 
-    // Fallback: previously intended route or projects list
-    navigate(from || '/projects', { replace: true });
+    // Fallback: previously intended route or dashboard.
+    navigate(from || '/dashboard', { replace: true });
   }, [isAuthenticated, user, navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
