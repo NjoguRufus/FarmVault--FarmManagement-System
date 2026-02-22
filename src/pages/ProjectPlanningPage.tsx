@@ -2,14 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery } from '@tanstack/react-query';
 import {
   doc,
-  getDoc,
   collection,
-  getDocs,
-  query,
-  where,
   updateDoc,
   serverTimestamp,
   addDoc,
@@ -23,6 +18,7 @@ import { useCollection } from '@/hooks/useCollection';
 import { useQueryClient } from '@tanstack/react-query';
 import { generateStageTimeline, type GeneratedStage } from '@/lib/cropStageConfig';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from 'sonner';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -31,24 +27,19 @@ export default function ProjectPlanningPage() {
   const queryClient = useQueryClient();
 
   const companyId = user?.companyId || null;
-  const role = user?.role;
-  const canEdit = role === 'company-admin' || role === 'manager' || role === 'admin';
 
-  const { data: project, isLoading: projectLoading, refetch: refetchProject } = useQuery<Project | null>({
-    queryKey: ['project', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return null;
-      const ref = doc(db, 'projects', projectId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return null;
-      const data = snap.data() as any;
-      if (data.companyId !== companyId) return null;
-      return { id: snap.id, ...(data as Project) };
-    },
-  });
+  const { data: projects = [], isLoading: projectLoading } = useCollection<Project>(
+    'project-planning-projects',
+    'projects',
+    { enabled: !!companyId },
+  );
+  const project = useMemo(() => {
+    if (!companyId || !projectId) return null;
+    const found = projects.find((p) => p.id === projectId && p.companyId === companyId);
+    return found ?? null;
+  }, [projects, companyId, projectId]);
 
-  const { data: stages = [], isLoading: stagesLoading, refetch: refetchStages } = useProjectStages(
+  const { data: stages = [], isLoading: stagesLoading } = useProjectStages(
     companyId,
     projectId,
   );
@@ -82,6 +73,10 @@ export default function ProjectPlanningPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       setSupplierDropdownOpen(false);
+      toast.success('Supplier added.');
+    } catch (error) {
+      console.error('Failed to add supplier:', error);
+      toast.error('Failed to add supplier.');
     } finally {
       setAddingSupplier(false);
     }
@@ -244,6 +239,8 @@ export default function ProjectPlanningPage() {
     if (oldDate && !plantingReason.trim()) return;
 
     setSavingPlanting(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setChangePlantingModalOpen(false);
     try {
       const projectRef = doc(db, 'projects', projectId);
       const changedAt = new Date().toISOString();
@@ -291,9 +288,15 @@ export default function ProjectPlanningPage() {
         await batch.commit();
       }
 
-      await Promise.all([refetchProject(), refetchStages()]);
       setPlantingReason('');
-      setChangePlantingModalOpen(false);
+      toast.success(
+        isOffline
+          ? 'Planting date change saved offline. It will sync when online.'
+          : 'Planting date updated.',
+      );
+    } catch (error) {
+      console.error('Failed to save planting date:', error);
+      toast.error('Failed to save planting date change.');
     } finally {
       setSavingPlanting(false);
     }
@@ -307,6 +310,8 @@ export default function ProjectPlanningPage() {
     if (hasExistingSeed && !seedReason.trim()) return;
 
     setSavingSeed(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setChangeSeedModalOpen(false);
     try {
       // If supplier name is not in list, add it to Suppliers so it appears there
       if (seedSupplier.trim() && !companySuppliers.some((s) => s.name.trim().toLowerCase() === seedSupplier.trim().toLowerCase())) {
@@ -372,10 +377,16 @@ export default function ProjectPlanningPage() {
       }
 
       await updateDoc(projectRef, update);
-      await refetchProject();
       setSeedReason('');
-      setChangeSeedModalOpen(false);
       setEditingSeed(false);
+      toast.success(
+        isOffline
+          ? 'Seed plan saved offline. It will sync when online.'
+          : 'Seed plan updated.',
+      );
+    } catch (error) {
+      console.error('Failed to save seed plan:', error);
+      toast.error('Failed to save seed plan.');
     } finally {
       setSavingSeed(false);
     }
@@ -387,6 +398,7 @@ export default function ProjectPlanningPage() {
     if (!newChallengeTitle.trim()) return;
 
     setSavingChallenge(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       const projectRef = doc(db, 'projects', projectId);
       const seasonChallengeRef = doc(collection(db, 'seasonChallenges'));
@@ -434,13 +446,20 @@ export default function ProjectPlanningPage() {
         'planning.planHistory': arrayUnion(historyEntry),
       });
       await batch.commit();
-      await refetchProject();
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
       setNewChallengeTitle('');
       setNewChallengeDescription('');
       setNewChallengeType('other');
       setNewChallengeSeverity('medium');
       setShowAddPreSeasonForm(false);
+      toast.success(
+        isOffline
+          ? 'Planned challenge saved offline. It will sync when online.'
+          : 'Planned challenge added.',
+      );
+    } catch (error) {
+      console.error('Failed to add planned challenge:', error);
+      toast.error('Failed to add planned challenge.');
     } finally {
       setSavingChallenge(false);
     }

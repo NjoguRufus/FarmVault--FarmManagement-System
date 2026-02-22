@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { hasHarvestCollectionsModule } from '@/lib/cropModules';
+import { toast } from 'sonner';
 
 const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
@@ -220,6 +221,7 @@ export default function HarvestSalesPage() {
     e.preventDefault();
     if (!activeProject) return;
     setHarvestSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       const destination = harvestDestination;
       const isTomatoes = activeProject.cropType === 'tomatoes';
@@ -233,7 +235,6 @@ export default function HarvestSalesPage() {
           const crateItem = woodenCrateItems.find((i) => i.id === harvestCrateInventoryItemId);
           if (!crateItem) {
             alert('Please select a wooden crate type from inventory.');
-            setHarvestSaving(false);
             return;
           }
           const boxSize = (crateItem as InventoryItem & { boxSize?: string }).boxSize;
@@ -290,6 +291,9 @@ export default function HarvestSalesPage() {
           harvestData.driverName = harvestDriverOtherName.trim();
         }
       }
+
+      // Close immediately once validation passes; writes continue in the background.
+      setHarvestOpen(false);
 
       const harvestRef = await addDoc(collection(db, 'harvests'), harvestData);
 
@@ -356,7 +360,6 @@ export default function HarvestSalesPage() {
           }
         }
       }
-      setHarvestOpen(false);
       setHarvestQty('');
       setHarvestUnit('kg');
       setHarvestQuality('A');
@@ -377,6 +380,14 @@ export default function HarvestSalesPage() {
       setHarvestDriverType('company');
       setHarvestDriverId('');
       setHarvestDriverOtherName('');
+      toast.success(
+        isOffline
+          ? 'Harvest saved offline. It will sync when online.'
+          : 'Harvest recorded.',
+      );
+    } catch (error) {
+      console.error('Failed to record harvest:', error);
+      toast.error('Failed to record harvest.');
     } finally {
       setHarvestSaving(false);
     }
@@ -386,6 +397,7 @@ export default function HarvestSalesPage() {
     e.preventDefault();
     if (!activeProject || !selectedHarvestId) return;
     setSaleSaving(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       const isTomatoes = activeProject.cropType === 'tomatoes';
       const isFrenchBeans = activeProject.cropType === 'french-beans';
@@ -417,7 +429,6 @@ export default function HarvestSalesPage() {
 
         if (!quantity || !totalAmount) {
           alert('Please enter at least one price and quantity for the crates being sold.');
-          setSaleSaving(false);
           return;
         }
       } else {
@@ -434,7 +445,6 @@ export default function HarvestSalesPage() {
 
         if (!quantity || !unitPrice || !totalAmount) {
           alert('Please fill in quantity and price to record the sale.');
-          setSaleSaving(false);
           return;
         }
       }
@@ -459,13 +469,15 @@ export default function HarvestSalesPage() {
         saleData.brokerId = saleBrokerId;
       }
 
+      // Close immediately once validation passes; Firestore persistence handles offline sync.
+      setSaleOpen(false);
+
       await addDoc(collection(db, 'sales'), saleData);
       
       // Invalidate queries to refresh data immediately
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-sales'] });
       
-      setSaleOpen(false);
       setBuyerName('');
       setSelectedHarvestId('');
       setSaleQty('');
@@ -476,6 +488,14 @@ export default function HarvestSalesPage() {
       setCrateSize('big');
       setSaleStatus('pending');
       setSaleBrokerId('');
+      toast.success(
+        isOffline
+          ? 'Sale saved offline. It will sync when online.'
+          : 'Sale recorded.',
+      );
+    } catch (error) {
+      console.error('Failed to record sale:', error);
+      toast.error('Failed to record sale.');
     } finally {
       setSaleSaving(false);
     }

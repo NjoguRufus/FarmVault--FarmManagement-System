@@ -631,14 +631,17 @@ export default function ManagerOperationsPage() {
     const submittedAt = serverTimestamp();
 
     setSubmittingPlanLog(true);
+    setFillOpen(false);
     try {
       await updateDoc(doc(db, 'workLogs', selectedPlan.id), {
         ...update,
         managerSubmittedAt: submittedAt,
       });
 
-      setFillOpen(false);
       setSelectedPlan(null);
+    } catch (error) {
+      console.error('Failed to submit plan log:', error);
+      alert('Failed to log work. Please try again.');
     } finally {
       setSubmittingPlanLog(false);
     }
@@ -688,6 +691,8 @@ export default function ManagerOperationsPage() {
     }
 
     setSavingDailyWork(true);
+    // Close immediately so the manager can continue; write will sync from local cache.
+    setLogDailyWorkOpen(false);
     try {
       const numPeople = Number(logNumberOfPeople || '0');
       const rate = logRatePerPerson ? Number(logRatePerPerson) : undefined;
@@ -757,7 +762,6 @@ export default function ManagerOperationsPage() {
       });
 
       // Reset form
-      setLogDailyWorkOpen(false);
       setLogDate(new Date());
       setLogWorkType('');
       setLogNumberOfPeople('');
@@ -858,7 +862,8 @@ export default function ManagerOperationsPage() {
   const handleSubmitWorkCardRecord = async () => {
     if (!user || !selectedWorkCard) return;
     if (!canManagerSubmit(selectedWorkCard, managerIdsForCurrentUser)) return;
-    const cat = selectedWorkCard.workCategory;
+    const card = selectedWorkCard;
+    const cat = card.workCategory;
     const item = recordModalSelectedItem;
     let actualInputsUsed: string | undefined;
     let actualFuelUsed: string | undefined;
@@ -887,9 +892,13 @@ export default function ManagerOperationsPage() {
     const resourceQtySecondary = item && recordResourceQuantitySecondary ? parseQuantityOrFraction(recordResourceQuantitySecondary) : undefined;
 
     setSubmittingWorkCardRecord(true);
+    // Close immediately; Firestore/local cache will sync pending writes.
+    setWorkCardRecordOpen(false);
+    setSelectedWorkCard(null);
     try {
       await submitExecution({
-        cardId: selectedWorkCard.id,
+        cardId: card.id,
+        currentCard: card,
         managerId: user.id,
         managerName: user.name,
         managerIds: Array.from(managerIdsForCurrentUser),
@@ -907,8 +916,6 @@ export default function ManagerOperationsPage() {
         actorUid: user.id,
       });
       invalidateWorkCards();
-      setWorkCardRecordOpen(false);
-      setSelectedWorkCard(null);
     } catch (e) {
       console.error(e);
       alert('Failed to submit work. Please try again.');
@@ -923,6 +930,7 @@ export default function ManagerOperationsPage() {
     try {
       await markWorkCardPaid({
         cardId: card.id,
+        currentCard: card,
         paidBy: user.id,
         paidByName: user.name,
         actorEmail: user.email,
@@ -931,7 +939,10 @@ export default function ManagerOperationsPage() {
       invalidateWorkCards();
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
-      if (selectedWorkCard?.id === card.id) setSelectedWorkCard({ ...card, status: 'paid', payment: { ...card.payment, isPaid: true } });
+      if (selectedWorkCard?.id === card.id) {
+        setSelectedWorkCard({ ...card, status: 'paid', payment: { ...card.payment, isPaid: true } });
+        setWorkCardViewOpen(false);
+      }
     } catch (e) {
       console.error(e);
       alert('Failed to mark as paid.');
@@ -1004,6 +1015,7 @@ export default function ManagerOperationsPage() {
       if (selectedLog?.id === log.id) {
         setSelectedLog({ ...selectedLog, paid: true });
       }
+      setViewOpen(false);
     } catch (error) {
       console.error('Failed to mark as paid:', error);
     } finally {

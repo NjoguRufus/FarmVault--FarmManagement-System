@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { toast } from 'sonner';
 
 export default function CropStagesPage() {
   const { activeProject } = useProject();
@@ -173,6 +174,8 @@ export default function CropStagesPage() {
   const handleMarkStageComplete = async () => {
     if (!selectedStage || !activeProject || selectedStage.id?.startsWith('placeholder-')) return;
     setMarkingComplete(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setDetailsOpen(false);
     try {
       const today = new Date();
       const stageRef = doc(db, 'projectStages', selectedStage.id);
@@ -213,9 +216,14 @@ export default function CropStagesPage() {
       }
 
       queryClient.invalidateQueries({ queryKey: ['projectStages'] });
-      setDetailsOpen(false);
+      toast.success(
+        isOffline
+          ? 'Stage update saved offline. It will sync when online.'
+          : 'Stage marked complete.',
+      );
     } catch (error) {
       console.error('Error marking stage complete:', error);
+      toast.error('Failed to update stage.');
     } finally {
       setMarkingComplete(false);
     }
@@ -224,6 +232,8 @@ export default function CropStagesPage() {
   const handleAddChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStage || !activeProject || !user) return;
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    setAddChallengeOpen(false);
     try {
       await addDoc(collection(db, 'seasonChallenges'), {
         title: challengeTitle,
@@ -240,13 +250,18 @@ export default function CropStagesPage() {
         createdAt: serverTimestamp(),
       });
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
-      setAddChallengeOpen(false);
       setChallengeTitle('');
       setChallengeDescription('');
       setChallengeType('other');
       setChallengeSeverity('medium');
+      toast.success(
+        isOffline
+          ? 'Challenge saved offline. It will sync when online.'
+          : 'Challenge added.',
+      );
     } catch (error) {
       console.error('Error adding challenge:', error);
+      toast.error('Failed to add challenge.');
     }
   };
 

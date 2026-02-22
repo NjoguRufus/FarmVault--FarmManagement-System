@@ -276,6 +276,7 @@ export default function OperationsPage() {
     if (!stage) return;
     const resource = buildPlannedResourceString();
     setSavingCard(true);
+    setAddCardOpen(false);
     try {
       await createWorkCard({
         companyId: activeProject.companyId,
@@ -299,7 +300,6 @@ export default function OperationsPage() {
         actorUid: user.id,
       });
       invalidateWorkCards();
-      setAddCardOpen(false);
       setCardWorkTitle('');
       setCardWorkCategory('');
       setCardPlannedWorkers('');
@@ -310,6 +310,9 @@ export default function OperationsPage() {
       setCardAllocatedManagerId('');
       setCardStageId('');
       setCardStageName('');
+    } catch (error) {
+      console.error('Failed to create work card:', error);
+      alert('Failed to plan work. Please try again.');
     } finally {
       setSavingCard(false);
     }
@@ -317,28 +320,41 @@ export default function OperationsPage() {
 
   const handleApproveWorkCard = async () => {
     if (!selectedWorkCard || !user) return;
-    const itemId = selectedWorkCard.actual?.actualResourceItemId;
-    const qty = selectedWorkCard.actual?.actualResourceQuantity ?? 0;
-    if (itemId && qty > 0 && selectedWorkCard.companyId && selectedWorkCard.projectId) {
-      const check = await checkStockForWorkCard({
-        companyId: selectedWorkCard.companyId,
-        projectId: selectedWorkCard.projectId,
-        inventoryItemId: itemId,
-        quantity: qty,
-        stageName: selectedWorkCard.stageName,
-        workCardId: selectedWorkCard.id,
-        date: new Date(),
-        managerName: selectedWorkCard.actual?.managerName,
-      });
-      if (!check.sufficient && check.missing?.length) {
-        setInsufficientStockMissing(check.missing);
-        return;
+    const card = selectedWorkCard;
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const itemId = card.actual?.actualResourceItemId;
+    const qty = card.actual?.actualResourceQuantity ?? 0;
+    if (!isOffline && itemId && qty > 0 && card.companyId && card.projectId) {
+      try {
+        const check = await checkStockForWorkCard({
+          companyId: card.companyId,
+          projectId: card.projectId,
+          inventoryItemId: itemId,
+          quantity: qty,
+          stageName: card.stageName,
+          workCardId: card.id,
+          date: new Date(),
+          managerName: card.actual?.managerName,
+        });
+        if (!check.sufficient && check.missing?.length) {
+          setInsufficientStockMissing(check.missing);
+          return;
+        }
+      } catch (error) {
+        // If stock pre-check fails (connectivity hiccup/cache miss), continue and let approval queue offline.
+        console.warn('Stock pre-check skipped; proceeding with approval.', error);
       }
     }
     setApprovingCard(true);
+    // Close immediately after validation; approval write can complete/sync in background.
+    setWorkCardModalOpen(false);
+    setWorkCardEditMode(false);
+    setRejectReason('');
+    setSelectedWorkCard(null);
     try {
       await approveWorkCard({
-        cardId: selectedWorkCard.id,
+        cardId: card.id,
+        currentCard: card,
         approvedBy: user.id,
         actorEmail: user.email,
         actorUid: user.id,
@@ -346,7 +362,9 @@ export default function OperationsPage() {
       invalidateWorkCards();
       queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
       queryClient.invalidateQueries({ queryKey: ['inventoryUsage'] });
-      setSelectedWorkCard({ ...selectedWorkCard, status: 'approved' });
+    } catch (error) {
+      console.error('Failed to approve work card:', error);
+      alert('Failed to approve work card. Please try again.');
     } finally {
       setApprovingCard(false);
     }
@@ -365,6 +383,8 @@ export default function OperationsPage() {
       invalidateWorkCards();
       setSelectedWorkCard({ ...selectedWorkCard, status: 'rejected', rejectionReason: rejectReason.trim() });
       setRejectReason('');
+      setWorkCardEditMode(false);
+      setWorkCardModalOpen(false);
     } finally {
       setRejectingCard(false);
     }
@@ -408,6 +428,7 @@ export default function OperationsPage() {
         stageName: cardStageName || undefined,
         planned,
         allocatedManagerId: (cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__') ? cardAllocatedManagerId : null,
+        existingCard: selectedWorkCard,
         actorEmail: user.email,
         actorUid: user.id,
       });
@@ -915,6 +936,7 @@ export default function OperationsPage() {
       if (selectedLog?.id === log.id) {
         setSelectedLog({ ...selectedLog, paid: true });
       }
+      setViewOpen(false);
     } catch (error) {
       console.error('Failed to mark as paid:', error);
     } finally {

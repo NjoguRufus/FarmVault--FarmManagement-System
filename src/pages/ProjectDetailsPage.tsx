@@ -2,9 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, CheckCircle, ChevronDown, ChevronLeft, ChevronUp, Clock, Package, Users, Activity, Wallet, Wrench as WrenchIcon, ListChecks, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { doc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { useQueryClient } from '@tanstack/react-query';
 import { ChallengeType, CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
 import { useProject } from '@/contexts/ProjectContext';
@@ -13,6 +11,7 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { deleteProject } from '@/services/companyDataService';
+import { useCollection } from '@/hooks/useCollection';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,83 +39,66 @@ export default function ProjectDetailsPage() {
 
   const companyId = user?.companyId || null;
 
-  const { data: project, isLoading: projectLoading } = useQuery<Project | null>({
-    queryKey: ['project', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return null;
-      const ref = doc(db, 'projects', projectId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return null;
-      const data = snap.data() as any;
-      if (data.companyId !== companyId) return null;
-      return { id: snap.id, ...(data as Project) };
-    },
-  });
+  const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
+    'project-details-projects',
+    'projects',
+    { enabled: !!companyId },
+  );
+  const project = useMemo(() => {
+    if (!companyId || !projectId) return null;
+    const found = allProjects.find((p) => p.id === projectId && p.companyId === companyId);
+    return found ?? null;
+  }, [allProjects, companyId, projectId]);
 
   const { data: stages = [], isLoading: stagesLoading } = useProjectStages(companyId, projectId);
 
-  const { data: workLogs = [] } = useQuery<WorkLog[]>({
-    queryKey: ['workLogs', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return [];
-      const qWork = query(
-        collection(db, 'workLogs'),
-        where('companyId', '==', companyId),
-        where('projectId', '==', projectId),
-      );
-      const snap = await getDocs(qWork);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as WorkLog[];
-    },
+  const { data: allWorkLogs = [] } = useCollection<WorkLog>('project-details-worklogs', 'workLogs', {
+    enabled: !!companyId,
   });
-
-  const { data: expenses = [] } = useQuery<Expense[]>({
-    queryKey: ['expenses', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return [];
-      const qExp = query(
-        collection(db, 'expenses'),
-        where('companyId', '==', companyId),
-        where('projectId', '==', projectId),
-      );
-      const snap = await getDocs(qExp);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Expense[];
-    },
+  const { data: allExpenses = [] } = useCollection<Expense>('project-details-expenses', 'expenses', {
+    enabled: !!companyId,
   });
+  const { data: allChallenges = [] } = useCollection<SeasonChallenge>(
+    'project-details-challenges',
+    'seasonChallenges',
+    { enabled: !!companyId },
+  );
+  const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>(
+    'project-details-usage',
+    'inventoryUsage',
+    { enabled: !!companyId },
+  );
 
-  const { data: challenges = [] } = useQuery<SeasonChallenge[]>({
-    queryKey: ['seasonChallenges', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return [];
-      const qChallenges = query(
-        collection(db, 'seasonChallenges'),
-        where('companyId', '==', companyId),
-        where('projectId', '==', projectId),
-      );
-      const snap = await getDocs(qChallenges);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as SeasonChallenge[];
-    },
-  });
+  const workLogs = useMemo(
+    () =>
+      companyId && projectId
+        ? allWorkLogs.filter((item) => item.companyId === companyId && item.projectId === projectId)
+        : [],
+    [allWorkLogs, companyId, projectId],
+  );
+  const expenses = useMemo(
+    () =>
+      companyId && projectId
+        ? allExpenses.filter((item) => item.companyId === companyId && item.projectId === projectId)
+        : [],
+    [allExpenses, companyId, projectId],
+  );
+  const challenges = useMemo(
+    () =>
+      companyId && projectId
+        ? allChallenges.filter((item) => item.companyId === companyId && item.projectId === projectId)
+        : [],
+    [allChallenges, companyId, projectId],
+  );
+  const inventoryUsage = useMemo(
+    () =>
+      companyId && projectId
+        ? allInventoryUsage.filter((item) => item.companyId === companyId && item.projectId === projectId)
+        : [],
+    [allInventoryUsage, companyId, projectId],
+  );
 
-  const { data: inventoryUsage = [] } = useQuery<InventoryUsage[]>({
-    queryKey: ['inventoryUsage', companyId, projectId],
-    enabled: !!companyId && !!projectId,
-    queryFn: async () => {
-      if (!companyId || !projectId) return [];
-      const qUsage = query(
-        collection(db, 'inventoryUsage'),
-        where('companyId', '==', companyId),
-        where('projectId', '==', projectId),
-      );
-      const snap = await getDocs(qUsage);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as InventoryUsage[];
-    },
-  });
-
-  const loading = projectLoading || stagesLoading;
+  const loading = projectsLoading || stagesLoading;
 
   const today = new Date();
 
@@ -255,8 +237,6 @@ export default function ProjectDetailsPage() {
     return styles[status] || 'bg-muted text-muted-foreground';
   };
 
-  const [mode, setMode] = useState<'overview' | 'planning'>('overview');
-  const [savingPlan, setSavingPlan] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   type SummaryTab = 'workLogs' | 'inventory' | 'expenses';
   const [activeSummaryTab, setActiveSummaryTab] = useState<SummaryTab>('workLogs');
