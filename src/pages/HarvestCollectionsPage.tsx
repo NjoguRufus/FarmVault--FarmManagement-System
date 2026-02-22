@@ -478,48 +478,49 @@ export default function HarvestCollectionsPage() {
     [totalRevenue, totalsFromPickers.totalPay]
   );
 
-  const handleCreateCollection = async () => {
+  const handleCreateCollection = () => {
     if (!companyId || !effectiveProject) return;
-    setCreating(true);
-    try {
-      const name = (newCollectionName || '').trim();
-      if (!name) {
-        toast({ title: 'Name required', description: 'Give the collection a name.', variant: 'destructive' });
-        setCreating(false);
-        return;
-      }
-      const harvestDate = new Date(newHarvestDate + 'T12:00:00');
-      const price = Number(newPricePerKgPicker || 0);
-      if (price <= 0) {
-        toast({ title: 'Invalid rate', description: 'Price per kg (picker) must be > 0', variant: 'destructive' });
-        setCreating(false);
-        return;
-      }
-      const id = await createHarvestCollection({
-        companyId,
-        projectId: effectiveProject.id,
-        cropType: effectiveProject.cropType,
-        name,
-        harvestDate,
-        pricePerKgPicker: price,
-      });
 
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
-      setSelectedCollectionId(id);
-      setViewMode('intake');
-      setNewCollectionOpen(false);
-      setNewCollectionName('');
-      setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
-      setNewPricePerKgPicker('140');
-      toast({ title: 'Collection created', description: 'Add pickers and weigh entries.' });
-    } catch (e: any) {
-      toast({ title: 'Error', description: e?.message ?? 'Failed to create collection', variant: 'destructive' });
-    } finally {
-      setCreating(false);
+    const name = (newCollectionName || '').trim();
+    if (!name) {
+      toast({ title: 'Name required', description: 'Give the collection a name.', variant: 'destructive' });
+      return;
     }
+
+    const harvestDate = new Date(newHarvestDate + 'T12:00:00');
+    const price = Number(newPricePerKgPicker || 0);
+    if (price <= 0) {
+      toast({ title: 'Invalid rate', description: 'Price per kg (picker) must be > 0', variant: 'destructive' });
+      return;
+    }
+
+    setCreating(true);
+    setNewCollectionOpen(false);
+    setNewCollectionName('');
+    setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
+    setNewPricePerKgPicker('140');
+    setCreating(false);
+
+    void createHarvestCollection({
+      companyId,
+      projectId: effectiveProject.id,
+      cropType: effectiveProject.cropType,
+      name,
+      harvestDate,
+      pricePerKgPicker: price,
+    })
+      .then((id) => {
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+        setSelectedCollectionId(id);
+        setViewMode('intake');
+        toast({ title: 'Collection created', description: 'Add pickers and weigh entries.' });
+      })
+      .catch((e: any) => {
+        toast({ title: 'Error', description: e?.message ?? 'Failed to create collection', variant: 'destructive' });
+      });
   };
 
-  const handleAddPicker = async () => {
+  const handleAddPicker = () => {
     if (!companyId || !selectedCollectionId) return;
     const num = Number(newPickerNumber || '0');
     const name = (newPickerName || '').trim();
@@ -536,24 +537,27 @@ export default function HarvestCollectionsPage() {
       });
       return;
     }
+
     setAddingPicker(true);
-    try {
-      await addHarvestPicker({
-        companyId,
-        collectionId: selectedCollectionId,
-        pickerNumber: num,
-        pickerName: name,
+
+    setAddPickerOpen(false);
+    setNewPickerNumber('');
+    setNewPickerName('');
+    setAddingPicker(false);
+
+    void addHarvestPicker({
+      companyId,
+      collectionId: selectedCollectionId,
+      pickerNumber: num,
+      pickerName: name,
+    })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+        toast({ title: 'Picker added' });
+      })
+      .catch((e: any) => {
+        toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
       });
-      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-      setAddPickerOpen(false);
-      setNewPickerNumber('');
-      setNewPickerName('');
-      toast({ title: 'Picker added' });
-    } catch (e: any) {
-      toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
-    } finally {
-      setAddingPicker(false);
-    }
   };
 
   const handleAddWeigh = () => {
@@ -751,6 +755,7 @@ export default function HarvestCollectionsPage() {
       return;
     }
     setMarkingBuyerPaid(true);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
       await setBuyerPriceAndMaybeClose({
         collectionId,
@@ -758,15 +763,27 @@ export default function HarvestCollectionsPage() {
         markBuyerPaid,
         totalHarvestKg: totalsFromPickers.totalKg,
         totalPickerCost: totalsFromPickers.totalPay,
+        companyId: selectedCollection?.companyId,
+        projectId: selectedCollection?.projectId,
+        cropType: selectedCollection?.cropType ? String(selectedCollection.cropType) : undefined,
+        harvestDate: selectedCollection?.harvestDate,
+        collectionName: selectedCollection?.name,
+        existingHarvestId: selectedCollection?.harvestId,
       });
       queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       if (markBuyerPaid) {
         queryClient.invalidateQueries({ queryKey: ['harvests'] });
         queryClient.invalidateQueries({ queryKey: ['sales'] });
-        toast({ title: 'Buyer paid – harvest closed' });
+        toast({
+          title: isOffline ? 'Buyer payment saved offline' : 'Buyer paid – harvest closed',
+          description: isOffline ? 'Will sync when back online.' : undefined,
+        });
         setBuyerPricePerKg('');
       } else {
-        toast({ title: 'Buyer price saved' });
+        toast({
+          title: isOffline ? 'Buyer price saved offline' : 'Buyer price saved',
+          description: isOffline ? 'Will sync when back online.' : undefined,
+        });
       }
     } catch (e: any) {
       console.error('Mark buyer paid failed:', e?.message, e?.stack ?? e);

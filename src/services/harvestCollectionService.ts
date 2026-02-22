@@ -180,6 +180,124 @@ export async function markPickersPaidInBatch(params: {
   return batchRef.id;
 }
 
+function isOfflineBuyerUpdateError(error: unknown): boolean {
+  const code = String((error as { code?: string } | null)?.code ?? '').toLowerCase();
+  const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
+  return (
+    code === 'unavailable' ||
+    message.includes('offline') ||
+    message.includes('network request failed') ||
+    message.includes('client is offline')
+  );
+}
+
+async function queueBuyerPriceAndCloseOffline(params: {
+  collectionId: string;
+  pricePerKgBuyer: number;
+  markBuyerPaid: boolean;
+  totalHarvestKg?: number;
+  totalPickerCost?: number;
+  companyId?: string;
+  projectId?: string;
+  cropType?: string;
+  harvestDate?: unknown;
+  collectionName?: string;
+  existingHarvestId?: string;
+}): Promise<void> {
+  const hasTotalHarvestKg = Number.isFinite(params.totalHarvestKg);
+  const hasTotalPickerCost = Number.isFinite(params.totalPickerCost);
+  const totalHarvestKg = hasTotalHarvestKg ? Number(params.totalHarvestKg) : undefined;
+  const totalPickerCost = hasTotalPickerCost ? Number(params.totalPickerCost) : undefined;
+  const totalRevenue =
+    totalHarvestKg != null ? totalHarvestKg * Number(params.pricePerKgBuyer ?? 0) : undefined;
+  const profit =
+    totalRevenue != null && totalPickerCost != null
+      ? totalRevenue - totalPickerCost
+      : undefined;
+
+  const update: Record<string, unknown> = {
+    pricePerKgBuyer: params.pricePerKgBuyer,
+    status: params.markBuyerPaid ? 'closed' : 'sold',
+  };
+  if (totalHarvestKg != null) update.totalHarvestKg = totalHarvestKg;
+  if (totalPickerCost != null) update.totalPickerCost = totalPickerCost;
+  if (totalRevenue != null) update.totalRevenue = totalRevenue;
+  if (profit != null) update.profit = profit;
+  if (params.markBuyerPaid) {
+    update.buyerPaidAt = serverTimestamp();
+  }
+
+  const updateClean: Record<string, unknown> = {};
+  Object.entries(update).forEach(([k, v]) => {
+    if (v !== undefined) updateClean[k] = v;
+  });
+
+  const isFrenchBeans = String(params.cropType ?? '').toLowerCase() === 'french-beans';
+  const canQueueHarvestSale =
+    params.markBuyerPaid &&
+    isFrenchBeans &&
+    !params.existingHarvestId &&
+    totalHarvestKg != null &&
+    totalHarvestKg > 0 &&
+    totalRevenue != null &&
+    totalRevenue > 0 &&
+    Boolean(params.companyId) &&
+    Boolean(params.projectId);
+
+  if (!canQueueHarvestSale) {
+    await updateDoc(doc(db, COLLECTIONS, params.collectionId), updateClean);
+    return;
+  }
+
+  const harvestRef = doc(collection(db, 'harvests'));
+  const saleRef = doc(collection(db, 'sales'));
+  const harvestDate = params.harvestDate ?? serverTimestamp();
+  const notes = params.collectionName
+    ? `From picker collection: ${params.collectionName}`
+    : 'From picker collection';
+
+  updateClean.harvestId = harvestRef.id;
+
+  const wb = writeBatch(db);
+  wb.set(harvestRef, {
+    quantity: totalHarvestKg,
+    unit: 'kg',
+    quality: 'A',
+    projectId: params.projectId ?? null,
+    companyId: params.companyId ?? null,
+    cropType: params.cropType ?? null,
+    destination: 'market',
+    date: harvestDate,
+    createdAt: serverTimestamp(),
+    createdAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
+    notes,
+    farmPricingMode: 'total',
+    farmPriceUnitType: 'kg',
+    farmTotalPrice: totalRevenue,
+  });
+
+  wb.set(saleRef, {
+    harvestId: harvestRef.id,
+    buyerName: 'Buyer (collections)',
+    quantity: totalHarvestKg,
+    unit: 'kg',
+    unitPrice: params.pricePerKgBuyer,
+    totalAmount: totalRevenue,
+    status: 'completed',
+    projectId: params.projectId ?? null,
+    companyId: params.companyId ?? null,
+    cropType: params.cropType ?? null,
+    date: harvestDate,
+    createdAt: serverTimestamp(),
+    createdAtLocal: Date.now(),
+    dateLocalISO: new Date().toISOString(),
+  });
+
+  wb.update(doc(db, COLLECTIONS, params.collectionId), updateClean);
+  await wb.commit();
+}
+
 /** Set buyer price and compute totalRevenue + profit; optionally mark buyer paid (closed). Uses a single transaction for speed and to avoid double-sync. */
 export async function setBuyerPriceAndMaybeClose(params: {
   collectionId: string;
@@ -187,6 +305,12 @@ export async function setBuyerPriceAndMaybeClose(params: {
   markBuyerPaid: boolean;
   totalHarvestKg?: number;
   totalPickerCost?: number;
+  companyId?: string;
+  projectId?: string;
+  cropType?: string;
+  harvestDate?: unknown;
+  collectionName?: string;
+  existingHarvestId?: string;
 }): Promise<void> {
   const collectionId = params?.collectionId != null ? String(params.collectionId).trim() : '';
   if (!collectionId) {
@@ -195,98 +319,136 @@ export async function setBuyerPriceAndMaybeClose(params: {
   if (!db) {
     throw new Error('Firestore is not initialized.');
   }
-  const pickersQuery = query(collection(db, PICKERS), where('collectionId', '==', collectionId));
-  // Create refs outside transaction so they use the same db instance (avoids "path" undefined errors)
-  const harvestRef = doc(collection(db, 'harvests'));
-  const saleRef = doc(collection(db, 'sales'));
-
-  // Read pickers outside transaction to avoid BatchGetDocuments path that can receive undefined refs
-  const pickersSnap = await getDocs(pickersQuery);
-  const allPaid = pickersSnap.docs.length > 0 && pickersSnap.docs.every((d) => d.data().isPaid === true);
-  if (params.markBuyerPaid && !allPaid) {
-    throw new Error('Cannot close harvest: some pickers are still unpaid.');
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  if (isOffline) {
+    await queueBuyerPriceAndCloseOffline({
+      collectionId,
+      pricePerKgBuyer: params.pricePerKgBuyer,
+      markBuyerPaid: params.markBuyerPaid,
+      totalHarvestKg: params.totalHarvestKg,
+      totalPickerCost: params.totalPickerCost,
+      companyId: params.companyId,
+      projectId: params.projectId,
+      cropType: params.cropType,
+      harvestDate: params.harvestDate,
+      collectionName: params.collectionName,
+      existingHarvestId: params.existingHarvestId,
+    });
+    return;
   }
 
-  await runTransaction(db, async (tx) => {
-    // Build colRef inside transaction from db + collectionId so the ref is never stale/undefined
-    const colRef = doc(collection(db, COLLECTIONS), collectionId);
-    const colSnap = await tx.get(colRef);
-    if (!colSnap.exists()) {
-      throw new Error('Collection not found.');
+  try {
+    const pickersQuery = query(collection(db, PICKERS), where('collectionId', '==', collectionId));
+    // Create refs outside transaction so they use the same db instance (avoids "path" undefined errors)
+    const harvestRef = doc(collection(db, 'harvests'));
+    const saleRef = doc(collection(db, 'sales'));
+
+    // Read pickers outside transaction to avoid BatchGetDocuments path that can receive undefined refs
+    const pickersSnap = await getDocs(pickersQuery);
+    const allPaid = pickersSnap.docs.length > 0 && pickersSnap.docs.every((d) => d.data().isPaid === true);
+    if (params.markBuyerPaid && !allPaid) {
+      throw new Error('Cannot close harvest: some pickers are still unpaid.');
     }
-    const col = colSnap.data() as Record<string, unknown>;
-    const totalHarvestKg =
-      Number.isFinite(params.totalHarvestKg) ? Number(params.totalHarvestKg) : Number(col?.totalHarvestKg ?? 0);
-    const totalPickerCost =
-      Number.isFinite(params.totalPickerCost) ? Number(params.totalPickerCost) : Number(col?.totalPickerCost ?? 0);
-    const totalRevenue = totalHarvestKg * params.pricePerKgBuyer;
-    const profit = totalRevenue - totalPickerCost;
 
-    const update: Record<string, unknown> = {
-      pricePerKgBuyer: params.pricePerKgBuyer,
-      totalHarvestKg,
-      totalPickerCost,
-      totalRevenue,
-      profit,
-      status: params.markBuyerPaid ? 'closed' : 'sold',
-    };
-    if (params.markBuyerPaid) {
-      update.buyerPaidAt = serverTimestamp();
-
-      const isFrenchBeans = (col?.cropType as string | undefined)?.toLowerCase() === 'french-beans';
-      const alreadySavedToHarvests = !!col?.harvestId;
-      if (isFrenchBeans && !alreadySavedToHarvests && totalHarvestKg > 0 && totalRevenue > 0) {
-        const projectId = col?.projectId ?? null;
-        const companyId = col?.companyId ?? null;
-        const cropType = col?.cropType ?? null;
-        const harvestDate = col?.harvestDate ?? serverTimestamp();
-        const notes = col?.name ? `From picker collection: ${col.name}` : 'From picker collection';
-
-        tx.set(harvestRef, {
-          quantity: totalHarvestKg,
-          unit: 'kg',
-          quality: 'A',
-          projectId,
-          companyId,
-          cropType,
-          destination: 'market',
-          date: harvestDate,
-          createdAt: serverTimestamp(),
-          createdAtLocal: Date.now(),
-          dateLocalISO: new Date().toISOString(),
-          notes,
-          farmPricingMode: 'total',
-          farmPriceUnitType: 'kg',
-          farmTotalPrice: totalRevenue,
-        });
-
-        tx.set(saleRef, {
-          harvestId: harvestRef.id,
-          buyerName: 'Buyer (collections)',
-          quantity: totalHarvestKg,
-          unit: 'kg',
-          unitPrice: params.pricePerKgBuyer,
-          totalAmount: totalRevenue,
-          status: 'completed',
-          projectId,
-          companyId,
-          cropType,
-          date: harvestDate,
-          createdAt: serverTimestamp(),
-          createdAtLocal: Date.now(),
-          dateLocalISO: new Date().toISOString(),
-        });
-
-        update.harvestId = harvestRef.id;
+    await runTransaction(db, async (tx) => {
+      // Build colRef inside transaction from db + collectionId so the ref is never stale/undefined
+      const colRef = doc(collection(db, COLLECTIONS), collectionId);
+      const colSnap = await tx.get(colRef);
+      if (!colSnap.exists()) {
+        throw new Error('Collection not found.');
       }
-    }
-    // Firestore rejects undefined; only pass defined values
-    const updateClean: Record<string, unknown> = {};
-    Object.entries(update).forEach(([k, v]) => {
-      if (v !== undefined) updateClean[k] = v;
+      const col = colSnap.data() as Record<string, unknown>;
+      const totalHarvestKg =
+        Number.isFinite(params.totalHarvestKg) ? Number(params.totalHarvestKg) : Number(col?.totalHarvestKg ?? 0);
+      const totalPickerCost =
+        Number.isFinite(params.totalPickerCost) ? Number(params.totalPickerCost) : Number(col?.totalPickerCost ?? 0);
+      const totalRevenue = totalHarvestKg * params.pricePerKgBuyer;
+      const profit = totalRevenue - totalPickerCost;
+
+      const update: Record<string, unknown> = {
+        pricePerKgBuyer: params.pricePerKgBuyer,
+        totalHarvestKg,
+        totalPickerCost,
+        totalRevenue,
+        profit,
+        status: params.markBuyerPaid ? 'closed' : 'sold',
+      };
+      if (params.markBuyerPaid) {
+        update.buyerPaidAt = serverTimestamp();
+
+        const isFrenchBeans = (col?.cropType as string | undefined)?.toLowerCase() === 'french-beans';
+        const alreadySavedToHarvests = !!col?.harvestId;
+        if (isFrenchBeans && !alreadySavedToHarvests && totalHarvestKg > 0 && totalRevenue > 0) {
+          const projectId = col?.projectId ?? null;
+          const companyId = col?.companyId ?? null;
+          const cropType = col?.cropType ?? null;
+          const harvestDate = col?.harvestDate ?? serverTimestamp();
+          const notes = col?.name ? `From picker collection: ${col.name}` : 'From picker collection';
+
+          tx.set(harvestRef, {
+            quantity: totalHarvestKg,
+            unit: 'kg',
+            quality: 'A',
+            projectId,
+            companyId,
+            cropType,
+            destination: 'market',
+            date: harvestDate,
+            createdAt: serverTimestamp(),
+            createdAtLocal: Date.now(),
+            dateLocalISO: new Date().toISOString(),
+            notes,
+            farmPricingMode: 'total',
+            farmPriceUnitType: 'kg',
+            farmTotalPrice: totalRevenue,
+          });
+
+          tx.set(saleRef, {
+            harvestId: harvestRef.id,
+            buyerName: 'Buyer (collections)',
+            quantity: totalHarvestKg,
+            unit: 'kg',
+            unitPrice: params.pricePerKgBuyer,
+            totalAmount: totalRevenue,
+            status: 'completed',
+            projectId,
+            companyId,
+            cropType,
+            date: harvestDate,
+            createdAt: serverTimestamp(),
+            createdAtLocal: Date.now(),
+            dateLocalISO: new Date().toISOString(),
+          });
+
+          update.harvestId = harvestRef.id;
+        }
+      }
+      // Firestore rejects undefined; only pass defined values
+      const updateClean: Record<string, unknown> = {};
+      Object.entries(update).forEach(([k, v]) => {
+        if (v !== undefined) updateClean[k] = v;
+      });
+      tx.update(colRef, updateClean);
     });
-    tx.update(colRef, updateClean);
-  });
+  } catch (error) {
+    if (isOfflineBuyerUpdateError(error)) {
+      await queueBuyerPriceAndCloseOffline({
+        collectionId,
+        pricePerKgBuyer: params.pricePerKgBuyer,
+        markBuyerPaid: params.markBuyerPaid,
+        totalHarvestKg: params.totalHarvestKg,
+        totalPickerCost: params.totalPickerCost,
+        companyId: params.companyId,
+        projectId: params.projectId,
+        cropType: params.cropType,
+        harvestDate: params.harvestDate,
+        collectionName: params.collectionName,
+        existingHarvestId: params.existingHarvestId,
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 /**
