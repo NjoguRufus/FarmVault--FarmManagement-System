@@ -8,6 +8,7 @@ import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, update
 import { useCollection } from '@/hooks/useCollection';
 import { InventoryItem, InventoryCategory, ExpenseCategory, Supplier, CropType, InventoryCategoryItem, NeededItem, ChemicalPackagingType, FuelType, InventoryUsage } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { formatDate } from '@/lib/dateUtils';
@@ -49,7 +50,14 @@ import { parseQuantityOrFraction } from '@/lib/utils';
 export default function InventoryPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const canAddInventoryItem = can('inventory', 'addItem');
+  const canDeleteInventoryItem = can('inventory', 'deleteItem');
+  const canRestockInventory = can('inventory', 'restock');
+  const canDeductInventory = can('inventory', 'deduct');
+  const canManageInventoryCategories = can('inventory', 'categories');
+  const canCreateInventoryPurchase = can('inventory', 'purchases');
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: allInventory = [], isLoading } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
   const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
@@ -181,14 +189,14 @@ export default function InventoryPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   useEffect(() => {
-    if (searchParams.get('add') === '1') {
+    if (searchParams.get('add') === '1' && canAddInventoryItem) {
       setAddOpen(true);
       setSearchParams((p) => {
         p.delete('add');
         return p;
       }, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, canAddInventoryItem]);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<string>('fertilizer');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -393,6 +401,10 @@ export default function InventoryPage() {
   };
 
   const handleAddCategory = async (categoryName: string) => {
+    if (!canManageInventoryCategories) {
+      toast.error('Permission denied', { description: 'You cannot manage inventory categories.' });
+      return;
+    }
     if (!user?.companyId || !categoryName.trim()) return;
     
     // Check if category already exists
@@ -423,6 +435,10 @@ export default function InventoryPage() {
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation(); // Prevent event from bubbling up
+    if (!canAddInventoryItem) {
+      toast.error('Permission denied', { description: 'You cannot add inventory items.' });
+      return;
+    }
     const companyId = user?.companyId ?? activeProject?.companyId;
     if (!companyId) {
       toast.error('You must be in a company to add inventory.');
@@ -459,6 +475,11 @@ export default function InventoryPage() {
     // Close immediately; Firestore persistence will sync pending writes when back online.
     setAddOpen(false);
     try {
+      if (showNewCategoryInput && newCategoryName.trim() && !canManageInventoryCategories) {
+        toast.error('Permission denied', { description: 'You cannot add inventory categories.' });
+        setSaving(false);
+        return;
+      }
       // If a new category was entered, add it first
       let finalCategory = category.toLowerCase();
       if (showNewCategoryInput && newCategoryName.trim()) {
@@ -659,6 +680,10 @@ export default function InventoryPage() {
   };
 
   const handleOpenRestock = (item: InventoryItem) => {
+    if (!canRestockInventory) {
+      toast.error('Permission denied', { description: 'You cannot restock inventory.' });
+      return;
+    }
     setRestockItem(item);
     setRestockQuantity('');
     setRestockTotalCost('');
@@ -666,6 +691,10 @@ export default function InventoryPage() {
   };
 
   const handleOpenDeduct = (item: InventoryItem) => {
+    if (!canDeductInventory) {
+      toast.error('Permission denied', { description: 'You cannot deduct inventory.' });
+      return;
+    }
     setDeductItem(item);
     setDeductQuantity('');
     setDeductReason('');
@@ -674,6 +703,10 @@ export default function InventoryPage() {
 
   const handleDeduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canDeductInventory) {
+      toast.error('Permission denied', { description: 'You cannot deduct inventory.' });
+      return;
+    }
     if (!deductItem || !user?.companyId) return;
     const item = deductItem;
     const qty = parseQuantityOrFraction(deductQuantity);
@@ -717,11 +750,19 @@ export default function InventoryPage() {
   };
 
   const handleConfirmDelete = (item: InventoryItem) => {
+    if (!canDeleteInventoryItem) {
+      toast.error('Permission denied', { description: 'You cannot delete inventory items.' });
+      return;
+    }
     setDeleteItem(item);
     setDeleteConfirmOpen(true);
   };
 
   const handleDelete = async () => {
+    if (!canDeleteInventoryItem) {
+      toast.error('Permission denied', { description: 'You cannot delete inventory items.' });
+      return;
+    }
     if (!deleteItem || !user?.companyId) return;
     setDeleteSaving(true);
     try {
@@ -743,6 +784,10 @@ export default function InventoryPage() {
 
   const handleRestock = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canRestockInventory || !canCreateInventoryPurchase) {
+      toast.error('Permission denied', { description: 'You cannot restock inventory.' });
+      return;
+    }
     if (!restockItem) return;
     const item = restockItem;
     const qty = Number(restockQuantity || '0');
@@ -841,6 +886,7 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {canAddInventoryItem && (
           <Dialog 
             open={addOpen} 
             onOpenChange={setAddOpen}
@@ -1402,6 +1448,7 @@ export default function InventoryPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
           <Dialog open={neededOpen} onOpenChange={setNeededOpen}>
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--secondary relative">
@@ -2006,25 +2053,31 @@ export default function InventoryPage() {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onClick={() => handleOpenRestock(item)}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Restock
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleOpenDeduct(item)}>
-                          <Minus className="h-4 w-4 mr-2" />
-                          Deduct
-                        </DropdownMenuItem>
+                        {canRestockInventory && (
+                          <DropdownMenuItem onClick={() => handleOpenRestock(item)}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Restock
+                          </DropdownMenuItem>
+                        )}
+                        {canDeductInventory && (
+                          <DropdownMenuItem onClick={() => handleOpenDeduct(item)}>
+                            <Minus className="h-4 w-4 mr-2" />
+                            Deduct
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem onClick={() => setUsageModalItem(item)}>
                           <History className="h-4 w-4 mr-2" />
                           Usage
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => handleConfirmDelete(item)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
+                        {canDeleteInventoryItem && (
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => handleConfirmDelete(item)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </td>
@@ -2062,10 +2115,10 @@ export default function InventoryPage() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem onClick={() => handleOpenRestock(item)}><Plus className="h-4 w-4 mr-2" /> Restock</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleOpenDeduct(item)}><Minus className="h-4 w-4 mr-2" /> Deduct</DropdownMenuItem>
+                      {canRestockInventory && <DropdownMenuItem onClick={() => handleOpenRestock(item)}><Plus className="h-4 w-4 mr-2" /> Restock</DropdownMenuItem>}
+                      {canDeductInventory && <DropdownMenuItem onClick={() => handleOpenDeduct(item)}><Minus className="h-4 w-4 mr-2" /> Deduct</DropdownMenuItem>}
                       <DropdownMenuItem onClick={() => setUsageModalItem(item)}><History className="h-4 w-4 mr-2" /> Usage</DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleConfirmDelete(item)}><Trash2 className="h-4 w-4 mr-2" /> Delete</DropdownMenuItem>
+                      {canDeleteInventoryItem && <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleConfirmDelete(item)}><Trash2 className="h-4 w-4 mr-2" /> Delete</DropdownMenuItem>}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -2151,9 +2204,9 @@ export default function InventoryPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem onClick={() => setUsageModalItem(item)}><History className="h-4 w-4 mr-2" /> Usage</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { setCategoryDrawerOpen(false); handleOpenRestock(item); }}><Plus className="h-4 w-4 mr-2" /> Restock</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => { setCategoryDrawerOpen(false); handleOpenDeduct(item); }}><Minus className="h-4 w-4 mr-2" /> Deduct</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { setCategoryDrawerOpen(false); handleConfirmDelete(item); }}><Trash2 className="h-4 w-4 mr-2" /> Delete</DropdownMenuItem>
+                          {canRestockInventory && <DropdownMenuItem onClick={() => { setCategoryDrawerOpen(false); handleOpenRestock(item); }}><Plus className="h-4 w-4 mr-2" /> Restock</DropdownMenuItem>}
+                          {canDeductInventory && <DropdownMenuItem onClick={() => { setCategoryDrawerOpen(false); handleOpenDeduct(item); }}><Minus className="h-4 w-4 mr-2" /> Deduct</DropdownMenuItem>}
+                          {canDeleteInventoryItem && <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { setCategoryDrawerOpen(false); handleConfirmDelete(item); }}><Trash2 className="h-4 w-4 mr-2" /> Delete</DropdownMenuItem>}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>

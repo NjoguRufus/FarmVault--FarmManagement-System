@@ -26,7 +26,10 @@ function useWorkCardsCollection(
   };
 }
 
-export function useWorkCardsForManager(managerIds: string[]) {
+export function useWorkCardsForManager(
+  managerIds: string[],
+  companyId?: string | null
+) {
   const dedupedManagerIds = useMemo(
     () => [...new Set(managerIds)].filter(Boolean).slice(0, 30),
     [managerIds]
@@ -34,13 +37,17 @@ export function useWorkCardsForManager(managerIds: string[]) {
 
   const constraints = useMemo<QueryConstraint[]>(() => {
     if (dedupedManagerIds.length === 0) return [];
-    return [where('allocatedManagerId', 'in', dedupedManagerIds)];
-  }, [dedupedManagerIds]);
+    const managerConstraint = where('allocatedManagerId', 'in', dedupedManagerIds);
+    if (companyId) {
+      return [managerConstraint, where('companyId', '==', companyId)];
+    }
+    return [managerConstraint];
+  }, [dedupedManagerIds, companyId]);
 
   return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-manager-${dedupedManagerIds.join(',')}`,
+    `${WORK_CARDS_KEY}-manager-${companyId ?? 'all'}-${dedupedManagerIds.join(',')}`,
     constraints,
-    dedupedManagerIds.length > 0
+    dedupedManagerIds.length > 0 && (companyId !== undefined ? Boolean(companyId) : true)
   );
 }
 

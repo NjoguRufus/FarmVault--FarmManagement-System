@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { getMainNavItems, getMoreNavItems, type NavItem as BottomNavItem } from '@/config/navConfig';
 import { MobileMoreDrawer } from './MobileMoreDrawer';
+import { usePermissions } from '@/hooks/usePermissions';
+import { getModuleForPath } from '@/lib/permissions';
 
 const ACTIVE_TAB_SCALE = 1.04;
 const NAV_ITEM_TRANSITION = {
@@ -35,9 +37,18 @@ function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undef
 
 export function BottomNav() {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const location = useLocation();
-  const mainItems = getMainNavItems(user);
-  const moreItems = getMoreNavItems(user);
+  const mainItems = getMainNavItems(user).filter((item) => {
+    const module = getModuleForPath(item.path);
+    if (!module) return true;
+    return can(module, 'view');
+  });
+  const moreItems = getMoreNavItems(user).filter((item) => {
+    const module = getModuleForPath(item.path);
+    if (!module) return true;
+    return can(module, 'view');
+  });
   const [moreOpen, setMoreOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 

@@ -5,9 +5,12 @@ import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { mockExpensesByCategory, mockActivityData } from '@/data/mockData';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export default function ReportsPage() {
   const { activeProject } = useProject();
+  const { can } = usePermissions();
+  const canExportReports = can('reports', 'export');
 
   const reportTypes = [
     {
@@ -91,14 +94,16 @@ export default function ReportsPage() {
                 <p className="hidden md:block text-sm text-muted-foreground mt-1">{report.description}</p>
               </div>
             </div>
-            <button
-              type="button"
-              className="fv-btn fv-btn--secondary w-full sm:w-auto self-start p-1.5 md:px-3 md:py-2 text-xs md:text-sm"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Download className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5" />
-              <span>Export</span>
-            </button>
+            {canExportReports && (
+              <button
+                type="button"
+                className="fv-btn fv-btn--secondary w-full sm:w-auto self-start p-1.5 md:px-3 md:py-2 text-xs md:text-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Download className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5" />
+                <span>Export</span>
+              </button>
+            )}
           </div>
         ))}
       </div>

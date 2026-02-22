@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useCollection } from '@/hooks/useCollection';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Harvest, Sale, Employee, User, InventoryItem } from '@/types';
 import { deductInventoryForHarvest } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
@@ -40,9 +41,15 @@ const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
 export default function HarvestSalesPage() {
   const { activeProject } = useProject();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const canViewHarvestFinancials = can('harvest', 'viewFinancials');
+  const canViewBuyerSection = can('harvest', 'viewBuyerSection');
+  const canSeeSalesRecords = canViewHarvestFinancials || canViewBuyerSection;
+  const canCreateHarvest = can('harvest', 'create') || can('harvest', 'recordIntake');
+  const canCreateSale = canViewBuyerSection;
 
   const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
   const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
@@ -149,15 +156,15 @@ export default function HarvestSalesPage() {
   const [harvestOpen, setHarvestOpen] = useState(false);
   const [saleOpen, setSaleOpen] = useState(false);
   useEffect(() => {
-    if (searchParams.get('harvest') === '1') {
+    if (searchParams.get('harvest') === '1' && canCreateHarvest) {
       setHarvestOpen(true);
       setSearchParams((p) => { p.delete('harvest'); return p; }, { replace: true });
     }
-    if (searchParams.get('sale') === '1') {
+    if (searchParams.get('sale') === '1' && canCreateSale) {
       setSaleOpen(true);
       setSearchParams((p) => { p.delete('sale'); return p; }, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, canCreateHarvest, canCreateSale]);
   const [harvestQty, setHarvestQty] = useState('');
   const [harvestUnit, setHarvestUnit] = useState('kg');
   const [harvestQuality, setHarvestQuality] = useState<'A' | 'B' | 'C'>('A');
@@ -219,6 +226,10 @@ export default function HarvestSalesPage() {
 
   const handleRecordHarvest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateHarvest) {
+      toast.error('Permission denied', { description: 'You cannot record harvest entries.' });
+      return;
+    }
     if (!activeProject) return;
     setHarvestSaving(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -395,6 +406,10 @@ export default function HarvestSalesPage() {
 
   const handleAddSale = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateSale) {
+      toast.error('Permission denied', { description: 'You cannot add sales for harvest.' });
+      return;
+    }
     if (!activeProject || !selectedHarvestId) return;
     setSaleSaving(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -525,6 +540,7 @@ export default function HarvestSalesPage() {
               Harvest Collections
             </Button>
           )}
+          {canCreateHarvest && (
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
               <button
@@ -999,8 +1015,9 @@ export default function HarvestSalesPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
 
-          {!isFrenchBeans && (
+          {!isFrenchBeans && canCreateSale && (
           <Dialog open={saleOpen} onOpenChange={setSaleOpen}>
             <DialogTrigger asChild>
               <button className="fv-btn fv-btn--primary">
@@ -1465,24 +1482,30 @@ export default function HarvestSalesPage() {
           iconVariant="primary"
           layout="vertical"
         />
-        <SimpleStatCard
-          title="Total Sales"
-          value={formatCurrency(totalSales)}
-          icon={TrendingUp}
-          iconVariant="gold"
-          layout="vertical"
-        />
-        <SimpleStatCard
-          title="Completed Sales"
-          value={sales.filter(s => s.status === 'completed').length}
-          layout="vertical"
-        />
-        <SimpleStatCard
-          title="Pending Sales"
-          value={sales.filter(s => s.status === 'pending').length}
-          valueVariant="warning"
-          layout="vertical"
-        />
+        {canSeeSalesRecords && (
+          <SimpleStatCard
+            title="Total Sales"
+            value={formatCurrency(totalSales)}
+            icon={TrendingUp}
+            iconVariant="gold"
+            layout="vertical"
+          />
+        )}
+        {canSeeSalesRecords && (
+          <SimpleStatCard
+            title="Completed Sales"
+            value={sales.filter(s => s.status === 'completed').length}
+            layout="vertical"
+          />
+        )}
+        {canSeeSalesRecords && (
+          <SimpleStatCard
+            title="Pending Sales"
+            value={sales.filter(s => s.status === 'pending').length}
+            valueVariant="warning"
+            layout="vertical"
+          />
+        )}
       </div>
 
       {/* Harvests Section */}
@@ -1568,7 +1591,7 @@ export default function HarvestSalesPage() {
                   })
                   .map((harvest) => {
                     const stock = harvestStock[harvest.id];
-                    const soldOut = stock ? stock.remaining <= 0 : false;
+                    const soldOut = canSeeSalesRecords && stock ? stock.remaining <= 0 : false;
                     return (
                       <tr
                         key={harvest.id}
@@ -1600,13 +1623,19 @@ export default function HarvestSalesPage() {
                           )}
                         </td>
                         <td>
-                          {soldOut && (
-                            <span className="fv-badge bg-destructive/20 text-destructive text-xs">SOLD OUT</span>
+                          {canSeeSalesRecords ? (
+                            <>
+                              {soldOut && (
+                                <span className="fv-badge bg-destructive/20 text-destructive text-xs">SOLD OUT</span>
+                              )}
+                              {!soldOut && stock && stock.sold > 0 && (
+                                <span className="text-xs text-muted-foreground">Sold: {stock.sold.toLocaleString()}</span>
+                              )}
+                              {!soldOut && (!stock || stock.sold === 0) && <span className="text-muted-foreground">-</span>}
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Restricted</span>
                           )}
-                          {!soldOut && stock && stock.sold > 0 && (
-                            <span className="text-xs text-muted-foreground">Sold: {stock.sold.toLocaleString()}</span>
-                          )}
-                          {!soldOut && (!stock || stock.sold === 0) && <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="text-muted-foreground">{harvest.notes || '-'}</td>
                         <td onClick={(e) => e.stopPropagation()}>
@@ -1647,8 +1676,8 @@ export default function HarvestSalesPage() {
               })
               .map((harvest) => {
                 const stock = harvestStock[harvest.id];
-                const soldOut = stock ? stock.remaining <= 0 : false;
-                const sold = stock?.sold ?? 0;
+                const soldOut = canSeeSalesRecords && stock ? stock.remaining <= 0 : false;
+                const sold = canSeeSalesRecords ? stock?.sold ?? 0 : 0;
                 return (
                   <div
                     key={harvest.id}
@@ -1690,7 +1719,7 @@ export default function HarvestSalesPage() {
                         ? `Market: ${harvest.marketName || 'Not set'}${harvest.brokerName ? ` • Broker: ${harvest.brokerName}` : ''}`
                         : 'Destination: Farm'}
                     </p>
-                    {sold > 0 && !soldOut && (
+                    {canSeeSalesRecords && sold > 0 && !soldOut && (
                       <p className="text-xs text-muted-foreground mt-2">Sold: {sold.toLocaleString()}</p>
                     )}
                   </div>
@@ -1701,6 +1730,7 @@ export default function HarvestSalesPage() {
       </div>
 
       {/* Sales Section */}
+      {canSeeSalesRecords ? (
       <div className="fv-card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <h3 className="text-lg font-semibold">Sales Records</h3>
@@ -1837,6 +1867,13 @@ export default function HarvestSalesPage() {
           );})}
         </div>
       </div>
+      ) : (
+      <div className="fv-card">
+        <p className="text-sm text-muted-foreground">
+          Sales details are restricted for your account.
+        </p>
+      </div>
+      )}
     </div>
   );
 }

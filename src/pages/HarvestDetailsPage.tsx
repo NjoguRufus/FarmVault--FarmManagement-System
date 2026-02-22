@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useCollection } from '@/hooks/useCollection';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Harvest, Sale, Expense } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
 import { formatDate, toDate } from '@/lib/dateUtils';
@@ -14,6 +15,9 @@ export default function HarvestDetailsPage() {
   const { harvestId } = useParams<{ harvestId: string }>();
   const navigate = useNavigate();
   const { activeProject } = useProject();
+  const { can } = usePermissions();
+  const canViewFinancials = can('harvest', 'viewFinancials');
+  const canViewBuyerSection = can('harvest', 'viewBuyerSection') || canViewFinancials;
 
   const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
   const { data: allSales = [] } = useCollection<Sale>('sales', 'sales');
@@ -90,23 +94,26 @@ export default function HarvestDetailsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="fv-card p-4">
-          <p className="text-sm text-muted-foreground">Total Revenue</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{formatCurrency(totalRevenue)}</p>
+      {canViewFinancials && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="fv-card p-4">
+            <p className="text-sm text-muted-foreground">Total Revenue</p>
+            <p className="text-2xl font-bold text-foreground mt-1">{formatCurrency(totalRevenue)}</p>
+          </div>
+          <div className="fv-card p-4">
+            <p className="text-sm text-muted-foreground">Total Expenses</p>
+            <p className="text-2xl font-bold text-destructive mt-1">{formatCurrency(totalExpensesAmount)}</p>
+          </div>
+          <div className="fv-card p-4">
+            <p className="text-sm text-muted-foreground">After Expenses</p>
+            <p className={cn('text-2xl font-bold mt-1', totalAfterExpenses >= 0 ? 'text-foreground' : 'text-destructive')}>
+              {formatCurrency(totalAfterExpenses)}
+            </p>
+          </div>
         </div>
-        <div className="fv-card p-4">
-          <p className="text-sm text-muted-foreground">Total Expenses</p>
-          <p className="text-2xl font-bold text-destructive mt-1">{formatCurrency(totalExpensesAmount)}</p>
-        </div>
-        <div className="fv-card p-4">
-          <p className="text-sm text-muted-foreground">After Expenses</p>
-          <p className={cn('text-2xl font-bold mt-1', totalAfterExpenses >= 0 ? 'text-foreground' : 'text-destructive')}>
-            {formatCurrency(totalAfterExpenses)}
-          </p>
-        </div>
-      </div>
+      )}
 
+      {canViewBuyerSection ? (
       <div className="fv-card">
         <h3 className="text-lg font-semibold p-4 border-b">Sales</h3>
         {sortedSales.length === 0 ? (
@@ -138,7 +145,16 @@ export default function HarvestDetailsPage() {
           </div>
         )}
       </div>
+      ) : (
+      <div className="fv-card">
+        <h3 className="text-lg font-semibold p-4 border-b">Sales</h3>
+        <p className="p-4 text-sm text-muted-foreground">
+          Sales details are restricted for your account.
+        </p>
+      </div>
+      )}
 
+      {canViewFinancials ? (
       <div className="fv-card">
         <h3 className="text-lg font-semibold p-4 border-b">Expenses</h3>
         {sortedExpenses.length === 0 ? (
@@ -168,6 +184,14 @@ export default function HarvestDetailsPage() {
           </div>
         )}
       </div>
+      ) : (
+      <div className="fv-card">
+        <h3 className="text-lg font-semibold p-4 border-b">Expenses</h3>
+        <p className="p-4 text-sm text-muted-foreground">
+          Expense details are restricted for your account.
+        </p>
+      </div>
+      )}
     </div>
   );
 }

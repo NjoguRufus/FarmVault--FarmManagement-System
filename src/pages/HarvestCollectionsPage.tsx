@@ -21,6 +21,7 @@ import {
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
@@ -75,6 +76,7 @@ export default function HarvestCollectionsPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const { activeProject, projects, setActiveProject } = useProject();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -128,8 +130,31 @@ export default function HarvestCollectionsPage() {
   const [payingSelected, setPayingSelected] = useState(false);
   const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
   const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
+  const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
+  const canManageIntake = can('harvest', 'recordIntake') || can('harvest', 'edit') || can('harvest', 'create');
+  const canPayPickers = can('harvest', 'payPickers');
+  const canViewBuyerSection = can('harvest', 'viewBuyerSection');
+  const canCloseHarvest = can('harvest', 'close');
+  const canViewFinancials = can('harvest', 'viewFinancials');
+  const canViewPaymentAmounts = canPayPickers || canViewFinancials;
+  const detailModes = useMemo<ViewMode[]>(() => {
+    const modes: ViewMode[] = [];
+    if (canManageIntake) modes.push('intake');
+    if (canPayPickers) modes.push('pay');
+    if (canViewBuyerSection) modes.push('buyer');
+    return modes;
+  }, [canManageIntake, canPayPickers, canViewBuyerSection]);
+  const defaultDetailMode: ViewMode = detailModes[0] ?? 'list';
 
   const handleSaveCash = async () => {
+    if (!canViewFinancials) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to update the harvest wallet.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!cashDialogCollection || !cashAmount.trim() || !companyId) return;
     const amount = Number(cashAmount || '0');
     if (amount <= 0) {
@@ -166,6 +191,17 @@ export default function HarvestCollectionsPage() {
     setPaySelectedIds(new Set());
     setShowPaidAndProfit(false);
   }, [selectedCollectionId]);
+
+  useEffect(() => {
+    if (!selectedCollectionId) return;
+    if (viewMode === 'list' && detailModes.length > 0) {
+      setViewMode(detailModes[0]);
+      return;
+    }
+    if (viewMode !== 'list' && !detailModes.includes(viewMode)) {
+      setViewMode(detailModes[0] ?? 'list');
+    }
+  }, [selectedCollectionId, viewMode, detailModes]);
 
   const { data: allCollections = [], isLoading: loadingCollections } = useCollection<HarvestCollection>(
     'harvestCollections',
@@ -479,6 +515,14 @@ export default function HarvestCollectionsPage() {
   );
 
   const handleCreateCollection = async () => {
+    if (!canCreateCollection) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to create harvest collections.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!companyId || !effectiveProject) return;
 
     const name = (newCollectionName || '').trim();
@@ -526,6 +570,14 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleAddPicker = async () => {
+    if (!canManageIntake) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to add pickers.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!companyId || !selectedCollectionId) return;
     const num = Number(newPickerNumber || '0');
     const name = (newPickerName || '').trim();
@@ -568,6 +620,14 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleAddWeigh = () => {
+    if (!canManageIntake) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to record picker weight.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!companyId || !selectedCollectionId || !weighPickerId || !selectedCollection) return;
     const kg = Number(weighKg || '0');
     const trip = Number(weighTrip || '1');
@@ -602,6 +662,14 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleMarkPickerPaid = async (pickerId: string) => {
+    if (!canPayPickers) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to mark picker payments.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const picker = allPickers.find((p) => p.id === pickerId);
     if (!picker) return;
 
@@ -662,6 +730,14 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleMarkMultiplePaid = async (pickerIds: string[]) => {
+    if (!canPayPickers) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to mark picker payments.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (pickerIds.length === 0 || !selectedCollectionId || !companyId || !effectiveProject) return;
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
@@ -750,6 +826,22 @@ export default function HarvestCollectionsPage() {
   };
 
   const handleSetBuyerPrice = async (markBuyerPaid: boolean) => {
+    if (!canViewBuyerSection) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to buyer section actions.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (markBuyerPaid && !canCloseHarvest) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to close harvest collections.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const collectionId = selectedCollectionId?.trim?.() || '';
     if (!collectionId) {
       toast({ title: 'Error', description: 'No collection selected.', variant: 'destructive' });
@@ -859,15 +951,17 @@ export default function HarvestCollectionsPage() {
         </div>
         {!selectedCollectionId && (
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => setNewCollectionOpen(true)}
-            >
-              <Plus className="h-4 w-4 mr-1.5" />
-              New collection
-            </Button>
-            {hasFrenchBeansCollections && (() => {
+            {canCreateCollection && (
+              <Button
+                size="sm"
+                className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={() => setNewCollectionOpen(true)}
+              >
+                <Plus className="h-4 w-4 mr-1.5" />
+                New collection
+              </Button>
+            )}
+            {canViewFinancials && hasFrenchBeansCollections && (() => {
               const fb = collections.find(
                 (c) => String(c.cropType).toLowerCase() === 'french-beans'
               );
@@ -1094,7 +1188,7 @@ export default function HarvestCollectionsPage() {
                             className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
                             onClick={() => {
                               setSelectedCollectionId(c.id);
-                              setViewMode('intake');
+                              setViewMode(defaultDetailMode);
                             }}
                           >
                             <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
@@ -1117,10 +1211,18 @@ export default function HarvestCollectionsPage() {
                                 </span>
                               </div>
                               <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                <div className="text-sm font-bold text-foreground tabular-nums">
-                                  KES {totalPay.toLocaleString()}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                {canViewPaymentAmounts ? (
+                                  <>
+                                    <div className="text-sm font-bold text-foreground tabular-nums">
+                                      KES {totalPay.toLocaleString()}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                  </>
+                                ) : (
+                                  <div className="text-sm font-bold text-foreground tabular-nums">
+                                    {(totalWeight).toFixed(1)} kg
+                                  </div>
+                                )}
                               </div>
                             </CardContent>
                           </Card>
@@ -1151,7 +1253,7 @@ export default function HarvestCollectionsPage() {
                             className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
                             onClick={() => {
                               setSelectedCollectionId(c.id);
-                              setViewMode('intake');
+                              setViewMode(defaultDetailMode);
                             }}
                           >
                             <div
@@ -1178,10 +1280,18 @@ export default function HarvestCollectionsPage() {
                                 </span>
                               </div>
                               <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                <div className="text-sm font-bold text-foreground tabular-nums">
-                                  KES {totalPay.toLocaleString()}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                {canViewPaymentAmounts ? (
+                                  <>
+                                    <div className="text-sm font-bold text-foreground tabular-nums">
+                                      KES {totalPay.toLocaleString()}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                  </>
+                                ) : (
+                                  <div className="text-sm font-bold text-foreground tabular-nums">
+                                    {(totalWeight).toFixed(1)} kg
+                                  </div>
+                                )}
                               </div>
                             </CardContent>
                           </Card>
@@ -1206,11 +1316,26 @@ export default function HarvestCollectionsPage() {
                   <span className="font-semibold text-foreground text-sm sm:text-base">
                     {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
                   </span>
-                  {selectedCollection.pricePerKgPicker != null && (
+                  {canViewPaymentAmounts && selectedCollection.pricePerKgPicker != null && (
                     <span className="text-xs text-muted-foreground">@{selectedCollection.pricePerKgPicker}/kg</span>
                   )}
                 </div>
-                <div className={cn('grid gap-2', ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) || selectedCollection.status === 'closed') ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2')}>
+                <div
+                  className={cn(
+                    'grid gap-2',
+                    (() => {
+                      const canShowBuyerSettlementCard =
+                        canViewFinancials &&
+                        ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) ||
+                          selectedCollection.status === 'closed');
+                      const statCount =
+                        1 + (canViewPaymentAmounts ? 1 : 0) + (canShowBuyerSettlementCard ? 1 : 0);
+                      if (statCount <= 1) return 'grid-cols-1';
+                      if (statCount === 2) return 'grid-cols-2';
+                      return 'grid-cols-2 sm:grid-cols-3';
+                    })()
+                  )}
+                >
                   <SimpleStatCard
                     layout="mobile-compact"
                     title="Total kg"
@@ -1219,15 +1344,19 @@ export default function HarvestCollectionsPage() {
                     iconVariant="primary"
                     className="py-2 px-2 text-sm"
                   />
-                  <SimpleStatCard
-                    layout="mobile-compact"
-                    title="Total amount"
-                    value={`KES ${((totalsFromPickers.totalPay ?? selectedCollection.totalPickerCost) ?? 0).toLocaleString()}`}
-                    icon={Banknote}
-                    iconVariant="primary"
-                    className="py-2 px-2 text-sm"
-                  />
-                  {((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) || selectedCollection.status === 'closed') && (
+                  {canViewPaymentAmounts && (
+                    <SimpleStatCard
+                      layout="mobile-compact"
+                      title="Total amount"
+                      value={`KES ${((totalsFromPickers.totalPay ?? selectedCollection.totalPickerCost) ?? 0).toLocaleString()}`}
+                      icon={Banknote}
+                      iconVariant="primary"
+                      className="py-2 px-2 text-sm"
+                    />
+                  )}
+                  {canViewFinancials &&
+                    ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) ||
+                      selectedCollection.status === 'closed') && (
                     <div className="rounded-lg border bg-card py-2 px-2 text-sm flex flex-col justify-center gap-2 min-h-[3.5rem] col-span-2 sm:col-span-1">
                       <div className="flex items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -1278,7 +1407,7 @@ export default function HarvestCollectionsPage() {
               >
                 {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </button>
-              {isFrenchBeansCollection && selectedCollection && (
+              {canViewFinancials && isFrenchBeansCollection && selectedCollection && (
                 <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -1332,49 +1461,65 @@ export default function HarvestCollectionsPage() {
             </div>
           </div>
 
+          {detailModes.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">
+                  Access restricted. Your account can view collections but cannot access intake, payout, or buyer actions.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
             <div className="flex flex-nowrap gap-1.5 sm:gap-2 overflow-x-auto pb-1 min-w-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('intake')}
-                className={cn(
-                  'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
-                  viewMode === 'intake'
-                    ? 'bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-400/50'
-                    : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800'
-                )}
-              >
-                <Scale className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                Intake
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('pay')}
-                className={cn(
-                  'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
-                  viewMode === 'pay'
-                    ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-400/50'
-                    : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800'
-                )}
-              >
-                <Banknote className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                Pay mode
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('buyer')}
-                className={cn(
-                  'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
-                  viewMode === 'buyer'
-                    ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
-                    : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
-                )}
-              >
-                <ShoppingCart className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
-                Buyer
-              </button>
+              {canManageIntake && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('intake')}
+                  className={cn(
+                    'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
+                    viewMode === 'intake'
+                      ? 'bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-400/50'
+                      : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800'
+                  )}
+                >
+                  <Scale className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                  Intake
+                </button>
+              )}
+              {canPayPickers && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('pay')}
+                  className={cn(
+                    'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
+                    viewMode === 'pay'
+                      ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-400/50'
+                      : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800'
+                  )}
+                >
+                  <Banknote className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                  Pay mode
+                </button>
+              )}
+              {canViewBuyerSection && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('buyer')}
+                  className={cn(
+                    'flex-shrink-0 min-h-9 sm:min-h-10 px-2.5 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-md border-2 transition-all touch-manipulation',
+                    viewMode === 'buyer'
+                      ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
+                      : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
+                  )}
+                >
+                  <ShoppingCart className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
+                  Buyer
+                </button>
+              )}
             </div>
 
+            {canManageIntake && (
             <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
               <div className="flex flex-wrap gap-2 items-stretch">
                 <Button
@@ -1444,7 +1589,8 @@ export default function HarvestCollectionsPage() {
                                 {p.pickerName}
                               </div>
                               <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
-                                {pickerTotals.totalKg.toFixed(1)} kg · KES {pickerTotals.totalPay.toLocaleString()}
+                                {pickerTotals.totalKg.toFixed(1)} kg
+                                {canViewPaymentAmounts ? ` - KES ${pickerTotals.totalPay.toLocaleString()}` : ''}
                               </div>
                               <div className={cn(
                                 'text-[10px] border-t border-border pt-1.5 mt-1',
@@ -1461,7 +1607,9 @@ export default function HarvestCollectionsPage() {
                 </>
               )}
             </TabsContent>
+            )}
 
+            {canPayPickers && (
             <TabsContent value="pay" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 {pickersForCollection.length > 0 && (
@@ -1640,7 +1788,9 @@ export default function HarvestCollectionsPage() {
                 )}
               </div>
             </TabsContent>
+            )}
 
+            {canViewBuyerSection && (
             <TabsContent value="buyer" className="mt-4 space-y-4">
               <Card>
                 <CardHeader>
@@ -1652,7 +1802,11 @@ export default function HarvestCollectionsPage() {
                       {selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0 && (
                         <p>Price they bought with: <strong className="text-foreground">KES {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} per kg</strong></p>
                       )}
-                      <p>Payment and profit are shown in the stat cards above (use Show amounts to reveal).</p>
+                      {canViewFinancials ? (
+                        <p>Payment and profit are shown in the stat cards above (use Show amounts to reveal).</p>
+                      ) : (
+                        <p>Buyer pricing is shown here. Financial totals are restricted for your account.</p>
+                      )}
                     </div>
                   )}
                   <div className="space-y-2">
@@ -1695,7 +1849,7 @@ export default function HarvestCollectionsPage() {
                         <Button
                           size="lg"
                           className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
-                          disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid}
+                          disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid || !canCloseHarvest}
                           onClick={() => handleSetBuyerPrice(true)}
                         >
                           MARK BUYER PAID
@@ -1706,12 +1860,19 @@ export default function HarvestCollectionsPage() {
                           All pickers must be marked cash paid before closing.
                         </p>
                       )}
+                      {!canCloseHarvest && (
+                        <p className="text-muted-foreground text-sm">
+                          You can save buyer pricing, but only users with close access can mark buyer paid.
+                        </p>
+                      )}
                     </>
                   )}
                 </CardContent>
               </Card>
             </TabsContent>
+            )}
           </Tabs>
+          )}
         </>
       )}
 
@@ -1881,3 +2042,5 @@ export default function HarvestCollectionsPage() {
     </div>
   );
 }
+
+

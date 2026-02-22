@@ -4,6 +4,122 @@ export type CropType = 'tomatoes' | 'french-beans' | 'capsicum' | 'maize' | 'wat
 
 export type UserRole = 'developer' | 'company-admin' | 'manager' | 'broker' | 'employee';
 
+export interface DashboardPermissions {
+  view: boolean;
+  cards?: {
+    cropStage?: boolean;
+    revenue?: boolean;
+    expenses?: boolean;
+    profitLoss?: boolean;
+    budget?: boolean;
+  };
+}
+
+export interface ProjectsPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+  accessTabs?: {
+    overview?: boolean;
+    planning?: boolean;
+    expenses?: boolean;
+    inventory?: boolean;
+    operations?: boolean;
+    harvest?: boolean;
+    reports?: boolean;
+  };
+}
+
+export interface PlanningPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+}
+
+export interface InventoryPermissions {
+  view: boolean;
+  addItem?: boolean;
+  editItem?: boolean;
+  deleteItem?: boolean;
+  restock?: boolean;
+  deduct?: boolean;
+  categories?: boolean;
+  purchases?: boolean;
+}
+
+export interface ExpensesPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+  approve?: boolean;
+}
+
+export interface OperationsPermissions {
+  view: boolean;
+  createWorkCard?: boolean;
+  assignWork?: boolean;
+  recordDailyWork?: boolean;
+  approveWorkLog?: boolean;
+  markPaid?: boolean;
+  viewCost?: boolean;
+}
+
+export interface HarvestPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  close?: boolean;
+  recordIntake?: boolean;
+  viewFinancials?: boolean;
+  payPickers?: boolean;
+  viewBuyerSection?: boolean;
+}
+
+export interface EmployeesPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  deactivate?: boolean;
+}
+
+export interface ReportsPermissions {
+  view: boolean;
+  export?: boolean;
+}
+
+export interface SettingsPermissions {
+  view: boolean;
+  edit?: boolean;
+}
+
+export interface PermissionMap {
+  dashboard: DashboardPermissions;
+  projects: ProjectsPermissions;
+  planning: PlanningPermissions;
+  inventory: InventoryPermissions;
+  expenses: ExpensesPermissions;
+  operations: OperationsPermissions;
+  harvest: HarvestPermissions;
+  employees: EmployeesPermissions;
+  reports: ReportsPermissions;
+  settings: SettingsPermissions;
+}
+
+export type PermissionModule = keyof PermissionMap;
+export type PermissionPresetKey =
+  | 'viewer'
+  | 'inventory-clerk'
+  | 'finance-clerk'
+  | 'operations-staff'
+  | 'harvest-intake-staff'
+  | 'manager'
+  | 'full-access';
+
+export type EmployeeStatus = 'active' | 'inactive' | 'on-leave';
+
 export interface User {
   id: string;
   email: string;
@@ -417,11 +533,19 @@ export interface Employee {
   id: string;
   companyId: string;
   name: string;
-  role: string; // e.g., 'operations-manager', 'logistics-driver', 'sales-broker', 'truck_driver'
-  department: string;
-  contact: string;
-  status: 'active' | 'on-leave' | 'inactive';
-  joinDate: Date;
+  fullName?: string;
+  email?: string;
+  phone?: string;
+  contact?: string;
+  role?: string | null; // legacy role field
+  employeeRole?: string | null;
+  department?: string;
+  status: EmployeeStatus;
+  permissions?: PermissionMap;
+  joinDate?: Date | unknown;
+  createdAt?: Date | unknown;
+  createdBy?: string;
+  authUserId?: string;
 }
 
 export interface Delivery {

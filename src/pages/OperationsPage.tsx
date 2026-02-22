@@ -8,6 +8,7 @@ import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/fi
 import { useCollection } from '@/hooks/useCollection';
 import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, User, Expense, ExpenseCategory, OperationsWorkCard } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import { getCurrentStageForProject } from '@/services/stageService';
 import { useWorkCardsForCompany, useInvalidateWorkCards } from '@/hooks/useWorkCards';
 import {
@@ -46,7 +47,11 @@ export default function OperationsPage() {
   const navigate = useNavigate();
   const { activeProject } = useProject();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const canCreateWorkCard = can('operations', 'createWorkCard');
+  const canRecordDailyWork = can('operations', 'recordDailyWork');
+  const canApproveWorkLogs = can('operations', 'approveWorkLog');
   const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
   const { data: allUsers = [] } = useCollection<User>('users', 'users');
@@ -213,11 +218,11 @@ export default function OperationsPage() {
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
-    if (searchParams.get('add') === '1') {
+    if (searchParams.get('add') === '1' && canCreateWorkCard) {
       setAddCardOpen(true);
       setSearchParams((p) => { p.delete('add'); return p; }, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, canCreateWorkCard]);
   const [selectedWorkCard, setSelectedWorkCard] = useState<OperationsWorkCard | null>(null);
   const [workCardModalOpen, setWorkCardModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -271,6 +276,10 @@ export default function OperationsPage() {
 
   const handleCreateWorkCard = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateWorkCard) {
+      toast.error('Permission denied', { description: 'You cannot create work cards.' });
+      return;
+    }
     if (!activeProject || !user?.companyId || !user?.email) return;
     const stage = projectStages.find((s) => s.id === cardStageId) ?? projectStages.find((s) => s.stageName === cardStageName);
     if (!stage) return;
@@ -319,6 +328,10 @@ export default function OperationsPage() {
   };
 
   const handleApproveWorkCard = async () => {
+    if (!canApproveWorkLogs) {
+      toast.error('Permission denied', { description: 'You cannot approve work cards.' });
+      return;
+    }
     if (!selectedWorkCard || !user) return;
     const card = selectedWorkCard;
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -663,6 +676,10 @@ export default function OperationsPage() {
 
   const handleAddWorkLog = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canRecordDailyWork) {
+      toast.error('Permission denied', { description: 'You cannot record daily work.' });
+      return;
+    }
     if (!activeProject) return;
     if (!date || !selectedStage) return;
     setSaving(true);
@@ -945,6 +962,10 @@ export default function OperationsPage() {
   };
 
   const handleApproveManagerSubmission = async (log: WorkLog) => {
+    if (!canApproveWorkLogs) {
+      toast.error('Permission denied', { description: 'You cannot approve manager submissions.' });
+      return;
+    }
     if (!user || !log.id) return;
     const logRef = doc(db, 'workLogs', log.id);
     // When approving, copy manager-submitted numeric fields into the main fields
@@ -974,6 +995,10 @@ export default function OperationsPage() {
   };
 
   const handleRejectManagerSubmission = async (log: WorkLog) => {
+    if (!canApproveWorkLogs) {
+      toast.error('Permission denied', { description: 'You cannot reject manager submissions.' });
+      return;
+    }
     if (!user || !log.id) return;
     const logRef = doc(db, 'workLogs', log.id);
     try {
@@ -1016,6 +1041,7 @@ export default function OperationsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {canCreateWorkCard && (
           <Dialog open={addCardOpen} onOpenChange={setAddCardOpen}>
             <DialogTrigger asChild>
               <button
@@ -1181,6 +1207,7 @@ export default function OperationsPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
         </div>
       </div>
 
@@ -1726,7 +1753,7 @@ export default function OperationsPage() {
                       Rejection reason: {selectedWorkCard.rejectionReason}
                     </div>
                   )}
-                  {canAdminApproveOrReject(selectedWorkCard) && (
+                  {canApproveWorkLogs && canAdminApproveOrReject(selectedWorkCard) && (
                     <div className="flex flex-wrap gap-3 pt-4 border-t">
                       <button
                         type="button"
@@ -1913,7 +1940,7 @@ export default function OperationsPage() {
                 </div>
               )}
 
-              {canAdminApproveOrReject(selectedWorkCard) && (
+              {canApproveWorkLogs && canAdminApproveOrReject(selectedWorkCard) && (
                 <div className="flex flex-wrap gap-3 pt-4 border-t">
                   <button
                     type="button"
@@ -2187,7 +2214,7 @@ export default function OperationsPage() {
               {!selectedLog.paid && (
                 <div className="flex justify-between items-center gap-2 pt-4 border-t">
                   <div className="flex gap-2">
-                    {selectedLog.managerSubmittedNumberOfPeople && (
+                    {canApproveWorkLogs && selectedLog.managerSubmittedNumberOfPeople && (
                       <>
                         <button
                           onClick={() => handleApproveManagerSubmission(selectedLog)}

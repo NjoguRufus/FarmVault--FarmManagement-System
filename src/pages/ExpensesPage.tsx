@@ -41,6 +41,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
+import { usePermissions } from '@/hooks/usePermissions';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -50,6 +51,7 @@ type ExpenseWithSyncState = Expense & {
 export default function ExpensesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses');
@@ -149,6 +151,9 @@ export default function ExpensesPage() {
   const [labourExpensesOpen, setLabourExpensesOpen] = useState(false);
   const [brokerExpensesOpen, setBrokerExpensesOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const canCreateExpense = can('expenses', 'create');
+  const canApproveExpense = can('expenses', 'approve');
+  const canExportExpenseReport = can('reports', 'export');
 
   const isTomatoesProject = activeProject?.cropType === 'tomatoes';
   const showBrokerExpensesButton = !isBroker && isTomatoesProject;
@@ -192,6 +197,10 @@ export default function ExpensesPage() {
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateExpense) {
+      toast.error('Permission denied', { description: 'You cannot create expenses.' });
+      return;
+    }
     if (!activeProject) return;
     setSaving(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -238,6 +247,10 @@ export default function ExpensesPage() {
   };
 
   const handleMarkWorkLogAsPaid = async (log: WorkLog) => {
+    if (!canApproveExpense) {
+      toast.error('Permission denied', { description: 'You cannot approve labour expenses.' });
+      return;
+    }
     if (!activeProject || !user || !log.id || !log.totalPrice) return;
     setMarkingPaid(log.id);
     try {
@@ -292,6 +305,10 @@ export default function ExpensesPage() {
   };
 
   const handleExport = () => {
+    if (!canExportExpenseReport) {
+      toast.error('Permission denied', { description: 'You cannot export reports.' });
+      return;
+    }
     const rows = filteredExpenses.map((expense) => ({
       Description: expense.description,
       Category: expense.category,
@@ -336,7 +353,7 @@ export default function ExpensesPage() {
               Broker expenses
             </button>
           )}
-          {unpaidWorkLogs.length > 0 && (
+          {canApproveExpense && unpaidWorkLogs.length > 0 && (
             <>
               <button 
                 className="fv-btn fv-btn--primary"
@@ -412,10 +429,13 @@ export default function ExpensesPage() {
             </Dialog>
           </>
           )}
-          <button className="fv-btn fv-btn--secondary" onClick={handleExport}>
-            <Download className="h-4 w-4" />
-            Export
-          </button>
+          {canExportExpenseReport && (
+            <button className="fv-btn fv-btn--secondary" onClick={handleExport}>
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+          )}
+          {canCreateExpense && (
           <Dialog
             open={addOpen}
             onOpenChange={(open) => {
@@ -508,6 +528,7 @@ export default function ExpensesPage() {
               )}
             </DialogContent>
           </Dialog>
+          )}
         </div>
       </div>
 

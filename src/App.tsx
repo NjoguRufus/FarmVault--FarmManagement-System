@@ -44,6 +44,7 @@ import { RequireManager } from "@/components/auth/RequireManager";
 import { RequireBroker } from "@/components/auth/RequireBroker";
 import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
+import { PermissionRoute } from "@/components/auth/PermissionRoute";
 import SetupCompany from "@/pages/SetupCompany";
 import ChoosePlan from "@/pages/ChoosePlan";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
@@ -110,8 +111,8 @@ const CompanyDashboardRoute = () => {
     if (employeeRole === "sales-broker" || employeeRole === "broker") {
       return <Navigate to="/broker" replace />;
     }
-    // Default employee landing: projects list
-    return <Navigate to="/projects" replace />;
+    // Role-less employees use the company dashboard and permissions decide visibility.
+    return <CompanyDashboard />;
   }
 
   // Catch-all: send to projects list
@@ -147,25 +148,25 @@ const App = () => (
                   </RequireAuth>
                 }
               >
-                <Route path="/dashboard" element={<CompanyDashboardRoute />} />
-                <Route path="/projects" element={<RequireNotBroker><ProjectsPage /></RequireNotBroker>} />
-                <Route path="/projects/new" element={<RequireNotBroker><NewProjectPage /></RequireNotBroker>} />
-                <Route path="/projects/:projectId" element={<RequireNotBroker><ProjectDetailsPage /></RequireNotBroker>} />
-                <Route path="/projects/:projectId/planning" element={<RequireNotBroker><ProjectPlanningPage /></RequireNotBroker>} />
-                <Route path="/crop-stages" element={<CropStagesPage />} />
-                <Route path="/expenses" element={<ExpensesPage />} />
-                <Route path="/operations" element={<OperationsPage />} />
-                <Route path="/inventory" element={<InventoryPage />} />
-                <Route path="/harvest-sales" element={<RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker>} />
-                <Route path="/harvest-sales/harvest/:harvestId" element={<RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker>} />
-                <Route path="/harvest-collections" element={<RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker>} />
-                <Route path="/harvest-collections/:projectId" element={<RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker>} />
-                <Route path="/suppliers" element={<SuppliersPage />} />
-                <Route path="/challenges" element={<SeasonChallengesPage />} />
-                <Route path="/employees" element={<EmployeesPage />} />
-                <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/billing" element={<BillingPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
+                <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><NewProjectPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/projects/:projectId" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectDetailsPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/projects/:projectId/planning" element={<PermissionRoute module="planning"><RequireNotBroker><ProjectPlanningPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/crop-stages" element={<PermissionRoute module="planning"><CropStagesPage /></PermissionRoute>} />
+                <Route path="/expenses" element={<PermissionRoute module="expenses"><ExpensesPage /></PermissionRoute>} />
+                <Route path="/operations" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
+                <Route path="/inventory" element={<PermissionRoute module="inventory"><InventoryPage /></PermissionRoute>} />
+                <Route path="/harvest-sales" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/harvest-sales/harvest/:harvestId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/harvest-collections" element={<PermissionRoute module="harvest"><RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/harvest-collections/:projectId" element={<PermissionRoute module="harvest"><RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/suppliers" element={<PermissionRoute module="projects"><SuppliersPage /></PermissionRoute>} />
+                <Route path="/challenges" element={<PermissionRoute module="planning"><SeasonChallengesPage /></PermissionRoute>} />
+                <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />
+                <Route path="/reports" element={<PermissionRoute module="reports"><ReportsPage /></PermissionRoute>} />
+                <Route path="/billing" element={<PermissionRoute module="settings"><BillingPage /></PermissionRoute>} />
+                <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
                 <Route path="/support" element={<SupportPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />
               </Route>
@@ -179,7 +180,7 @@ const App = () => (
                 }
               >
                 <Route path="/manager" element={<Navigate to="/manager/operations" replace />} />
-                <Route path="/manager/operations" element={<ManagerOperationsPage />} />
+                <Route path="/manager/operations" element={<PermissionRoute module="operations"><ManagerOperationsPage /></PermissionRoute>} />
               </Route>
 
               <Route
@@ -190,10 +191,10 @@ const App = () => (
                   </RequireBroker>
                 }
               >
-                <Route index element={<BrokerDashboard />} />
-                <Route path="harvest-sales" element={<BrokerHarvestSalesPage />} />
-                <Route path="harvest/:harvestId" element={<BrokerHarvestDetailsPage />} />
-                <Route path="expenses" element={<BrokerExpensesPage />} />
+                <Route index element={<PermissionRoute module="dashboard"><BrokerDashboard /></PermissionRoute>} />
+                <Route path="harvest-sales" element={<PermissionRoute module="harvest"><BrokerHarvestSalesPage /></PermissionRoute>} />
+                <Route path="harvest/:harvestId" element={<PermissionRoute module="harvest"><BrokerHarvestDetailsPage /></PermissionRoute>} />
+                <Route path="expenses" element={<PermissionRoute module="expenses"><BrokerExpensesPage /></PermissionRoute>} />
               </Route>
 
               <Route
@@ -203,7 +204,7 @@ const App = () => (
                   </RequireDriver>
                 }
               >
-                <Route path="/driver" element={<DriverDashboard />} />
+                <Route path="/driver" element={<PermissionRoute module="harvest"><DriverDashboard /></PermissionRoute>} />
               </Route>
 
               {/* Developer-only routes under /admin */}

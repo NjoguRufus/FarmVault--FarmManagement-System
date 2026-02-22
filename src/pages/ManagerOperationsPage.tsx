@@ -106,7 +106,10 @@ export default function ManagerOperationsPage() {
   }, [user, allEmployees]);
 
   const managerIdsArray = useMemo(() => Array.from(managerIdsForCurrentUser), [managerIdsForCurrentUser]);
-  const { data: managerWorkCards = [], isLoading: managerCardsLoading } = useWorkCardsForManager(managerIdsArray);
+  const { data: managerWorkCards = [], isLoading: managerCardsLoading } = useWorkCardsForManager(
+    managerIdsArray,
+    user?.companyId ?? null,
+  );
   const { data: companyWorkCards = [], isLoading: companyCardsLoading } = useWorkCardsForCompany(user?.companyId ?? null, { refetchInterval: 5000 });
   const workCards = useMemo(() => {
     const fromManager = managerIdsArray.length > 0 ? managerWorkCards : [];

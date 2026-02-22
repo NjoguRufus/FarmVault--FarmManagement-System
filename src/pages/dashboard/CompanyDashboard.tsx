@@ -33,10 +33,13 @@ import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { NewOperationMenu } from '@/components/dashboard/NewOperationMenu';
 import { Button } from '@/components/ui/button';
 import { useTour } from '@/tour/TourProvider';
+import { usePermissions } from '@/hooks/usePermissions';
+import { cn } from '@/lib/utils';
 
 export function CompanyDashboard() {
   const { activeProject, setActiveProject } = useProject();
   const { user } = useAuth();
+  const { canSee } = usePermissions();
   const { startTour } = useTour();
   const isMobile = useIsMobile();
   const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
@@ -279,6 +282,12 @@ export function CompanyDashboard() {
     return cropType ? icons[cropType] ?? '🌾' : '🌾';
   };
 
+  const showCropStageCard = canSee('dashboard', 'cards.cropStage');
+  const showRevenueCard = canSee('dashboard', 'cards.revenue');
+  const showExpensesCard = canSee('dashboard', 'cards.expenses');
+  const showProfitLossCard = canSee('dashboard', 'cards.profitLoss');
+  const showBudgetCard = canSee('dashboard', 'cards.budget');
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
@@ -322,13 +331,29 @@ export function CompanyDashboard() {
       {/* Stats Grid */}
       <div className="space-y-3" data-tour="dashboard-stats">
         {!isHarvestActive ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
-            <CropStageProgressCard
-              projectName={activeProject?.name}
-              stages={activeProjectStages}
-            />
-            <div className="grid grid-cols-1 gap-3 md:h-full md:grid-rows-2">
-              <div data-tour="expenses-summary-card" className="h-full">
+          <div
+            className={cn(
+              'grid grid-cols-1 gap-3 items-stretch',
+              (showExpensesCard || showRevenueCard) && 'md:grid-cols-2',
+            )}
+          >
+            {showCropStageCard ? (
+              <CropStageProgressCard
+                projectName={activeProject?.name}
+                stages={activeProjectStages}
+              />
+            ) : showRevenueCard ? (
+              <StatCard
+                title="Total Revenue"
+                value={`KES ${totalSales.toLocaleString()}`}
+                change={15.3}
+                changeLabel="vs last month"
+                icon={<TrendingUp className="h-4 w-4" />}
+                variant="gold"
+                compact
+              />
+            ) : showExpensesCard ? (
+              <div data-tour="expenses-summary-card">
                 <StatCard
                   title="Total Expenses"
                   value={`KES ${totalExpenses.toLocaleString()}`}
@@ -339,65 +364,114 @@ export function CompanyDashboard() {
                   compact
                 />
               </div>
-              <div className="hidden md:block h-full">
+            ) : (
+              <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 text-sm text-muted-foreground">
+                No dashboard cards enabled for your account.
+              </div>
+            )}
+
+            {(showExpensesCard || showRevenueCard) && (
+              <div className="grid grid-cols-1 gap-3 md:h-full md:grid-rows-2">
+                {showExpensesCard && (
+                  <div data-tour="expenses-summary-card" className="h-full">
+                    <StatCard
+                      title="Total Expenses"
+                      value={`KES ${totalExpenses.toLocaleString()}`}
+                      change={12.5}
+                      changeLabel="vs last month"
+                      icon={<DollarSign className="h-4 w-4" />}
+                      variant="default"
+                      compact
+                    />
+                  </div>
+                )}
+                {showRevenueCard && (
+                  <div className={cn('h-full', showExpensesCard ? 'hidden md:block' : '')}>
+                    <StatCard
+                      title="Total Revenue"
+                      value={`KES ${totalSales.toLocaleString()}`}
+                      change={15.3}
+                      changeLabel="vs last month"
+                      icon={<TrendingUp className="h-4 w-4" />}
+                      variant="gold"
+                      compact
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'grid grid-cols-1 gap-3',
+              showRevenueCard && showExpensesCard && 'md:grid-cols-2',
+            )}
+          >
+            {showRevenueCard && (
+              <StatCard
+                title="Total Revenue"
+                value={`KES ${totalSales.toLocaleString()}`}
+                change={15.3}
+                changeLabel="Harvest revenue (current cycle)"
+                icon={<TrendingUp className="h-4 w-4" />}
+                variant="gold"
+                compact
+              />
+            )}
+            {showExpensesCard && (
+              <div data-tour="expenses-summary-card">
                 <StatCard
-                  title="Total Revenue"
-                  value={`KES ${totalSales.toLocaleString()}`}
-                  change={15.3}
+                  title="Total Expenses"
+                  value={`KES ${totalExpenses.toLocaleString()}`}
+                  change={12.5}
                   changeLabel="vs last month"
-                  icon={<TrendingUp className="h-4 w-4" />}
-                  variant="gold"
+                  icon={<DollarSign className="h-4 w-4" />}
+                  variant="default"
                   compact
                 />
               </div>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <StatCard
-              title="Total Revenue"
-              value={`KES ${totalSales.toLocaleString()}`}
-              change={15.3}
-              changeLabel="Harvest revenue (current cycle)"
-              icon={<TrendingUp className="h-4 w-4" />}
-              variant="gold"
-              compact
-            />
-            <div data-tour="expenses-summary-card">
-              <StatCard
-                title="Total Expenses"
-                value={`KES ${totalExpenses.toLocaleString()}`}
-                change={12.5}
-                changeLabel="vs last month"
-                icon={<DollarSign className="h-4 w-4" />}
-                variant="default"
-                compact
-              />
-            </div>
+            )}
+            {!showRevenueCard && !showExpensesCard && (
+              <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 text-sm text-muted-foreground">
+                No dashboard cards enabled for your account.
+              </div>
+            )}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div data-tour="profit-loss-card">
-            <StatCard
-              title="Profit and Loss"
-              value={`KES ${netBalance.toLocaleString()}`}
-              change={netBalance >= 0 ? 22.1 : -5.2}
-              changeLabel="vs last month"
-              icon={<Wallet className="h-4 w-4" />}
-              variant={netBalance >= 0 ? 'primary' : 'default'}
-              compact
-            />
+        {(showProfitLossCard || showBudgetCard) && (
+          <div
+            className={cn(
+              'grid gap-3',
+              showProfitLossCard && showBudgetCard ? 'grid-cols-2' : 'grid-cols-1',
+            )}
+          >
+            {showProfitLossCard && (
+              <div data-tour="profit-loss-card">
+                <StatCard
+                  title="Profit and Loss"
+                  value={`KES ${netBalance.toLocaleString()}`}
+                  change={netBalance >= 0 ? 22.1 : -5.2}
+                  changeLabel="vs last month"
+                  icon={<Wallet className="h-4 w-4" />}
+                  variant={netBalance >= 0 ? 'primary' : 'default'}
+                  compact
+                />
+              </div>
+            )}
+            {showBudgetCard && (
+              <StatCard
+                title="Remaining Budget"
+                value={`KES ${remainingBudget.toLocaleString()}`}
+                change={undefined}
+                changeLabel={`of KES ${totalBudget.toLocaleString()}`}
+                icon={<CalendarIcon className="h-4 w-4" />}
+                variant={remainingBudget >= 0 ? 'primary' : 'default'}
+                compact
+              />
+            )}
           </div>
-          <StatCard
-            title="Remaining Budget"
-            value={`KES ${remainingBudget.toLocaleString()}`}
-            change={undefined}
-            changeLabel={`of KES ${totalBudget.toLocaleString()}`}
-            icon={<CalendarIcon className="h-4 w-4" />}
-            variant={remainingBudget >= 0 ? 'primary' : 'default'}
-            compact
-          />
-        </div>
+        )}
       </div>
 
       {/* Charts */}
