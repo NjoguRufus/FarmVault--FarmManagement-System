@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { StatCard } from '@/components/dashboard/StatCard';
+import { CropStageProgressCard } from '@/components/dashboard/CropStageProgressCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ProjectsTable } from '@/components/dashboard/ProjectsTable';
@@ -126,6 +127,53 @@ export function CompanyDashboard() {
       (s) => s.companyId === companyId && s.projectId === activeProject.id
     );
   }, [allStages, companyId, activeProject]);
+
+  const activeProjectHarvests = useMemo(() => {
+    if (!activeProject) return [];
+    return allHarvests.filter(
+      (h) =>
+        h.projectId === activeProject.id &&
+        (companyId ? h.companyId === companyId : true)
+    );
+  }, [allHarvests, activeProject, companyId]);
+
+  const isHarvestActive = useMemo(() => {
+    if (!activeProject || activeProjectHarvests.length === 0) return false;
+
+    const harvestsWithOptionalStatus = activeProjectHarvests as Array<Harvest & { status?: string }>;
+    const hasStatusField = harvestsWithOptionalStatus.some(
+      (harvest) => typeof harvest.status === 'string' && harvest.status.length > 0
+    );
+
+    if (hasStatusField) {
+      return harvestsWithOptionalStatus.some((harvest) => {
+        const normalizedStatus = harvest.status?.toLowerCase();
+        return normalizedStatus === 'active' || normalizedStatus === 'ongoing';
+      });
+    }
+
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const hasHarvestInLastSevenDays = activeProjectHarvests.some((harvest) => {
+      const harvestDate = toDate(harvest.date);
+      return harvestDate ? harvestDate.getTime() >= sevenDaysAgo.getTime() : false;
+    });
+
+    if (hasHarvestInLastSevenDays) return true;
+
+    const hasHarvestInCurrentMonth = activeProjectHarvests.some((harvest) => {
+      const harvestDate = toDate(harvest.date);
+      if (!harvestDate) return false;
+      const time = harvestDate.getTime();
+      return time >= currentMonthStart.getTime() && time <= currentMonthEnd.getTime();
+    });
+
+    return hasHarvestInCurrentMonth;
+  }, [activeProject, activeProjectHarvests]);
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -273,28 +321,61 @@ export function CompanyDashboard() {
 
       {/* Stats Grid */}
       <div className="space-y-3" data-tour="dashboard-stats">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <StatCard
-            title="Total Revenue"
-            value={`KES ${totalSales.toLocaleString()}`}
-            change={15.3}
-            changeLabel="vs last month"
-            icon={<TrendingUp className="h-4 w-4" />}
-            variant="gold"
-            compact
-          />
-          <div data-tour="expenses-summary-card">
+        {!isHarvestActive ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+            <CropStageProgressCard
+              projectName={activeProject?.name}
+              stages={activeProjectStages}
+            />
+            <div className="grid grid-cols-1 gap-3 md:h-full md:grid-rows-2">
+              <div data-tour="expenses-summary-card" className="h-full">
+                <StatCard
+                  title="Total Expenses"
+                  value={`KES ${totalExpenses.toLocaleString()}`}
+                  change={12.5}
+                  changeLabel="vs last month"
+                  icon={<DollarSign className="h-4 w-4" />}
+                  variant="default"
+                  compact
+                />
+              </div>
+              <div className="hidden md:block h-full">
+                <StatCard
+                  title="Total Revenue"
+                  value={`KES ${totalSales.toLocaleString()}`}
+                  change={15.3}
+                  changeLabel="vs last month"
+                  icon={<TrendingUp className="h-4 w-4" />}
+                  variant="gold"
+                  compact
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <StatCard
-              title="Total Expenses"
-              value={`KES ${totalExpenses.toLocaleString()}`}
-              change={12.5}
-              changeLabel="vs last month"
-              icon={<DollarSign className="h-4 w-4" />}
-              variant="default"
+              title="Total Revenue"
+              value={`KES ${totalSales.toLocaleString()}`}
+              change={15.3}
+              changeLabel="Harvest revenue (current cycle)"
+              icon={<TrendingUp className="h-4 w-4" />}
+              variant="gold"
               compact
             />
+            <div data-tour="expenses-summary-card">
+              <StatCard
+                title="Total Expenses"
+                value={`KES ${totalExpenses.toLocaleString()}`}
+                change={12.5}
+                changeLabel="vs last month"
+                icon={<DollarSign className="h-4 w-4" />}
+                variant="default"
+                compact
+              />
+            </div>
           </div>
-        </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div data-tour="profit-loss-card">
             <StatCard

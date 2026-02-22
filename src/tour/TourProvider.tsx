@@ -90,6 +90,26 @@ const desktopTourRestartStep: DashboardTourStep = {
   placement: "left",
 };
 
+function hasMountedTarget(target: Step["target"]): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return false;
+  }
+
+  if (typeof target === "string") {
+    return Boolean(document.querySelector(target));
+  }
+
+  if (target && typeof (target as Element).nodeType === "number") {
+    return Boolean(target);
+  }
+
+  return false;
+}
+
+function getMountedSteps(stepList: DashboardTourStep[]): DashboardTourStep[] {
+  return stepList.filter((step) => hasMountedTarget(step.target));
+}
+
 function getStorageKey(userId?: string | null) {
   return `${TOUR_COMPLETED_STORAGE_PREFIX}:${userId ?? "anonymous"}`;
 }
@@ -113,6 +133,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   const [isRunning, setIsRunning] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [pendingStart, setPendingStart] = useState(false);
+  const [activeSteps, setActiveSteps] = useState<DashboardTourStep[]>([]);
 
   const autoRunKeyRef = useRef<string | null>(null);
 
@@ -122,19 +143,21 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   );
 
   const joyrideSteps = useMemo<Step[]>(
-    () => steps.map(({ route: _route, id: _id, ...step }) => step),
-    [steps],
+    () => activeSteps.map(({ route: _route, id: _id, ...step }) => step),
+    [activeSteps],
   );
 
   const stopTour = useCallback(() => {
     setIsRunning(false);
     setPendingStart(false);
+    setActiveSteps([]);
     setStepIndex(0);
   }, []);
 
   const startTour = useCallback(() => {
     const firstRoute = steps[0]?.route ?? "/dashboard";
     setIsRunning(false);
+    setActiveSteps([]);
     setStepIndex(0);
     setPendingStart(true);
 
@@ -149,13 +172,53 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     const firstRoute = steps[0]?.route ?? "/dashboard";
     if (location.pathname !== firstRoute) return;
 
-    const timer = window.setTimeout(() => {
-      setPendingStart(false);
-      setIsRunning(true);
-    }, 300);
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 30;
+    const retryDelayMs = 150;
 
-    return () => window.clearTimeout(timer);
+    const tryStart = () => {
+      if (cancelled) return;
+
+      const mountedSteps = getMountedSteps(steps);
+      if (mountedSteps.length > 0) {
+        setActiveSteps(mountedSteps);
+        setStepIndex(0);
+        setPendingStart(false);
+        setIsRunning(true);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        setPendingStart(false);
+        setIsRunning(false);
+        setActiveSteps([]);
+        return;
+      }
+
+      window.setTimeout(tryStart, retryDelayMs);
+    };
+
+    const timer = window.setTimeout(tryStart, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [location.pathname, pendingStart, steps]);
+
+  useEffect(() => {
+    if (!isRunning || pendingStart) return;
+
+    const mountedSteps = getMountedSteps(steps);
+    if (mountedSteps.length === 0) {
+      stopTour();
+      return;
+    }
+
+    setActiveSteps(mountedSteps);
+    setStepIndex((prev) => Math.min(prev, mountedSteps.length - 1));
+  }, [isRunning, pendingStart, steps, stopTour]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -190,6 +253,13 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (type === EVENTS.STEP_AFTER || type === EVENTS.TARGET_NOT_FOUND) {
+        const mountedSteps = getMountedSteps(steps);
+        if (mountedSteps.length === 0) {
+          stopTour();
+          return;
+        }
+
+        setActiveSteps(mountedSteps);
         const delta = action === ACTIONS.PREV ? -1 : 1;
         const nextIndex = index + delta;
 
@@ -198,7 +268,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        if (nextIndex >= joyrideSteps.length) {
+        if (nextIndex >= mountedSteps.length) {
           setCompletedTour(user?.id);
           stopTour();
           return;
@@ -207,7 +277,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         setStepIndex(nextIndex);
       }
     },
-    [joyrideSteps.length, stopTour, user?.id],
+    [steps, stopTour, user?.id],
   );
 
   const contextValue = useMemo(
@@ -223,7 +293,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       {children}
       <Joyride
         steps={joyrideSteps}
-        run={isRunning && !pendingStart}
+        run={isRunning && !pendingStart && joyrideSteps.length > 0 && stepIndex < joyrideSteps.length}
         stepIndex={stepIndex}
         callback={handleJoyrideCallback}
         continuous
