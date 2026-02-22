@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
+import { where } from 'firebase/firestore';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -40,9 +41,23 @@ export function CompanyDashboard() {
   const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
   const companyId = user?.companyId || '';
+  const isDeveloper = user?.role === 'developer';
+  const canLoadProjects = Boolean(isDeveloper || companyId);
+  const projectConstraints = useMemo(
+    () =>
+      isDeveloper || !companyId
+        ? []
+        : [where('companyId', '==', companyId)],
+    [isDeveloper, companyId],
+  );
+
   const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
     'dashboard-projects',
-    'projects'
+    'projects',
+    {
+      enabled: canLoadProjects,
+      constraints: projectConstraints,
+    },
   );
   const { data: allExpenses = [] } = useCollection<Expense>('dashboard-expenses', 'expenses');
   const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests');

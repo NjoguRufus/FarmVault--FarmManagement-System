@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { CalendarDays, CheckCircle, Clock, TrendingUp, Wrench, Package } from 'lucide-react';
+import { where } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { WorkLog, Project, CropStage, Employee } from '@/types';
@@ -10,8 +11,21 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 
 export function EmployeeDashboard() {
   const { user } = useAuth();
+  const isDeveloper = user?.role === 'developer';
+  const canLoadProjects = Boolean(isDeveloper || user?.companyId);
+  const projectConstraints = useMemo(
+    () =>
+      isDeveloper || !user?.companyId
+        ? []
+        : [where('companyId', '==', user.companyId)],
+    [isDeveloper, user?.companyId],
+  );
+
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
-  const { data: allProjects = [] } = useCollection<Project>('projects', 'projects');
+  const { data: allProjects = [] } = useCollection<Project>('projects', 'projects', {
+    enabled: canLoadProjects,
+    constraints: projectConstraints,
+  });
   const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
 

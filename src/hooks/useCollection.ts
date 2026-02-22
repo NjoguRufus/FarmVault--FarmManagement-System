@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, type QueryConstraint } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from '@/hooks/use-toast';
 
@@ -9,6 +9,7 @@ export type UseCollectionOptions = {
   /** Deprecated: polling is ignored; realtime snapshots drive updates. */
   refetchInterval?: number;
   enabled?: boolean;
+  constraints?: QueryConstraint[];
 };
 
 export type UseCollectionResult<T> = {
@@ -39,8 +40,12 @@ export function useCollection<T = any>(
     setIsLoading(true);
     setError(null);
 
+    const source = options?.constraints?.length
+      ? query(collection(db, path), ...options.constraints)
+      : collection(db, path);
+
     const unsub = onSnapshot(
-      collection(db, path),
+      source,
       { includeMetadataChanges: true },
       (snap) => {
         setData(
@@ -72,7 +77,7 @@ export function useCollection<T = any>(
     );
 
     return () => unsub();
-  }, [key, path, options?.enabled]);
+  }, [key, path, options?.enabled, options?.constraints]);
 
   return {
     data,

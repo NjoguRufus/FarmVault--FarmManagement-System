@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import { where } from 'firebase/firestore';
 import { Project } from '@/types';
 import { useCollection } from '@/hooks/useCollection';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ProjectContextType {
   projects: Project[];
@@ -25,18 +27,33 @@ function readCachedProjects(): Project[] {
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
+  const { user, isAuthenticated, authReady } = useAuth();
+  const isDeveloper = user?.role === 'developer';
+  const canSubscribeProjects = authReady && isAuthenticated && (isDeveloper || !!user?.companyId);
+
+  const projectConstraints = useMemo(
+    () =>
+      isDeveloper || !user?.companyId
+        ? []
+        : [where('companyId', '==', user.companyId)],
+    [isDeveloper, user?.companyId],
+  );
+
   const {
     data: projectsData = [],
     isLoading,
     error,
     fromCache,
     hasPendingWrites,
-  } = useCollection<Project>('projects', 'projects');
+  } = useCollection<Project>('projects', 'projects', {
+    enabled: canSubscribeProjects,
+    constraints: projectConstraints,
+  });
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProject] = useState<Project | null>(null);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (!canSubscribeProjects || isLoading) return;
     // Persist only fully-synced snapshots (including empty arrays) to avoid stale cache drift.
     if (!fromCache && !hasPendingWrites) {
       setCachedProjects(projectsData);
@@ -48,9 +65,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [projectsData, isLoading, fromCache, hasPendingWrites]);
+  }, [projectsData, isLoading, fromCache, hasPendingWrites, canSubscribeProjects]);
 
   const projects = useMemo(() => {
+    if (!canSubscribeProjects) {
+      return [];
+    }
+
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     const shouldUseCache =
       projectsData.length === 0 &&
@@ -58,7 +79,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       (isOffline || error !== null);
 
     return shouldUseCache ? cachedProjects : projectsData;
-  }, [projectsData, cachedProjects, error]);
+  }, [projectsData, cachedProjects, error, canSubscribeProjects]);
 
   useEffect(() => {
     if (!activeProject) return;

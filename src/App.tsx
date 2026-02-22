@@ -120,18 +120,18 @@ const CompanyDashboardRoute = () => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <ProjectProvider>
-        <NotificationProvider>
-        <ConnectivityProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <ErrorBoundary>
-          <BrowserRouter>
-            <RoutePersistence />
-            <TourProvider>
-            <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <ProjectProvider>
+          <NotificationProvider>
+          <ConnectivityProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <RoutePersistence />
+              <TourProvider>
+              <Routes>
               {/* Public routes */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<LoginPage />} />
@@ -228,15 +228,15 @@ const App = () => (
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
-            </Routes>
-            </TourProvider>
-          </BrowserRouter>
-          </ErrorBoundary>
-        </TooltipProvider>
-        </ConnectivityProvider>
-        </NotificationProvider>
-      </ProjectProvider>
-    </AuthProvider>
+              </Routes>
+              </TourProvider>
+            </BrowserRouter>
+          </TooltipProvider>
+          </ConnectivityProvider>
+          </NotificationProvider>
+        </ProjectProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   </QueryClientProvider>
 );
 

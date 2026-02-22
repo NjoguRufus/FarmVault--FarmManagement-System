@@ -7,7 +7,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { collection, limit, onSnapshot, query } from 'firebase/firestore';
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
@@ -25,7 +25,7 @@ interface ConnectivityContextValue {
 const ConnectivityContext = createContext<ConnectivityContextValue | undefined>(undefined);
 
 export function ConnectivityProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authReady, user } = useAuth();
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine
   );
@@ -68,14 +68,21 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
   }, [isOnline]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    const isDeveloper = user?.role === 'developer';
+    const companyId = user?.companyId ?? null;
+    const canProbeProjects = authReady && isAuthenticated && (isDeveloper || !!companyId);
+
+    if (!canProbeProjects) {
       setHasPendingWrites(false);
       setFromCache(false);
       return;
     }
 
     // Single lightweight listener for metadata-only sync state.
-    const syncProbeQuery = query(collection(db, 'projects'), limit(1));
+    const syncProbeQuery = isDeveloper
+      ? query(collection(db, 'projects'), limit(1))
+      : query(collection(db, 'projects'), where('companyId', '==', companyId), limit(1));
+
     const unsub = onSnapshot(
       syncProbeQuery,
       { includeMetadataChanges: true },
@@ -90,7 +97,7 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     );
 
     return () => unsub();
-  }, [isAuthenticated]);
+  }, [authReady, isAuthenticated, user?.companyId, user?.role]);
 
   const value = useMemo<ConnectivityContextValue>(() => {
     const isSyncing = isOnline && hasPendingWrites;
