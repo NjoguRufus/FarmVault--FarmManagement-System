@@ -182,6 +182,8 @@ export async function ensureProjectWalletMigration(projectId: string, companyId:
     await setDoc(
       metaRef,
       {
+        companyId,
+        projectId,
         migrated: true,
         migratedAt: serverTimestamp(),
         migrationSource: 'existing-ledger',
@@ -256,6 +258,8 @@ export async function ensureProjectWalletMigration(projectId: string, companyId:
   batch.set(
     metaRef,
     {
+      companyId,
+      projectId,
       migrated: true,
       migratedAt: serverTimestamp(),
       legacyWalletCount: legacySnap.size,

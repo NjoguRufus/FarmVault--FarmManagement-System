@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
+import { InstallFarmVault } from "@/components/pwa/InstallFarmVault";
 
 export function HeroSection() {
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -52,6 +53,7 @@ export function HeroSection() {
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
+                <InstallFarmVault />
                 <Button
                   size="lg"
                   variant="ghost"

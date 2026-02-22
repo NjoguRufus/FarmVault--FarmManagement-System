@@ -4,15 +4,13 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
 
-// https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
-    hmr: {
-      overlay: false,
-    },
+    hmr: { overlay: false },
   },
+
   plugins: [
     react(),
     mode === "development" && componentTagger(),
@@ -38,16 +36,8 @@ export default defineConfig(({ mode }) => ({
         display: "standalone",
         start_url: "/",
         icons: [
-          {
-            src: "/icons/icon-192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "/icons/icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
           {
             src: "/icons/icon-512-maskable.png",
             sizes: "512x512",
@@ -72,25 +62,22 @@ export default defineConfig(({ mode }) => ({
             handler: "CacheFirst",
             options: {
               cacheName: "app-assets",
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
+              expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],
       },
       devOptions: {
-        enabled: mode === "development",
+        enabled: false,
         type: "module",
         navigateFallback: "/index.html",
       },
     }),
   ].filter(Boolean),
+
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },

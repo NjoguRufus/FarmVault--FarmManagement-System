@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import { User, UserRole } from '@/types';
 import { auth } from '@/lib/firebase';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 interface AuthContextType {
@@ -95,6 +95,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               avatar: undefined,
               createdAt: new Date(),
             };
+            // Backfill missing user profile so rules that depend on users/{uid}.companyId can authorize reads.
+            await setDoc(
+              profileRef,
+              {
+                email: mapped.email,
+                name: mapped.name,
+                role: mapped.role,
+                employeeRole: mapped.employeeRole ?? null,
+                companyId: mapped.companyId ?? null,
+                createdAt: serverTimestamp(),
+              },
+              { merge: true },
+            );
             setUser(mapped);
             writeCachedUser(mapped);
           } else {
@@ -127,9 +140,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(mapped);
         writeCachedUser(mapped);
       } catch (error) {
+        const code = (error as { code?: string } | null)?.code;
+        const isPermissionDenied = code === 'permission-denied';
         // If profile reads fail offline, keep user logged in from cache/fallback.
         const cached = readCachedUser();
-        if (cached && cached.id === firebaseUser.uid) {
+        if (!isPermissionDenied && cached && cached.id === firebaseUser.uid) {
           setUser(cached);
         } else {
           const fallback: User = {
@@ -145,7 +160,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(fallback);
           writeCachedUser(fallback);
         }
-        console.warn('[Auth] Falling back to cached user profile while offline:', error);
+        console.warn(
+          isPermissionDenied
+            ? '[Auth] Permission denied reading user profile; running with restricted fallback user.'
+            : '[Auth] Falling back to cached user profile while offline:',
+          error,
+        );
       } finally {
         setAuthReady(true);
       }
@@ -190,6 +210,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           avatar: undefined,
           createdAt: new Date(),
         };
+        await setDoc(
+          profileRef,
+          {
+            email: mapped.email,
+            name: mapped.name,
+            role: mapped.role,
+            employeeRole: mapped.employeeRole ?? null,
+            companyId: mapped.companyId ?? null,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
         setUser(mapped);
         writeCachedUser(mapped);
       } else {

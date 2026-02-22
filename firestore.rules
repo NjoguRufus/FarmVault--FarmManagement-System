@@ -244,6 +244,41 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // --- Project Wallet Ledger (append-only project cash ledger) ---
+    match /projectWalletLedger/{entryId} {
+      allow read: if canReadCompanyDoc();
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null
+            && request.resource.data.get('companyId', null) == userCompanyId())
+      );
+      allow update, delete: if false;
+    }
+
+    // --- Project Wallet Migration Meta ---
+    // Document ID format: companyId_projectId
+    match /projectWalletMeta/{metaId} {
+      allow read: if isSignedIn() && (
+        isDeveloper()
+        || (userCompanyId() != null && metaId.matches('^' + userCompanyId() + '_.*'))
+      );
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || request.resource.data.get('companyId', null) == userCompanyId()
+        || (request.resource.data.get('companyId', null) == null
+            && userCompanyId() != null
+            && metaId.matches('^' + userCompanyId() + '_.*'))
+      );
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || resource.data.get('companyId', null) == userCompanyId()
+        || (resource.data.get('companyId', null) == null
+            && userCompanyId() != null
+            && metaId.matches('^' + userCompanyId() + '_.*'))
+      );
+      allow delete: if false;
+    }
+
     // --- Suppliers ---
 
     match /suppliers/{supplierId} {
@@ -255,7 +290,9 @@ service cloud.firestore {
     // --- Employees ---
     // Create: company-admin or manager (same company only), or developer. Requester's user doc must have companyId for company match.
     match /employees/{employeeId} {
-      allow read: if canReadCompanyDoc();
+      // Also allow an authenticated user to read their own employee profile via authUserId (bootstrap path).
+      allow read: if canReadCompanyDoc()
+        || (isSignedIn() && resource.data.get('authUserId', null) == request.auth.uid);
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (
         (isCompanyAdmin() && request.resource.data.get('companyId', null) == userCompanyId())
