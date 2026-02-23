@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, Timestamp, query, where, limit, type QueryConstraint } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export type InventoryAuditActionType = 'RESTOCK' | 'DEDUCT' | 'DELETE' | 'ADD_ITEM' | 'ADD_NEEDED';
@@ -48,10 +48,19 @@ export async function createInventoryAuditLog(params: {
   return ref.id;
 }
 
-/** Fetch inventory audit logs (for admin). Sorted by createdAt desc. */
-export async function getInventoryAuditLogs(maxResults: number = 200): Promise<InventoryAuditLogDoc[]> {
-  const ref = collection(db, 'inventoryAuditLogs');
-  const snap = await getDocs(ref);
+/** Fetch inventory audit logs sorted by createdAt desc. */
+export async function getInventoryAuditLogs(maxResults: number = 200, companyId?: string): Promise<InventoryAuditLogDoc[]> {
+  const constraints: QueryConstraint[] = [];
+  if (companyId) {
+    constraints.push(where('companyId', '==', companyId));
+  }
+  if (maxResults > 0) {
+    constraints.push(limit(maxResults));
+  }
+  const source = constraints.length
+    ? query(collection(db, 'inventoryAuditLogs'), ...constraints)
+    : collection(db, 'inventoryAuditLogs');
+  const snap = await getDocs(source);
   const list = snap.docs.map((d) => {
     const data = d.data();
     return {
@@ -68,5 +77,8 @@ export async function getInventoryAuditLogs(maxResults: number = 200): Promise<I
     } as InventoryAuditLogDoc;
   });
   list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  return list.slice(0, maxResults);
+  if (maxResults > 0) {
+    return list.slice(0, maxResults);
+  }
+  return list;
 }

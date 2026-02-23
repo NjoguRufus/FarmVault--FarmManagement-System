@@ -529,7 +529,10 @@ export default function OperationsPage() {
       .map(u => ({ id: u.id, name: u.name, role: u.role, type: 'user' as const, authId: u.id }));
 
     const managerEmployees = companyEmployees
-      .filter(e => e.role === 'operations-manager' || e.role.includes('manager'))
+      .filter((e) => {
+        const employeeRole = String(e.employeeRole ?? e.role ?? '').toLowerCase();
+        return employeeRole === 'operations-manager' || employeeRole.includes('manager');
+      })
       .map(e => ({
         id: e.id,
         name: e.name,

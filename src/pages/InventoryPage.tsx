@@ -8,6 +8,7 @@ import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, update
 import { useCollection } from '@/hooks/useCollection';
 import { InventoryItem, InventoryCategory, ExpenseCategory, Supplier, CropType, InventoryCategoryItem, NeededItem, ChemicalPackagingType, FuelType, InventoryUsage } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -44,12 +45,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { createInventoryAuditLog } from '@/services/inventoryAuditLogService';
+import { createInventoryAuditLog, getInventoryAuditLogs } from '@/services/inventoryAuditLogService';
 import { parseQuantityOrFraction } from '@/lib/utils';
 
 export default function InventoryPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canAddInventoryItem = can('inventory', 'addItem');
@@ -104,6 +106,7 @@ export default function InventoryPage() {
   // Always show all inventory items for the company; project context is used
   // only for optional filtering and expense linkage.
   const inventory = allInventory;
+  const effectiveCompanyId = user?.companyId ?? activeProject?.companyId ?? null;
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -247,10 +250,11 @@ export default function InventoryPage() {
       itemName: string,
       metadata?: Record<string, unknown>,
     ) => {
-      if (!user?.companyId || !user?.id) return;
+      const companyId = user?.companyId ?? activeProject?.companyId;
+      if (!companyId || !user?.id) return;
       try {
         await createInventoryAuditLog({
-          companyId: user.companyId,
+          companyId,
           actorUid: user.id,
           actorEmail: user.email ?? '',
           actorName: user.name,
@@ -262,7 +266,7 @@ export default function InventoryPage() {
         console.error('Failed to write inventory audit log', e);
       }
     },
-    [user],
+    [activeProject?.companyId, user],
   );
 
   const [cropFilter, setCropFilter] = useState<'all' | CropType>('all');
@@ -317,15 +321,19 @@ export default function InventoryPage() {
           return true;
         });
   
-  const { data: inventoryAuditLogs = [], isLoading: inventoryAuditLoading } = useQuery({
-    queryKey: ['inventory-audit-logs', inventoryAuditOpen],
-    queryFn: () => getInventoryAuditLogs(200),
-    enabled: inventoryAuditOpen,
+  const {
+    data: inventoryAuditLogs = [],
+    isLoading: inventoryAuditLoading,
+    error: inventoryAuditError,
+  } = useQuery({
+    queryKey: ['inventory-audit-logs', inventoryAuditOpen, effectiveCompanyId],
+    queryFn: () => getInventoryAuditLogs(200, effectiveCompanyId ?? undefined),
+    enabled: inventoryAuditOpen && !!effectiveCompanyId,
   });
   const companyInventoryAuditLogs = useMemo(() => {
-    if (!user?.companyId) return [];
-    return inventoryAuditLogs.filter((log) => log.companyId === user.companyId);
-  }, [inventoryAuditLogs, user?.companyId]);
+    if (!effectiveCompanyId) return [];
+    return inventoryAuditLogs.filter((log) => log.companyId === effectiveCompanyId);
+  }, [effectiveCompanyId, inventoryAuditLogs]);
 
   /** Format audit log for display: human-readable action label and details. */
   const formatAuditLogDisplay = useCallback(
@@ -379,13 +387,13 @@ export default function InventoryPage() {
 
   // Filter needed items for current company/project
   const filteredNeededItems = useMemo(() => {
-    if (!user?.companyId) return [];
+    if (!effectiveCompanyId) return [];
     return neededItems.filter(item => {
-      if (item.companyId !== user.companyId) return false;
+      if (item.companyId !== effectiveCompanyId) return false;
       if (activeProject && item.projectId && item.projectId !== activeProject.id) return false;
       return item.status === 'pending';
     });
-  }, [neededItems, user?.companyId, activeProject]);
+  }, [activeProject, effectiveCompanyId, neededItems]);
 
   // Get items for selected category
   const categoryItemsList = useMemo(() => {
@@ -574,9 +582,9 @@ export default function InventoryPage() {
       }
 
       const itemRef = await addDoc(collection(db, 'inventoryItems'), data);
-      if (user?.companyId && user?.id) {
+      if (companyId && user?.id) {
         await createInventoryAuditLog({
-          companyId: user.companyId,
+          companyId,
           actorUid: user.id,
           actorEmail: user.email ?? '',
           actorName: user.name,
@@ -666,6 +674,11 @@ export default function InventoryPage() {
       setBags('');
       setKgs('');
       setBoxSize('big');
+      addNotification({
+        title: 'Inventory item added',
+        message: `${name} was added to inventory.`,
+        type: 'success',
+      });
       toast.success(
         isOffline
           ? 'Inventory item saved offline. It will sync when online.'
@@ -707,7 +720,7 @@ export default function InventoryPage() {
       toast.error('Permission denied', { description: 'You cannot deduct inventory.' });
       return;
     }
-    if (!deductItem || !user?.companyId) return;
+    if (!deductItem || !effectiveCompanyId) return;
     const item = deductItem;
     const qty = parseQuantityOrFraction(deductQuantity);
     if (qty <= 0) {
@@ -736,6 +749,11 @@ export default function InventoryPage() {
       queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-audit-logs'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-inventory'] });
+      addNotification({
+        title: 'Inventory deducted',
+        message: `${qty} ${item.unit} deducted from ${item.name}.`,
+        type: 'warning',
+      });
       toast.success(
         isOffline
           ? 'Deduction saved offline. It will sync when online.'
@@ -763,7 +781,7 @@ export default function InventoryPage() {
       toast.error('Permission denied', { description: 'You cannot delete inventory items.' });
       return;
     }
-    if (!deleteItem || !user?.companyId) return;
+    if (!deleteItem || !effectiveCompanyId) return;
     setDeleteSaving(true);
     try {
       await deleteDoc(doc(db, 'inventoryItems', deleteItem.id));
@@ -771,6 +789,11 @@ export default function InventoryPage() {
       queryClient.invalidateQueries({ queryKey: ['inventoryItems'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-audit-logs'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-inventory'] });
+      addNotification({
+        title: 'Inventory item deleted',
+        message: `${deleteItem.name} was removed from inventory.`,
+        type: 'warning',
+      });
       setDeleteConfirmOpen(false);
       setDeleteItem(null);
       toast.success('Item deleted.');
@@ -858,6 +881,11 @@ export default function InventoryPage() {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-inventory'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+      addNotification({
+        title: 'Inventory restocked',
+        message: `${item.name} increased by ${qty} ${item.unit}.`,
+        type: 'success',
+      });
       toast.success(
         isOffline
           ? 'Restock saved offline. It will sync when online.'
@@ -901,7 +929,7 @@ export default function InventoryPage() {
               <DialogHeader>
                 <DialogTitle>Add Inventory Item</DialogTitle>
               </DialogHeader>
-              {!user?.companyId ? (
+              {!effectiveCompanyId ? (
                 <p className="text-sm text-muted-foreground">
                   Sign in with a company account to add inventory items.
                 </p>
@@ -1486,9 +1514,9 @@ export default function InventoryPage() {
                       status: 'pending',
                       createdAt: serverTimestamp(),
                     });
-                    if (user?.companyId && user?.id) {
+                    if (companyId && user?.id) {
                       await createInventoryAuditLog({
-                        companyId: user.companyId,
+                        companyId,
                         actorUid: user.id,
                         actorEmail: user.email ?? '',
                         actorName: user.name,
@@ -1505,10 +1533,16 @@ export default function InventoryPage() {
                     }
                     queryClient.invalidateQueries({ queryKey: ['neededItems'] });
                     queryClient.invalidateQueries({ queryKey: ['inventory-audit-logs'] });
+                    const addedNeededItemName = neededItemName.trim();
                     setNeededItemName('');
                     setNeededItemCategory(availableCategories[0]?.toLowerCase() ?? '');
                     setNeededItemQuantity('');
                     setNeededItemUnit('kg');
+                    addNotification({
+                      title: 'Needed item added',
+                      message: `${addedNeededItemName} was added to the needed list.`,
+                      type: 'info',
+                    });
                     toast.success('Item added to needed list.');
                   } catch (err) {
                     toast.error('Failed to add item.');
@@ -1651,14 +1685,21 @@ export default function InventoryPage() {
                 {inventoryAuditLoading && (
                   <p className="text-sm text-muted-foreground py-4">Loading inventory audit logs…</p>
                 )}
-                {!inventoryAuditLoading && companyInventoryAuditLogs.length === 0 && (
+                {!inventoryAuditLoading && inventoryAuditError && (
+                  <div className="py-8">
+                    <p className="text-sm text-destructive">
+                      Failed to load inventory audit logs. Please check your company access and try again.
+                    </p>
+                  </div>
+                )}
+                {!inventoryAuditLoading && !inventoryAuditError && companyInventoryAuditLogs.length === 0 && (
                   <div className="py-8">
                     <p className="text-sm text-muted-foreground">
                       No inventory actions yet. Restock, deduct, and delete actions will appear here with who did it and when.
                     </p>
                   </div>
                 )}
-                {!inventoryAuditLoading && companyInventoryAuditLogs.length > 0 && (
+                {!inventoryAuditLoading && !inventoryAuditError && companyInventoryAuditLogs.length > 0 && (
                   <div className="overflow-x-auto">
                     <table className="fv-table">
                       <thead>

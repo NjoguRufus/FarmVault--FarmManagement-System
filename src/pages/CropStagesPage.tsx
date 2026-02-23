@@ -110,6 +110,10 @@ export default function CropStagesPage() {
   }, [projectStages, activeProject]);
 
   const stages = allExpectedStages;
+  const sortedStages = useMemo(
+    () => [...stages].sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0)),
+    [stages],
+  );
 
   const getStatusBadge = (startDate?: any, endDate?: any) => {
     const start = toDate(startDate);
@@ -133,16 +137,17 @@ export default function CropStagesPage() {
 
   // Current stage = first that is not completed (by stored status or dates). All previous stages show as complete.
   const currentStageIndex = useMemo(() => {
-    const sorted = [...stages].sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0));
-    const idx = sorted.findIndex(
+    const idx = sortedStages.findIndex(
       (s) => s.status !== 'completed' && getDerivedStatus(s.startDate, s.endDate) !== 'completed'
     );
-    return idx === -1 ? sorted.length : sorted[idx].stageIndex ?? idx;
-  }, [stages]);
+    return idx === -1 ? sortedStages.length : sortedStages[idx].stageIndex ?? idx;
+  }, [sortedStages]);
 
   const getDisplayStatus = (stage: CropStage): 'pending' | 'in-progress' | 'completed' => {
     if (stage.status === 'completed') return 'completed';
-    if ((stage.stageIndex ?? 0) < currentStageIndex) return 'completed';
+    const stageIndex = stage.stageIndex ?? 0;
+    if (stageIndex < currentStageIndex) return 'completed';
+    if (stageIndex > currentStageIndex) return 'pending';
     return getDerivedStatus(stage.startDate, stage.endDate);
   };
 
@@ -173,6 +178,22 @@ export default function CropStagesPage() {
 
   const handleMarkStageComplete = async () => {
     if (!selectedStage || !activeProject || selectedStage.id?.startsWith('placeholder-')) return;
+    const selectedStageIndex = selectedStage.stageIndex ?? 0;
+    const hasIncompletePreviousStage = sortedStages
+      .filter((s) => (s.stageIndex ?? 0) < selectedStageIndex)
+      .some((s) => getDisplayStatus(s) !== 'completed');
+    if (hasIncompletePreviousStage) {
+      toast.error('Complete earlier stages first.');
+      return;
+    }
+    if (selectedStageIndex !== currentStageIndex) {
+      toast.error('Only the current stage can be completed.');
+      return;
+    }
+    if (getDisplayStatus(selectedStage) !== 'in-progress') {
+      toast.error('Only an in-progress stage can be marked complete.');
+      return;
+    }
     setMarkingComplete(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setDetailsOpen(false);
@@ -186,7 +207,7 @@ export default function CropStagesPage() {
       });
 
       // Start the next stage automatically (current becomes next)
-      const nextStageIndex = selectedStage.stageIndex + 1;
+      const nextStageIndex = selectedStageIndex + 1;
       const nextStage = projectStages.find((s) => s.stageIndex === nextStageIndex);
       const stageDefs = getCropStages(activeProject.cropType);
       const nextDef = stageDefs.find((d) => d.order === nextStageIndex);
@@ -315,8 +336,7 @@ export default function CropStagesPage() {
         )}
 
         <div className="space-y-1">
-          {stages
-            .sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0))
+          {sortedStages
             .map((stage, index) => {
               const status = getDisplayStatus(stage);
               return (
@@ -338,7 +358,7 @@ export default function CropStagesPage() {
                   )}>
                     {getStatusIcon(status)}
                   </div>
-                  {index < stages.length - 1 && (
+                  {index < sortedStages.length - 1 && (
                     <div className={cn(
                       'w-0.5 h-8 mt-2',
                       status === 'completed' ? 'bg-fv-success' : 'bg-muted'
@@ -418,7 +438,8 @@ export default function CropStagesPage() {
             <div className="space-y-6">
               {/* Stage Actions */}
               <div className="flex flex-wrap gap-2 pb-4 border-b">
-                {getDisplayStatus(selectedStage) !== 'completed' && 
+                {getDisplayStatus(selectedStage) === 'in-progress' &&
+                 (selectedStage.stageIndex ?? 0) === currentStageIndex &&
                  !selectedStage.id?.startsWith('placeholder-') && (
                   <button
                     onClick={handleMarkStageComplete}

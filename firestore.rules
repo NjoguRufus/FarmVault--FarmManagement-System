@@ -325,8 +325,14 @@ service cloud.firestore {
 
     // --- Inventory audit logs: who did what (restock/deduct/delete/add); company users create and read their own ---
     match /inventoryAuditLogs/{logId} {
-      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.get('companyId', null) == userCompanyId()
+        || isDeveloper()
+      );
+      allow read: if isSignedIn() && (
+        resource.data.get('companyId', null) == userCompanyId()
+        || isDeveloper()
+      );
       allow update, delete: if false;
     }
 
