@@ -291,13 +291,13 @@ export function CompanyDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
         <DashboardGreeting firstName={firstName} />
-        <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end sm:ml-auto">
+        <div className="flex w-full items-center justify-between gap-2 sm:gap-3 md:ml-auto md:w-auto md:flex-nowrap md:justify-end">
           <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
             <SelectTrigger
               data-tour="dashboard-project-selector"
-              className="h-9 w-[140px] sm:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm"
+              className="h-9 w-[112px] shrink-0 sm:w-[150px] lg:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm"
             >
               <SelectValue placeholder="Project" />
             </SelectTrigger>
@@ -318,12 +318,12 @@ export function CompanyDashboard() {
             type="button"
             size="sm"
             variant="outline"
-            className="h-9 px-3 rounded-md"
+            className="h-9 shrink-0 rounded-md px-3"
             onClick={startTour}
             data-tour="dashboard-take-tour"
           >
-            <HelpCircle className="h-4 w-4 sm:mr-1.5" />
-            <span className="hidden sm:inline">Take a Tour</span>
+            <HelpCircle className="h-4 w-4 lg:mr-1.5" />
+            <span className="hidden lg:inline">Take a Tour</span>
           </Button>
         </div>
       </div>

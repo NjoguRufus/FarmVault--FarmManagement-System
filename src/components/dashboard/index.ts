@@ -4,6 +4,7 @@ export { SimpleStatCard } from './SimpleStatCard';
 export type { SimpleStatCardProps } from './SimpleStatCard';
 export { LuxuryStatCard } from './LuxuryStatCard';
 export type { LuxuryStatCardProps } from './LuxuryStatCard';
+export { CropProgressCard } from './CropProgressCard';
 export { CropStageProgressCard } from './CropStageProgressCard';
 
 // Dashboard Widgets

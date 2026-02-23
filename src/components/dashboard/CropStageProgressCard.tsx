@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Flag, Gauge, Sprout } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import React, { useMemo } from 'react';
+import { Sprout } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toDate } from '@/lib/dateUtils';
 import type { CropStage } from '@/types';
+import { CropProgressCard } from './CropProgressCard';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -25,8 +25,6 @@ export interface CropStageProgressCardProps {
   activeStageOverride?: StageLike | null;
 }
 
-type StageHealthStatus = 'On Track' | 'Finishing Soon' | 'Monitor' | 'Overdue';
-
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const startOfDay = (input: Date) =>
@@ -34,6 +32,15 @@ const startOfDay = (input: Date) =>
 
 const formatStageDate = (date: Date) =>
   date.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
+
+const normalizeCropForImage = (cropType?: string | null) => {
+  const key = String(cropType || '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+  if (key === 'frenchbeans') return 'frenchbeans';
+  if (key === 'capsicum') return 'capsicum';
+  return 'tomatoes';
+};
 
 function getStageLabel(stage: StageLike, fallbackIndex: number) {
   return stage.stageName || stage.name || `Stage ${stage.stageIndex ?? fallbackIndex + 1}`;
@@ -142,12 +149,6 @@ export function CropStageProgressCard({
     const day = Math.ceil((today.getTime() - stageDetails.start.getTime()) / MS_PER_DAY) + 1;
     return clamp(Number.isFinite(day) ? day : 0, 1, totalDays);
   }, [stageDetails, totalDays]);
-  const daysPassed = useMemo(() => {
-    if (!stageDetails) return 0;
-    const today = startOfDay(new Date());
-    const passed = Math.ceil((today.getTime() - stageDetails.start.getTime()) / MS_PER_DAY) + 1;
-    return clamp(Number.isFinite(passed) ? passed : 0, 0, totalDays);
-  }, [stageDetails, totalDays]);
   const progressPct = useMemo(() => {
     if (!stageDetails) return 0;
     const normalizedStatus = String(stageDetails.stage.status || '').toLowerCase();
@@ -156,67 +157,6 @@ export function CropStageProgressCard({
     const pct = Math.round((dayNumber / totalDays) * 100);
     return clamp(Number.isFinite(pct) ? pct : 0, 0, 100);
   }, [stageDetails, dayNumber, totalDays]);
-  const daysLeft = useMemo(() => {
-    if (!stageDetails) return 0;
-    return clamp(totalDays - dayNumber, 0, totalDays);
-  }, [stageDetails, totalDays, dayNumber]);
-  const expectedProgress = useMemo(() => {
-    if (!stageDetails) return 0;
-    const expected = Math.round((daysPassed / totalDays) * 100);
-    return clamp(Number.isFinite(expected) ? expected : 0, 0, 100);
-  }, [stageDetails, daysPassed, totalDays]);
-  const status = useMemo<StageHealthStatus>(() => {
-    if (!stageDetails) return 'On Track';
-    const today = startOfDay(new Date());
-    if (today.getTime() > stageDetails.end.getTime()) return 'Overdue';
-    if (daysLeft <= 7) return 'Finishing Soon';
-    if (progressPct < expectedProgress - 10) return 'Monitor';
-    return 'On Track';
-  }, [stageDetails, daysLeft, progressPct, expectedProgress]);
-  const progressAdvisory = useMemo(() => {
-    if (progressPct < 30) return 'Early stage development underway.';
-    if (progressPct < 70) return 'Mid-stage growth phase in progress.';
-    if (progressPct < 90) return 'Approaching stage transition.';
-    return 'Prepare for next stage operations.';
-  }, [progressPct]);
-  const finishAdvisory = useMemo(() => {
-    if (daysLeft > 7) return '';
-    if (daysLeft > 0) return 'Prepare transition activities.';
-    return 'Stage completion required.';
-  }, [daysLeft]);
-  const badgeClassName = useMemo(() => {
-    const tone: Record<StageHealthStatus, string> = {
-      'On Track': 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
-      'Finishing Soon': 'border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300',
-      Monitor: 'border-yellow-500/40 bg-yellow-500/5 text-yellow-700 dark:text-yellow-300',
-      Overdue: 'border-red-500/40 bg-red-500/5 text-red-700 dark:text-red-300',
-    };
-    return tone[status];
-  }, [status]);
-
-  const [animatedProgress, setAnimatedProgress] = useState(0);
-  const animatedStageKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!stageDetails) {
-      setAnimatedProgress(0);
-      animatedStageKeyRef.current = null;
-      return;
-    }
-
-    const stageKey = `${stageDetails.stage.id}-${stageDetails.start.getTime()}-${stageDetails.end.getTime()}`;
-    if (animatedStageKeyRef.current !== stageKey) {
-      animatedStageKeyRef.current = stageKey;
-      setAnimatedProgress(0);
-      const rafId = requestAnimationFrame(() => {
-        setAnimatedProgress(progressPct);
-      });
-      return () => cancelAnimationFrame(rafId);
-    }
-
-    setAnimatedProgress(progressPct);
-    return undefined;
-  }, [stageDetails, progressPct]);
 
   const hasProject = Boolean(projectName && projectName.trim().length > 0);
 
@@ -256,72 +196,21 @@ export function CropStageProgressCard({
     );
   }
 
+  const normalizedStatus = String(stageDetails.stage.status || '').toLowerCase();
+  const daysCompleted = normalizedStatus === 'completed' ? totalDays : normalizedStatus === 'pending' ? 0 : dayNumber;
+  const daysLeft = clamp(totalDays - daysCompleted, 0, totalDays);
+
   return (
-    <div className={cardClasses}>
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Sprout className="h-4 w-4 text-primary" />
-          <span className="truncate text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Crop Stage Progress
-          </span>
-        </div>
-        <Badge
-          variant="outline"
-          className={`shrink-0 ${badgeClassName}`}
-        >
-          {status}
-        </Badge>
-      </div>
-
-      <p className="truncate text-[11px] sm:text-xs text-muted-foreground">
-        {projectName} • {stageDetails.stageName}
-      </p>
-
-      <div className="mt-1 flex items-end gap-2">
-        <span className="font-heading text-lg sm:text-xl font-bold tracking-tight">
-          {progressPct}%
-        </span>
-      </div>
-
-      <div className="mt-1 flex items-center gap-1 text-[10px] sm:text-xs text-muted-foreground">
-        <Gauge className="h-3 w-3" />
-        <span>Stage completion</span>
-      </div>
-
-      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-muted/60">
-        <div
-          className="relative h-full rounded-full bg-gradient-to-r from-fv-green-dark via-fv-green-medium to-fv-green-light transition-all duration-700 ease-out"
-          style={{ width: `${animatedProgress}%` }}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,rgba(255,255,255,0.08)_35%,rgba(255,255,255,0.28)_50%,rgba(255,255,255,0.08)_65%,transparent_100%)] bg-[length:220%_100%] animate-crop-stage-shimmer" />
-        </div>
-      </div>
-      <p className="mt-2 text-[10px] sm:text-xs text-muted-foreground">{progressAdvisory}</p>
-
-      <div className="mt-4 grid grid-cols-2 gap-2 text-[10px] sm:text-xs">
-        <div className="rounded-lg border border-border/25 bg-background/30 p-2">
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <CalendarDays className="h-3 w-3" />
-            <span>Day {dayNumber} of {totalDays}</span>
-          </div>
-          <p className="mt-1 truncate text-foreground/90">
-            Since {formatStageDate(stageDetails.start)}
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-border/25 bg-background/30 p-2">
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <Flag className="h-3 w-3" />
-            <span>Est. finish {formatStageDate(stageDetails.end)}</span>
-          </div>
-          <p className="mt-1 truncate text-foreground/90">
-            {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
-          </p>
-          {finishAdvisory && (
-            <p className="mt-1 text-[10px] text-muted-foreground">{finishAdvisory}</p>
-          )}
-        </div>
-      </div>
-    </div>
+    <CropProgressCard
+      crop={normalizeCropForImage(stageDetails.stage.cropType)}
+      farmName={projectName}
+      stage={stageDetails.stageName}
+      progress={progressPct}
+      dayOf={totalDays}
+      daysCompleted={daysCompleted}
+      estimatedFinish={formatStageDate(stageDetails.end)}
+      daysLeft={daysLeft}
+      className={cardClasses}
+    />
   );
 }
