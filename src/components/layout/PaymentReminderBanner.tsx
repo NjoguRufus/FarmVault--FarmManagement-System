@@ -5,9 +5,11 @@ import { useQuery } from '@tanstack/react-query';
 import { getCompany, clearPaymentReminder } from '@/services/companyService';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 export function PaymentReminderBanner() {
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
@@ -21,6 +23,7 @@ export function PaymentReminderBanner() {
   });
 
   const [dismissing, setDismissing] = React.useState(false);
+  const reminderNotificationKeyRef = React.useRef<string>('');
 
   const handleDismiss = async () => {
     if (!companyId || !user?.id) return;
@@ -28,20 +31,45 @@ export function PaymentReminderBanner() {
     try {
       await clearPaymentReminder(companyId, user.id);
       await queryClient.invalidateQueries({ queryKey: ['company-payment-reminder', companyId] });
+      addNotification({
+        title: 'Payment reminder dismissed',
+        message: 'The payment reminder was dismissed for your account.',
+        type: 'info',
+      });
     } finally {
       setDismissing(false);
     }
   };
 
   const reminderActive = company?.paymentReminderActive === true || company?.paymentReminderActive === 'true';
-  if (isLoading || !company || !reminderActive) return null;
-
   let nextPayment: string | null = null;
-  if (company.nextPaymentAt) {
+  if (company?.nextPaymentAt) {
     const t = company.nextPaymentAt as { toDate?: () => Date; seconds?: number };
     if (typeof t.toDate === 'function') nextPayment = format(t.toDate(), 'PP');
     else if (typeof t.seconds === 'number') nextPayment = format(new Date(t.seconds * 1000), 'PP');
   }
+
+  React.useEffect(() => {
+    if (!companyId || !company || !reminderActive) return;
+    const setAt = company.paymentReminderSetAt as { toDate?: () => Date; seconds?: number } | null | undefined;
+    let setAtMs: number | null = null;
+    if (setAt) {
+      if (typeof setAt.toDate === 'function') setAtMs = setAt.toDate().getTime();
+      else if (typeof setAt.seconds === 'number') setAtMs = setAt.seconds * 1000;
+    }
+    const notificationKey = `${companyId}:${setAtMs ?? 'active'}`;
+    if (reminderNotificationKeyRef.current === notificationKey) return;
+    reminderNotificationKeyRef.current = notificationKey;
+    addNotification({
+      title: 'Payment reminder',
+      message: nextPayment
+        ? `Your next payment is due on ${nextPayment}.`
+        : 'Please update your payment to continue with full access.',
+      type: 'warning',
+    });
+  }, [addNotification, company, companyId, nextPayment, reminderActive]);
+
+  if (isLoading || !company || !reminderActive) return null;
 
   return (
     <div className="fixed bottom-6 right-6 z-50 w-full max-w-sm animate-in slide-in-from-bottom-5 fade-in duration-300">
