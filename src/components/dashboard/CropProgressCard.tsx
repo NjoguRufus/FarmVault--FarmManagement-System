@@ -79,6 +79,7 @@ function CropStripProgress({
   onImageError,
 }: CropStripProgressProps) {
   const revealWidth = clamp(progress, 0, 100);
+  const isTomatoesImage = imageSrc.toLowerCase().includes('tomato');
   const overlayWidth =
     revealWidth >= 99.5 ? '0px' : `calc(${100 - revealWidth}% + 60px)`;
 
@@ -89,7 +90,10 @@ function CropStripProgress({
           src={imageSrc}
           alt={`${cropLabel} growth stages`}
           onError={onImageError}
-          className="pointer-events-none absolute inset-x-0 bottom-[-44px] h-[118%] w-full select-none object-cover object-left opacity-[0.9] sm:bottom-[-32px]"
+          className={cn(
+            'pointer-events-none absolute inset-x-0 h-[118%] w-full select-none object-cover object-left opacity-[0.9] sm:bottom-[-32px]',
+            isTomatoesImage ? 'bottom-[-38px]' : 'bottom-[-44px]',
+          )}
           loading="lazy"
           decoding="async"
           draggable={false}
