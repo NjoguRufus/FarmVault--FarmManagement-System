@@ -17,7 +17,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { Expense, Harvest, Project, Sale } from '@/types';
-import type { CropType } from '@/types';
+import type { CropType, EnvironmentType } from '@/types';
 import {
   Select,
   SelectTrigger,
@@ -27,6 +27,13 @@ import {
 } from '@/components/ui/select';
 import { toDate } from '@/lib/dateUtils';
 import { getSortTime, safeToDate } from '@/lib/safeTime';
+import {
+  getLegacyStartingStageIndex,
+  getStageLabelForKey,
+} from '@/lib/stageDetection';
+import { detectStageForCrop } from '@/knowledge/stageDetection';
+import { findCropKnowledgeByTypeKey, getEffectiveEnvironmentForCrop } from '@/knowledge/cropCatalog';
+import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
@@ -42,6 +49,7 @@ export function CompanyDashboard() {
   const { canSee } = usePermissions();
   const { startTour } = useTour();
   const isMobile = useIsMobile();
+  const { crops: cropCatalog } = useCropCatalog(user?.companyId);
   const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
   const companyId = user?.companyId || '';
@@ -130,6 +138,104 @@ export function CompanyDashboard() {
       (s) => s.companyId === companyId && s.projectId === activeProject.id
     );
   }, [allStages, companyId, activeProject]);
+  const activeProjectKnowledge = useMemo(
+    () => findCropKnowledgeByTypeKey(cropCatalog, activeProject?.cropTypeKey || activeProject?.cropType),
+    [cropCatalog, activeProject?.cropType, activeProject?.cropTypeKey],
+  );
+  const activeProjectEnvironment = useMemo(
+    () =>
+      getEffectiveEnvironmentForCrop(
+        activeProjectKnowledge,
+        (activeProject?.environmentType as EnvironmentType | undefined) ?? 'open_field',
+      ),
+    [activeProjectKnowledge, activeProject?.environmentType],
+  );
+  const activeProjectDetectedStage = useMemo(
+    () => detectStageForCrop(activeProjectKnowledge, activeProject?.plantingDate, activeProjectEnvironment),
+    [activeProjectKnowledge, activeProject?.plantingDate, activeProjectEnvironment],
+  );
+  const activeProjectStageLabel = useMemo(() => {
+    if (activeProjectDetectedStage) return activeProjectDetectedStage.stage.label;
+    if (!activeProject) return null;
+    return (
+      getStageLabelForKey(
+        activeProject.cropType,
+        activeProject.currentStage || activeProject.stageSelected,
+      ) ?? null
+    );
+  }, [activeProject, activeProjectDetectedStage]);
+  const activeProjectDaysRemainingToNextStage = useMemo(() => {
+    if (!activeProjectDetectedStage) return null;
+    return Math.max(0, activeProjectDetectedStage.daysRemainingToNextStage);
+  }, [activeProjectDetectedStage]);
+  const activeProjectEstimatedHarvestStartDate = useMemo(() => {
+    if (!activeProject || !activeProjectKnowledge) return null;
+    const plantingDate = toDate(activeProject.plantingDate);
+    if (!plantingDate) return null;
+
+    const harvestStage = activeProjectKnowledge.stages.find(
+      (stage) =>
+        String(stage.key || '').toLowerCase().includes('harvest') ||
+        String(stage.label || '').toLowerCase().includes('harvest'),
+    );
+    if (!harvestStage) return null;
+
+    const environmentAdjustment = activeProjectDetectedStage?.environmentDayAdjustment ?? 0;
+    const harvestStartOffset = Math.max(0, harvestStage.baseDayStart + environmentAdjustment);
+    const harvestStart = new Date(plantingDate);
+    harvestStart.setDate(harvestStart.getDate() + harvestStartOffset);
+    return harvestStart;
+  }, [activeProject, activeProjectKnowledge, activeProjectDetectedStage?.environmentDayAdjustment]);
+  const activeProjectKnowledgeDetection = useMemo(() => {
+    if (!activeProjectDetectedStage || !activeProject) return null;
+    const stageDurationDays = Math.max(
+      1,
+      activeProjectDetectedStage.stage.baseDayEnd - activeProjectDetectedStage.stage.baseDayStart + 1,
+    );
+    const estimatedNextStageDate =
+      activeProjectDaysRemainingToNextStage == null
+        ? null
+        : (() => {
+            const next = new Date();
+            next.setDate(next.getDate() + activeProjectDaysRemainingToNextStage);
+            return next;
+          })();
+
+    return {
+      cropType: activeProject.cropType,
+      stageLabel: activeProjectDetectedStage.stage.label,
+      progressPercent: activeProjectDetectedStage.stageProgressPercent,
+      totalCycleDays: activeProjectKnowledge?.baseCycleDays ?? stageDurationDays,
+      daysSincePlanting: activeProjectDetectedStage.daysSincePlanting,
+      stageDurationDays,
+      daysIntoStage: activeProjectDetectedStage.daysIntoStage,
+      daysRemainingToNextStage: activeProjectDetectedStage.daysRemainingToNextStage,
+      estimatedNextStageDate,
+      estimatedHarvestStartDate: activeProjectEstimatedHarvestStartDate,
+    };
+  }, [
+    activeProjectDetectedStage,
+    activeProject,
+    activeProjectDaysRemainingToNextStage,
+    activeProjectKnowledge?.baseCycleDays,
+    activeProjectEstimatedHarvestStartDate,
+  ]);
+  const activeStageOverride = useMemo<CropStage | null>(() => {
+    if (!activeProject || !activeProjectStageLabel || activeProjectDetectedStage) return null;
+    return {
+      id: `project-stage-override-${activeProject.id}`,
+      projectId: activeProject.id,
+      companyId: activeProject.companyId,
+      cropType: activeProject.cropType,
+      stageName: activeProjectStageLabel,
+      stageIndex: getLegacyStartingStageIndex(
+        activeProject.cropType,
+        activeProject.currentStage || activeProject.stageSelected,
+        activeProject.startingStageIndex ?? 0,
+      ),
+      status: 'in-progress',
+    };
+  }, [activeProject, activeProjectStageLabel, activeProjectDetectedStage]);
 
   const activeProjectHarvests = useMemo(() => {
     if (!activeProject) return [];
@@ -341,6 +447,8 @@ export function CompanyDashboard() {
               <CropStageProgressCard
                 projectName={activeProject?.name}
                 stages={activeProjectStages}
+                activeStageOverride={activeStageOverride}
+                knowledgeDetection={activeProjectKnowledgeDetection}
               />
             ) : showRevenueCard ? (
               <StatCard

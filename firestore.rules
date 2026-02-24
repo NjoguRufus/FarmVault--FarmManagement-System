@@ -253,6 +253,13 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
+    // --- Crop Catalog (custom crop knowledge per company) ---
+    match /cropCatalog/{cropId} {
+      allow read: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
+      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
     // --- Custom Roles ---
     // Company-scoped custom role definitions (for permission presets/templates in-app).
     // Expected field: companyId

@@ -60,6 +60,10 @@ export interface CropProgressCardProps {
   daysCompleted: number;
   estimatedFinish: string;
   daysLeft?: number;
+  primaryMetricLabel?: string;
+  primaryMetricDetail?: string;
+  secondaryMetricLabel?: string;
+  secondaryMetricDetail?: string;
   className?: string;
 }
 
@@ -155,6 +159,10 @@ export function CropProgressCard({
   daysCompleted,
   estimatedFinish,
   daysLeft,
+  primaryMetricLabel,
+  primaryMetricDetail,
+  secondaryMetricLabel,
+  secondaryMetricDetail,
   className,
 }: CropProgressCardProps) {
   const safeProgress = useMemo(
@@ -210,6 +218,14 @@ export function CropProgressCard({
   const stageLabel = (stage || 'Stage').trim();
   const farmLabel = farmName?.trim() || projectName?.trim() || '';
   const subtitle = farmLabel ? `${farmLabel} • ${stageLabel}` : stageLabel;
+  const resolvedPrimaryMetricLabel = primaryMetricLabel ?? `Day ${safeDaysCompleted} of ${safeDayOf}`;
+  const resolvedPrimaryMetricDetail =
+    primaryMetricDetail ??
+    `${safeDaysCompleted} ${safeDaysCompleted === 1 ? 'day' : 'days'} completed`;
+  const resolvedSecondaryMetricLabel = secondaryMetricLabel ?? `Est. finish ${estimatedFinish}`;
+  const resolvedSecondaryMetricDetail =
+    secondaryMetricDetail ??
+    `${safeDaysLeft} ${safeDaysLeft === 1 ? 'day' : 'days'} left`;
 
   return (
     <div
@@ -233,23 +249,17 @@ export function CropProgressCard({
           <div className="rounded-lg border border-border/25 bg-background/30 p-2">
             <div className="flex items-center gap-1 text-muted-foreground">
               <CalendarDays className="h-3 w-3" />
-              <span>
-                Day {safeDaysCompleted} of {safeDayOf}
-              </span>
+              <span>{resolvedPrimaryMetricLabel}</span>
             </div>
-            <p className="mt-1 truncate text-foreground/90">
-              {safeDaysCompleted} {safeDaysCompleted === 1 ? 'day' : 'days'} completed
-            </p>
+            <p className="mt-1 truncate text-foreground/90">{resolvedPrimaryMetricDetail}</p>
           </div>
 
           <div className="rounded-lg border border-border/25 bg-background/30 p-2">
             <div className="flex items-center gap-1 text-muted-foreground">
               <Flag className="h-3 w-3" />
-              <span>Est. finish {estimatedFinish}</span>
+              <span>{resolvedSecondaryMetricLabel}</span>
             </div>
-            <p className="mt-1 truncate text-foreground/90">
-              {safeDaysLeft} {safeDaysLeft === 1 ? 'day' : 'days'} left
-            </p>
+            <p className="mt-1 truncate text-foreground/90">{resolvedSecondaryMetricDetail}</p>
           </div>
         </div>
       </div>

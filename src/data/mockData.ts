@@ -51,7 +51,7 @@ export const mockCompanies: Company[] = [
 export const mockProjects: Project[] = [
   {
     id: 'project-1',
-    name: 'Butterscotch Tomatoes',
+    name: 'Kilele - Season 1',
     companyId: 'company-1',
     cropType: 'tomatoes',
     status: 'active',
