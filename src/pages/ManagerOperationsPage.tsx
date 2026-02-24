@@ -370,6 +370,33 @@ export default function ManagerOperationsPage() {
     return map[workType] || '🧑‍🌾';
   };
 
+  const getWorkCardSurfaceClass = (card: OperationsWorkCard) => {
+    const isPaid = card.payment?.isPaid || card.status === 'paid';
+    const isManagerCreated = Boolean((card as OperationsWorkCard & { createdByManagerId?: string | null }).createdByManagerId);
+
+    return cn(
+      'border border-border/70',
+      isPaid && 'bg-emerald-50/60 border-emerald-200/70',
+      card.status === 'approved' && !isPaid && 'bg-emerald-50/45 border-emerald-200/60',
+      card.status === 'submitted' && 'bg-amber-50/60 border-amber-200/70',
+      card.status === 'rejected' && 'bg-destructive/5 border-destructive/30',
+      card.status === 'planned' && 'bg-card',
+      isManagerCreated && !isPaid && 'border-sky-300 bg-sky-50/70',
+    );
+  };
+
+  const getWorkCardStatusBadgeClass = (card: OperationsWorkCard) => {
+    const isPaid = card.payment?.isPaid || card.status === 'paid';
+    return cn(
+      'capitalize',
+      isPaid && 'bg-green-100 text-green-800',
+      card.status === 'approved' && !isPaid && 'bg-emerald-100 text-emerald-800',
+      card.status === 'submitted' && 'bg-amber-100 text-amber-800',
+      card.status === 'rejected' && 'bg-destructive/10 text-destructive',
+      card.status === 'planned' && 'bg-muted text-muted-foreground',
+    );
+  };
+
   const getAssigneeName = (employeeId?: string) => {
     if (!employeeId) return 'Unassigned';
     const employee = allEmployees.find(e => e.id === employeeId);
@@ -1174,6 +1201,7 @@ export default function ManagerOperationsPage() {
                 key={card.id}
                 className={cn(
                   'fv-card p-4 hover:shadow-md transition-shadow relative overflow-hidden',
+                  getWorkCardSurfaceClass(card),
                 )}
               >
                 {/* Status watermark */}
@@ -1208,7 +1236,9 @@ export default function ManagerOperationsPage() {
                   </p>
                   <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <span>Status:</span>
-                    <Badge variant="outline" className="capitalize">{card.status}</Badge>
+                    <Badge variant="outline" className={getWorkCardStatusBadgeClass(card)}>
+                      {card.status}
+                    </Badge>
                   </div>
                   {card.actual?.submitted && card.actual?.actualWorkers != null && card.actual?.ratePerPerson != null && card.actual.actualWorkers > 0 && card.actual.ratePerPerson > 0 && (
                     <p className="text-xs text-foreground">
@@ -1637,6 +1667,7 @@ export default function ManagerOperationsPage() {
                         key={`card-${entry.card.id}`}
                         className={cn(
                           "border-b hover:bg-muted/30 relative",
+                          getWorkCardSurfaceClass(entry.card),
                           (entry.card.payment?.isPaid || entry.card.status === 'paid') &&
                             "after:content-['PAID'] after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:text-6xl after:font-bold after:text-red-500/10 after:rotate-[-35deg] after:pointer-events-none after:select-none after:z-0"
                         )}
@@ -1697,10 +1728,10 @@ export default function ManagerOperationsPage() {
                         <td className="p-3 relative z-10">
                           <Badge
                             className={cn(
-                              'capitalize',
+                              getWorkCardStatusBadgeClass(entry.card),
                               (entry.card.payment?.isPaid || entry.card.status === 'paid')
-                                ? 'bg-green-100 text-green-800 hover:bg-green-100'
-                                : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-100'
+                                ? 'hover:bg-green-100'
+                                : 'hover:bg-emerald-100'
                             )}
                           >
                             {(entry.card.payment?.isPaid || entry.card.status === 'paid') ? 'Paid' : 'Approved'}
@@ -1872,6 +1903,7 @@ export default function ManagerOperationsPage() {
                   key={`card-${entry.card.id}`}
                   className={cn(
                     "fv-card relative p-4 overflow-hidden",
+                    getWorkCardSurfaceClass(entry.card),
                     (entry.card.payment?.isPaid || entry.card.status === 'paid') && "after:content-['PAID'] after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:text-6xl after:font-bold after:text-red-500/15 after:rotate-[-35deg] after:pointer-events-none after:select-none after:z-0"
                   )}
                 >
@@ -1887,10 +1919,8 @@ export default function ManagerOperationsPage() {
                           </h4>
                           <Badge
                             className={cn(
-                              'capitalize text-xs',
-                              (entry.card.payment?.isPaid || entry.card.status === 'paid')
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-emerald-100 text-emerald-800'
+                              'text-xs',
+                              getWorkCardStatusBadgeClass(entry.card)
                             )}
                           >
                             {(entry.card.payment?.isPaid || entry.card.status === 'paid') ? 'Paid' : 'Approved'}
@@ -2128,7 +2158,9 @@ export default function ManagerOperationsPage() {
                 <h3 className="font-semibold text-lg text-foreground">
                   {selectedWorkCard.workTitle || selectedWorkCard.workCategory}
                 </h3>
-                <Badge variant="outline" className="capitalize">{selectedWorkCard.status}</Badge>
+                <Badge variant="outline" className={getWorkCardStatusBadgeClass(selectedWorkCard)}>
+                  {selectedWorkCard.status}
+                </Badge>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

@@ -2,14 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Flag, Gauge, Sprout } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const cropImages = {
-  tomatoes: '/cropstage images/tomatoes.png',
-  frenchbeans: '/cropstage images/French beans.png',
-  capsicum: '/cropstage images/capsicum.png',
-} as const;
-
-const cropFallbackImages: Partial<Record<keyof typeof cropImages, string>> = {
-  frenchbeans: '/cropstage images/Frenchbeans.png',
+const KNOWN_CROP_IMAGE_FILES: Record<string, string> = {
+  tomatoes: 'tomatoes.png',
+  frenchbeans: 'Frenchbeans.png',
+  capsicum: 'capsicum.png',
+  maize: 'maize.png',
+  rice: 'rice.png',
+  watermelon: 'watermelon.png',
+  watermelons: 'watermelon.png',
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -25,6 +25,29 @@ const prettifyCropName = (crop: string) =>
     .replace(/[-_]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+const toTitleCase = (value: string) =>
+  value.replace(/\b\w/g, (char) => char.toUpperCase());
+
+function buildCropImageCandidates(crop: string) {
+  const raw = String(crop || '').trim();
+  const spaced = raw.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+  const lowered = spaced.toLowerCase();
+  const titled = toTitleCase(lowered);
+  const normalized = normalizeCropKey(raw);
+
+  const candidates = [
+    KNOWN_CROP_IMAGE_FILES[normalized] ? `/cropstage images/${KNOWN_CROP_IMAGE_FILES[normalized]}` : null,
+    raw ? `/cropstage images/${raw}.png` : null,
+    spaced ? `/cropstage images/${spaced}.png` : null,
+    lowered ? `/cropstage images/${lowered}.png` : null,
+    titled ? `/cropstage images/${titled}.png` : null,
+    normalized ? `/cropstage images/${normalized}.png` : null,
+    '/cropstage images/tomatoes.png',
+  ].filter(Boolean) as string[];
+
+  return [...new Set(candidates)].map((path) => encodeURI(path));
+}
 
 export interface CropProgressCardProps {
   crop: 'tomatoes' | 'frenchbeans' | 'capsicum' | string;
@@ -55,6 +78,10 @@ function CropStripProgress({
   subtitle,
   onImageError,
 }: CropStripProgressProps) {
+  const revealWidth = clamp(progress, 0, 100);
+  const overlayWidth =
+    revealWidth >= 99.5 ? '0px' : `calc(${100 - revealWidth}% + 60px)`;
+
   return (
     <div className="mt-2 w-full px-0">
       <div className="relative h-[112px] w-full overflow-hidden rounded-lg border border-emerald-950/20 bg-emerald-50/5 sm:h-[120px]">
@@ -62,15 +89,19 @@ function CropStripProgress({
           src={imageSrc}
           alt={`${cropLabel} growth stages`}
           onError={onImageError}
-          className="pointer-events-none absolute inset-x-0 bottom-[-44px] h-[118%] w-full select-none object-cover object-left opacity-[0.3] sm:bottom-[-32px]"
+          className="pointer-events-none absolute inset-x-0 bottom-[-44px] h-[118%] w-full select-none object-cover object-left opacity-[0.9] sm:bottom-[-32px]"
           loading="lazy"
           decoding="async"
           draggable={false}
         />
 
         <div
-          className="pointer-events-none absolute inset-y-0 right-0 bg-background/55 transition-[width] duration-700 ease-out"
-          style={{ width: `${100 - progress}%` }}
+          className="pointer-events-none absolute inset-y-0 right-0 transition-[width] duration-700 ease-out"
+          style={{
+            width: overlayWidth,
+            background:
+              'linear-gradient(to right, hsl(var(--background) / 0) 0px, hsl(var(--background) / 0.72) 60px, hsl(var(--background) / 0.9) 100%)',
+          }}
         />
 
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/80 via-background/45 to-transparent" />
@@ -150,17 +181,7 @@ export function CropProgressCard({
     [daysLeft, safeDayOf, safeDaysCompleted]
   );
 
-  const normalizedCrop = useMemo(
-    () => normalizeCropKey(crop || '') as keyof typeof cropImages,
-    [crop]
-  );
-
-  const imageCandidates = useMemo(() => {
-    const primary = cropImages[normalizedCrop] || cropImages.tomatoes;
-    const fallback = cropFallbackImages[normalizedCrop];
-    const list = [primary, fallback].filter(Boolean) as string[];
-    return [...new Set(list)].map((path) => encodeURI(path));
-  }, [normalizedCrop]);
+  const imageCandidates = useMemo(() => buildCropImageCandidates(crop || ''), [crop]);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [animatedProgress, setAnimatedProgress] = useState(0);

@@ -268,7 +268,6 @@ export default function OperationsPage() {
       case 'Watering':
         return { fuel: str };
       case 'Tying of crops':
-      case 'Weeding':
       default:
         return { inputs: str };
     }
@@ -626,7 +625,7 @@ export default function OperationsPage() {
       case 'Tying of crops':
         return inputsItems.filter((i) => i.category === 'ropes' || i.category === 'sacks');
       case 'Weeding':
-        return inputsItems;
+        return [];
       default:
         return inputsItems;
     }
@@ -1120,15 +1119,15 @@ export default function OperationsPage() {
                         onChange={(e) => setCardPlannedWorkers(e.target.value)}
                       />
                     </div>
-                    {cardWorkCategory && (
+                    {cardWorkCategory && cardWorkCategory !== 'Weeding' && (
                       <>
                         <div className="col-span-1">
                           <label className="text-sm font-medium text-foreground">
                             {cardWorkCategory === 'Fertilizer application' && 'Planned fertilizer'}
                             {cardWorkCategory === 'Spraying' && 'Planned chemical'}
                             {cardWorkCategory === 'Watering' && 'Planned fuel'}
-                            {(cardWorkCategory === 'Tying of crops' || cardWorkCategory === 'Weeding') && 'Planned inputs (ropes/sacks/materials)'}
-                            {!['Fertilizer application', 'Spraying', 'Watering', 'Tying of crops', 'Weeding'].includes(cardWorkCategory) && 'Planned resource'}
+                            {cardWorkCategory === 'Tying of crops' && 'Planned inputs (ropes/sacks/materials)'}
+                            {!['Fertilizer application', 'Spraying', 'Watering', 'Tying of crops'].includes(cardWorkCategory) && 'Planned resource'}
                           </label>
                           <Select value={cardPlannedItemId || '__none__'} onValueChange={(v) => { setCardPlannedItemId(v === '__none__' ? '' : v); setCardPlannedQuantity(''); setCardPlannedQuantitySecondary(''); }}>
                             <SelectTrigger className="w-full mt-1">
@@ -1816,7 +1815,7 @@ export default function OperationsPage() {
                       <label className="text-sm font-medium text-foreground">Planned workers</label>
                       <input type="number" min={0} className="fv-input w-full mt-1" value={cardPlannedWorkers} onChange={(e) => setCardPlannedWorkers(e.target.value)} />
                     </div>
-                    {cardWorkCategory && (
+                    {cardWorkCategory && cardWorkCategory !== 'Weeding' && (
                       <>
                         <div className="col-span-1">
                           <label className="text-sm font-medium text-foreground">Planned resource</label>

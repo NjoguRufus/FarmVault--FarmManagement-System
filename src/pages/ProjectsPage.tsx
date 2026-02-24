@@ -4,7 +4,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Project } from '@/types';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { formatDate } from '@/lib/dateUtils';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
@@ -13,15 +13,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { NewProjectForm } from '@/components/projects/NewProjectForm';
 
 export default function ProjectsPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const { projects, setActiveProject } = useProject();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canCreateProject = can('projects', 'create');
+  const isCreateDialogOpen = canCreateProject && searchParams.get('new') === '1';
 
   const visibleProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
+
+  const openCreateDialog = () => {
+    const next = new URLSearchParams(searchParams);
+    next.set('new', '1');
+    setSearchParams(next, { replace: true });
+  };
+
+  const closeCreateDialog = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  };
 
   const getCropEmoji = (cropType: string) => {
     const emojis: Record<string, string> = {
@@ -60,7 +76,7 @@ export default function ProjectsPage() {
         {canCreateProject && (
           <button
             className="fv-btn fv-btn--primary"
-            onClick={() => navigate('/projects/new')}
+            onClick={openCreateDialog}
             data-tour="projects-new-button"
           >
             <Plus className="h-4 w-4" />
@@ -68,6 +84,24 @@ export default function ProjectsPage() {
           </button>
         )}
       </div>
+
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            openCreateDialog();
+            return;
+          }
+          closeCreateDialog();
+        }}
+      >
+        <DialogContent className="max-w-2xl p-4 sm:p-6">
+          <NewProjectForm
+            onCancel={closeCreateDialog}
+            onSuccess={closeCreateDialog}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">

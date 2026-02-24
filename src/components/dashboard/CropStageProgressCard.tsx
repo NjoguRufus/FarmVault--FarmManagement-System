@@ -33,14 +33,8 @@ const startOfDay = (input: Date) =>
 const formatStageDate = (date: Date) =>
   date.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
 
-const normalizeCropForImage = (cropType?: string | null) => {
-  const key = String(cropType || '')
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
-  if (key === 'frenchbeans') return 'frenchbeans';
-  if (key === 'capsicum') return 'capsicum';
-  return 'tomatoes';
-};
+const resolveCropNameForImage = (cropType?: string | null) =>
+  String(cropType || '').trim() || 'tomatoes';
 
 function getStageLabel(stage: StageLike, fallbackIndex: number) {
   return stage.stageName || stage.name || `Stage ${stage.stageIndex ?? fallbackIndex + 1}`;
@@ -202,7 +196,7 @@ export function CropStageProgressCard({
 
   return (
     <CropProgressCard
-      crop={normalizeCropForImage(stageDetails.stage.cropType)}
+      crop={resolveCropNameForImage(stageDetails.stage.cropType)}
       farmName={projectName}
       stage={stageDetails.stageName}
       progress={progressPct}
