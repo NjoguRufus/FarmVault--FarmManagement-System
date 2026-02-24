@@ -23,6 +23,18 @@ export interface CropStageProgressCardProps {
   projectName?: string | null;
   stages?: StageLike[];
   activeStageOverride?: StageLike | null;
+  knowledgeDetection?: {
+    cropType?: string | null;
+    stageLabel: string;
+    progressPercent: number;
+    totalCycleDays?: number;
+    daysSincePlanting?: number;
+    stageDurationDays: number;
+    daysIntoStage: number;
+    daysRemainingToNextStage: number;
+    estimatedNextStageDate?: Date | null;
+    estimatedHarvestStartDate?: Date | null;
+  } | null;
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -127,7 +139,42 @@ export function CropStageProgressCard({
   projectName,
   stages = [],
   activeStageOverride = null,
+  knowledgeDetection = null,
 }: CropStageProgressCardProps) {
+  if (knowledgeDetection) {
+    const dayOf = Math.max(
+      1,
+      Math.round(knowledgeDetection.totalCycleDays || knowledgeDetection.stageDurationDays || 1),
+    );
+    const daysCompleted = clamp(Math.round(knowledgeDetection.daysSincePlanting || 0), 0, dayOf);
+    const daysLeft = Math.max(
+      0,
+      Math.round(knowledgeDetection.daysRemainingToNextStage || 0),
+    );
+    const progressPct = clamp(Math.round(knowledgeDetection.progressPercent || 0), 0, 100);
+    const estimatedHarvestStart = knowledgeDetection.estimatedHarvestStartDate
+      ? formatStageDate(knowledgeDetection.estimatedHarvestStartDate)
+      : '—';
+
+    return (
+      <CropProgressCard
+        crop={resolveCropNameForImage(knowledgeDetection.cropType)}
+        farmName={projectName}
+        stage={knowledgeDetection.stageLabel}
+        progress={progressPct}
+        dayOf={dayOf}
+        daysCompleted={daysCompleted}
+        estimatedFinish={estimatedHarvestStart}
+        daysLeft={daysLeft}
+        primaryMetricLabel={`Day ${daysCompleted} of ${dayOf}`}
+        primaryMetricDetail={`${daysCompleted} ${daysCompleted === 1 ? 'day' : 'days'} since planting`}
+        secondaryMetricLabel={`Est. harvest start ${estimatedHarvestStart}`}
+        secondaryMetricDetail={`${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to next stage`}
+        className={cardClasses}
+      />
+    );
+  }
+
   const stageDetails = useMemo(
     () => resolveCurrentStage(stages, activeStageOverride),
     [stages, activeStageOverride]

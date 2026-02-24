@@ -12,11 +12,15 @@ import {
 } from 'firebase/firestore';
 import { arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ChallengeType, CropStage, Project, SeasonChallenge, Supplier } from '@/types';
+import { ChallengeType, CropStage, EnvironmentType, Project, SeasonChallenge, Supplier } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
 import { useCollection } from '@/hooks/useCollection';
 import { useQueryClient } from '@tanstack/react-query';
-import { generateStageTimeline, type GeneratedStage } from '@/lib/cropStageConfig';
+import { generateStageTimeline, getCropStages, type GeneratedStage } from '@/lib/cropStageConfig';
+import { getLegacyStartingStageIndex } from '@/lib/stageDetection';
+import { detectStageForCrop } from '@/knowledge/stageDetection';
+import { findCropKnowledgeByTypeKey } from '@/knowledge/cropCatalog';
+import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
@@ -52,6 +56,11 @@ export default function ProjectPlanningPage() {
   const companySuppliers = useMemo(
     () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
     [suppliers, companyId],
+  );
+  const { crops: cropCatalog } = useCropCatalog(companyId);
+  const selectedProjectCrop = useMemo(
+    () => findCropKnowledgeByTypeKey(cropCatalog, project?.cropTypeKey || project?.cropType),
+    [cropCatalog, project?.cropType, project?.cropTypeKey],
   );
   const supplierNames = useMemo(() => companySuppliers.map((s) => s.name).filter(Boolean), [companySuppliers]);
 
@@ -253,39 +262,103 @@ export default function ProjectPlanningPage() {
         changedBy: user?.id ?? 'unknown',
       };
 
+      const detectedStage = detectStageForCrop(
+        selectedProjectCrop,
+        newDate,
+        (project.environmentType as EnvironmentType | undefined) ?? 'open_field',
+      );
+      const nextAutoStageKey =
+        detectedStage?.stage.key ??
+        project.stageAutoDetected ??
+        project.currentStage ??
+        project.stageSelected ??
+        '';
+      const nextCurrentStageKey = project.stageWasManuallyOverridden
+        ? project.currentStage || project.stageSelected || nextAutoStageKey
+        : nextAutoStageKey;
+      const nextDaysSincePlanting =
+        typeof detectedStage?.daysSincePlanting === 'number'
+          ? detectedStage.daysSincePlanting
+          : project.daysSincePlanting ?? 0;
+      const fallbackStageIndex = Math.max(
+        0,
+        selectedProjectCrop?.stages.findIndex((stage) => stage.key === nextCurrentStageKey) ?? 0,
+      );
+      const legacyStartIndex = getLegacyStartingStageIndex(
+        project.cropType,
+        nextCurrentStageKey,
+        fallbackStageIndex || project.startingStageIndex || 0,
+      );
+      const legacyDefs = getCropStages(project.cropType as any);
+      const startIndex = legacyDefs.length > 0 ? legacyStartIndex : fallbackStageIndex;
+
       await updateDoc(projectRef, {
         plantingDate: newDate,
+        currentStage: nextCurrentStageKey || project.currentStage || '',
+        stageSelected: nextCurrentStageKey || project.stageSelected || '',
+        stageAutoDetected: nextAutoStageKey || project.stageAutoDetected || '',
+        daysSincePlanting: nextDaysSincePlanting,
+        startingStageIndex: startIndex,
         'planning.planHistory': arrayUnion(historyEntry),
       });
 
       // Recalculate stages for active + pending only
       if (project.cropType) {
-        const startIndex = project.startingStageIndex ?? 0;
-        const timeline = generateStageTimeline(project.cropType, newDate, startIndex);
-        const byIndex = new Map<number, GeneratedStage>();
-        timeline.forEach((t) => byIndex.set(t.stageIndex, t));
+        if (legacyDefs.length > 0) {
+          const timeline = generateStageTimeline(project.cropType, newDate, startIndex);
+          const byIndex = new Map<number, GeneratedStage>();
+          timeline.forEach((t) => byIndex.set(t.stageIndex, t));
 
-        const batch = writeBatch(db);
-        sortedStages.forEach((s) => {
-          if (!s.startDate || !s.endDate) return;
-          const start = new Date(s.startDate);
-          const end = new Date(s.endDate);
-          const isCompleted = today > end;
-          if (isCompleted) return; // preserve completed
+          const batch = writeBatch(db);
+          sortedStages.forEach((s) => {
+            if (!s.startDate || !s.endDate) return;
+            const end = new Date(s.endDate);
+            const isCompleted = today > end;
+            if (isCompleted) return; // preserve completed
 
-          const updated = byIndex.get(s.stageIndex);
-          if (!updated) return;
+            const updated = byIndex.get(s.stageIndex);
+            if (!updated) return;
 
-          const stageRef = doc(db, 'projectStages', s.id);
-          batch.update(stageRef, {
-            startDate: updated.startDate,
-            endDate: updated.endDate,
-            recalculated: true,
-            recalculatedAt: serverTimestamp(),
-            recalculationReason: 'Change of plan: planting date updated',
+            const stageRef = doc(db, 'projectStages', s.id);
+            batch.update(stageRef, {
+              startDate: updated.startDate,
+              endDate: updated.endDate,
+              recalculated: true,
+              recalculatedAt: serverTimestamp(),
+              recalculationReason: 'Change of plan: planting date updated',
+            });
           });
-        });
-        await batch.commit();
+          await batch.commit();
+        } else if (selectedProjectCrop?.stages?.length) {
+          const envAdjustment = detectedStage?.environmentDayAdjustment ?? 0;
+          const batch = writeBatch(db);
+          sortedStages.forEach((s) => {
+            if (!s.startDate || !s.endDate) return;
+            const end = new Date(s.endDate);
+            if (today > end) return; // preserve completed
+
+            const stageRule = selectedProjectCrop.stages[s.stageIndex];
+            if (!stageRule) return;
+
+            const adjustedStart = Math.max(0, stageRule.baseDayStart + envAdjustment);
+            const adjustedEnd = Math.max(adjustedStart, stageRule.baseDayEnd + envAdjustment);
+            const stageStart = new Date(newDate);
+            stageStart.setDate(stageStart.getDate() + adjustedStart);
+            const stageEnd = new Date(newDate);
+            stageEnd.setDate(stageEnd.getDate() + adjustedEnd);
+
+            const stageRef = doc(db, 'projectStages', s.id);
+            batch.update(stageRef, {
+              startDate: stageStart,
+              endDate: stageEnd,
+              expectedDurationDays: Math.max(1, adjustedEnd - adjustedStart + 1),
+              recalculated: true,
+              recalculatedAt: serverTimestamp(),
+              recalculationReason: 'Change of plan: planting date updated',
+            });
+          });
+          await batch.commit();
+        }
       }
 
       setPlantingReason('');

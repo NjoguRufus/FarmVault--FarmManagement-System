@@ -1,6 +1,17 @@
 // FarmVault Type Definitions
 
-export type CropType = 'tomatoes' | 'french-beans' | 'capsicum' | 'maize' | 'watermelons' | 'rice';
+export type CropType =
+  | 'tomatoes'
+  | 'french-beans'
+  | 'french_beans'
+  | 'capsicum'
+  | 'maize'
+  | 'watermelons'
+  | 'watermelon'
+  | 'rice'
+  | (string & {});
+
+export type EnvironmentType = 'open_field' | 'greenhouse';
 
 export type UserRole = 'developer' | 'company-admin' | 'manager' | 'broker' | 'employee';
 
@@ -150,6 +161,8 @@ export interface Project {
   name: string;
   companyId: string;
   cropType: CropType;
+  cropTypeKey?: string;
+  environmentType?: EnvironmentType;
   status: 'planning' | 'active' | 'completed' | 'archived';
   startDate: Date;
   endDate?: Date;
@@ -159,6 +172,11 @@ export interface Project {
   createdAt: Date;
   plantingDate?: Date;
   startingStageIndex?: number;
+  currentStage?: string;
+  stageSelected?: string;
+  stageAutoDetected?: string;
+  stageWasManuallyOverridden?: boolean;
+  daysSincePlanting?: number;
   // Optional planning metadata
   seedVariety?: string;
   planNotes?: string;

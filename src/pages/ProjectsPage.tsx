@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
 
 export default function ProjectsPage() {
@@ -96,6 +96,10 @@ export default function ProjectsPage() {
         }}
       >
         <DialogContent className="max-w-2xl p-4 sm:p-6">
+          <DialogTitle className="sr-only">Create Project</DialogTitle>
+          <DialogDescription className="sr-only">
+            Create a new farm project by setting crop setup and farm details.
+          </DialogDescription>
           <NewProjectForm
             onCancel={closeCreateDialog}
             onSuccess={closeCreateDialog}

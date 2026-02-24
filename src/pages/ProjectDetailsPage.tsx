@@ -9,6 +9,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { getCurrentStageForProject } from '@/services/stageService';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
+import { getDaysSince, getStageLabelForKey } from '@/lib/stageDetection';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { deleteProject } from '@/services/companyDataService';
 import { useCollection } from '@/hooks/useCollection';
@@ -117,17 +118,11 @@ export default function ProjectDetailsPage() {
 
   const plantingDate = normalizeDate(project?.plantingDate as any);
 
-  // Real calendar days since planting (whole days)
-  const daysSincePlanting =
-    plantingDate
-      ? Math.max(
-          0,
-          Math.floor(
-            (today.getTime() - plantingDate.getTime()) /
-              (1000 * 60 * 60 * 24),
-          ),
-        )
-      : undefined;
+  const daysSincePlanting = plantingDate
+    ? getDaysSince(plantingDate)
+    : typeof project?.daysSincePlanting === 'number'
+    ? Math.max(0, Math.floor(project.daysSincePlanting))
+    : undefined;
 
   // Current stage from real data: same logic as CropStagesPage (respects stored status + dates)
   const currentStageResult = useMemo(
@@ -140,6 +135,16 @@ export default function ProjectDetailsPage() {
       sortedStages.find((s) => s.stageIndex === currentStageResult.stageIndex) ?? null
     );
   }, [currentStageResult, sortedStages]);
+  const currentStageLabel = useMemo(
+    () =>
+      getStageLabelForKey(
+        project?.cropType,
+        project?.currentStage || project?.stageSelected,
+      ) ??
+      currentStage?.stageName ??
+      'Not started',
+    [project?.cropType, project?.currentStage, project?.stageSelected, currentStage?.stageName],
+  );
 
   const stageProgressPercent = useMemo(() => {
     if (!currentStage || !currentStage.startDate || !currentStage.endDate) return 0;
@@ -339,7 +344,7 @@ export default function ProjectDetailsPage() {
             </div>
             <div className="space-y-0.5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Current stage</p>
-              <p className="text-sm font-semibold text-foreground leading-tight">{currentStage?.stageName ?? 'Not started'}</p>
+              <p className="text-sm font-semibold text-foreground leading-tight">{currentStageLabel}</p>
             </div>
             <div className="space-y-0.5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage progress</p>
