@@ -23,7 +23,7 @@ const NEW_OPERATION_OPTIONS = [
   { label: 'Log work', path: '/operations', icon: Wrench },
   { label: 'Add expense', path: '/expenses', icon: Receipt },
   { label: 'Record harvest', path: '/harvest-sales', icon: TrendingUp },
-  { label: 'New project', path: '/projects/new', icon: FolderPlus },
+  { label: 'New project', path: '/projects?new=1', icon: FolderPlus },
 ] as const;
 
 interface MobileDashboardHeaderProps {
