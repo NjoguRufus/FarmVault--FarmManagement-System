@@ -106,6 +106,13 @@ export interface SettingsPermissions {
   edit?: boolean;
 }
 
+export interface NotesPermissions {
+  view: boolean;
+  create?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+}
+
 export interface PermissionMap {
   dashboard: DashboardPermissions;
   projects: ProjectsPermissions;
@@ -117,6 +124,7 @@ export interface PermissionMap {
   employees: EmployeesPermissions;
   reports: ReportsPermissions;
   settings: SettingsPermissions;
+  notes: NotesPermissions;
 }
 
 export type PermissionModule = keyof PermissionMap;
@@ -154,6 +162,59 @@ export interface Company {
   /** Custom work types (e.g. "Pruning", "Staking") added by the company */
   customWorkTypes?: string[];
   createdAt: Date;
+}
+
+export type NoteCategory =
+  | 'timing'
+  | 'fertilizer'
+  | 'pests-diseases'
+  | 'sprays'
+  | 'yield'
+  | 'general';
+
+export interface LibraryNote {
+  id: string;
+  cropId: string;
+  category: NoteCategory;
+  title: string;
+  content: string;
+  highlights: string[];
+  tags: string[];
+  status: 'draft' | 'published';
+  createdBy: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+export interface CompanyNote {
+  id: string;
+  companyId: string;
+  cropId: string;
+  category: NoteCategory;
+  title: string;
+  content: string;
+  highlights: string[];
+  tags: string[];
+  createdBy: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+export interface CompanyNoteShare {
+  id: string;
+  companyId: string;
+  noteId: string;
+  cropId: string;
+  sharedBy: string;
+  sharedAt: unknown;
+  visibility: 'visible' | 'hidden';
+  pinned: boolean;
+}
+
+export interface CropDoc {
+  id: string;
+  name: string;
+  createdAt?: unknown;
 }
 
 export interface Project {

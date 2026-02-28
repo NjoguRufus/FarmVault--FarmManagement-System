@@ -25,6 +25,9 @@ const TourContext = createContext<TourContextValue | undefined>(undefined);
 
 const TOUR_COMPLETED_STORAGE_PREFIX = "farmvault:tour:dashboard-completed:v1";
 
+/** Height of the fixed TopNavbar (h-16 = 64px). Used so tour tooltips and scroll stay below it. */
+const NAVBAR_HEIGHT = 64;
+
 const baseDashboardSteps: DashboardTourStep[] = [
   {
     id: "dashboard-title",
@@ -60,24 +63,28 @@ const baseDashboardSteps: DashboardTourStep[] = [
     route: "/dashboard",
     target: '[data-tour="expenses-summary-card"]',
     content: "This card tracks your total expenses so you can control spend across projects.",
+    placement: "bottom",
   },
   {
     id: "profit-loss-card",
     route: "/dashboard",
     target: '[data-tour="profit-loss-card"]',
     content: "Monitor profit and loss here to understand your current financial position.",
+    placement: "bottom",
   },
   {
     id: "inventory-overview",
     route: "/dashboard",
     target: '[data-tour="inventory-overview"]',
     content: "Inventory Overview helps you track available stock and category-level value.",
+    placement: "bottom",
   },
   {
     id: "recent-transactions",
     route: "/dashboard",
     target: '[data-tour="recent-transactions"]',
     content: "Recent Transactions lists your latest sales and expenses for quick auditing.",
+    placement: "bottom",
   },
 ];
 
@@ -308,6 +315,13 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         showSkipButton
         disableOverlayClose
         scrollToFirstStep
+        disableScrollParentFix={false}
+        scrollOffset={NAVBAR_HEIGHT}
+        spotlightPadding={8}
+        floaterProps={{
+          offset: NAVBAR_HEIGHT,
+          disableAnimation: false,
+        }}
         locale={{
           back: "Back",
           close: "Done",
@@ -317,7 +331,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         }}
         styles={{
           options: {
-            zIndex: 9999,
+            zIndex: 10000,
             primaryColor: "hsl(var(--primary))",
             backgroundColor: "hsl(var(--card))",
             textColor: "hsl(var(--foreground))",

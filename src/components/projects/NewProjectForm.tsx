@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar as CalendarIcon, Info, Sprout } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { generateStageTimeline, getCropStages } from '@/lib/cropStageConfig';
@@ -243,8 +243,8 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         cropTypeKey: normalizedCropTypeKey,
         environmentType: effectiveEnvironment,
         status: 'active',
-        startDate: form.plantingDate,
-        plantingDate: form.plantingDate,
+        startDate: form.plantingDate ? Timestamp.fromDate(form.plantingDate) : null,
+        plantingDate: form.plantingDate ? Timestamp.fromDate(form.plantingDate) : null,
         startingStageIndex,
         currentStage: finalStageKey,
         stageSelected: finalStageKey,

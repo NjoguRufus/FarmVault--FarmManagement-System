@@ -56,6 +56,10 @@ import AdminCodeRedPage from "@/pages/admin/AdminCodeRedPage";
 import AdminFeedbackPage from "@/pages/admin/AdminFeedbackPage";
 import AdminFinancesPage from "@/pages/admin/AdminFinancesPage";
 import AdminExpensesPage from "@/pages/admin/AdminExpensesPage";
+import DeveloperNotesLibraryPage from "@/pages/admin/DeveloperNotesLibraryPage";
+import DeveloperCropNotesPage from "@/pages/admin/DeveloperCropNotesPage";
+import AdminNotesPage from "@/pages/notes/AdminNotesPage";
+import AdminCropNotesPage from "@/pages/notes/AdminCropNotesPage";
 import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -169,6 +173,8 @@ const App = () => (
                 <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
                 <Route path="/support" element={<SupportPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />
+                <Route path="/notes" element={<PermissionRoute module="notes"><AdminNotesPage /></PermissionRoute>} />
+                <Route path="/notes/:cropId" element={<PermissionRoute module="notes"><AdminCropNotesPage /></PermissionRoute>} />
               </Route>
 
               {/* Role-based dashboard routes */}
@@ -228,6 +234,8 @@ const App = () => (
                 <Route path="/admin/feedback" element={<AdminFeedbackPage />} />
                 <Route path="/admin/finances" element={<AdminFinancesPage />} />
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
+                <Route path="/admin/notes" element={<DeveloperNotesLibraryPage />} />
+                <Route path="/admin/notes/:cropId" element={<DeveloperCropNotesPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>
