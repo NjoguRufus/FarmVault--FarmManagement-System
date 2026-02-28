@@ -22,11 +22,13 @@ export default function DeveloperNotesLibraryPage() {
   const { data: crops = [], isLoading: cropsLoading } = useQuery({
     queryKey: ['notes-crops'],
     queryFn: getCrops,
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: libraryNotes = [], isLoading: notesLoading } = useQuery({
     queryKey: ['notes-library'],
     queryFn: () => getLibraryNotes(),
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: companies = [] } = useCollection<Company>(

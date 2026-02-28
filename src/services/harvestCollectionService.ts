@@ -379,9 +379,9 @@ export async function setBuyerPriceAndMaybeClose(params: {
         const isFrenchBeans = (col?.cropType as string | undefined)?.toLowerCase() === 'french-beans';
         const alreadySavedToHarvests = !!col?.harvestId;
         if (isFrenchBeans && !alreadySavedToHarvests && totalHarvestKg > 0 && totalRevenue > 0) {
-          const projectId = col?.projectId ?? null;
-          const companyId = col?.companyId ?? null;
-          const cropType = col?.cropType ?? null;
+          const projectId = col?.projectId ?? params.projectId ?? null;
+          const companyId = params.companyId ?? col?.companyId ?? null;
+          const cropType = col?.cropType ?? params.cropType ?? null;
           const harvestDate = col?.harvestDate ?? serverTimestamp();
           const notes = col?.name ? `From picker collection: ${col.name}` : 'From picker collection';
 

@@ -629,7 +629,8 @@ export default function ProjectDetailsPage() {
         {!!challenges.length && (
           <div className="space-y-3">
             {challenges.map((c) => {
-              const stageLabel = templateStages[(c as any).stageIndex]?.label ?? `Stage ${(c as any).stageIndex}`;
+              const stage = templateStages[(c as any).stageIndex];
+              const stageLabel = stage?.label ?? `Stage ${(c as any).stageIndex}`;
               const challengeDate = c.dateIdentified ? normalizeDate(c.dateIdentified as any) : null;
               const isExpanded = expandedChallenges.has(c.id);
               const preSeason = isPreSeasonChallenge(c);

@@ -42,6 +42,7 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
+import { applyExpenseDeduction } from '@/services/expenseBudgetService';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -213,9 +214,10 @@ export default function ExpensesPage() {
         category === 'other' && customCategory.trim()
           ? customCategory.trim()
           : category;
+      const amountNum = Number(amount || '0');
       await addDoc(collection(db, 'expenses'), {
         description,
-        amount: Number(amount || '0'),
+        amount: amountNum,
         category: categoryToSave,
         projectId: activeProject.id,
         companyId: activeProject.companyId,
@@ -227,6 +229,7 @@ export default function ExpensesPage() {
         paid: false,
         createdAt: serverTimestamp(),
       });
+      await applyExpenseDeduction(activeProject.companyId, activeProject.id, amountNum);
 
       // Invalidate queries to refresh data immediately
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
@@ -290,6 +293,7 @@ export default function ExpensesPage() {
       });
 
       await batch.commit();
+      await applyExpenseDeduction(activeProject.companyId, activeProject.id, log.totalPrice);
 
       // Invalidate queries to refresh data immediately
       queryClient.invalidateQueries({ queryKey: ['workLogs'] });

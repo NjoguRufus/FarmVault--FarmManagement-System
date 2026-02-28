@@ -45,6 +45,9 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { cn } from '@/lib/utils';
+import { useProjectBlocks } from '@/hooks/useProjectBlocks';
+import { getCropTimeline } from '@/config/cropTimelines';
+import { calculateDaysSince } from '@/utils/cropStages';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -105,6 +108,30 @@ export function CompanyDashboard() {
     activeProject?.id ?? null,
     companyId || null
   );
+  const { data: projectBlocks = [] } = useProjectBlocks(
+    companyId,
+    activeProject?.useBlocks ? activeProject?.id ?? null : null
+  );
+  const blocksSummary = useMemo(() => {
+    if (!activeProject?.useBlocks || projectBlocks.length === 0) return null;
+    const timeline = getCropTimeline(activeProject.cropTypeKey ?? activeProject.cropType);
+    const totalDays = timeline?.totalDaysToHarvest ?? 90;
+    let totalAcreage = 0;
+    let weightedSum = 0;
+    projectBlocks.forEach((b) => {
+      const ac = Number(b.acreage) || 0;
+      if (ac <= 0) return;
+      const days = calculateDaysSince(b.plantingDate);
+      const progress = Math.min(1, Math.max(0, days / totalDays));
+      totalAcreage += ac;
+      weightedSum += ac * progress;
+    });
+    if (totalAcreage <= 0) return { count: projectBlocks.length, weightedProgressPercent: 0 };
+    return {
+      count: projectBlocks.length,
+      weightedProgressPercent: Math.round((weightedSum / totalAcreage) * 100),
+    };
+  }, [activeProject?.useBlocks, activeProject?.cropType, activeProject?.cropTypeKey, projectBlocks]);
 
   const [activityLogs, setActivityLogs] = useState<ActivityLogDoc[]>([]);
   useEffect(() => {
@@ -579,7 +606,14 @@ export function CompanyDashboard() {
             )}
           >
             {showCropStageCard ? (
-              <div data-tour="crop-stage-progress" className="min-w-0">
+              <div data-tour="crop-stage-progress" className="min-w-0 space-y-1">
+                {blocksSummary != null && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">{blocksSummary.count} Blocks Active</span>
+                    <span>·</span>
+                    <span>{blocksSummary.weightedProgressPercent}% season progress</span>
+                  </div>
+                )}
                 <CropStageProgressCard
                   projectName={activeProject?.name}
                   stages={activeProjectStages}
@@ -619,6 +653,19 @@ export function CompanyDashboard() {
 
             {(showExpensesCard || showRevenueCard) && (
               <div className="grid grid-cols-1 gap-3 md:h-full md:grid-rows-2">
+                {showRevenueCard && (
+                  <div data-tour="revenue-summary-card" className={cn('h-full', showExpensesCard ? 'md:row-start-1' : '')}>
+                    <StatCard
+                      title="Total Revenue"
+                      value={`KES ${totalSales.toLocaleString()}`}
+                      change={15.3}
+                      changeLabel="vs last month"
+                      icon={<TrendingUp className="h-4 w-4" />}
+                      variant="gold"
+                      compact
+                    />
+                  </div>
+                )}
                 {showExpensesCard && (
                   <div data-tour="expenses-summary-card" className="h-full">
                     <StatCard
@@ -628,19 +675,6 @@ export function CompanyDashboard() {
                       changeLabel="vs last month"
                       icon={<DollarSign className="h-4 w-4" />}
                       variant="default"
-                      compact
-                    />
-                  </div>
-                )}
-                {showRevenueCard && (
-                  <div className={cn('h-full', showExpensesCard ? 'hidden md:block' : '')}>
-                    <StatCard
-                      title="Total Revenue"
-                      value={`KES ${totalSales.toLocaleString()}`}
-                      change={15.3}
-                      changeLabel="vs last month"
-                      icon={<TrendingUp className="h-4 w-4" />}
-                      variant="gold"
                       compact
                     />
                   </div>
