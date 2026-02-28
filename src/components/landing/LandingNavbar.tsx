@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { InstallPWAButton } from "@/components/InstallPWAButton";
+import { InstallFarmVault } from "@/components/pwa/InstallFarmVault";
 
 const navLinks = ["Home", "Features", "How It Works", "Pricing", "About", "Contact"];
 
@@ -47,7 +47,8 @@ export function LandingNavbar() {
         </ul>
 
         <div className="hidden lg:flex items-center gap-3">
-          <InstallPWAButton
+          <InstallFarmVault
+            compact
             className={scrolled ? "rounded-xl font-medium" : "rounded-xl font-medium border-primary-foreground/40 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"}
           />
           <Button variant="ghost" size="sm" asChild className={scrolled ? "text-foreground hover:text-primary hover:bg-primary/5 font-medium" : "text-primary-foreground/90 hover:text-primary-foreground hover:bg-primary-foreground/10 font-medium"}>
@@ -84,7 +85,7 @@ export function LandingNavbar() {
                   <Link to="/setup-company" onClick={() => setOpen(false)}>Get Started</Link>
                 </Button>
               </div>
-              <InstallPWAButton className="w-full rounded-xl mt-3" />
+              <InstallFarmVault compact className="w-full rounded-xl mt-3" />
             </div>
           </motion.div>
         )}
