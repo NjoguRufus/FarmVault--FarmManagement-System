@@ -158,7 +158,8 @@ export function useCollection<T = any>(
     );
 
     return () => unsub();
-    // Callers should memoize options.constraints to avoid unnecessary resubscribes.
+    // Exclude options?.constraints from deps to avoid infinite loop (array reference changes every render).
+    // To resubscribe when constraints change, pass a different key or memoize constraints.
   }, [
     key,
     path,
@@ -166,7 +167,6 @@ export function useCollection<T = any>(
     noCompany,
     companyId ?? 'none',
     projectId ?? 'all',
-    options?.constraints,
     options?.orderByField,
     options?.orderByDirection,
     options?.limitCount,

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, Download, MonitorSmartphone, Smartphone } from "lucide-react";
-
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CheckCircle2, ChevronDown, Download, ExternalLink, Smartphone } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,267 +18,212 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-}
-
-type InstructionTarget = "this-device" | "android" | "iphone" | null;
+const MANUAL_INSTRUCTIONS = {
+  android: {
+    title: "Add to Home Screen (Android)",
+    description: "In Chrome, use the browser menu to install:",
+    steps: "Menu ⋮ → Install app (or Add to Home screen)",
+  },
+  iphone: {
+    title: "Add to Home Screen (iPhone)",
+    description: "In Safari, use the Share menu:",
+    steps: "Share → Add to Home Screen",
+  },
+} as const;
 
 interface InstallFarmVaultProps {
   className?: string;
+  /** Compact style for navbar (smaller button, rounded-xl). */
+  compact?: boolean;
 }
 
-const instructionCopy: Record<Exclude<InstructionTarget, null>, {
-  title: string;
-  description: string;
-  helper: string;
-}> = {
-  "this-device": {
-    title: "Install on this device",
-    description: "Automatic install prompt is unavailable in this browser session.",
-    helper: "Use your browser menu \u2192 Add to Home Screen",
-  },
-  android: {
-    title: "Install on Android",
-    description: "Open FarmVault in Chrome, then follow these steps:",
-    helper: "Chrome \u2192 \u22ee menu \u2192 Add to Home screen \u2192 Install",
-  },
-  iphone: {
-    title: "Install on iPhone",
-    description: "Open FarmVault in Safari, then follow these steps:",
-    helper: "Safari \u2192 Share button \u2192 Add to Home Screen",
-  },
-};
-
-export function InstallFarmVault({ className }: InstallFarmVaultProps) {
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const [instructionsFor, setInstructionsFor] = useState<InstructionTarget>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) {
+  const navigate = useNavigate();
+  const { canInstall, isInstalled, promptInstall } = usePwaInstall();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [manualTarget, setManualTarget] = useState<"android" | "iphone" | null>(null);
   const isMobile = useIsMobile();
-  const promptInProgressRef = useRef(false);
 
-  useEffect(() => {
-    const isStandalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
-    setIsInstalled(isStandalone);
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setInstallPromptEvent(null);
-      setIsOpen(false);
-      setInstructionsFor(null);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
-
-  const activeInstruction = useMemo(
-    () => (instructionsFor ? instructionCopy[instructionsFor] : null),
-    [instructionsFor],
-  );
-
-  const openInstructions = (target: Exclude<InstructionTarget, null>) => {
-    setIsOpen(false);
-    setInstructionsFor(target);
+  const handleOpenApp = () => {
+    setPanelOpen(false);
+    navigate("/dashboard");
   };
 
-  const promptInstall = async (fallbackTarget: Exclude<InstructionTarget, null>) => {
-    if (promptInProgressRef.current) {
-      return;
+  const handleInstallRecommended = async () => {
+    const result = await promptInstall();
+    if (result === "accepted") {
+      toast.success("FarmVault is installing. Open it from your home screen when ready.");
+      setPanelOpen(false);
+    } else if (result === "dismissed") {
+      toast.info("Install cancelled. You can try again from the Install button.");
     }
-
-    if (!installPromptEvent) {
-      openInstructions(fallbackTarget);
-      return;
-    }
-
-    promptInProgressRef.current = true;
-    setIsOpen(false);
-
-    try {
-      await installPromptEvent.prompt();
-      await installPromptEvent.userChoice;
-    } catch {
-      openInstructions(fallbackTarget);
-    } finally {
-      promptInProgressRef.current = false;
-      setInstallPromptEvent(null);
-    }
+    if (result !== "unavailable") setPanelOpen(false);
   };
 
-  const handleInstallOnThisDevice = () => {
-    void promptInstall("this-device");
+  const handleManualInstructions = (target: "android" | "iphone") => {
+    setPanelOpen(false);
+    setManualTarget(target);
   };
 
-  const handleInstallAndroid = () => {
-    if (installPromptEvent) {
-      void promptInstall("android");
-      return;
-    }
-    openInstructions("android");
-  };
-
-  const handleInstallIphone = () => {
-    openInstructions("iphone");
-  };
-
-  const options = (
-    <div className="space-y-2.5">
-      <button
-        type="button"
-        onClick={handleInstallOnThisDevice}
-        className="group flex w-full items-start gap-3 rounded-xl border border-primary-foreground/15 bg-primary-foreground/[0.03] px-4 py-3 text-left transition-all duration-300 hover:scale-[1.01] hover:border-gold/40 hover:bg-primary-foreground/[0.1]"
-      >
-        <MonitorSmartphone className="mt-0.5 h-4 w-4 text-gold" />
-        <span className="space-y-1">
-          <span className="block text-sm font-semibold text-primary-foreground">Install on this device</span>
-          <span className="block text-xs text-primary-foreground/70">
-            Primary option. Uses native prompt when available.
-          </span>
-        </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={handleInstallAndroid}
-        className="group flex w-full items-start gap-3 rounded-xl border border-primary-foreground/15 bg-primary-foreground/[0.03] px-4 py-3 text-left transition-all duration-300 hover:scale-[1.01] hover:border-gold/40 hover:bg-primary-foreground/[0.1]"
-      >
-        <Smartphone className="mt-0.5 h-4 w-4 text-gold" />
-        <span className="space-y-1">
-          <span className="block text-sm font-semibold text-primary-foreground">Install on Android</span>
-          <span className="block text-xs text-primary-foreground/70">
-            Prompts install if supported, otherwise shows Chrome steps.
-          </span>
-        </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={handleInstallIphone}
-        className="group flex w-full items-start gap-3 rounded-xl border border-primary-foreground/15 bg-primary-foreground/[0.03] px-4 py-3 text-left transition-all duration-300 hover:scale-[1.01] hover:border-gold/40 hover:bg-primary-foreground/[0.1]"
-      >
-        <Download className="mt-0.5 h-4 w-4 text-gold" />
-        <span className="space-y-1">
-          <span className="block text-sm font-semibold text-primary-foreground">Install on iPhone</span>
-          <span className="block text-xs text-primary-foreground/70">
-            Opens Safari instructions for Add to Home Screen.
-          </span>
-        </span>
-      </button>
-    </div>
-  );
+  const triggerLabel = isInstalled ? "Open FarmVault" : "Install FarmVault";
+  const triggerIcon = isInstalled ? <CheckCircle2 className="h-4 w-4" /> : <ChevronDown className="h-4 w-4 opacity-90" />;
 
   const triggerButton = (
     <Button
       type="button"
-      size="lg"
+      size={compact ? "sm" : "lg"}
       className={cn(
-        "gradient-primary text-primary-foreground btn-luxury rounded-2xl px-7 h-14 text-base font-semibold shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+        "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+        compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
         className,
       )}
     >
-      {isInstalled ? (
-        <>
-          <CheckCircle2 className="h-4 w-4" />
-          FarmVault Installed
-        </>
-      ) : (
-        <>
-          Install FarmVault
-          <ChevronDown className="h-4 w-4 opacity-90" />
-        </>
-      )}
+      {triggerLabel}
+      {!isInstalled && triggerIcon}
+      {isInstalled && <ExternalLink className="h-4 w-4 ml-1" />}
     </Button>
   );
 
+  const optionsContent = (
+    <div className="space-y-2">
+      {canInstall && (
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full justify-start h-auto py-3 rounded-xl font-medium"
+          onClick={handleInstallRecommended}
+        >
+          <CheckCircle2 className="h-4 w-4 mr-2 text-primary" />
+          Install App (Recommended)
+        </Button>
+      )}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 rounded-xl"
+          onClick={() => handleManualInstructions("android")}
+        >
+          <Smartphone className="h-3.5 w-3.5 mr-1.5" />
+          Android
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 rounded-xl"
+          onClick={() => handleManualInstructions("iphone")}
+        >
+          <Download className="h-3.5 w-3.5 mr-1.5" />
+          iPhone
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground pt-1">
+        Manual: use browser menu → Add to Home Screen
+      </p>
+    </div>
+  );
+
+  if (isInstalled) {
+    return (
+      <>
+        <Button
+          type="button"
+          size={compact ? "sm" : "lg"}
+          onClick={handleOpenApp}
+          className={cn(
+            "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+            compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+            className,
+          )}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          Open FarmVault
+          <ExternalLink className="h-4 w-4 ml-1" />
+        </Button>
+        <Dialog open={!!manualTarget} onOpenChange={(open) => !open && setManualTarget(null)}>
+          <DialogContent className="max-w-md rounded-2xl">
+            {manualTarget && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{MANUAL_INSTRUCTIONS[manualTarget].title}</DialogTitle>
+                  <DialogDescription>{MANUAL_INSTRUCTIONS[manualTarget].description}</DialogDescription>
+                </DialogHeader>
+                <p className="rounded-lg border bg-muted/50 px-4 py-3 text-sm font-medium">
+                  {MANUAL_INSTRUCTIONS[manualTarget].steps}
+                </p>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   return (
     <>
-      {!isMobile && !isInstalled ? (
-        <Popover open={isOpen} onOpenChange={setIsOpen}>
+      {!isMobile ? (
+        <Popover open={panelOpen} onOpenChange={setPanelOpen}>
           <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
           <PopoverContent
             align="start"
             sideOffset={10}
-            className="w-[22rem] rounded-2xl border border-gold/25 bg-[hsl(150_30%_10%/0.97)] p-4 text-primary-foreground shadow-luxury backdrop-blur-xl"
+            className="w-[20rem] rounded-2xl border border-border bg-card p-4 shadow-lg"
           >
-            <p className="mb-1 text-sm font-semibold text-primary-foreground">Install FarmVault</p>
-            <p className="mb-4 text-xs text-primary-foreground/70">
-              Choose your install path for fast access from your home screen.
+            <p className="text-sm font-semibold text-foreground mb-1">Install options</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              Get the app for a clean icon and standalone experience.
             </p>
-            {options}
+            {optionsContent}
           </PopoverContent>
         </Popover>
       ) : (
-        <Button
-          type="button"
-          size="lg"
-          onClick={() => setIsOpen(true)}
-          disabled={isInstalled}
-          className={cn(
-            "gradient-primary text-primary-foreground btn-luxury rounded-2xl px-7 h-14 text-base font-semibold shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
-            className,
-          )}
-        >
-          {isInstalled ? (
-            <>
-              <CheckCircle2 className="h-4 w-4" />
-              FarmVault Installed
-            </>
-          ) : (
-            <>
-              Install FarmVault
-              <ChevronDown className="h-4 w-4 opacity-90" />
-            </>
-          )}
-        </Button>
+        <>
+          <Button
+            type="button"
+            size={compact ? "sm" : "lg"}
+            onClick={() => setPanelOpen(true)}
+            className={cn(
+              "gradient-primary text-primary-foreground btn-luxury shadow-luxury",
+              compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+              className,
+            )}
+          >
+            {triggerLabel}
+            {triggerIcon}
+          </Button>
+          <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
+            <SheetContent side="bottom" className="rounded-t-3xl">
+              <SheetHeader className="text-left">
+                <SheetTitle>Install FarmVault</SheetTitle>
+                <SheetDescription>
+                  Choose how to install for a clean home screen icon.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-5">{optionsContent}</div>
+            </SheetContent>
+          </Sheet>
+        </>
       )}
 
-      <Sheet open={isMobile && isOpen} onOpenChange={setIsOpen}>
-        <SheetContent
-          side="bottom"
-          className="rounded-t-3xl border-t border-gold/25 bg-[hsl(150_30%_10%/0.98)] px-5 pb-8 pt-6 text-primary-foreground shadow-luxury"
-        >
-          <SheetHeader className="text-left">
-            <SheetTitle className="text-primary-foreground">Install FarmVault</SheetTitle>
-            <SheetDescription className="text-primary-foreground/70">
-              Choose your preferred install option.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="mt-5">{options}</div>
-        </SheetContent>
-      </Sheet>
-
-      <Dialog open={instructionsFor !== null} onOpenChange={(open) => !open && setInstructionsFor(null)}>
-        <DialogContent className="max-w-md rounded-2xl border border-gold/20 bg-[hsl(150_30%_10%/0.97)] text-primary-foreground shadow-luxury">
-          <DialogHeader>
-            <DialogTitle className="text-primary-foreground">{activeInstruction?.title}</DialogTitle>
-            <DialogDescription className="text-primary-foreground/70">
-              {activeInstruction?.description}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-xl border border-primary-foreground/15 bg-primary-foreground/[0.05] px-4 py-3 text-sm font-medium text-primary-foreground/90">
-            {activeInstruction?.helper}
-          </div>
+      <Dialog open={!!manualTarget} onOpenChange={(open) => !open && setManualTarget(null)}>
+        <DialogContent className="max-w-md rounded-2xl">
+          {manualTarget && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{MANUAL_INSTRUCTIONS[manualTarget].title}</DialogTitle>
+                <DialogDescription>{MANUAL_INSTRUCTIONS[manualTarget].description}</DialogDescription>
+              </DialogHeader>
+              <p className="rounded-lg border bg-muted/50 px-4 py-3 text-sm font-medium">
+                {MANUAL_INSTRUCTIONS[manualTarget].steps}
+              </p>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </>
