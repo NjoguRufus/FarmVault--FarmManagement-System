@@ -105,6 +105,22 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
+    // --- Project Blocks (company + project scoped) ---
+
+    match /projectBlocks/{blockId} {
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
+      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+    }
+
+    // --- Budget Pools (company scoped) ---
+
+    match /budgetPools/{poolId} {
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
+      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+    }
+
     // --- Work Logs ---
 
     match /workLogs/{workLogId} {
@@ -177,29 +193,96 @@ service cloud.firestore {
     }
 
     // --- Harvest Collections (field cash: pickers + weigh + buyer) ---
-
+    // FIXED: Simplified permissions to ensure buyer payment can be marked
     match /harvestCollections/{collectionId} {
-      allow read: if canReadCompanyDoc();
-      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
-      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+      allow read: if isSignedIn() && (
+        isDeveloper() 
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      // Allow create for signed-in users with companyId
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null 
+            && request.resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      // Allow update for any signed-in user from the same company (for marking payments)
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      // Delete only for developers or company admins
+      allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
     }
 
     match /harvestPickers/{pickerId} {
-      allow read: if canReadCompanyDoc();
-      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
-      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+      allow read: if isSignedIn() && (
+        isDeveloper() 
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null 
+            && request.resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
     }
 
     match /pickerWeighEntries/{entryId} {
-      allow read: if canReadCompanyDoc();
-      allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
-      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+      allow read: if isSignedIn() && (
+        isDeveloper() 
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null 
+            && request.resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
     }
 
     match /harvestPaymentBatches/{batchId} {
-      allow read: if canReadCompanyDoc();
-      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
-      allow update, delete: if false;
+      allow read: if isSignedIn() && (
+        isDeveloper() 
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null 
+            && request.resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == userCompanyId())
+      );
+      
+      allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
     }
 
     // --- Sales ---

@@ -243,6 +243,10 @@ export interface Project {
   planNotes?: string;
   /** When false, project doc exists but stages are still being created; show "Creating project..." on list. */
   setupComplete?: boolean;
+  /** When true, project uses blocks (multiple planting dates); plantingDate may be omitted. */
+  useBlocks?: boolean;
+  /** When set, project expenses deduct from this budget pool instead of project.budget. */
+  budgetPoolId?: string | null;
   planning?: {
     seed?: {
       name: string;
@@ -286,6 +290,28 @@ export interface CropStage {
   recalculated?: boolean;
   recalculatedAt?: Date;
   recalculationReason?: string;
+}
+
+export interface ProjectBlock {
+  id: string;
+  companyId: string;
+  projectId: string;
+  blockName: string;
+  acreage: number;
+  plantingDate: unknown;
+  expectedEndDate?: unknown;
+  currentStage?: string;
+  seasonProgress?: number;
+  createdAt: unknown;
+}
+
+export interface BudgetPool {
+  id: string;
+  companyId: string;
+  name: string;
+  totalAmount: number;
+  remainingAmount: number;
+  createdAt: unknown;
 }
 
 // --- Core Operational / Financial / Inventory Models ---

@@ -21,7 +21,7 @@ import {
   updateCompanyNote,
   deleteCompanyNote,
 } from '@/services/notesService';
-import { getCropDisplayName, getCategoryLabel } from '@/constants/notes';
+import { getCropDisplayName, getCropIcon, getCategoryLabel } from '@/constants/notes';
 import type { NoteCardData } from '@/components/notes/NoteCard';
 import type { NoteFormValues } from '@/components/notes/NoteEditorModal';
 import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-react';
@@ -43,12 +43,14 @@ export default function AdminCropNotesPage() {
     queryKey: ['notes-shared', companyId, cropId],
     queryFn: () => getSharedLibraryNotesForCompany(companyId),
     enabled: !!companyId,
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: companyNotes = [], isLoading: companyLoading } = useQuery({
     queryKey: ['notes-company', companyId, cropId],
     queryFn: () => getCompanyNotes(companyId, cropId ?? ''),
     enabled: !!companyId,
+    staleTime: 2 * 60 * 1000,
   });
 
   const sharedForCrop = sharedNotes.filter((n: { cropId: string }) => n.cropId === cropId);
@@ -132,6 +134,7 @@ export default function AdminCropNotesPage() {
 
   const isLoading = sharedLoading || companyLoading;
   const cropName = getCropDisplayName(cropId ?? '');
+  const cropIcon = getCropIcon(cropId ?? '');
 
   return (
     <div className="p-6 space-y-6">
@@ -140,7 +143,10 @@ export default function AdminCropNotesPage() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">{cropName}</h1>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <span className="text-2xl" aria-hidden>{cropIcon}</span>
+            {cropName}
+          </h1>
           <p className="text-muted-foreground">Shared notes (read-only) and your company notes</p>
         </div>
         <Button

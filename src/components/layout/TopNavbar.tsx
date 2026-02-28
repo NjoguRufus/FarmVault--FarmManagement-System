@@ -53,7 +53,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     <header
       id="main-navbar"
       className={cn(
-        'fixed top-0 right-0 z-[1000] h-16 bg-card border-b border-border transition-all duration-300',
+        'fixed top-0 right-0 z-40 h-16 bg-card border-b border-border transition-all duration-300',
         // On mobile, navbar spans full width (sidebar overlays)
         // On desktop, adjust based on sidebar state
         'left-0 md:left-16 md:left-60',

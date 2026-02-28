@@ -652,6 +652,8 @@ export default function InventoryPage() {
         };
         if (activeProject.cropType) expenseData.cropType = activeProject.cropType;
         await addDoc(collection(db, 'expenses'), expenseData);
+        const { applyExpenseDeduction } = await import('@/services/expenseBudgetService');
+        await applyExpenseDeduction(activeProject.companyId, activeProject.id, amount);
         queryClient.invalidateQueries({ queryKey: ['expenses'] });
         queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
       }

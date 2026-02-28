@@ -16,18 +16,21 @@ export default function AdminNotesPage() {
   const { data: crops = [], isLoading: cropsLoading } = useQuery({
     queryKey: ['notes-crops'],
     queryFn: getCrops,
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: sharedNotes = [], isLoading: sharedLoading } = useQuery({
     queryKey: ['notes-shared', companyId],
     queryFn: () => getSharedLibraryNotesForCompany(companyId),
     enabled: !!companyId,
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: companyNotes = [], isLoading: companyLoading } = useQuery({
     queryKey: ['notes-company', companyId],
     queryFn: () => getCompanyNotes(companyId),
     enabled: !!companyId,
+    staleTime: 2 * 60 * 1000,
   });
 
   const cropIds = crops.length > 0 ? crops.map((c) => c.id) : CROP_IDS.slice();

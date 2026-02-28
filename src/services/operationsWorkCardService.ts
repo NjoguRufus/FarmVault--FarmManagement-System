@@ -421,6 +421,10 @@ export async function markWorkCardPaid(params: {
       paidByName: params.paidByName ?? undefined,
       createdAt: serverTimestamp(),
     });
+    if (card.projectId && card.companyId) {
+      const { applyExpenseDeduction } = await import('@/services/expenseBudgetService');
+      await applyExpenseDeduction(card.companyId, card.projectId, amount);
+    }
   }
 
   await createAuditLogSafe({

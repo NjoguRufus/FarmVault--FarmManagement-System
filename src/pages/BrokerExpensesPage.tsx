@@ -92,13 +92,15 @@ export default function BrokerExpensesPage() {
     const harvest = harvestId ? brokerHarvests.find((h) => h.id === harvestId) : null;
     setSaving(true);
     try {
+      const companyId = harvest?.companyId ?? user?.companyId ?? '';
+      const projectId = harvest?.projectId;
       await addDoc(collection(db, 'expenses'), {
         category,
         description: description.trim() || getExpenseCategoryLabel(category),
         amount: num,
         date: serverTimestamp(),
-        companyId: harvest?.companyId ?? user?.companyId ?? '',
-        projectId: harvest?.projectId,
+        companyId,
+        projectId,
         cropType: harvest?.cropType,
         harvestId: harvestId || undefined,
         paidBy: brokerId,
@@ -107,6 +109,10 @@ export default function BrokerExpensesPage() {
         paidAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       });
+      if (projectId && companyId) {
+        const { applyExpenseDeduction } = await import('@/services/expenseBudgetService');
+        await applyExpenseDeduction(companyId, projectId, num);
+      }
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       setAddOpen(false);
       setCategory('space');

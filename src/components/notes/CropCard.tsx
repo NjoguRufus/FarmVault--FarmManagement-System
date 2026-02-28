@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getCropDisplayName } from '@/constants/notes';
+import { getCropDisplayName, getCropIcon } from '@/constants/notes';
 
 export function CropCard({
   cropId,
@@ -20,6 +20,7 @@ export function CropCard({
   className?: string;
 }) {
   const name = getCropDisplayName(cropId);
+  const icon = getCropIcon(cropId);
   return (
     <Link to={`${basePath}/${cropId}`}>
       <Card
@@ -30,7 +31,10 @@ export function CropCard({
       >
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-lg">{name}</span>
+            <span className="flex items-center gap-2 font-semibold text-lg">
+              <span className="text-xl" aria-hidden>{icon}</span>
+              {name}
+            </span>
             <ChevronRight className="h-5 w-5 text-muted-foreground" />
           </div>
         </CardHeader>

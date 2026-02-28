@@ -32,6 +32,20 @@ export function getCropDisplayName(cropId: string): string {
   return CROP_DISPLAY_NAMES[cropId] ?? cropId;
 }
 
+/** Same crop icons as dashboard/project selector (emoji). */
+export const CROP_ICONS: Record<string, string> = {
+  tomatoes: '🍅',
+  'french-beans': '🌱',
+  capsicum: '🫑',
+  maize: '🌽',
+  watermelons: '🍉',
+  rice: '🍚',
+};
+
+export function getCropIcon(cropId: string): string {
+  return CROP_ICONS[cropId] ?? '🌾';
+}
+
 export function getCategoryLabel(category: NoteCategory): string {
   return NOTE_CATEGORIES.find((c) => c.value === category)?.label ?? category;
 }

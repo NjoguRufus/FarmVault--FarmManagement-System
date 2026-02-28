@@ -951,6 +951,10 @@ export default function OperationsPage() {
           createdAt: serverTimestamp(),
           paidAt: serverTimestamp(),
         });
+        if (log.projectId && log.companyId) {
+          const { applyExpenseDeduction } = await import('@/services/expenseBudgetService');
+          await applyExpenseDeduction(log.companyId, log.projectId, amount);
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['workLogs'] });
