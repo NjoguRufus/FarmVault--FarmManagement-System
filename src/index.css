@@ -141,6 +141,7 @@
 
   html {
     font-family: 'Inter', system-ui, sans-serif;
+    scroll-padding-top: 5rem;
   }
 
   body {
@@ -158,6 +159,11 @@
   .landing-page h5,
   .landing-page h6 {
     font-family: 'Playfair Display', serif;
+  }
+
+  /* Tour targets: scroll into view below fixed navbar (h-16 = 4rem) */
+  [data-tour] {
+    scroll-margin-top: 5rem;
   }
 }
 

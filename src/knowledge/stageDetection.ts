@@ -14,7 +14,10 @@ export interface StageDetectionResult {
   effectiveDay: number;
   environmentType: EnvironmentType;
   environmentDayAdjustment: number;
+  /** Progress through the current stage (0–100). */
   stageProgressPercent: number;
+  /** Progress through the full season/cycle from planting to harvest (0–100). */
+  seasonProgressPercent: number;
   daysIntoStage: number;
   daysRemainingToNextStage: number;
   nextStage: CropStage | null;
@@ -106,6 +109,12 @@ export function detectStageForCrop(
   const daysIntoStage = effectiveDay < stage.baseDayStart ? 0 : clamp(rawIntoStage, 0, duration);
   const stageProgressPercent =
     daysIntoStage <= 0 ? 0 : clamp(Math.round((daysIntoStage / duration) * 100), 0, 100);
+  const baseCycleDays = Math.max(1, crop.baseCycleDays ?? (crop.stages[crop.stages.length - 1]?.baseDayEnd ?? 1));
+  const seasonProgressPercent = clamp(
+    Math.round((daysSincePlanting / baseCycleDays) * 100),
+    0,
+    100
+  );
   const daysRemainingToNextStage = nextStage
     ? Math.max(0, stage.baseDayEnd - effectiveDay)
     : Math.max(0, stage.baseDayEnd - effectiveDay);
@@ -118,6 +127,7 @@ export function detectStageForCrop(
     environmentType,
     environmentDayAdjustment: dayAdjustment,
     stageProgressPercent,
+    seasonProgressPercent,
     daysIntoStage,
     daysRemainingToNextStage,
     nextStage,

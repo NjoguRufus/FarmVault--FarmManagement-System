@@ -1,9 +1,10 @@
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
-import { X } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { DrawerModalWatermark } from "@/components/ui/DrawerModalWatermark";
 
 const Sheet = SheetPrimitive.Root;
 
@@ -47,23 +48,133 @@ const sheetVariants = cva(
   },
 );
 
+const WIDTH_MIN = 280;
+const WIDTH_MAX_DEFAULT = 520;
+const HEIGHT_MIN = 200;
+
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  /** When true, the sheet can be resized: width for left/right, height for top/bottom */
+  draggable?: boolean;
+}
 
 const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
-  ({ side = "right", className, children, ...props }, ref) => (
-    <SheetPortal>
-      <SheetOverlay />
-      <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-        {children}
-        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
-      </SheetPrimitive.Content>
-    </SheetPortal>
-  ),
+  ({ side = "right", className, children, draggable = false, ...props }, ref) => {
+    const contentRef = React.useRef<HTMLDivElement>(null);
+    const [sizePx, setSizePx] = React.useState<number | null>(null);
+    const [isResizing, setIsResizing] = React.useState(false);
+    const startRef = React.useRef({ client: 0, size: 0 });
+
+    const isHorizontal = side === "left" || side === "right";
+
+    React.useEffect(() => {
+      if (!draggable || !isResizing) return;
+      const onMove = (e: PointerEvent) => {
+        if (isHorizontal) {
+          const delta = side === "right" ? startRef.current.client - e.clientX : e.clientX - startRef.current.client;
+          const maxW = Math.min(WIDTH_MAX_DEFAULT, typeof window !== "undefined" ? window.innerWidth * 0.9 : 600);
+          const next = Math.max(WIDTH_MIN, Math.min(maxW, startRef.current.size + delta));
+          setSizePx(next);
+        } else {
+          const delta = side === "bottom" ? startRef.current.client - e.clientY : e.clientY - startRef.current.client;
+          const maxH = typeof window !== "undefined" ? Math.floor(window.innerHeight * 0.9) : 600;
+          const next = Math.max(HEIGHT_MIN, Math.min(maxH, startRef.current.size + delta));
+          setSizePx(next);
+        }
+      };
+      const onUp = () => setIsResizing(false);
+      window.addEventListener("pointermove", onMove, { capture: true });
+      window.addEventListener("pointerup", onUp, { capture: true });
+      return () => {
+        window.removeEventListener("pointermove", onMove, { capture: true });
+        window.removeEventListener("pointerup", onUp, { capture: true });
+      };
+    }, [draggable, isResizing, isHorizontal, side]);
+
+    const onResizeStart = React.useCallback(
+      (e: React.PointerEvent) => {
+        if (!draggable) return;
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        const el = contentRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (isHorizontal) {
+            startRef.current = { client: e.clientX, size: rect.width };
+          } else {
+            startRef.current = { client: e.clientY, size: rect.height };
+          }
+        } else {
+          startRef.current = {
+            client: isHorizontal ? e.clientX : e.clientY,
+            size: isHorizontal ? WIDTH_MAX_DEFAULT : (typeof window !== "undefined" ? Math.floor(window.innerHeight * 0.6) : 400),
+          };
+        }
+        setSizePx((prev) => prev ?? startRef.current.size);
+        setIsResizing(true);
+      },
+      [draggable, isHorizontal]
+    );
+
+    const resizeStyle = React.useMemo(() => {
+      if (!draggable || sizePx == null) return undefined;
+      if (isHorizontal) {
+        return { width: sizePx, minWidth: WIDTH_MIN, maxWidth: "90vw" };
+      }
+      return { height: sizePx, minHeight: HEIGHT_MIN, maxHeight: "90vh" };
+    }, [draggable, sizePx, isHorizontal]);
+
+    const resizeHandle = draggable ? (
+      <div
+        role="separator"
+        aria-orientation={isHorizontal ? "vertical" : "horizontal"}
+        aria-label={isHorizontal ? "Drag to resize width" : "Drag to resize height"}
+        onPointerDown={onResizeStart}
+        className={cn(
+          "flex shrink-0 touch-none items-center justify-center bg-muted/40 text-muted-foreground hover:bg-muted/60",
+          isHorizontal ? "w-3 cursor-col-resize" : "h-3 cursor-row-resize",
+          side === "right" && "border-r border-border/50",
+          side === "left" && "border-l border-border/50",
+          side === "bottom" && "border-b border-border/50",
+          side === "top" && "border-t border-border/50"
+        )}
+      >
+        <GripVertical className={cn("text-muted-foreground", isHorizontal ? "h-4 w-4" : "h-4 w-4 rotate-90")} />
+      </div>
+    ) : null;
+
+    const mainFlexDir = isHorizontal ? "flex-row" : "flex-col";
+    const handleFirst = side === "right" || side === "bottom";
+
+    return (
+      <SheetPortal>
+        <SheetOverlay />
+        <SheetPrimitive.Content
+          ref={(node) => {
+            (contentRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+            if (typeof ref === "function") ref(node);
+            else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+          }}
+          className={cn(sheetVariants({ side }), "flex min-h-0 overflow-hidden", mainFlexDir, className)}
+          style={resizeStyle}
+          {...props}
+        >
+          {handleFirst && resizeHandle}
+          <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden min-w-0">
+            <DrawerModalWatermark />
+            <div className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain min-w-0 py-px">
+              {children}
+            </div>
+          </div>
+          {!handleFirst && resizeHandle}
+          <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    );
+  }
 );
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 

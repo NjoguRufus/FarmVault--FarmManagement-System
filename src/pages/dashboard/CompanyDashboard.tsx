@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -35,13 +35,24 @@ import { detectStageForCrop } from '@/knowledge/stageDetection';
 import { findCropKnowledgeByTypeKey, getEffectiveEnvironmentForCrop } from '@/knowledge/cropCatalog';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useWorkCardsForProject } from '@/hooks/useWorkCards';
+import type { OperationsWorkCard } from '@/types';
 import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
 import { NewOperationMenu } from '@/components/dashboard/NewOperationMenu';
 import { Button } from '@/components/ui/button';
 import { useTour } from '@/tour/TourProvider';
 import { usePermissions } from '@/hooks/usePermissions';
+import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
+import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { cn } from '@/lib/utils';
+
+function isActivityToday(log: ActivityLogDoc): boolean {
+  const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
+  if (!d) return false;
+  const today = new Date();
+  return d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+}
 
 export function CompanyDashboard() {
   const { activeProject, setActiveProject } = useProject();
@@ -82,6 +93,23 @@ export function CompanyDashboard() {
     'dashboard-stages',
     'projectStages'
   );
+  const { data: projectWorkCards = [] } = useWorkCardsForProject(
+    activeProject?.id ?? null,
+    companyId || null
+  );
+
+  const [activityLogs, setActivityLogs] = useState<ActivityLogDoc[]>([]);
+  useEffect(() => {
+    if (!companyId) return;
+    const unsubscribe = subscribeActivity(
+      companyId,
+      { limit: 15, projectId: activeProject?.id ?? undefined },
+      setActivityLogs
+    );
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [companyId, activeProject?.id]);
 
   const companyProjects = useMemo(
     () => (companyId ? allProjects.filter((p) => p.companyId === companyId) : allProjects),
@@ -204,7 +232,7 @@ export function CompanyDashboard() {
     return {
       cropType: activeProject.cropType,
       stageLabel: activeProjectDetectedStage.stage.label,
-      progressPercent: activeProjectDetectedStage.stageProgressPercent,
+      progressPercent: activeProjectDetectedStage.seasonProgressPercent,
       totalCycleDays: activeProjectKnowledge?.baseCycleDays ?? stageDurationDays,
       daysSincePlanting: activeProjectDetectedStage.daysSincePlanting,
       stageDurationDays,
@@ -283,6 +311,82 @@ export function CompanyDashboard() {
 
     return hasHarvestInCurrentMonth;
   }, [activeProject, activeProjectHarvests]);
+
+  const advisoryTasks = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const plannedOnly = (projectWorkCards as OperationsWorkCard[]).filter(
+      (c) => c?.status === 'planned' || c?.status === 'submitted'
+    );
+    const withDate = plannedOnly
+      .map((c) => ({
+        card: c,
+        due: toDate((c.planned as { date?: unknown })?.date),
+      }))
+      .filter(({ due }) => due != null) as { card: OperationsWorkCard; due: Date }[];
+    const overdue = withDate
+      .filter(({ due }) => due.getTime() < today.getTime())
+      .sort((a, b) => a.due.getTime() - b.due.getTime());
+    const dueSoon = withDate
+      .filter(({ due }) => due.getTime() >= today.getTime() && due.getTime() <= weekEnd.getTime())
+      .sort((a, b) => a.due.getTime() - b.due.getTime());
+    const allUpcoming = withDate
+      .filter(({ due }) => due.getTime() >= today.getTime())
+      .sort((a, b) => a.due.getTime() - b.due.getTime());
+    return {
+      overdue: overdue.map(({ card, due }) => ({
+        id: card.id,
+        title: card.workTitle || 'Task',
+        dueDate: due,
+        isOverdue: true,
+      })),
+      dueSoon: dueSoon.map(({ card, due }) => ({
+        id: card.id,
+        title: card.workTitle || 'Task',
+        dueDate: due,
+        isOverdue: false,
+      })),
+      next: allUpcoming[0]
+        ? {
+            id: allUpcoming[0].card.id,
+            title: allUpcoming[0].card.workTitle || 'Task',
+            dueDate: allUpcoming[0].due,
+            isOverdue: false,
+          }
+        : null,
+    };
+  }, [projectWorkCards]);
+
+  const recentExpensesTrend = useMemo<'high' | 'normal' | 'low' | null>(() => {
+    const now = new Date();
+    const last7End = new Date(now);
+    last7End.setHours(23, 59, 59, 999);
+    const last7Start = new Date(now);
+    last7Start.setDate(last7Start.getDate() - 7);
+    last7Start.setHours(0, 0, 0, 0);
+    const prev7End = new Date(last7Start);
+    prev7End.setMilliseconds(-1);
+    const prev7Start = new Date(prev7End);
+    prev7Start.setDate(prev7Start.getDate() - 7);
+    const last7 = filteredExpenses
+      .filter((e) => {
+        const t = toDate(e.date)?.getTime();
+        return t != null && t >= last7Start.getTime() && t <= last7End.getTime();
+      })
+      .reduce((s, e) => s + e.amount, 0);
+    const prev7 = filteredExpenses
+      .filter((e) => {
+        const t = toDate(e.date)?.getTime();
+        return t != null && t >= prev7Start.getTime() && t <= prev7End.getTime();
+      })
+      .reduce((s, e) => s + e.amount, 0);
+    if (prev7 <= 0) return last7 > 0 ? 'high' : null;
+    if (last7 > prev7 * 1.2) return 'high';
+    if (last7 < prev7 * 0.8) return 'low';
+    return 'normal';
+  }, [filteredExpenses]);
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -369,6 +473,29 @@ export function CompanyDashboard() {
     [companyProjects, setActiveProject]
   );
 
+  const advisorySummary = useMemo(() => {
+    const hasActivityToday = activityLogs.some(isActivityToday);
+    return buildSmartAdvisoryCardSummary({
+      hasActivityToday,
+      pendingTasksCount: advisoryTasks.overdue.length + advisoryTasks.dueSoon.length,
+      stageNearingEnd:
+        activeProjectDaysRemainingToNextStage != null &&
+        activeProjectDaysRemainingToNextStage <= 7,
+      expensesRising: recentExpensesTrend === 'high',
+      harvestActive: isHarvestActive,
+      environment:
+        activeProjectEnvironment === 'greenhouse' ? 'greenhouse' : 'openField',
+    });
+  }, [
+    activityLogs,
+    advisoryTasks.overdue.length,
+    advisoryTasks.dueSoon.length,
+    activeProjectDaysRemainingToNextStage,
+    recentExpensesTrend,
+    isHarvestActive,
+    activeProjectEnvironment,
+  ]);
+
   if (projectsLoading) {
     return <DashboardSkeleton />;
   }
@@ -444,12 +571,16 @@ export function CompanyDashboard() {
             )}
           >
             {showCropStageCard ? (
-              <CropStageProgressCard
-                projectName={activeProject?.name}
-                stages={activeProjectStages}
-                activeStageOverride={activeStageOverride}
-                knowledgeDetection={activeProjectKnowledgeDetection}
-              />
+              <div data-tour="crop-stage-progress" className="min-w-0">
+                <CropStageProgressCard
+                  projectName={activeProject?.name}
+                  stages={activeProjectStages}
+                  activeStageOverride={activeStageOverride}
+                  knowledgeDetection={activeProjectKnowledgeDetection}
+                  recentActivityLogs={activityLogs}
+                  advisorySummary={advisorySummary}
+                />
+              </div>
             ) : showRevenueCard ? (
               <StatCard
                 title="Total Revenue"

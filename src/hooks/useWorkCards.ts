@@ -67,16 +67,26 @@ export function useWorkCardsForCompany(
   );
 }
 
-export function useWorkCardsForProject(projectId: string | null) {
+export function useWorkCardsForProject(
+  projectId: string | null,
+  companyId?: string | null
+) {
   const constraints = useMemo<QueryConstraint[]>(() => {
     if (!projectId) return [];
-    return [where('projectId', '==', projectId)];
-  }, [projectId]);
+    const byProject = where('projectId', '==', projectId);
+    if (companyId) {
+      return [byProject, where('companyId', '==', companyId)];
+    }
+    return [byProject];
+  }, [projectId, companyId]);
+
+  // Require companyId so the query is always company-scoped and passes Firestore rules.
+  const enabled = Boolean(projectId && companyId);
 
   return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-project-${projectId ?? 'none'}`,
+    `${WORK_CARDS_KEY}-project-${projectId ?? 'none'}-${companyId ?? 'all'}`,
     constraints,
-    Boolean(projectId)
+    enabled
   );
 }
 

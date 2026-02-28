@@ -3,6 +3,7 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import { DrawerModalWatermark } from "@/components/ui/DrawerModalWatermark";
 
 const AlertDialog = AlertDialogPrimitive.Root;
 
@@ -28,18 +29,23 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
+>(({ className, children, ...props }, ref) => (
   <AlertDialogPortal>
     <AlertDialogOverlay />
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
       <AlertDialogPrimitive.Content
         ref={ref}
         className={cn(
-          "grid w-full max-w-lg gap-4 border bg-background p-4 sm:p-6 shadow-lg max-h-[calc(100vh-2rem)] overflow-y-auto pointer-events-auto duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-lg",
+          "relative grid w-full max-w-lg gap-4 border bg-background p-4 sm:p-6 shadow-lg max-h-[calc(100vh-2rem)] overflow-y-auto pointer-events-auto duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-lg",
           className,
         )}
         {...props}
-      />
+      >
+        <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg">
+          <DrawerModalWatermark position="top" />
+        </div>
+        {children}
+      </AlertDialogPrimitive.Content>
     </div>
   </AlertDialogPortal>
 ));

@@ -131,7 +131,7 @@ function CropStripProgress({
 
           <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground sm:text-xs">
             <Gauge className="h-3 w-3" />
-            <span>Stage completion</span>
+            <span>Season completion</span>
           </div>
         </div>
       </div>
