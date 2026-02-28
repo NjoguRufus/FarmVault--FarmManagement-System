@@ -534,6 +534,138 @@ input Any_ListFilter {
   excludesAll: [Any!]
 }
 
+"Conditions on a `Date` value."
+input Date_Filter {
+  "Match if the field `IS NULL`."
+  isNull: Boolean
+  "Match if the field is exactly equal to the provided value."
+  eq: Date @fdc_oneOf(group: "eq")
+  "Match if the field equals the provided CEL expression."
+  eq_expr: Date_Expr @fdc_oneOf(group: "eq")
+  "Match if the field equals the provided relative date."
+  eq_date: Date_Relative @fdc_oneOf(group: "eq")
+  "Match if the field is not equal to the provided value."
+  ne: Date @fdc_oneOf(group: "ne")
+  "Match if the field is not equal to the provided CEL expression."
+  ne_expr: Date_Expr @fdc_oneOf(group: "ne")
+  "Match if the field is not equal to the provided relative date."
+  ne_date: Date_Relative @fdc_oneOf(group: "ne")
+  "Match if the field value is among the provided list of values."
+  in: [Date!]
+  "Match if the field value is not among the provided list of values."
+  nin: [Date!]
+  "Match if the field value is greater than the provided value."
+  gt: Date @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than the provided CEL expression."
+  gt_expr: Date_Expr @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than the provided relative date."
+  gt_date: Date_Relative @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than or equal to the provided value."
+  ge: Date @fdc_oneOf(group: "ge")
+  "Match if the field value is greater than or equal to the provided CEL expression."
+  ge_expr: Date_Expr @fdc_oneOf(group: "ge")
+  "Match if the field value is greater than or equal to the provided relative date."
+  ge_date: Date_Relative @fdc_oneOf(group: "ge")
+  "Match if the field value is less than the provided value."
+  lt: Date @fdc_oneOf(group: "lt")
+  "Match if the field value is less than the provided CEL expression."
+  lt_expr: Date_Expr @fdc_oneOf(group: "lt")
+  "Match if the field value is less than the provided relative date."
+  lt_date: Date_Relative @fdc_oneOf(group: "lt")
+  "Match if the field value is less than or equal to the provided value."
+  le: Date @fdc_oneOf(group: "le")
+  "Match if the field value is less than or equal to the provided CEL expression."
+  le_expr: Date_Expr @fdc_oneOf(group: "le")
+  "Match if the field value is less than or equal to the provided relative date."
+  le_date: Date_Relative @fdc_oneOf(group: "le")
+}
+
+"Conditions on a`Date` list."
+input Date_ListFilter {
+  "Match if the list contains the provided date."
+  includes: Date @fdc_oneOf(group: "includes")
+  "Match if the list contains the provided date CEL expression."
+  includes_expr: Date_Expr @fdc_oneOf(group: "includes")
+  "Match if the list contains the provided relative date."
+  includes_date: Date_Relative @fdc_oneOf(group: "includes")
+  "Match if the list does not contain the provided date."
+  excludes: Date @fdc_oneOf(group: "excludes")
+  "Match if the list does not contain the provided date CEL expression."
+  excludes_expr: Date_Expr @fdc_oneOf(group: "excludes")
+  "Match if the list does not contain the provided relative date."
+  excludes_date: Date_Relative @fdc_oneOf(group: "excludes")
+  "Match if the list contains all the provided dates."
+  includesAll: [Date!]
+  "Match if the list contains none of the provided dates."
+  excludesAll: [Date!]
+}
+
+"Conditions on a `Timestamp` value."
+input Timestamp_Filter {
+  "Match if the field `IS NULL`."
+  isNull: Boolean
+  "Match if the field is exactly equal to the provided value."
+  eq: Timestamp @fdc_oneOf(group: "eq")
+  "Match if the field equals the provided CEL expression."
+  eq_expr: Timestamp_Expr @fdc_oneOf(group: "eq")
+  "Match if the field equals the provided relative time."
+  eq_time: Timestamp_Relative @fdc_oneOf(group: "eq")
+  "Match if the field is not equal to the provided value."
+  ne: Timestamp @fdc_oneOf(group: "ne")
+  "Match if the field is not equal to the provided CEL expression."
+  ne_expr: Timestamp_Expr @fdc_oneOf(group: "ne")
+  "Match if the field is not equal to the provided relative time."
+  ne_time: Timestamp_Relative @fdc_oneOf(group: "ne")
+  "Match if the field value is among the provided list of values."
+  in: [Timestamp!]
+  "Match if the field value is not among the provided list of values."
+  nin: [Timestamp!]
+  "Match if the field value is greater than the provided value."
+  gt: Timestamp @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than the provided CEL expression."
+  gt_expr: Timestamp_Expr @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than the provided relative time."
+  gt_time: Timestamp_Relative @fdc_oneOf(group: "gt")
+  "Match if the field value is greater than or equal to the provided value."
+  ge: Timestamp @fdc_oneOf(group: "ge")
+  "Match if the field value is greater than or equal to the provided CEL expression."
+  ge_expr: Timestamp_Expr @fdc_oneOf(group: "ge")
+  "Match if the field value is greater than or equal to the provided relative time."
+  ge_time: Timestamp_Relative @fdc_oneOf(group: "ge")
+  "Match if the field value is less than the provided value."
+  lt: Timestamp @fdc_oneOf(group: "lt")
+  "Match if the field value is less than the provided CEL expression."
+  lt_expr: Timestamp_Expr @fdc_oneOf(group: "lt")
+  "Match if the field value is less than the provided relative time."
+  lt_time: Timestamp_Relative @fdc_oneOf(group: "lt")
+  "Match if the field value is less than or equal to the provided value."
+  le: Timestamp @fdc_oneOf(group: "le")
+  "Match if the field value is less than or equal to the provided CEL expression."
+  le_expr: Timestamp_Expr @fdc_oneOf(group: "le")
+  "Match if the field value is less than or equal to the provided relative time."
+  le_time: Timestamp_Relative @fdc_oneOf(group: "le")
+}
+
+"Conditions on a `Timestamp` list."
+input Timestamp_ListFilter {
+  "Match if the list contains the provided timestamp."
+  includes: Timestamp @fdc_oneOf(group: "includes")
+  "Match if the list contains the provided timestamp CEL expression."
+  includes_expr: Timestamp_Expr @fdc_oneOf(group: "includes")
+  "Match if the list contains the provided relative timestamp."
+  includes_time: Timestamp_Relative @fdc_oneOf(group: "includes")
+  "Match if the list does not contain the provided timestamp."
+  excludes: Timestamp @fdc_oneOf(group: "excludes")
+  "Match if the list does not contain the provided timestamp CEL expression."
+  excludes_expr: Timestamp_Expr @fdc_oneOf(group: "excludes")
+  "Match if the list does not contain the provided relative timestamp."
+  excludes_time: Timestamp_Relative @fdc_oneOf(group: "excludes")
+  "Match if the list contains all the provided timestamps."
+  includesAll: [Timestamp!]
+  "Match if the list contains none of the provided timestamps."
+  excludesAll: [Timestamp!]
+}
+
 """
 Put on a `String` field to include it in the full-text search index.
 
@@ -677,10 +809,23 @@ type _Service {
     """
     omitDescription: Boolean = false
   ): String!
-  "Orignal Schema Sources in the service."
+  "All GraphQL Schema Sources in the service."
   schema: String!
+  "GraphQL Schema Sources in the service for each schema_id."
+  schemas: [_Schema!]!
   "Generated documentation from the schema of the Firebase Data Connect Service."
   docs: [_Doc!]!
+}
+
+type _Schema {
+  """
+  The schema id of the schema.
+  The `main` schema can define SQL `@table` and `@view` based by Cloud SQL PostgreSQL.
+  Other schemas are secondary schemas backed by GraphQL services in Cloud Run.
+  """
+  id: String!
+  "The GraphQL Schema in this particular schema."
+  source: String!
 }
 
 type _Doc {
@@ -868,6 +1013,44 @@ scalar True
   @fdc_example(value: true, description: "The only allowed value.")
 
 """
+Date is a string in the YYYY-MM-DD format representing a local-only date.
+
+See the description for Timestamp for range and limitations.
+
+As a FDC-specific extension, inputs that includes time portions (as specified by
+the Timestamp scalar) are accepted but only the date portion is used. In other
+words, only the part before "T" is used and the rest discarded. This effectively
+truncates it to the local date in the specified time-zone.
+
+Outputs will always be in the canonical YYYY-MM-DD format.
+
+In the PostgreSQL table, it's stored as [`date`](https://www.postgresql.org/docs/current/datatype-datetime.html).
+"""
+scalar Date @specifiedBy(url: "https://scalars.graphql.org/andimarek/local-date.html")
+
+"""
+Timestamp is a RFC 3339 string that represents an exact point in time.
+
+The serialization format follows https://scalars.graphql.org/andimarek/date-time
+except the "Non-optional exact milliseconds" Section. As a FDC-specific
+extension, inputs and outputs may contain 0, 3, 6, or 9 fractional digits.
+
+Specifically, output precision varies by server-side factors such as data source
+support and clients must not rely on an exact number of digits. Clients may
+truncate extra digits as fit, with the caveat that there may be information loss
+if the truncated value is subsequently sent back to the server.
+
+FDC only supports year 1583 to 9999 (inclusive) and uses the ISO-8601 calendar
+system for all date-time calculations. Notably, the expanded year representation
+(+/-YYYYY) is rejected and Year 1582 and before may either be rejected or cause
+undefined behavior.
+
+In the PostgreSQL table, it's stored as [`timestamptz`](https://www.postgresql.org/docs/current/datatype-datetime.html).
+"""
+scalar Timestamp @specifiedBy(url: "https://scalars.graphql.org/andimarek/date-time")
+
+
+"""
 A Common Expression Language (CEL) expression that returns a boolean at runtime.
 
 This expression can reference the `auth` variable, which is null when Firebase
@@ -963,6 +1146,32 @@ scalar Any_SQL
   @fdc_sqlExpression
   @fdc_forbiddenAsVariableType
   @fdc_forbiddenAsFieldType
+
+"""
+A Common Expression Language (CEL) expression that returns a Timestamp at runtime.
+
+Limitation: Right now, only a few expressions are supported.
+"""
+scalar Timestamp_Expr
+  @specifiedBy(url: "https://github.com/google/cel-spec")
+  @fdc_celExpression(returnType: "google.protobuf.Timestamp")
+  @fdc_forbiddenAsVariableType
+  @fdc_forbiddenAsFieldType
+  @fdc_example(value: "request.time", description: "The timestamp when the request is received (with microseconds precision).")
+
+"""
+A Common Expression Language (CEL) expression that returns a Timestamp at runtime,
+which is then truncated to UTC date only. The time-of-day parts are discarded.
+
+Limitation: Right now, only a few expressions are supported.
+"""
+scalar Date_Expr
+  @specifiedBy(url: "https://github.com/google/cel-spec")
+  @fdc_celExpression(returnType: "google.protobuf.Timestamp")
+  @fdc_forbiddenAsVariableType
+  @fdc_forbiddenAsFieldType
+  @fdc_example(value: "request.time", description: "The UTC date on which the request is received.")
+
 
 """
 Defines a relational database table.
@@ -1652,240 +1861,6 @@ directive @unique(
   fields: [String!]
 ) repeatable on FIELD_DEFINITION | OBJECT
 
-"""
-Date is a string in the YYYY-MM-DD format representing a local-only date.
-
-See the description for Timestamp for range and limitations.
-
-As a FDC-specific extension, inputs that includes time portions (as specified by
-the Timestamp scalar) are accepted but only the date portion is used. In other
-words, only the part before "T" is used and the rest discarded. This effectively
-truncates it to the local date in the specified time-zone.
-
-Outputs will always be in the canonical YYYY-MM-DD format.
-
-In the PostgreSQL table, it's stored as [`date`](https://www.postgresql.org/docs/current/datatype-datetime.html).
-"""
-scalar Date @specifiedBy(url: "https://scalars.graphql.org/andimarek/local-date.html")
-
-"""
-Timestamp is a RFC 3339 string that represents an exact point in time.
-
-The serialization format follows https://scalars.graphql.org/andimarek/date-time
-except the "Non-optional exact milliseconds" Section. As a FDC-specific
-extension, inputs and outputs may contain 0, 3, 6, or 9 fractional digits.
-
-Specifically, output precision varies by server-side factors such as data source
-support and clients must not rely on an exact number of digits. Clients may
-truncate extra digits as fit, with the caveat that there may be information loss
-if the truncated value is subsequently sent back to the server.
-
-FDC only supports year 1583 to 9999 (inclusive) and uses the ISO-8601 calendar
-system for all date-time calculations. Notably, the expanded year representation
-(+/-YYYYY) is rejected and Year 1582 and before may either be rejected or cause
-undefined behavior.
-
-In the PostgreSQL table, it's stored as [`timestamptz`](https://www.postgresql.org/docs/current/datatype-datetime.html).
-"""
-scalar Timestamp @specifiedBy(url: "https://scalars.graphql.org/andimarek/date-time")
-
-"""
-A Common Expression Language (CEL) expression that returns a Timestamp at runtime.
-
-Limitation: Right now, only a few expressions are supported.
-"""
-scalar Timestamp_Expr
-  @specifiedBy(url: "https://github.com/google/cel-spec")
-  @fdc_celExpression(returnType: "google.protobuf.Timestamp")
-  @fdc_forbiddenAsVariableType
-  @fdc_forbiddenAsFieldType
-  @fdc_example(value: "request.time", description: "The timestamp when the request is received (with microseconds precision).")
-
-"""
-A Common Expression Language (CEL) expression that returns a Timestamp at runtime,
-which is then truncated to UTC date only. The time-of-day parts are discarded.
-
-Limitation: Right now, only a few expressions are supported.
-"""
-scalar Date_Expr
-  @specifiedBy(url: "https://github.com/google/cel-spec")
-  @fdc_celExpression(returnType: "google.protobuf.Timestamp")
-  @fdc_forbiddenAsVariableType
-  @fdc_forbiddenAsFieldType
-  @fdc_example(value: "request.time", description: "The UTC date on which the request is received.")
-
-"Conditions on a `Date` value."
-input Date_Filter {
-  "Match if the field `IS NULL`."
-  isNull: Boolean
-  "Match if the field is exactly equal to the provided value."
-  eq: Date @fdc_oneOf(group: "eq")
-  "Match if the field equals the provided CEL expression."
-  eq_expr: Date_Expr @fdc_oneOf(group: "eq")
-  "Match if the field equals the provided relative date."
-  eq_date: Date_Relative @fdc_oneOf(group: "eq")
-  "Match if the field is not equal to the provided value."
-  ne: Date @fdc_oneOf(group: "ne")
-  "Match if the field is not equal to the provided CEL expression."
-  ne_expr: Date_Expr @fdc_oneOf(group: "ne")
-  "Match if the field is not equal to the provided relative date."
-  ne_date: Date_Relative @fdc_oneOf(group: "ne")
-  "Match if the field value is among the provided list of values."
-  in: [Date!]
-  "Match if the field value is not among the provided list of values."
-  nin: [Date!]
-  "Match if the field value is greater than the provided value."
-  gt: Date @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than the provided CEL expression."
-  gt_expr: Date_Expr @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than the provided relative date."
-  gt_date: Date_Relative @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than or equal to the provided value."
-  ge: Date @fdc_oneOf(group: "ge")
-  "Match if the field value is greater than or equal to the provided CEL expression."
-  ge_expr: Date_Expr @fdc_oneOf(group: "ge")
-  "Match if the field value is greater than or equal to the provided relative date."
-  ge_date: Date_Relative @fdc_oneOf(group: "ge")
-  "Match if the field value is less than the provided value."
-  lt: Date @fdc_oneOf(group: "lt")
-  "Match if the field value is less than the provided CEL expression."
-  lt_expr: Date_Expr @fdc_oneOf(group: "lt")
-  "Match if the field value is less than the provided relative date."
-  lt_date: Date_Relative @fdc_oneOf(group: "lt")
-  "Match if the field value is less than or equal to the provided value."
-  le: Date @fdc_oneOf(group: "le")
-  "Match if the field value is less than or equal to the provided CEL expression."
-  le_expr: Date_Expr @fdc_oneOf(group: "le")
-  "Match if the field value is less than or equal to the provided relative date."
-  le_date: Date_Relative @fdc_oneOf(group: "le")
-}
-
-"Conditions on a`Date` list."
-input Date_ListFilter {
-  "Match if the list contains the provided date."
-  includes: Date @fdc_oneOf(group: "includes")
-  "Match if the list contains the provided date CEL expression."
-  includes_expr: Date_Expr @fdc_oneOf(group: "includes")
-  "Match if the list contains the provided relative date."
-  includes_date: Date_Relative @fdc_oneOf(group: "includes")
-  "Match if the list does not contain the provided date."
-  excludes: Date @fdc_oneOf(group: "excludes")
-  "Match if the list does not contain the provided date CEL expression."
-  excludes_expr: Date_Expr @fdc_oneOf(group: "excludes")
-  "Match if the list does not contain the provided relative date."
-  excludes_date: Date_Relative @fdc_oneOf(group: "excludes")
-  "Match if the list contains all the provided dates."
-  includesAll: [Date!]
-  "Match if the list contains none of the provided dates."
-  excludesAll: [Date!]
-}
-
-"Conditions on a `Timestamp` value."
-input Timestamp_Filter {
-  "Match if the field `IS NULL`."
-  isNull: Boolean
-  "Match if the field is exactly equal to the provided value."
-  eq: Timestamp @fdc_oneOf(group: "eq")
-  "Match if the field equals the provided CEL expression."
-  eq_expr: Timestamp_Expr @fdc_oneOf(group: "eq")
-  "Match if the field equals the provided relative time."
-  eq_time: Timestamp_Relative @fdc_oneOf(group: "eq")
-  "Match if the field is not equal to the provided value."
-  ne: Timestamp @fdc_oneOf(group: "ne")
-  "Match if the field is not equal to the provided CEL expression."
-  ne_expr: Timestamp_Expr @fdc_oneOf(group: "ne")
-  "Match if the field is not equal to the provided relative time."
-  ne_time: Timestamp_Relative @fdc_oneOf(group: "ne")
-  "Match if the field value is among the provided list of values."
-  in: [Timestamp!]
-  "Match if the field value is not among the provided list of values."
-  nin: [Timestamp!]
-  "Match if the field value is greater than the provided value."
-  gt: Timestamp @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than the provided CEL expression."
-  gt_expr: Timestamp_Expr @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than the provided relative time."
-  gt_time: Timestamp_Relative @fdc_oneOf(group: "gt")
-  "Match if the field value is greater than or equal to the provided value."
-  ge: Timestamp @fdc_oneOf(group: "ge")
-  "Match if the field value is greater than or equal to the provided CEL expression."
-  ge_expr: Timestamp_Expr @fdc_oneOf(group: "ge")
-  "Match if the field value is greater than or equal to the provided relative time."
-  ge_time: Timestamp_Relative @fdc_oneOf(group: "ge")
-  "Match if the field value is less than the provided value."
-  lt: Timestamp @fdc_oneOf(group: "lt")
-  "Match if the field value is less than the provided CEL expression."
-  lt_expr: Timestamp_Expr @fdc_oneOf(group: "lt")
-  "Match if the field value is less than the provided relative time."
-  lt_time: Timestamp_Relative @fdc_oneOf(group: "lt")
-  "Match if the field value is less than or equal to the provided value."
-  le: Timestamp @fdc_oneOf(group: "le")
-  "Match if the field value is less than or equal to the provided CEL expression."
-  le_expr: Timestamp_Expr @fdc_oneOf(group: "le")
-  "Match if the field value is less than or equal to the provided relative time."
-  le_time: Timestamp_Relative @fdc_oneOf(group: "le")
-}
-
-"Conditions on a `Timestamp` list."
-input Timestamp_ListFilter {
-  "Match if the list contains the provided timestamp."
-  includes: Timestamp @fdc_oneOf(group: "includes")
-  "Match if the list contains the provided timestamp CEL expression."
-  includes_expr: Timestamp_Expr @fdc_oneOf(group: "includes")
-  "Match if the list contains the provided relative timestamp."
-  includes_time: Timestamp_Relative @fdc_oneOf(group: "includes")
-  "Match if the list does not contain the provided timestamp."
-  excludes: Timestamp @fdc_oneOf(group: "excludes")
-  "Match if the list does not contain the provided timestamp CEL expression."
-  excludes_expr: Timestamp_Expr @fdc_oneOf(group: "excludes")
-  "Match if the list does not contain the provided relative timestamp."
-  excludes_time: Timestamp_Relative @fdc_oneOf(group: "excludes")
-  "Match if the list contains all the provided timestamps."
-  includesAll: [Timestamp!]
-  "Match if the list contains none of the provided timestamps."
-  excludesAll: [Timestamp!]
-}
-
-"Update input of a `Date` value. Only one of `inc` or `dec` may be specified."
-input Date_Update {
-  "Increment the field by a provided duration."
-  inc: Date_Duration @fdc_oneOf
-  "Decrement the field by a provided duration."
-  dec: Date_Duration @fdc_oneOf
-}
-
-"Update input of a `Date` list value. Only one of `append`, `prepend`, `add`, or `remove` may be specified."
-input Date_ListUpdate {
-  "Append the provided `Date` values to the existing list."
-  append: [Date!] @fdc_oneOf
-  "Prepend the provided `Date` values to the existing list."
-  prepend: [Date!] @fdc_oneOf
-  "Append any `Date` values that do not already exist to the list."
-  add: [Date!] @fdc_oneOf
-  "Remove all occurrences of each `Date` from the list."
-  remove: [Date!] @fdc_oneOf
-}
-
-"Update input of a `Timestamp` value. Only one of `inc` or `dec` may be specified."
-input Timestamp_Update {
-  "Increment the field by a provided duration."
-  inc: Timestamp_Duration @fdc_oneOf
-  "Decrement the field by a provided duration."
-  dec: Timestamp_Duration @fdc_oneOf
-}
-
-"Update input of an `Timestamp` list value. Only one of `append`, `prepend`, `add`, or `remove` may be specified."
-input Timestamp_ListUpdate {
-  "Append the provided `Timestamp` values to the existing list."
-  append: [Timestamp!] @fdc_oneOf
-  "Prepend the provided `Timestamp` values to the existing list."
-  prepend: [Timestamp!] @fdc_oneOf
-  "Append any `Timestamp` values that do not already exist to the list."
-  add: [Timestamp!] @fdc_oneOf
-  "Remove all occurrences of each `Timestamp` from the list."
-  remove: [Timestamp!] @fdc_oneOf
-}
-
 "A runtime-calculated `Timestamp` value relative to `now` or `at`."
 input Timestamp_Relative @fdc_forbiddenAsVariableType @fdc_forbiddenAsFieldType {
   "Match for the current time."
@@ -2078,6 +2053,46 @@ input Any_ListUpdate {
   remove: [Any!] @fdc_oneOf
 }
 
+"Update input of a `Date` value. Only one of `inc` or `dec` may be specified."
+input Date_Update {
+  "Increment the field by a provided duration."
+  inc: Date_Duration @fdc_oneOf
+  "Decrement the field by a provided duration."
+  dec: Date_Duration @fdc_oneOf
+}
+
+"Update input of a `Date` list value. Only one of `append`, `prepend`, `add`, or `remove` may be specified."
+input Date_ListUpdate {
+  "Append the provided `Date` values to the existing list."
+  append: [Date!] @fdc_oneOf
+  "Prepend the provided `Date` values to the existing list."
+  prepend: [Date!] @fdc_oneOf
+  "Append any `Date` values that do not already exist to the list."
+  add: [Date!] @fdc_oneOf
+  "Remove all occurrences of each `Date` from the list."
+  remove: [Date!] @fdc_oneOf
+}
+
+"Update input of a `Timestamp` value. Only one of `inc` or `dec` may be specified."
+input Timestamp_Update {
+  "Increment the field by a provided duration."
+  inc: Timestamp_Duration @fdc_oneOf
+  "Decrement the field by a provided duration."
+  dec: Timestamp_Duration @fdc_oneOf
+}
+
+"Update input of an `Timestamp` list value. Only one of `append`, `prepend`, `add`, or `remove` may be specified."
+input Timestamp_ListUpdate {
+  "Append the provided `Timestamp` values to the existing list."
+  append: [Timestamp!] @fdc_oneOf
+  "Prepend the provided `Timestamp` values to the existing list."
+  prepend: [Timestamp!] @fdc_oneOf
+  "Append any `Timestamp` values that do not already exist to the list."
+  add: [Timestamp!] @fdc_oneOf
+  "Remove all occurrences of each `Timestamp` from the list."
+  remove: [Timestamp!] @fdc_oneOf
+}
+
 type Query {
   """
   _service provides customized introspection on Firebase Data Connect Sevice.
@@ -2207,4 +2222,195 @@ scalar Vector_Embed_Model
   @fdc_example(value: "text-embedding-004", description: "Another text embedding model")
 
 # Intentionally left blank.
+
+"""
+**SQL_Query**: A scalar representing a PostgreSQL SQL Data Query Language (DQL) statement.
+
+To guard against SQL injection, the SQL statement must be a **string literal** embedded directly within the GraphQL operation. It **cannot** be provided as a GraphQL variable.
+
+**Constraints:**
+
+*   Only Data Query Language (DQL) statements (e.g., `SELECT`, `TABLE`) are permitted.
+*   Data Definition Language (DDL) statements (e.g., `CREATE`, `ALTER`, `DROP`) are **not** allowed.
+*   Data Manipulation Language (DML) statements (e.g., `INSERT`, `UPDATE`, `DELETE`) are **not** allowed.
+"""
+scalar SQL_Query
+  @fdc_sqlExpression
+  @fdc_forbiddenAsVariableType
+  @fdc_forbiddenAsFieldType
+  @fdc_example(value: "SELECT id, content FROM items WHERE id = $1", description: "Select items by ID.")
+  @fdc_example(value: "TABLE items", description: "Select all from items.")
+
+"""
+**SQL_Mutation**: A scalar representing a PostgreSQL SQL Data Manipulation Language (DML) statement.
+
+To guard against SQL injection, the SQL statement must be a **string literal** embedded directly within the GraphQL operation. It **cannot** be provided as a GraphQL variable.
+
+**Constraints:**
+
+*   Only Data Manipulation Language (DML) statements (e.g., `INSERT`, `UPDATE`, `DELETE`) are permitted.
+*   Data Definition Language (DDL) statements (e.g., `CREATE`, `ALTER`, `DROP`) are **not** allowed.
+"""
+scalar SQL_Mutation
+  @fdc_sqlExpression
+  @fdc_forbiddenAsVariableType
+  @fdc_forbiddenAsFieldType
+  @fdc_example(value: "UPDATE my_table SET status = $1 WHERE id = $2", description: "Update status by ID.")
+  @fdc_example(value: "INSERT INTO new_table (col1, col2) VALUES ($1, $2) RETURNING *", description: "Insert and return all columns.")
+
+"""
+A list of values to bind to the `$1`, `$2`, etc. placeholders in the SQL statement, in order.
+"""
+scalar SQL_Params
+  @fdc_forbiddenAsVariableType
+  @fdc_forbiddenAsFieldType
+  @fdc_example(value: ["user123", "active"], description: "List of values for $1, $2, etc.")
+
+extend type Query {
+  """
+  Executes a SQL statement expected to return zero or more rows.
+  Intended for read-only operations (e.g., SELECT, TABLE).
+  Deploy-time checks will warn against DML statements in this field.
+
+  **Usage:**
+
+  ```graphql
+  query GetRestaurantStats {
+    _select(
+      sql: "SELECT id, column from my_table WHERE user_id = $1 AND status = $2",
+      params: [{_expr: "auth.uid"}, "active"]
+    )
+  }
+  ```
+
+  **Returns:** A JSON array of objects. The structure is derived from the `SELECT` statement's columns.
+  """
+  _select(
+    """
+    The SQL DQL statement to execute. This must be a **string literal** defined directly in the GraphQL operation. Use `$1`, `$2`, etc. as placeholders for values provided in the `params` argument.
+    """
+    sql: SQL_Query!,
+    """
+    A list of values to bind to the `$1`, `$2`, etc. placeholders in the `sql`, in order. Values can also be expressions using `_expr` (e.g., `{_expr: "auth.uid"}`) to inject dynamic values.
+    """
+    params: SQL_Params
+  ): [Any]
+
+  """
+  Executes a SQL statement expected to return exactly one row.
+  Returns null if no row is returned.
+  Intended for read-only operations.
+  Deploy-time checks will warn against DML statements in this field.
+
+  **Usage:**
+
+  ```graphql
+  query MyCustomSelect {
+    _selectFirst(
+      sql: "SELECT id, column from my_table WHERE user_id = $1 LIMIT 1",
+      params: [{_expr: "auth.uid"}]
+    )
+  }
+  ```
+
+  **Returns:** A single JSON object or `null`. The structure is derived from the `SELECT` statement's columns.
+  """
+  _selectFirst(
+    """
+    The SQL DQL statement to execute. This must be a **string literal** defined directly in the GraphQL operation. Use `$1`, `$2`, etc. as placeholders for values provided in the `params` argument.
+    """
+    sql: SQL_Query!,
+    """
+    A list of values to bind to the `$1`, `$2`, etc. placeholders in the `sql`, in order. Values can also be expressions using `_expr` (e.g., `{_expr: "auth.uid"}`) to inject dynamic values.
+    """
+    params: SQL_Params
+  ): Any
+}
+
+extend type Mutation {
+  """
+  Executes a SQL statement, potentially with side effects, expected to return zero or more rows.
+  Useful for DML statements with a RETURNING clause (e.g., INSERT/UPDATE/DELETE ... RETURNING *).
+
+  **Usage:**
+
+  ```graphql
+  mutation MyCustomInsert {
+    _executeReturning(
+      sql: "INSERT INTO new_table (col1, col2) VALUES ($1, $2) RETURNING *",
+      params: ["value1", 456]
+    )
+  }
+  ```
+
+  **Returns:** A JSON array of objects, where each object represents a row from the `RETURNING` clause.
+  """
+  _executeReturning(
+    """
+    The SQL statement to execute. This must be a **string literal** defined directly in the GraphQL operation. Use `$1`, `$2`, etc. as placeholders for values provided in the `params` argument.
+    """
+    sql: SQL_Mutation!,
+    """
+    A list of values to bind to the `$1`, `$2`, etc. placeholders in the `sql`, in order. Values can also be expressions using `_expr` (e.g., `{_expr: "auth.uid"}`) to inject dynamic values.
+    """
+    params: SQL_Params
+  ): [Any]
+
+  """
+  Executes a SQL statement, potentially with side effects, expected to return exactly one row.
+  Useful for DML statements on a single row with a RETURNING clause.
+  Returns null if no row is returned.
+
+  **Usage:**
+
+  ```graphql
+  mutation MyCustomUpdate {
+    _executeReturningFirst(
+      sql: "UPDATE my_table SET status = $1 WHERE id = $2 AND user_id = $3 RETURNING *",
+      params: ["inactive", 123, {_expr: "auth.uid"}]
+    )
+  }
+  ```
+
+  **Returns:** A single JSON object or `null`, representing a row from the `RETURNING` clause.
+  """
+  _executeReturningFirst(
+    """
+    The SQL DML statement with a `RETURNING *` clause. This must be a **string literal** defined directly in the GraphQL operation. Use `$1`, `$2`, etc. as placeholders for values provided in the `params` argument.
+    """
+    sql: SQL_Mutation!,
+    """
+    A list of values to bind to the `$1`, `$2`, etc. placeholders in the `sql`, in order. Values can also be expressions using `_expr` (e.g., `{_expr: "auth.uid"}`) to inject dynamic values.
+    """
+    params: SQL_Params
+  ): Any
+
+  """
+  Executes a SQL DML statement (e.g., INSERT, UPDATE, DELETE) where the primary result is the number of affected rows.
+  RETURNING clauses in the SQL will be ignored in the output of this field.
+
+  **Usage:**
+
+  ```graphql
+  mutation MyCustomExecute {
+    _execute(
+      sql: "DELETE FROM my_table WHERE id = $1",
+      params: [123]
+    )
+  }
+  ```
+
+  **Returns:** The number of rows affected.
+  """
+  _execute(
+    """
+    The SQL statement to execute. This must be a **string literal** defined directly in the GraphQL operation. Use `$1`, `$2`, etc. as placeholders for values provided in the `params` argument.
+    """
+    sql: SQL_Mutation!,
+    """
+    A list of values to bind to the `$1`, `$2`, etc. placeholders in the `sql`, in order. Values can also be expressions using `_expr` (e.g., `{_expr: "auth.uid"}`) to inject dynamic values.
+    """
+    params: SQL_Params
+  ): Int
+}
 

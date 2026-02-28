@@ -42,6 +42,13 @@ const baseDashboardSteps: DashboardTourStep[] = [
     placement: "bottom",
   },
   {
+    id: "crop-stage-progress",
+    route: "/dashboard",
+    target: '[data-tour="crop-stage-progress"]',
+    content: "Crop Stage Progress shows season progress for the selected project. Use «Updates & Advisory» to see recent activity and smart tips.",
+    placement: "bottom",
+  },
+  {
     id: "new-operations-button",
     route: "/dashboard",
     target: '[data-tour="new-operation-button"]',
@@ -310,7 +317,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         }}
         styles={{
           options: {
-            zIndex: 1200,
+            zIndex: 9999,
             primaryColor: "hsl(var(--primary))",
             backgroundColor: "hsl(var(--card))",
             textColor: "hsl(var(--foreground))",

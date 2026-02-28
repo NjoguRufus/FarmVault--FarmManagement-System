@@ -343,13 +343,26 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // --- Activity logs: live operations snapshot (tasks, harvest, inventory, payments) ---
+    match /activityLogs/{logId} {
+      allow create: if isSignedIn() && (
+        request.resource.data.get('companyId', null) == userCompanyId()
+        || isDeveloper()
+      );
+      allow read: if isSignedIn() && (
+        resource.data.get('companyId', null) == userCompanyId()
+        || isDeveloper()
+      );
+      allow update, delete: if false;
+    }
+
     // --- Code Red: urgent developer–admin communication (e.g. data recovery) ---
     match /codeRed/{requestId} {
       allow read: if isSignedIn() && (
         resource.data.get('companyId', null) == userCompanyId() || isDeveloper()
       );
       allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow update, delete: if isSignedIn() && (
+      allow update, delete: if isSignedIn() && (  
         resource.data.get('companyId', null) == userCompanyId() || isDeveloper()
       );
       match /messages/{messageId} {
