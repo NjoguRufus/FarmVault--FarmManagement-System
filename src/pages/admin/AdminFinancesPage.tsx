@@ -43,7 +43,10 @@ function formatKESFull(v: number): string {
 }
 
 export default function AdminFinancesPage() {
-  const { data: companies = [], isLoading: companiesLoading } = useCollection<Company>('admin-finances-companies', 'companies');
+  const { data: companies = [], isLoading: companiesLoading } = useCollection<Company>('admin-finances-companies', 'companies', {
+    companyScoped: false,
+    isDeveloper: true,
+  });
   const { data: platformExpenses = [], isLoading: expensesLoading } = useQuery({
     queryKey: ['platform-expenses'],
     queryFn: getPlatformExpenses,

@@ -71,10 +71,10 @@ export async function updateCompany(
   await updateDoc(ref, updates);
 }
 
-export async function createCompany(name: string, email: string, plan: string = 'starter') {
+export async function createCompany(name: string, companyEmail: string, plan: string = 'starter') {
   const ref = await addDoc(collection(db, 'companies'), {
     name,
-    email,
+    email: companyEmail,
     createdAt: serverTimestamp(),
     status: 'active',
     subscriptionPlan: 'trial',
@@ -83,10 +83,10 @@ export async function createCompany(name: string, email: string, plan: string = 
     projectCount: 0,
     revenue: 0,
   });
-
   return ref.id;
 }
 
+/** Write users/{uid} with role company-admin and companyId. Must use auth uid as doc id. */
 export async function createCompanyUserProfile(params: {
   uid: string;
   companyId: string;
@@ -94,13 +94,15 @@ export async function createCompanyUserProfile(params: {
   email: string;
 }) {
   const { uid, companyId, name, email } = params;
-
-  await setDoc(doc(db, 'users', uid), {
+  const userRef = doc(db, 'users', uid);
+  await setDoc(userRef, {
+    id: uid,
     companyId,
     name,
     email,
-    role: 'company_admin',
+    role: 'company-admin',
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 }
 

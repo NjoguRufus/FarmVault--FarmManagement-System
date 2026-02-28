@@ -17,16 +17,18 @@ export function DriverDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const companyId = user?.companyId || '';
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayEnd = new Date(today);
   todayEnd.setHours(23, 59, 59, 999);
 
   // Data sources
-  const { data: allDeliveries = [] } = useCollection<Delivery>('deliveries', 'deliveries');
-  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses');
+  const { data: allDeliveries = [] } = useCollection<Delivery>('deliveries', 'deliveries', scope);
+  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses', scope);
 
   // Filter deliveries by driver and project
   const driverDeliveries = useMemo(() => {

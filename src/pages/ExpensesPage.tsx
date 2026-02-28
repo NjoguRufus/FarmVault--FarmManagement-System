@@ -53,10 +53,13 @@ export default function ExpensesPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses');
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
-  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
+  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses', scope);
+  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');

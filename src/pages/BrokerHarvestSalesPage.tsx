@@ -58,12 +58,15 @@ const parseNumber = (value: string) => Number(value || '0');
 export default function BrokerHarvestSalesPage() {
   const { user } = useAuth();
   const brokerId = user?.id ?? '';
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
-  const { data: allExpenses = [] } = useCollection<Expense>('broker-expenses', 'expenses');
+  const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales', scope);
+  const { data: allExpenses = [] } = useCollection<Expense>('broker-expenses', 'expenses', scope);
 
   // Brokers only see harvests allocated to them that are going to market
   const brokerHarvests = useMemo(() => {

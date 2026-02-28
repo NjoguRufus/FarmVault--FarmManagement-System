@@ -31,7 +31,10 @@ interface FeedbackDoc {
 export default function AdminFeedbackPage() {
   const [typeFilter, setTypeFilter] = useState<string>('all');
 
-  const { data: companies = [] } = useCollection<Company>('admin-feedback-companies', 'companies');
+  const { data: companies = [] } = useCollection<Company>('admin-feedback-companies', 'companies', {
+    companyScoped: false,
+    isDeveloper: true,
+  });
   const getCompanyName = (companyId: string | null | undefined) =>
     companyId ? (companies.find((c) => c.id === companyId)?.name ?? companyId) : '—';
 

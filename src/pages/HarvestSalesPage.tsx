@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, List } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -41,6 +42,7 @@ const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
 export default function HarvestSalesPage() {
   const { activeProject } = useProject();
+  const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -53,11 +55,14 @@ export default function HarvestSalesPage() {
 
   const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
   const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
-  const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales');
-  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
-  const { data: allUsers = [] } = useCollection<User>('harvest-page-users', 'users');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('harvest-inventory', 'inventoryItems');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales', scope);
+  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
+  const { data: allUsers = [] } = useCollection<User>('harvest-page-users', 'users', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('harvest-inventory', 'inventoryItems', scope);
 
   const harvests = activeProject
     ? allHarvests.filter((h) => h.projectId === activeProject.id)

@@ -10,7 +10,10 @@ import { Company } from '@/types';
 
 export function DeveloperDashboard() {
   const navigate = useNavigate();
-  const { data: companies = [], isLoading } = useCollection<Company>('companies', 'companies');
+  const { data: companies = [], isLoading } = useCollection<Company>('companies', 'companies', {
+    companyScoped: false,
+    isDeveloper: true,
+  });
   const totalUsers = companies.reduce((sum, c) => sum + (c.userCount ?? 0), 0);
   const totalRevenue = companies.reduce((sum, c) => sum + (c.revenue ?? 0), 0);
   const activeCompanies = companies.filter(c => c.status === 'active').length;

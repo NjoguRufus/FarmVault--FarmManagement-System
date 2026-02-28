@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Harvest, Sale, Expense } from '@/types';
@@ -15,13 +16,17 @@ export default function HarvestDetailsPage() {
   const { harvestId } = useParams<{ harvestId: string }>();
   const navigate = useNavigate();
   const { activeProject } = useProject();
+  const { user } = useAuth();
   const { can } = usePermissions();
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const canViewFinancials = can('harvest', 'viewFinancials');
   const canViewBuyerSection = can('harvest', 'viewBuyerSection') || canViewFinancials;
 
-  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales');
-  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses');
+  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales', scope);
+  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses', scope);
 
   const harvest = useMemo(
     () => allHarvests.find((h) => h.id === harvestId && (!activeProject || h.projectId === activeProject.id)),

@@ -126,8 +126,11 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [addPermissions, setAddPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
   const [addPreset, setAddPreset] = useState<PermissionEditorPreset>('custom');
-  const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees');
-  const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees', scope);
+  const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users', scope);
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');

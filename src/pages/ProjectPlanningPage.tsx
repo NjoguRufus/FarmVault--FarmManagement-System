@@ -30,12 +30,14 @@ export default function ProjectPlanningPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const companyId = user?.companyId || null;
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper, enabled: !!companyId || isDeveloper };
 
   const { data: projects = [], isLoading: projectLoading } = useCollection<Project>(
     'project-planning-projects',
     'projects',
-    { enabled: !!companyId },
+    scope,
   );
   const project = useMemo(() => {
     if (!companyId || !projectId) return null;
@@ -48,10 +50,11 @@ export default function ProjectPlanningPage() {
     projectId,
   );
 
-  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
+  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers', scope);
   const { data: allSeasonChallenges = [] } = useCollection<SeasonChallenge>(
     'project-planning-season-challenges',
-    'seasonChallenges'
+    'seasonChallenges',
+    scope,
   );
   const companySuppliers = useMemo(
     () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),

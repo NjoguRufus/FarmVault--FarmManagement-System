@@ -51,7 +51,7 @@ export function CtaSection() {
 
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-10 h-14 text-base font-semibold">
-                <Link to="/choose-plan" className="inline-flex items-center">
+                <Link to="/setup-company" className="inline-flex items-center">
                   Get Started Now
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>

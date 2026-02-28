@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap } from 'lucide-react';
+import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap, RefreshCw } from 'lucide-react';
 import { registerCompanyAdmin } from '@/services/authService';
 import { createCompany, createCompanyUserProfile } from '@/services/companyService';
 import { SUBSCRIPTION_PLANS } from '@/config/plans';
@@ -8,13 +8,16 @@ import { OnboardingHeader } from '@/components/onboarding/OnboardingHeader';
 import { OnboardingNavButtons } from '@/components/onboarding/OnboardingNavButtons';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const STEPS = 4;
 
 export default function SetupCompany() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setupIncomplete } = useAuth();
   const statePlan = (location.state as { plan?: string })?.plan;
+  const stateMessage = (location.state as { message?: string })?.message;
   const initialPlan =
     statePlan && ['starter', 'professional', 'enterprise'].includes(statePlan)
       ? statePlan
@@ -114,6 +117,27 @@ export default function SetupCompany() {
   };
 
 
+  // Setup incomplete redirect: show message and refresh option
+  if (setupIncomplete && stateMessage) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
+        <Card className="w-full max-w-md rounded-2xl shadow-xl border-primary/10 overflow-hidden">
+          <CardContent className="p-8 sm:p-10 text-center">
+            <p className="text-muted-foreground text-sm mb-6">{stateMessage}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh page
+            </button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Success state screen
   if (success) {
     return (
@@ -153,9 +177,10 @@ export default function SetupCompany() {
     (step === 3) ||
     (step === 4 && step4Valid && !loading);
 
+  const isPlanStep = step === 4;
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-8 sm:py-12">
-      <div className="w-full max-w-lg">
+      <div className={cn('w-full', isPlanStep ? 'max-w-4xl' : 'max-w-lg')}>
         <Card className="rounded-2xl shadow-xl border-primary/10 overflow-hidden bg-card/95 backdrop-blur-sm">
           <CardContent className="p-6 sm:p-8">
             {/* Logo row */}
@@ -346,7 +371,7 @@ export default function SetupCompany() {
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Pricing
                   </p>
-                  <div className="grid sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 min-w-0">
                     {SUBSCRIPTION_PLANS.map((plan) => {
                       const isSelected = selectedPlan === plan.value;
                       return (

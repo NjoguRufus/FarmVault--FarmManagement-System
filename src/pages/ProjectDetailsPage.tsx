@@ -38,12 +38,14 @@ export default function ProjectDetailsPage() {
   const queryClient = useQueryClient();
   const { activeProject, setActiveProject } = useProject();
 
-  const companyId = user?.companyId || null;
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper, enabled: !!companyId || isDeveloper };
 
   const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
     'project-details-projects',
     'projects',
-    { enabled: !!companyId },
+    scope,
   );
   const project = useMemo(() => {
     if (!companyId || !projectId) return null;
@@ -54,20 +56,22 @@ export default function ProjectDetailsPage() {
   const { data: stages = [], isLoading: stagesLoading } = useProjectStages(companyId, projectId);
 
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('project-details-worklogs', 'workLogs', {
-    enabled: !!companyId,
+    ...scope,
+    projectId: projectId ?? null,
   });
   const { data: allExpenses = [] } = useCollection<Expense>('project-details-expenses', 'expenses', {
-    enabled: !!companyId,
+    ...scope,
+    projectId: projectId ?? null,
   });
   const { data: allChallenges = [] } = useCollection<SeasonChallenge>(
     'project-details-challenges',
     'seasonChallenges',
-    { enabled: !!companyId },
+    { ...scope, projectId: projectId ?? null },
   );
   const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>(
     'project-details-usage',
     'inventoryUsage',
-    { enabled: !!companyId },
+    { ...scope, projectId: projectId ?? null },
   );
 
   const workLogs = useMemo(

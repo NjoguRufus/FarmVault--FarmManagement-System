@@ -32,11 +32,14 @@ export default function CropStagesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const { data: allStages = [], isLoading } = useCollection<CropStage>('projectStages', 'projectStages');
-  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
-  const { data: allChallenges = [] } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges');
-  const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>('inventoryUsage', 'inventoryUsage');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: allStages = [], isLoading } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
+  const { data: allChallenges = [] } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges', scope);
+  const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>('inventoryUsage', 'inventoryUsage', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
   const [selectedStage, setSelectedStage] = useState<CropStage | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);

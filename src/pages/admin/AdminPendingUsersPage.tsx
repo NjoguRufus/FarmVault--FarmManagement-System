@@ -4,7 +4,10 @@ import { useCollection } from '@/hooks/useCollection';
 import { User } from '@/types';
 
 export default function AdminPendingUsersPage() {
-  const { data: users = [], isLoading } = useCollection<User>('admin-pending-users', 'users');
+  const { data: users = [], isLoading } = useCollection<User>('admin-pending-users', 'users', {
+    companyScoped: false,
+    isDeveloper: true,
+  });
 
   const pendingUsers = users.filter(
     (u) => u.role !== 'developer' && !u.companyId

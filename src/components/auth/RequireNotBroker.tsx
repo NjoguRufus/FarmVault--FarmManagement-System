@@ -12,7 +12,13 @@ interface RequireNotBrokerProps {
 
 export function RequireNotBroker({ children, redirectTo = '/broker' }: RequireNotBrokerProps) {
   const { user } = useAuth();
-  const { data: employees = [] } = useCollection<Employee>('employees', 'employees');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const { data: employees = [] } = useCollection<Employee>('employees', 'employees', {
+    companyScoped: true,
+    companyId,
+    isDeveloper,
+  });
 
   if (!user) {
     return children;

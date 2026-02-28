@@ -30,7 +30,10 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 export default function AdminCompaniesPage() {
-  const { data: companies = [], isLoading } = useCollection<Company>('admin-companies-list', 'companies');
+  const { data: companies = [], isLoading } = useCollection<Company>('admin-companies-list', 'companies', {
+    companyScoped: false,
+    isDeveloper: true,
+  });
   const [viewMode, setViewMode] = useState<CompaniesViewMode>('list');
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [reminderLoading, setReminderLoading] = useState(false);

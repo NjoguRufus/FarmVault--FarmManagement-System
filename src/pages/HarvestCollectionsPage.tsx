@@ -203,17 +203,21 @@ export default function HarvestCollectionsPage() {
     }
   }, [selectedCollectionId, viewMode, detailModes]);
 
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const { data: allCollections = [], isLoading: loadingCollections } = useCollection<HarvestCollection>(
     'harvestCollections',
-    'harvestCollections'
+    'harvestCollections',
+    scope,
   );
-  const { data: allPickers = [] } = useCollection<HarvestPicker>('harvestPickers', 'harvestPickers');
+  const { data: allPickers = [] } = useCollection<HarvestPicker>('harvestPickers', 'harvestPickers', scope);
   const { data: allWeighEntries = [] } = useCollection<PickerWeighEntry>(
     'pickerWeighEntries',
-    'pickerWeighEntries'
+    'pickerWeighEntries',
+    scope,
   );
 
-  const companyId = user?.companyId ?? '';
   const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
 
   useEffect(() => {
