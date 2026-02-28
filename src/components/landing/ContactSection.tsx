@@ -57,7 +57,7 @@ export function ContactSection() {
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-12">
-                <Link to="/choose-plan" className="inline-flex items-center justify-center">
+                <Link to="/setup-company" className="inline-flex items-center justify-center">
                   Get Started
                   <Send className="ml-2 h-4 w-4" />
                 </Link>

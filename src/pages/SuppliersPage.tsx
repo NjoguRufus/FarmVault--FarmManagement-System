@@ -67,8 +67,11 @@ export default function SuppliersPage() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewSaving, setReviewSaving] = useState(false);
 
-  const { data: suppliers = [], isLoading } = useCollection<Supplier>('suppliers', 'suppliers');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: suppliers = [], isLoading } = useCollection<Supplier>('suppliers', 'suppliers', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
   const companySuppliers = useMemo(
     () => (user?.companyId ? suppliers.filter((s) => s.companyId === user.companyId) : suppliers),

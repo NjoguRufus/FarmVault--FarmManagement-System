@@ -49,14 +49,17 @@ export default function OperationsPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const canCreateWorkCard = can('operations', 'createWorkCard');
   const canRecordDailyWork = can('operations', 'recordDailyWork');
   const canApproveWorkLogs = can('operations', 'approveWorkLog');
-  const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs');
-  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
-  const { data: allUsers = [] } = useCollection<User>('users', 'users');
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
+  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
+  const { data: allUsers = [] } = useCollection<User>('ops-users', 'users', scope);
+  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
   // Available categories = only those that exist in company inventory (for plan work / inputs)
   const availableCategories = useMemo(() => {
     const inv = activeProject

@@ -9,12 +9,19 @@ const WORK_CARDS_KEY = 'operationsWorkCards';
 
 function useWorkCardsCollection(
   key: string,
-  constraints: QueryConstraint[],
-  enabled: boolean
+  options: {
+    enabled: boolean;
+    companyId: string | null;
+    projectId?: string | null;
+    constraints?: QueryConstraint[];
+  }
 ) {
   const result = useCollection<OperationsWorkCard>(key, WORK_CARDS_PATH, {
-    enabled,
-    constraints,
+    enabled: options.enabled,
+    companyScoped: true,
+    companyId: options.companyId,
+    projectId: options.projectId ?? undefined,
+    constraints: options.constraints ?? [],
   });
 
   return {
@@ -37,17 +44,18 @@ export function useWorkCardsForManager(
 
   const constraints = useMemo<QueryConstraint[]>(() => {
     if (dedupedManagerIds.length === 0) return [];
-    const managerConstraint = where('allocatedManagerId', 'in', dedupedManagerIds);
-    if (companyId) {
-      return [managerConstraint, where('companyId', '==', companyId)];
-    }
-    return [managerConstraint];
-  }, [dedupedManagerIds, companyId]);
+    return [where('allocatedManagerId', 'in', dedupedManagerIds)];
+  }, [dedupedManagerIds]);
+
+  const enabled = dedupedManagerIds.length > 0 && (companyId !== undefined ? Boolean(companyId) : true);
 
   return useWorkCardsCollection(
     `${WORK_CARDS_KEY}-manager-${companyId ?? 'all'}-${dedupedManagerIds.join(',')}`,
-    constraints,
-    dedupedManagerIds.length > 0 && (companyId !== undefined ? Boolean(companyId) : true)
+    {
+      enabled,
+      companyId: companyId ?? null,
+      constraints,
+    }
   );
 }
 
@@ -55,15 +63,12 @@ export function useWorkCardsForCompany(
   companyId: string | null,
   _options?: { refetchInterval?: number }
 ) {
-  const constraints = useMemo<QueryConstraint[]>(() => {
-    if (!companyId) return [];
-    return [where('companyId', '==', companyId)];
-  }, [companyId]);
-
   return useWorkCardsCollection(
     `${WORK_CARDS_KEY}-company-${companyId ?? 'none'}`,
-    constraints,
-    Boolean(companyId)
+    {
+      enabled: Boolean(companyId),
+      companyId,
+    }
   );
 }
 
@@ -71,22 +76,15 @@ export function useWorkCardsForProject(
   projectId: string | null,
   companyId?: string | null
 ) {
-  const constraints = useMemo<QueryConstraint[]>(() => {
-    if (!projectId) return [];
-    const byProject = where('projectId', '==', projectId);
-    if (companyId) {
-      return [byProject, where('companyId', '==', companyId)];
-    }
-    return [byProject];
-  }, [projectId, companyId]);
-
-  // Require companyId so the query is always company-scoped and passes Firestore rules.
   const enabled = Boolean(projectId && companyId);
 
   return useWorkCardsCollection(
     `${WORK_CARDS_KEY}-project-${projectId ?? 'none'}-${companyId ?? 'all'}`,
-    constraints,
-    enabled
+    {
+      enabled,
+      companyId: companyId ?? null,
+      projectId: projectId ?? null,
+    }
   );
 }
 

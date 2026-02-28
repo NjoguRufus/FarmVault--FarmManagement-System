@@ -54,6 +54,9 @@ export default function InventoryPage() {
   const { addNotification } = useNotifications();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   const canAddInventoryItem = can('inventory', 'addItem');
   const canDeleteInventoryItem = can('inventory', 'deleteItem');
   const canRestockInventory = can('inventory', 'restock');
@@ -61,10 +64,10 @@ export default function InventoryPage() {
   const canManageInventoryCategories = can('inventory', 'categories');
   const canCreateInventoryPurchase = can('inventory', 'purchases');
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: allInventory = [], isLoading } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
-  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers');
-  const { data: neededItems = [] } = useCollection<NeededItem>('neededItems', 'neededItems');
-  const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>('inventoryUsage', 'inventoryUsage');
+  const { data: allInventory = [], isLoading } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
+  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers', scope);
+  const { data: neededItems = [] } = useCollection<NeededItem>('neededItems', 'neededItems', scope);
+  const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>('inventoryUsage', 'inventoryUsage', scope);
   const [usageModalItem, setUsageModalItem] = useState<InventoryItem | null>(null);
 
   // Usage list for selected item, sorted with latest usage first
@@ -85,6 +88,7 @@ export default function InventoryPage() {
   const { data: allCategories = [] } = useCollection<InventoryCategoryItem>(
     'inventoryCategories',
     'inventoryCategories',
+    scope,
   );
   
   const categories = useMemo(() => {

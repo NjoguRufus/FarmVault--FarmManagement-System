@@ -62,11 +62,14 @@ export default function ManagerOperationsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   // Fetch data from Firestore
-  const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', { refetchInterval: 3000 });
-  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
+  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
+  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
   const { data: company } = useQuery({
     queryKey: ['company', user?.companyId],
     queryFn: () => getCompany(user!.companyId!),

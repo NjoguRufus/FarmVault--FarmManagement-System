@@ -4,8 +4,9 @@ import { useCollection } from '@/hooks/useCollection';
 import { Employee, Company } from '@/types';
 
 export default function AdminBrokersPage() {
-  const { data: employees = [], isLoading } = useCollection<Employee>('admin-employees-brokers', 'employees');
-  const { data: companies = [] } = useCollection<Company>('admin-companies-for-brokers', 'companies');
+  const adminScope = { companyScoped: false, isDeveloper: true };
+  const { data: employees = [], isLoading } = useCollection<Employee>('admin-employees-brokers', 'employees', adminScope);
+  const { data: companies = [] } = useCollection<Company>('admin-companies-for-brokers', 'companies', adminScope);
 
   const brokers = employees.filter((e) => e.role === 'broker');
 

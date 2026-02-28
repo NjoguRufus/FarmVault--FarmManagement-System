@@ -54,7 +54,7 @@ export function LandingNavbar() {
             <Link to="/login">Login</Link>
           </Button>
           <Button size="sm" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-xl px-6 font-semibold">
-            <Link to="/choose-plan">Get Started</Link>
+            <Link to="/setup-company">Get Started</Link>
           </Button>
         </div>
 
@@ -81,7 +81,7 @@ export function LandingNavbar() {
                   <Link to="/login" onClick={() => setOpen(false)}>Login</Link>
                 </Button>
                 <Button size="sm" asChild className="gradient-primary text-primary-foreground flex-1 rounded-xl btn-luxury">
-                  <Link to="/choose-plan" onClick={() => setOpen(false)}>Get Started</Link>
+                  <Link to="/setup-company" onClick={() => setOpen(false)}>Get Started</Link>
                 </Button>
               </div>
               <InstallPWAButton className="w-full rounded-xl mt-3" />

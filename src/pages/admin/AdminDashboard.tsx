@@ -4,9 +4,10 @@ import { useCollection } from '@/hooks/useCollection';
 import { Company, Employee, User } from '@/types';
 
 export default function AdminDashboard() {
-  const { data: companies = [] } = useCollection<Company>('admin-companies', 'companies');
-  const { data: users = [] } = useCollection<User>('admin-users', 'users');
-  const { data: employees = [] } = useCollection<Employee>('admin-employees', 'employees');
+  const adminScope = { companyScoped: false, isDeveloper: true };
+  const { data: companies = [] } = useCollection<Company>('admin-companies', 'companies', adminScope);
+  const { data: users = [] } = useCollection<User>('admin-users', 'users', adminScope);
+  const { data: employees = [] } = useCollection<Employee>('admin-employees', 'employees', adminScope);
 
   const totalCompanies = companies.length;
   const activeCompanies = companies.filter(c => c.status === 'active').length;

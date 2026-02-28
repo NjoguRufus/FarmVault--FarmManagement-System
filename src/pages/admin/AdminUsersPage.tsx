@@ -5,8 +5,9 @@ import { User } from '@/types';
 import { Company } from '@/types';
 
 export default function AdminUsersPage() {
-  const { data: users = [], isLoading } = useCollection<User>('admin-users-list', 'users');
-  const { data: companies = [] } = useCollection<Company>('admin-users-companies', 'companies');
+  const adminScope = { companyScoped: false, isDeveloper: true };
+  const { data: users = [], isLoading } = useCollection<User>('admin-users-list', 'users', adminScope);
+  const { data: companies = [] } = useCollection<Company>('admin-users-companies', 'companies', adminScope);
 
   const nonDevelopers = users.filter(u => u.role !== 'developer');
   const getCompanyName = (companyId: string | null) =>

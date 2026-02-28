@@ -30,10 +30,13 @@ export function ManagerDashboard() {
   const todayEnd = new Date(today);
   todayEnd.setHours(23, 59, 59, 999);
 
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
   // Data sources
-  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs');
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages');
-  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees');
+  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
+  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
 
   // Work can be allocated to manager by user id (auth uid) or by employee doc id (operations-manager). Match both.
   const managerIdsForCurrentUser = useMemo(() => {
@@ -45,7 +48,7 @@ export function ManagerDashboard() {
     return ids;
   }, [user, allEmployees]);
   const managerIdsArray = useMemo(() => Array.from(managerIdsForCurrentUser), [managerIdsForCurrentUser]);
-  const { data: managerWorkCards = [] } = useWorkCardsForManager(managerIdsArray);
+  const { data: managerWorkCards = [] } = useWorkCardsForManager(managerIdsArray, companyId);
 
   // Filter by project and manager (current user as manager, by either id)
   const projectWorkLogs = useMemo(() => {

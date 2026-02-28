@@ -31,8 +31,11 @@ export default function SeasonChallengesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const { data: allChallenges = [], isLoading } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges');
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: allChallenges = [], isLoading } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges', scope);
+  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
   const challenges = activeProject
     ? allChallenges.filter(c => c.projectId === activeProject.id)

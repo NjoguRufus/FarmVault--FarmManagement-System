@@ -23,8 +23,9 @@ const BACKUP_ACCESS_PASSWORD = import.meta.env.VITE_DEVELOPER_BACKUP_PASSWORD ??
 export default function AdminBackupsPage() {
   const { addNotification } = useNotifications();
   const { data: companies = [], isLoading: companiesLoading } = useCollection<Company>(
-    'admin-companies',
-    'companies'
+    'admin-backups-companies',
+    'companies',
+    { companyScoped: false, isDeveloper: true },
   );
   const [backupsByCompany, setBackupsByCompany] = useState<
     Record<string, Array<{ id: string; companyName?: string; createdAt: any }>>

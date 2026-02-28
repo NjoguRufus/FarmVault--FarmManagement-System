@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import { where } from 'firebase/firestore';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Project } from '@/types';
 import { useCollection } from '@/hooks/useCollection';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,16 +28,11 @@ function readCachedProjects(): Project[] {
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, authReady } = useAuth();
+  const queryClient = useQueryClient();
+  const prevCompanyIdRef = useRef<string | null>(undefined as unknown as string | null);
   const isDeveloper = user?.role === 'developer';
-  const canSubscribeProjects = authReady && isAuthenticated && (isDeveloper || !!user?.companyId);
-
-  const projectConstraints = useMemo(
-    () =>
-      isDeveloper || !user?.companyId
-        ? []
-        : [where('companyId', '==', user.companyId)],
-    [isDeveloper, user?.companyId],
-  );
+  const companyId = user?.companyId ?? null;
+  const canSubscribeProjects = authReady && isAuthenticated && (isDeveloper || !!companyId);
 
   const {
     data: projectsData = [],
@@ -47,10 +42,36 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     hasPendingWrites,
   } = useCollection<Project>('projects', 'projects', {
     enabled: canSubscribeProjects,
-    constraints: projectConstraints,
+    companyScoped: true,
+    companyId,
+    isDeveloper,
   });
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+
+  useEffect(() => {
+    const prev = prevCompanyIdRef.current;
+    if (prev !== undefined && prev !== companyId) {
+      setCachedProjects([]);
+      setActiveProject(null);
+      try {
+        window.localStorage.removeItem(PROJECTS_CACHE_KEY);
+        queryClient.clear();
+      } catch {
+        // ignore
+      }
+    }
+    if (!companyId && !isDeveloper) {
+      setCachedProjects([]);
+      setActiveProject(null);
+      try {
+        window.localStorage.removeItem(PROJECTS_CACHE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+    prevCompanyIdRef.current = companyId;
+  }, [companyId, isDeveloper, queryClient]);
 
   useEffect(() => {
     if (!canSubscribeProjects || isLoading) return;

@@ -16,9 +16,12 @@ export default function BrokerHarvestDetailsPage() {
   const { user } = useAuth();
   const brokerId = user?.id ?? '';
 
-  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales');
-  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales', scope);
+  const { data: allExpenses = [] } = useCollection<Expense>('expenses', 'expenses', scope);
 
   const harvest = useMemo(
     () => allHarvests.find((h) => h.id === harvestId && h.brokerId === brokerId),

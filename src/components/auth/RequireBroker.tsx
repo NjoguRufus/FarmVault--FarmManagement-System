@@ -12,7 +12,13 @@ interface RequireBrokerProps {
 export function RequireBroker({ children }: RequireBrokerProps) {
   const { user, isAuthenticated, authReady } = useAuth();
   const location = useLocation();
-  const { data: employees = [], isLoading: employeesLoading } = useCollection<Employee>('employees', 'employees');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const { data: employees = [], isLoading: employeesLoading } = useCollection<Employee>('employees', 'employees', {
+    companyScoped: true,
+    companyId,
+    isDeveloper,
+  });
 
   if (!authReady) {
     return <AuthLoadingScreen />;

@@ -33,7 +33,7 @@ export function HowItWorksSection() {
         </div>
         <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mt-14">
           <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-12">
-            <Link to="/choose-plan" className="inline-flex items-center">Get Started <ArrowRight className="ml-2 h-4 w-4" /></Link>
+            <Link to="/setup-company" className="inline-flex items-center">Get Started <ArrowRight className="ml-2 h-4 w-4" /></Link>
           </Button>
         </motion.div>
       </div>

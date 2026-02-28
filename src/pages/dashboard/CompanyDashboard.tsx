@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
-import { where } from 'firebase/firestore';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { CropStageProgressCard } from '@/components/dashboard/CropStageProgressCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
@@ -63,35 +62,44 @@ export function CompanyDashboard() {
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
   const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
-  const companyId = user?.companyId || '';
+  const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const canLoadProjects = Boolean(isDeveloper || companyId);
-  const projectConstraints = useMemo(
-    () =>
-      isDeveloper || !companyId
-        ? []
-        : [where('companyId', '==', companyId)],
-    [isDeveloper, companyId],
-  );
 
   const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
     'dashboard-projects',
     'projects',
     {
       enabled: canLoadProjects,
-      constraints: projectConstraints,
+      companyScoped: true,
+      companyId,
+      isDeveloper,
     },
   );
-  const { data: allExpenses = [] } = useCollection<Expense>('dashboard-expenses', 'expenses');
-  const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests');
-  const { data: allSales = [] } = useCollection<Sale>('dashboard-sales', 'sales');
+  const { data: allExpenses = [] } = useCollection<Expense>('dashboard-expenses', 'expenses', {
+    companyScoped: true,
+    companyId,
+    isDeveloper,
+  });
+  const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests', {
+    companyScoped: true,
+    companyId,
+    isDeveloper,
+  });
+  const { data: allSales = [] } = useCollection<Sale>('dashboard-sales', 'sales', {
+    companyScoped: true,
+    companyId,
+    isDeveloper,
+  });
   const { data: allInventory = [] } = useCollection<InventoryItem>(
     'dashboard-inventory',
-    'inventoryItems'
+    'inventoryItems',
+    { companyScoped: true, companyId, isDeveloper }
   );
   const { data: allStages = [] } = useCollection<CropStage>(
     'dashboard-stages',
-    'projectStages'
+    'projectStages',
+    { companyScoped: true, companyId, isDeveloper }
   );
   const { data: projectWorkCards = [] } = useWorkCardsForProject(
     activeProject?.id ?? null,

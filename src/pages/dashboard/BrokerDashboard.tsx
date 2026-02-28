@@ -10,9 +10,12 @@ import { cn } from '@/lib/utils';
 export function BrokerDashboard() {
   const { user } = useAuth();
   const brokerId = user?.id ?? '';
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
 
-  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales');
-  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
+  const { data: allSales = [] } = useCollection<Sale>('sales', 'sales', scope);
+  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests', scope);
 
   // Harvests allocated to this broker (brokerId on harvest); brokers only see market harvests
   const brokerHarvests = useMemo(() => {

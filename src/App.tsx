@@ -45,13 +45,13 @@ import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
 import { PermissionRoute } from "@/components/auth/PermissionRoute";
 import SetupCompany from "@/pages/SetupCompany";
-import ChoosePlan from "@/pages/ChoosePlan";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminCompaniesPage from "@/pages/admin/AdminCompaniesPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
 import AdminPendingUsersPage from "@/pages/admin/AdminPendingUsersPage";
 import AdminAuditLogsPage from "@/pages/admin/AdminAuditLogsPage";
 import AdminBackupsPage from "@/pages/admin/AdminBackupsPage";
+import AdminMigrationPage from "@/pages/admin/AdminMigrationPage";
 import AdminCodeRedPage from "@/pages/admin/AdminCodeRedPage";
 import AdminFeedbackPage from "@/pages/admin/AdminFeedbackPage";
 import AdminFinancesPage from "@/pages/admin/AdminFinancesPage";
@@ -61,6 +61,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TourProvider } from "@/tour/TourProvider";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
+import { RootRoute } from "@/components/routing/RootRoute";
 
 const queryClient = new QueryClient();
 
@@ -133,9 +134,9 @@ const App = () => (
               <TourProvider>
               <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Index />} />
+              <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/choose-plan" element={<ChoosePlan />} />
+              <Route path="/choose-plan" element={<Navigate to="/setup-company" replace />} />
               <Route path="/setup-company" element={<SetupCompany />} />
               <Route path="/setup" element={<Navigate to="/setup-company" replace />} />
 
@@ -222,6 +223,7 @@ const App = () => (
                 <Route path="/admin/users/pending" element={<AdminPendingUsersPage />} />
                 <Route path="/admin/audit-logs" element={<AdminAuditLogsPage />} />
                 <Route path="/admin/backups" element={<AdminBackupsPage />} />
+                <Route path="/admin/migration" element={<AdminMigrationPage />} />
                 <Route path="/admin/code-red" element={<AdminCodeRedPage />} />
                 <Route path="/admin/feedback" element={<AdminFeedbackPage />} />
                 <Route path="/admin/finances" element={<AdminFinancesPage />} />

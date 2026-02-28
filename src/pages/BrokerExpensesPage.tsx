@@ -39,8 +39,11 @@ export default function BrokerExpensesPage() {
   const brokerId = user?.id ?? '';
   const queryClient = useQueryClient();
 
-  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests');
-  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses');
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const scope = { companyScoped: true, companyId, isDeveloper };
+  const { data: allHarvests = [] } = useCollection<Harvest>('harvests', 'harvests', scope);
+  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses', scope);
 
   const brokerHarvestIds = useMemo(() => {
     const harvests = allHarvests.filter(
