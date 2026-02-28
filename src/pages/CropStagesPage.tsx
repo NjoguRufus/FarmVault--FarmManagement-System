@@ -5,6 +5,14 @@ import { cn } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
 import { CropStage, WorkLog, SeasonChallenge, InventoryUsage, InventoryItem, ChallengeType } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
+import { getCropTimeline } from '@/config/cropTimelines';
+import {
+  calculateDaysSince,
+  getStageForDay,
+  buildTimeline,
+  getStageEndDate,
+  type StageRule,
+} from '@/utils/cropStages';
 import { getCropStages } from '@/lib/cropStageConfig';
 import { addDays } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
@@ -117,6 +125,35 @@ export default function CropStagesPage() {
     () => [...stages].sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0)),
     [stages],
   );
+
+  // Single source of truth: plantingDate + stage template (same as Project Details)
+  const cropTimeline = useMemo(
+    () => (activeProject ? getCropTimeline(activeProject.cropType ?? null) : null),
+    [activeProject?.cropType],
+  );
+  const templateStages: StageRule[] = useMemo(
+    () => cropTimeline?.stages ?? [],
+    [cropTimeline],
+  );
+  const plantingDateNorm = useMemo(
+    () => (activeProject?.plantingDate ? toDate(activeProject.plantingDate) : null),
+    [activeProject?.plantingDate],
+  );
+  const daysSincePlanting = useMemo(
+    () => (plantingDateNorm != null ? calculateDaysSince(plantingDateNorm) : null),
+    [plantingDateNorm],
+  );
+  const timelineItems = useMemo(
+    () =>
+      templateStages.length && daysSincePlanting != null
+        ? buildTimeline(templateStages, daysSincePlanting)
+        : [],
+    [templateStages, daysSincePlanting],
+  );
+  const currentStageForDay = useMemo(() => {
+    if (daysSincePlanting == null || daysSincePlanting < 0 || !templateStages.length) return null;
+    return getStageForDay(templateStages, daysSincePlanting);
+  }, [templateStages, daysSincePlanting]);
 
   const getStatusBadge = (startDate?: any, endDate?: any) => {
     const start = toDate(startDate);
@@ -306,119 +343,120 @@ export default function CropStagesPage() {
         {/* Stages are generated automatically from crop configuration */}
       </div>
 
-      {/* Stats */}
+      {/* Stats — from plantingDate-driven timeline when available */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <SimpleStatCard
           title="Completed"
-          value={stages.filter(s => getDisplayStatus(s) === 'completed').length}
+          value={timelineItems.length > 0 ? timelineItems.filter(i => i.status === 'completed').length : stages.filter(s => getDisplayStatus(s) === 'completed').length}
           icon={CheckCircle}
           iconVariant="success"
         />
         <SimpleStatCard
           title="In Progress"
-          value={stages.filter(s => getDisplayStatus(s) === 'in-progress').length}
+          value={timelineItems.length > 0 ? timelineItems.filter(i => i.status === 'current').length : stages.filter(s => getDisplayStatus(s) === 'in-progress').length}
           icon={Clock}
           iconVariant="warning"
         />
         <SimpleStatCard
           title="Pending"
-          value={stages.filter(s => getDisplayStatus(s) === 'pending').length}
+          value={timelineItems.length > 0 ? timelineItems.filter(i => i.status === 'upcoming').length : stages.filter(s => getDisplayStatus(s) === 'pending').length}
           icon={AlertCircle}
           iconVariant="muted"
         />
       </div>
 
-      {/* Stages Timeline */}
+      {/* Stages Timeline — driven by project.plantingDate (same as Project Details) */}
       <div className="fv-card">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">Stage Timeline</h3>
         </div>
 
-        {isLoading && (
-          <p className="text-sm text-muted-foreground mb-4">Loading stages…</p>
+        {!activeProject && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertTriangle className="h-4 w-4" />
+            Select a project to see its crop stage timeline.
+          </div>
+        )}
+        {activeProject && !plantingDateNorm && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertTriangle className="h-4 w-4" />
+            Set planting date to track stages. Go to Project Details or Planning to set it.
+          </div>
+        )}
+        {activeProject && plantingDateNorm && !templateStages.length && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertTriangle className="h-4 w-4" />
+            No stage template for this crop.
+          </div>
+        )}
+        {activeProject && plantingDateNorm && daysSincePlanting != null && daysSincePlanting < 0 && templateStages.length > 0 && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+            Not planted yet (starts in {Math.abs(daysSincePlanting)} days).
+          </div>
+        )}
+        {timelineItems.length > 0 && plantingDateNorm && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Day {Math.max(0, daysSincePlanting ?? 0)} since planting
+            {currentStageForDay != null && (
+              <> · Estimated stage end: {formatDate(getStageEndDate(plantingDateNorm, currentStageForDay.stage.dayEnd), { month: 'short', day: 'numeric', year: 'numeric' })}</>
+            )}
+          </p>
         )}
 
         <div className="space-y-1">
-          {sortedStages
-            .map((stage, index) => {
-              const status = getDisplayStatus(stage);
-              return (
+          {timelineItems.map((item, index) => {
+            const statusLabel = item.status === 'completed' ? 'completed' : item.status === 'current' ? 'in progress' : 'pending';
+            const estimatedEnd = plantingDateNorm ? getStageEndDate(plantingDateNorm, item.estimatedEndDay) : null;
+            const dayRange = `Day ${item.stage.dayStart}–${item.stage.dayEnd}`;
+            return (
               <div
-                key={stage.id}
-                className="flex items-start gap-4 p-4 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
-                onClick={() => {
-                  setSelectedStage(stage);
-                  setDetailsOpen(true);
-                }}
+                key={item.stage.key}
+                className="flex items-start gap-4 p-4 rounded-lg hover:bg-muted/30 transition-colors"
               >
-                {/* Timeline indicator */}
                 <div className="flex flex-col items-center">
-                  <div className={cn(
-                    'flex h-10 w-10 items-center justify-center rounded-full border-2',
-                    status === 'completed' && 'border-fv-success bg-fv-success/10',
-                    status === 'in-progress' && 'border-fv-warning bg-fv-warning/10',
-                    status === 'pending' && 'border-muted bg-muted'
-                  )}>
-                    {getStatusIcon(status)}
+                  <div
+                    className={cn(
+                      'flex h-10 w-10 items-center justify-center rounded-full border-2',
+                      item.status === 'completed' && 'border-fv-success bg-fv-success/10',
+                      item.status === 'current' && 'border-fv-warning bg-fv-warning/10',
+                      item.status === 'upcoming' && 'border-muted bg-muted',
+                    )}
+                  >
+                    {item.status === 'completed' && <CheckCircle className="h-5 w-5 text-fv-success" />}
+                    {item.status === 'current' && <Clock className="h-5 w-5 text-fv-warning" />}
+                    {item.status === 'upcoming' && <AlertCircle className="h-5 w-5 text-muted-foreground" />}
                   </div>
-                  {index < sortedStages.length - 1 && (
-                    <div className={cn(
-                      'w-0.5 h-8 mt-2',
-                      status === 'completed' ? 'bg-fv-success' : 'bg-muted'
-                    )} />
+                  {index < timelineItems.length - 1 && (
+                    <div className={cn('w-0.5 h-8 mt-2', item.status === 'completed' ? 'bg-fv-success' : 'bg-muted')} />
                   )}
                 </div>
-
-                {/* Stage content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="font-medium text-foreground">{stage.stageName || `Stage ${stage.stageIndex}`}</h4>
-                    <span className={cn(
+                    <h4 className="font-medium text-foreground">{item.stage.label}</h4>
+                    <span
+                      className={cn(
                         'fv-badge capitalize',
-                        status === 'completed' && 'fv-badge--active',
-                        status === 'in-progress' && 'fv-badge--warning',
-                        status === 'pending' && 'bg-muted text-muted-foreground'
-                      )}>
-                      {status.replace('-', ' ')}
+                        item.status === 'completed' && 'fv-badge--active',
+                        item.status === 'current' && 'fv-badge--warning',
+                        item.status === 'upcoming' && 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {statusLabel}
                     </span>
                   </div>
                   <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    {(() => {
-                      const start = toDate(stage.startDate);
-                      const end = toDate(stage.endDate);
-                      return (
-                        <>
-                          {start && (
-                            <span>
-                              Started: {formatDate(start)}
-                            </span>
-                          )}
-                          {end && (
-                            <span>
-                              Completed: {formatDate(end)}
-                            </span>
-                          )}
-                          {!start && !end && (
-                            <span className="text-muted-foreground">No dates set</span>
-                          )}
-                        </>
-                      );
-                    })()}
+                    <span>{dayRange}</span>
+                    {item.status === 'current' && (
+                      <span>{Math.round(item.progress * 100)}% through stage</span>
+                    )}
+                    {estimatedEnd && (
+                      <span>Est. end: {formatDate(estimatedEnd, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    )}
                   </div>
                 </div>
-
-                <button 
-                  className="p-2 hover:bg-muted rounded-lg transition-colors"
-                  onClick={() => {
-                    setSelectedStage(stage);
-                    setDetailsOpen(true);
-                  }}
-                >
-                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                </button>
               </div>
-              );
-            })}
+            );
+          })}
         </div>
       </div>
 

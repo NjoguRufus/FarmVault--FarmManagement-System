@@ -22,6 +22,7 @@ const MODULES: PermissionModule[] = [
   'employees',
   'reports',
   'settings',
+  'notes',
 ];
 
 const DEFAULT_MINIMAL_PERMISSIONS: PermissionMap = {
@@ -105,6 +106,12 @@ const DEFAULT_MINIMAL_PERMISSIONS: PermissionMap = {
   settings: {
     view: false,
     edit: false,
+  },
+  notes: {
+    view: false,
+    create: false,
+    edit: false,
+    delete: false,
   },
 };
 
@@ -217,6 +224,12 @@ const FULL_ACCESS_PERMISSIONS: PermissionMap = {
   settings: {
     view: true,
     edit: true,
+  },
+  notes: {
+    view: true,
+    create: true,
+    edit: true,
+    delete: true,
   },
 };
 
@@ -515,6 +528,8 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/projects/', module: 'projects' },
   { prefix: '/projects', module: 'projects' },
   { prefix: '/suppliers', module: 'projects' },
+  { prefix: '/notes/', module: 'notes' },
+  { prefix: '/notes', module: 'notes' },
   { prefix: '/crop-stages', module: 'planning' },
   { prefix: '/challenges', module: 'planning' },
   { prefix: '/inventory', module: 'inventory' },

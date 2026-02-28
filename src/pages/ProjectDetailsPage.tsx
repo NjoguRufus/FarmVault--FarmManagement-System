@@ -3,13 +3,20 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, CheckCircle, ChevronDown, ChevronLeft, ChevronUp, Clock, Package, Users, Activity, Wallet, Wrench as WrenchIcon, ListChecks, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChallengeType, CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
-import { useProjectStages } from '@/hooks/useProjectStages';
+import { ChallengeType, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
 import { useProject } from '@/contexts/ProjectContext';
-import { getCurrentStageForProject } from '@/services/stageService';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
-import { getDaysSince, getStageLabelForKey } from '@/lib/stageDetection';
+import { getCropTimeline } from '@/config/cropTimelines';
+import {
+  calculateDaysSince,
+  getStageForDay,
+  buildTimeline,
+  getProgressWithinStage,
+  getStageEndDate,
+  assertCropStagesDev,
+  type StageRule,
+} from '@/utils/cropStages';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { deleteProject } from '@/services/companyDataService';
 import { useCollection } from '@/hooks/useCollection';
@@ -30,6 +37,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+
+if (import.meta.env?.DEV) {
+  assertCropStagesDev();
+}
 
 export default function ProjectDetailsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -52,8 +63,6 @@ export default function ProjectDetailsPage() {
     const found = allProjects.find((p) => p.id === projectId && p.companyId === companyId);
     return found ?? null;
   }, [allProjects, companyId, projectId]);
-
-  const { data: stages = [], isLoading: stagesLoading } = useProjectStages(companyId, projectId);
 
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('project-details-worklogs', 'workLogs', {
     ...scope,
@@ -103,65 +112,50 @@ export default function ProjectDetailsPage() {
     [allInventoryUsage, companyId, projectId],
   );
 
-  const loading = projectsLoading || stagesLoading;
+  const loading = projectsLoading;
 
   const today = new Date();
-
   const normalizeDate = (raw: any | undefined) => toDate(raw) || undefined;
 
-  const sortedStages = useMemo(
-    () => [...stages].sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0)),
-    [stages],
+  // Single source of truth: project.plantingDate + crop stage template (config/cropTimelines)
+  const cropTimeline = useMemo(
+    () => getCropTimeline(project?.cropType ?? null),
+    [project?.cropType],
   );
+  const templateStages: StageRule[] = useMemo(
+    () => cropTimeline?.stages ?? [],
+    [cropTimeline],
+  );
+  const plantingDate = normalizeDate(project?.plantingDate as any);
+  const daysSincePlanting = plantingDate != null ? calculateDaysSince(plantingDate) : null;
 
   const expectedHarvestDate = useMemo(() => {
-    if (!sortedStages.length) return undefined;
-    const last = sortedStages[sortedStages.length - 1];
-    return normalizeDate(last.endDate || last.startDate);
-  }, [sortedStages]);
+    if (!plantingDate || !templateStages.length) return undefined;
+    const last = templateStages[templateStages.length - 1];
+    return getStageEndDate(plantingDate, last.dayEnd);
+  }, [plantingDate, templateStages]);
 
-  const plantingDate = normalizeDate(project?.plantingDate as any);
+  const currentStageForDay = useMemo(() => {
+    if (daysSincePlanting == null || daysSincePlanting < 0 || !templateStages.length) return null;
+    return getStageForDay(templateStages, daysSincePlanting);
+  }, [templateStages, daysSincePlanting]);
 
-  const daysSincePlanting = plantingDate
-    ? getDaysSince(plantingDate)
-    : typeof project?.daysSincePlanting === 'number'
-    ? Math.max(0, Math.floor(project.daysSincePlanting))
-    : undefined;
-
-  // Current stage from real data: same logic as CropStagesPage (respects stored status + dates)
-  const currentStageResult = useMemo(
-    () => getCurrentStageForProject(stages),
-    [stages],
-  );
-  const currentStage = useMemo(() => {
-    if (!currentStageResult || !sortedStages.length) return null;
-    return (
-      sortedStages.find((s) => s.stageIndex === currentStageResult.stageIndex) ?? null
-    );
-  }, [currentStageResult, sortedStages]);
-  const currentStageLabel = useMemo(
-    () =>
-      getStageLabelForKey(
-        project?.cropType,
-        project?.currentStage || project?.stageSelected,
-      ) ??
-      currentStage?.stageName ??
-      'Not started',
-    [project?.cropType, project?.currentStage, project?.stageSelected, currentStage?.stageName],
-  );
+  const currentStageLabel = useMemo(() => {
+    if (!plantingDate) return 'Set planting date';
+    if (daysSincePlanting != null && daysSincePlanting < 0) return 'Not planted yet';
+    if (!templateStages.length) return 'No stage template';
+    return currentStageForDay?.stage.label ?? '—';
+  }, [plantingDate, daysSincePlanting, templateStages.length, currentStageForDay]);
 
   const stageProgressPercent = useMemo(() => {
-    if (!currentStage || !currentStage.startDate || !currentStage.endDate) return 0;
-    const startDate = normalizeDate(currentStage.startDate as any);
-    const endDate = normalizeDate(currentStage.endDate as any);
-    if (!startDate || !endDate) return 0;
-    const start = startDate.getTime();
-    const end = endDate.getTime();
-    const total = end - start;
-    if (total <= 0) return 0;
-    const elapsed = Math.min(Math.max(today.getTime() - start, 0), total);
-    return Math.round((elapsed / total) * 100);
-  }, [currentStage, today]);
+    if (!currentStageForDay || daysSincePlanting == null) return 0;
+    return Math.round(getProgressWithinStage(currentStageForDay.stage, daysSincePlanting) * 100);
+  }, [currentStageForDay, daysSincePlanting]);
+
+  const timelineItems = useMemo(
+    () => (templateStages.length && daysSincePlanting != null ? buildTimeline(templateStages, daysSincePlanting) : []),
+    [templateStages, daysSincePlanting],
+  );
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const labourCost = expenses.filter((e) => e.category === 'labour').reduce((s, e) => s + e.amount, 0);
@@ -343,7 +337,13 @@ export default function ProjectDetailsPage() {
             <div className="space-y-0.5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Days since planting</p>
               <p className="text-lg font-semibold text-foreground tabular-nums">
-                {typeof daysSincePlanting === 'number' ? Math.floor(daysSincePlanting) : '—'}
+                {plantingDate == null
+                  ? '—'
+                  : daysSincePlanting != null && daysSincePlanting < 0
+                    ? `Not planted (in ${Math.abs(daysSincePlanting)} days)`
+                    : typeof daysSincePlanting === 'number'
+                      ? Math.floor(daysSincePlanting)
+                      : '—'}
               </p>
             </div>
             <div className="space-y-0.5">
@@ -629,7 +629,7 @@ export default function ProjectDetailsPage() {
         {!!challenges.length && (
           <div className="space-y-3">
             {challenges.map((c) => {
-              const stage = sortedStages.find((s) => s.stageIndex === (c as any).stageIndex);
+              const stageLabel = templateStages[(c as any).stageIndex]?.label ?? `Stage ${(c as any).stageIndex}`;
               const challengeDate = c.dateIdentified ? normalizeDate(c.dateIdentified as any) : null;
               const isExpanded = expandedChallenges.has(c.id);
               const preSeason = isPreSeasonChallenge(c);
@@ -687,7 +687,7 @@ export default function ProjectDetailsPage() {
                             <span>Resolved: {formatDate(normalizeDate(c.dateResolved as any) ?? (c.dateResolved as Date))}</span>
                           )}
                           {stage && (
-                            <span>Stage: <span className="font-medium text-foreground">{stage.stageName}</span></span>
+                            <span>Stage: <span className="font-medium text-foreground">{stageLabel}</span></span>
                           )}
                         </div>
                       </div>
@@ -758,71 +758,73 @@ export default function ProjectDetailsPage() {
         )}
       </div>
 
-      {/* Crop stage timeline */}
+      {/* Crop stage timeline — driven by project.plantingDate + stage template */}
       <div className="fv-card">
         <h2 className="text-lg font-semibold mb-4">Crop Stage Timeline</h2>
-        {!sortedStages.length && (
+        {!plantingDate && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <AlertTriangle className="h-4 w-4" />
-            No stages generated for this project yet.
+            Set planting date to track stages.
           </div>
         )}
+        {plantingDate && !templateStages.length && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertTriangle className="h-4 w-4" />
+            No stage template for this crop. Create one.
+          </div>
+        )}
+        {plantingDate && daysSincePlanting != null && daysSincePlanting < 0 && templateStages.length > 0 && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+            Not planted yet (starts in {Math.abs(daysSincePlanting)} days). All stages upcoming.
+          </div>
+        )}
+        {plantingDate && templateStages.length > 0 && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Day {Math.max(0, daysSincePlanting ?? 0)} since planting
+            {currentStageForDay != null && (
+              <> · Estimated stage end: {formatDate(getStageEndDate(plantingDate, currentStageForDay.stage.dayEnd), { month: 'short', day: 'numeric', year: 'numeric' })}</>
+            )}
+          </p>
+        )}
         <div className="space-y-4">
-                    {sortedStages.map((stage, index) => {
-                    const start = normalizeDate(stage.startDate as any) || null;
-                    const end = normalizeDate(stage.endDate as any) || null;
-            let derivedStatus: 'pending' | 'active' | 'completed' = 'pending';
-            if ((stage as CropStage).status === 'completed') {
-              derivedStatus = 'completed';
-            } else if (start && end) {
-              if (today < start) derivedStatus = 'pending';
-              else if (today > end) derivedStatus = 'completed';
-              else derivedStatus = 'active';
-            }
-            const diffDays =
-              start && end
-                ? Math.max(
-                    1,
-                    Math.round(
-                      (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
-                    ) + 1,
-                  )
-                : undefined;
+          {timelineItems.map((item, index) => {
+            const statusLabel = item.status === 'completed' ? 'completed' : item.status === 'current' ? 'active' : 'pending';
+            const estimatedEnd = plantingDate ? getStageEndDate(plantingDate, item.estimatedEndDay) : null;
+            const dayRange = `Day ${item.stage.dayStart}–${item.stage.dayEnd}`;
             return (
-              <div
-                key={stage.id}
-                className="flex items-start gap-4"
-              >
+              <div key={item.stage.key} className="flex items-start gap-4">
                 <div className="flex flex-col items-center">
                   <div
                     className={[
                       'flex h-10 w-10 items-center justify-center rounded-full border-2',
-                      derivedStatus === 'completed' && 'border-fv-success bg-fv-success/10',
-                      derivedStatus === 'active' && 'border-fv-warning bg-fv-warning/10',
-                      derivedStatus === 'pending' && 'border-muted bg-muted',
+                      item.status === 'completed' && 'border-fv-success bg-fv-success/10',
+                      item.status === 'current' && 'border-fv-warning bg-fv-warning/10',
+                      item.status === 'upcoming' && 'border-muted bg-muted',
                     ].join(' ')}
                   >
                     <Clock className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  {index < sortedStages.length - 1 && (
+                  {index < timelineItems.length - 1 && (
                     <div className="w-0.5 h-8 mt-2 bg-muted" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0 pb-4 border-b last:border-b-0 border-border/60">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-foreground">{stage.stageName}</h3>
+                    <h3 className="font-medium text-foreground">{item.stage.label}</h3>
                     <span className="fv-badge text-xs capitalize">
-                      {derivedStatus}
+                      {statusLabel}
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground flex flex-wrap gap-3">
-                    {start && end && (
+                    <span>{dayRange}</span>
+                    {item.status === 'current' && (
+                      <span>{Math.round(item.progress * 100)}% through stage</span>
+                    )}
+                    {estimatedEnd && (
                       <span>
-                        {formatDate(start, { month: 'short', day: 'numeric' })} –{' '}
-                        {formatDate(end, { month: 'short', day: 'numeric' })}
+                        Est. end: {formatDate(estimatedEnd, { month: 'short', day: 'numeric', year: 'numeric' })}
                       </span>
                     )}
-                    {diffDays && <span>{diffDays} days</span>}
                   </div>
                 </div>
               </div>

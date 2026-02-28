@@ -17,6 +17,7 @@ import {
   Building2,
   Database,
   Settings,
+  StickyNote,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -42,6 +43,7 @@ export const companyNavConfig: NavItem[] = [
   { label: 'Suppliers', path: '/suppliers', icon: Truck, group: 'more' },
   { label: 'Season Challenges', path: '/challenges', icon: AlertTriangle, group: 'more' },
   { label: 'Employees', path: '/employees', icon: Users, group: 'more' },
+  { label: 'Notes', path: '/notes', icon: StickyNote, group: 'more' },
   { label: 'Reports', path: '/reports', icon: FileText, group: 'more' },
   { label: 'Billing & Subscription', path: '/billing', icon: CreditCard, group: 'more' },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
@@ -61,6 +63,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Code Red', path: '/admin/code-red', icon: AlertTriangle, group: 'main' },
   { label: 'Feedback inbox', path: '/admin/feedback', icon: MessageSquare, group: 'main' },
   { label: 'Audit Logs', path: '/admin/audit-logs', icon: FileText, group: 'main' },
+  { label: 'Notes', path: '/admin/notes', icon: StickyNote, group: 'main' },
 ];
 
 /** Manager nav. */
