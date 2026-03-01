@@ -1554,9 +1554,9 @@ export default function HarvestCollectionsPage() {
                 <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
               ) : (
                 <>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {filteredPickers.length === 0 ? (
-                      <p className="w-full text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
+                      <p className="col-span-2 text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
                     ) : (
                       filteredPickers.map((p) => {
                         const tripCount = tripCountForPicker[p.id] ?? 0;
@@ -1567,7 +1567,7 @@ export default function HarvestCollectionsPage() {
                           <Card
                             key={p.id}
                             className={cn(
-                              'relative transition-all w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden shrink-0',
+                              'relative transition-all min-h-[130px] flex flex-col overflow-hidden',
                               isPaid
                                 ? 'opacity-75 cursor-not-allowed bg-muted/50'
                                 : 'cursor-pointer hover:bg-muted/50 active:scale-[0.98]'
@@ -1655,7 +1655,7 @@ export default function HarvestCollectionsPage() {
                     {payUnpaidAndGroups.unpaid.length > 0 && (
                       <div>
                         <p className="text-xs font-medium text-muted-foreground mb-1.5">Unpaid</p>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           {payUnpaidAndGroups.unpaid.map((p) => {
                             const selected = paySelectedIds.has(p.id);
                             const tripCount = tripCountForPicker[p.id] ?? 0;
@@ -1664,7 +1664,7 @@ export default function HarvestCollectionsPage() {
                               <Card
                                 key={p.id}
                                 className={cn(
-                                  'relative w-[48%] min-w-[145px] sm:w-[160px] min-h-[130px] flex flex-col overflow-hidden transition-all active:scale-[0.98] shrink-0 cursor-pointer hover:bg-muted/50 bg-card',
+                                  'relative min-h-[130px] flex flex-col overflow-hidden transition-all active:scale-[0.98] cursor-pointer hover:bg-muted/50 bg-card',
                                   selected && 'ring-2 ring-primary ring-offset-2'
                                 )}
                                 onClick={() => togglePaySelection(p.id)}
@@ -1704,7 +1704,7 @@ export default function HarvestCollectionsPage() {
                     {payUnpaidAndGroups.individuals.length > 0 && (
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-muted-foreground">Individuals</p>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
                             const p = pickers[0];
                             const tripCount = tripCountForPicker[p.id] ?? 0;
@@ -1712,7 +1712,7 @@ export default function HarvestCollectionsPage() {
                             return (
                               <Card
                                 key={p.id}
-                                className="relative w-[48%] min-w-[120px] sm:w-[130px] aspect-square max-w-[140px] flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 shrink-0"
+                                className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
                               >
                                 <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
                                   <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
@@ -1745,21 +1745,21 @@ export default function HarvestCollectionsPage() {
                     {payUnpaidAndGroups.groups.length > 0 && (
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-muted-foreground">Groups</p>
-                        <div className="flex flex-wrap gap-3">
+                        <div className="grid grid-cols-2 gap-3">
                           {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
                             <div
                               key={label}
-                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-2 flex-1 min-w-0 max-w-[320px]"
+                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-2 min-w-0"
                             >
                               <p className="text-xs font-semibold text-foreground mb-2 text-center">{label}</p>
-                              <div className="flex flex-wrap gap-2 justify-center">
+                              <div className="grid grid-cols-2 gap-2">
                                 {pickers.map((p) => {
                                   const tripCount = tripCountForPicker[p.id] ?? 0;
                                   const pickerTotals = getPickerTotals(p.id);
                                   return (
                                     <Card
                                       key={p.id}
-                                      className="relative w-[100px] min-w-[100px] aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 shrink-0"
+                                      className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
                                     >
                                       <CardContent className="p-1.5 flex flex-col flex-1 justify-between min-h-0 text-center">
                                         <div className="absolute top-0.5 right-0.5 px-1 h-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground">

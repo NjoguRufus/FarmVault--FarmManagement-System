@@ -535,11 +535,11 @@ export default function HarvestSalesPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-nowrap items-center overflow-x-auto min-w-0">
           {showHarvestCollections && (
             <Button
               variant="default"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3 text-sm sm:h-10 sm:px-4"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3 text-sm sm:h-10 sm:px-4 shrink-0"
               onClick={() => navigate(`/harvest-collections/${activeProject.id}`)}
             >
               Harvest Collections
@@ -549,7 +549,7 @@ export default function HarvestSalesPage() {
           <Dialog open={harvestOpen} onOpenChange={setHarvestOpen}>
             <DialogTrigger asChild>
               <button
-                className="fv-btn fv-btn--secondary h-9 px-3 text-sm sm:h-10 sm:px-4"
+                className="fv-btn fv-btn--secondary h-9 px-3 text-sm sm:h-10 sm:px-4 shrink-0"
                 data-tour="harvest-record-button"
               >
                 <Plus className="h-4 w-4 mr-1.5" />

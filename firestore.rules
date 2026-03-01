@@ -415,11 +415,11 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
-    // --- Developer-only: company data backups (only developer can read/write) ---
+    // --- Company data backups: developer can read/write any; company-admin can read/write own company only ---
     match /developerBackups/{companyId} {
-      allow read, write: if isDeveloper();
+      allow read, write: if isDeveloper() || (isSignedIn() && userCompanyId() == companyId);
       match /snapshots/{snapshotId} {
-        allow read, write: if isDeveloper();
+        allow read, write: if isDeveloper() || (isSignedIn() && userCompanyId() == companyId);
       }
     }
 

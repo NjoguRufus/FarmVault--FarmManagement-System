@@ -1,4 +1,5 @@
 import {
+  addDoc,
   collection,
   doc,
   getDoc,
@@ -6,7 +7,6 @@ import {
   query,
   where,
   orderBy,
-  setDoc,
   serverTimestamp,
   writeBatch,
   Timestamp,
@@ -45,7 +45,6 @@ export interface CompanyBackupSnapshot {
 
 /** Create a backup of all company data. Only developer should call this. */
 export async function createCompanyBackup(companyId: string, companyName?: string): Promise<string> {
-  const snapRef = doc(collection(db, BACKUP_ROOT, companyId, 'snapshots'));
   const collections: Record<string, Array<{ id: string; [key: string]: any }>> = {};
 
   // 1. Company document
@@ -66,15 +65,15 @@ export async function createCompanyBackup(companyId: string, companyName?: strin
     collections[collName] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   }
 
-  const snapshotId = snapRef.id;
-  await setDoc(snapRef, {
+  const snapshotsRef = collection(db, BACKUP_ROOT, companyId, 'snapshots');
+  const ref = await addDoc(snapshotsRef, {
     companyId,
     companyName: companyName ?? null,
     createdAt: serverTimestamp(),
     collections,
   });
 
-  return snapshotId;
+  return ref.id;
 }
 
 /** List backup snapshot IDs and minimal info for a company (newest first). */
