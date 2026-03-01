@@ -1,4 +1,4 @@
-import { db } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import {
   collection,
   addDoc,
@@ -18,6 +18,7 @@ import {
   addWalletDebit,
   getWalletSummaryOnce,
 } from '@/services/projectWalletService';
+import { applyExpenseDeduction } from '@/services/expenseBudgetService';
 
 const COLLECTIONS = 'harvestCollections';
 const PICKERS = 'harvestPickers';
@@ -664,6 +665,49 @@ export async function payPickersFromWalletBatchFirestore(params: {
       reasonType: 'PICKER_BATCH_PAYMENT',
     },
   );
+
+  // Record the amount deducted from harvest wallet as an expense (dynamic per batch).
+  const colSnap = await getDoc(doc(db, COLLECTIONS, collectionId));
+  const colData = colSnap.data();
+  const collectionName = colData?.name ?? collectionId;
+  const userName = auth.currentUser?.displayName ?? auth.currentUser?.email ?? 'System';
+  await addDoc(collection(db, 'expenses'), {
+    companyId,
+    projectId,
+    cropType,
+    amount: totalAmount,
+    description: `Picker labour – ${collectionName}`,
+    category: 'labour',
+    date: serverTimestamp(),
+    createdAt: serverTimestamp(),
+    synced: false,
+    paid: true,
+    meta: {
+      harvestCollectionId: collectionId,
+      paymentBatchId: paymentBatchRef.id,
+      pickerIds: paidPickerIds,
+      source: 'harvest_wallet_picker_payment',
+    },
+    createdByUid: auth.currentUser?.uid ?? '',
+    createdByName: userName,
+  });
+  await applyExpenseDeduction(companyId, projectId, totalAmount);
+
+  // When all pickers in this collection are now paid, update collection totals and create final labour expense for the collection.
+  const allPickersSnap = await getDocs(
+    query(collection(db, PICKERS), where('collectionId', '==', collectionId))
+  );
+  const allPaid = allPickersSnap.docs.every((d) => d.data()?.isPaid === true);
+  if (allPaid && colSnap.exists()) {
+    const { totalHarvestKg, totalPickerCost } = await computeCollectionTotalsFromWeighEntries(
+      collectionId,
+      colData?.pricePerKgPicker ?? 0
+    );
+    await updateDoc(doc(db, COLLECTIONS, collectionId), {
+      totalHarvestKg,
+      totalPickerCost,
+    });
+  }
 }
 
 /** Get project wallet summary (compat wrapper for existing callers). */
