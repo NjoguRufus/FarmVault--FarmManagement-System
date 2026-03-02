@@ -14,6 +14,7 @@ import {
   startAfter,
   serverTimestamp,
   writeBatch,
+  documentId,
   type DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -312,13 +313,48 @@ export async function getLibraryNote(noteId: string): Promise<(LibraryNote & { i
 
 /** For company admin: fetch library notes that have been shared to this company. */
 export async function getSharedLibraryNotesForCompany(companyId: string): Promise<(LibraryNote & { id: string })[]> {
-  const shares = await getSharesForCompany(companyId);
-  const notes: (LibraryNote & { id: string })[] = [];
-  for (const s of shares) {
-    const note = await getLibraryNote(s.noteId);
-    if (note) notes.push(note);
+  try {
+    const shares = await getSharesForCompany(companyId);
+    if (!shares.length) return [];
+
+    const noteIds = shares.map((s) => s.noteId).filter(Boolean);
+    if (noteIds.length === 0) return [];
+
+    // Firestore "in" queries are limited to 10 IDs per query.
+    const chunks: string[][] = [];
+    for (let i = 0; i < noteIds.length; i += 10) {
+      chunks.push(noteIds.slice(i, i + 10));
+    }
+
+    const snaps = await Promise.all(
+      chunks.map((chunk) =>
+        getDocs(
+          query(
+            collection(db, NOTES_LIBRARY),
+            where(documentId(), 'in', chunk)
+          )
+        )
+      )
+    );
+
+    const notesById = new Map<string, LibraryNote & { id: string }>();
+    for (const snap of snaps) {
+      for (const d of snap.docs) {
+        notesById.set(d.id, { id: d.id, ...d.data() } as LibraryNote & { id: string });
+      }
+    }
+
+    // Preserve the original share ordering where possible.
+    return noteIds
+      .map((id) => notesById.get(id))
+      .filter((n): n is LibraryNote & { id: string } => !!n);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.error('getSharedLibraryNotesForCompany failed', err);
+    }
+    throw err;
   }
-  return notes;
 }
 
 export async function getCompanyNote(noteId: string): Promise<(CompanyNote & { id: string }) | null> {

@@ -26,13 +26,16 @@ export function OptimizedImage({
   alt = "",
   ...rest
 }: OptimizedImageProps) {
+  const { fetchPriority, ...safeRest } = rest as any;
+
   const imgProps = {
-    ...rest,
+    ...safeRest,
     alt,
     className: cn(className),
     decoding: "async" as const,
     loading: priority ? ("eager" as const) : lazy ? ("lazy" as const) : undefined,
-    fetchPriority: priority ? ("high" as const) : undefined,
+    // Use lowercase attribute to avoid React warning while still hinting priority to the browser.
+    fetchpriority: priority ? ("high" as const) : undefined,
   };
 
   if (webpSrc) {

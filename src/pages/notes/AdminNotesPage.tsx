@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { CropCard } from '@/components/notes/CropCard';
 import {
   getCrops,
@@ -13,20 +14,35 @@ export default function AdminNotesPage() {
   const { user } = useAuth();
   const companyId = user?.companyId ?? '';
 
-  const { data: crops = [], isLoading: cropsLoading } = useQuery({
+  const {
+    data: crops = [],
+    isLoading: cropsLoading,
+    error: cropsError,
+    refetch: refetchCrops,
+  } = useQuery({
     queryKey: ['notes-crops'],
     queryFn: getCrops,
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: sharedNotes = [], isLoading: sharedLoading } = useQuery({
+  const {
+    data: sharedNotes = [],
+    isLoading: sharedLoading,
+    error: sharedError,
+    refetch: refetchShared,
+  } = useQuery({
     queryKey: ['notes-shared', companyId],
     queryFn: () => getSharedLibraryNotesForCompany(companyId),
     enabled: !!companyId,
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: companyNotes = [], isLoading: companyLoading } = useQuery({
+  const {
+    data: companyNotes = [],
+    isLoading: companyLoading,
+    error: companyError,
+    refetch: refetchCompany,
+  } = useQuery({
     queryKey: ['notes-company', companyId],
     queryFn: () => getCompanyNotes(companyId),
     enabled: !!companyId,
@@ -35,6 +51,7 @@ export default function AdminNotesPage() {
 
   const cropIds = crops.length > 0 ? crops.map((c) => c.id) : CROP_IDS.slice();
   const isLoading = cropsLoading || sharedLoading || companyLoading;
+  const loadError = cropsError || sharedError || companyError;
 
   return (
     <div className="p-6 space-y-6">
@@ -44,6 +61,23 @@ export default function AdminNotesPage() {
           Shared notes from FarmVault and your company&apos;s own notes
         </p>
       </div>
+
+      {loadError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 text-destructive px-4 py-2 flex items-center justify-between">
+          <span className="text-sm">Failed to load notes. Please try again.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              refetchCrops();
+              refetchShared();
+              refetchCompany();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
