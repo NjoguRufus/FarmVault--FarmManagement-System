@@ -4,13 +4,13 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  getDocs,
   query,
   orderBy,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getDocsWithCache } from '@/lib/firestoreCache';
 
 export interface PlatformExpenseDoc {
   id: string;
@@ -37,7 +37,7 @@ export async function getPlatformExpenses(): Promise<PlatformExpenseDoc[]> {
     collection(db, COLLECTION),
     orderBy('date', 'desc')
   );
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   return snap.docs.map((d) => {
     const data = d.data();
     return {

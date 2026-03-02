@@ -4,13 +4,13 @@ import {
   serverTimestamp,
   writeBatch,
   doc,
-  getDocs,
   query,
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { safeFormatDate, safeToDate } from '@/lib/safeTime';
 import { WorkLog, Expense, ExpenseCategory } from '@/types';
+import { getDocsWithCache } from '@/lib/firestoreCache';
 
 type CreateWorkLogInput = Omit<WorkLog, 'id' | 'createdAt'>;
 
@@ -60,7 +60,7 @@ export async function syncTodaysLabourExpenses({
     where('paid', '!=', true),
   );
 
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   if (snap.empty) return { createdCount: 0 };
 
   const batch = writeBatch(db);

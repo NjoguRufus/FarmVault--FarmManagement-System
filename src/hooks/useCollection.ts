@@ -46,7 +46,7 @@ export type UseCollectionResult<T> = {
   hasPendingWrites: boolean;
 };
 
-function buildScopedConstraints(options: UseCollectionOptions): QueryConstraint[] {
+export function buildScopedConstraints(options: UseCollectionOptions): QueryConstraint[] {
   const {
     companyScoped = true,
     companyId,
