@@ -1,6 +1,28 @@
 import { addDoc, collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
+export type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'enterprise';
+export type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused';
+
+export interface CompanySubscriptionOverride {
+  enabled: boolean;
+  type?: 'full_free' | 'extended_trial' | 'custom';
+  overrideEndsAt?: Timestamp | null;
+  reason?: string | null;
+  grantedBy?: string;
+  grantedAt?: Timestamp;
+}
+
+export interface CompanySubscription {
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  trialStartAt?: Timestamp;
+  trialEndsAt?: Timestamp;
+  paidUntil?: Timestamp | null;
+  billingMode?: PaymentMode;
+  override?: CompanySubscriptionOverride;
+}
+
 export interface CompanyDoc {
   id: string;
   name?: string;
@@ -17,6 +39,7 @@ export interface CompanyDoc {
   paymentReminderDismissedAt?: Timestamp | null;
   paymentReminderDismissedBy?: string | null;
   subscriptionPlan?: string;
+  subscription?: CompanySubscription;
   [key: string]: unknown;
 }
 
@@ -80,7 +103,14 @@ export async function updateCompany(
   await updateDoc(ref, updates);
 }
 
-export async function createCompany(name: string, companyEmail: string, plan: string = 'starter') {
+export async function createCompany(
+  name: string,
+  companyEmail: string,
+  plan: string = 'starter',
+): Promise<string> {
+  const now = Timestamp.now();
+  const trialEndsAt = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
+
   const ref = await addDoc(collection(db, 'companies'), {
     name,
     email: companyEmail,
@@ -91,8 +121,87 @@ export async function createCompany(name: string, companyEmail: string, plan: st
     userCount: 1,
     projectCount: 0,
     revenue: 0,
+    subscription: {
+      plan: 'trial',
+      status: 'active',
+      trialStartAt: now,
+      trialEndsAt,
+      paidUntil: null,
+      billingMode: 'monthly' as PaymentMode,
+      override: {
+        enabled: false,
+        type: 'custom',
+        overrideEndsAt: null,
+        reason: null,
+        grantedBy: '',
+        grantedAt: now,
+      },
+    } as CompanySubscription,
   });
   return ref.id;
+}
+
+export async function setCompanySubscriptionOverride(
+  companyId: string,
+  override: CompanySubscriptionOverride | null,
+): Promise<void> {
+  const ref = doc(db, 'companies', companyId);
+  if (override === null) {
+    await updateDoc(ref, {
+      'subscription.override': {
+        enabled: false,
+        type: 'custom',
+        overrideEndsAt: null,
+        reason: null,
+        grantedBy: null,
+        grantedAt: serverTimestamp(),
+      },
+    });
+    return;
+  }
+
+  await updateDoc(ref, {
+    'subscription.override': {
+      ...override,
+      grantedAt: override.grantedAt ?? serverTimestamp(),
+    },
+  });
+}
+
+export type PaymentMode = 'monthly' | 'seasonal' | 'annual';
+
+export async function setCompanyPaidPlan(
+  companyId: string,
+  plan: Exclude<SubscriptionPlan, 'trial'>,
+  mode: PaymentMode,
+): Promise<void> {
+  const ref = doc(db, 'companies', companyId);
+  const now = Timestamp.now();
+
+  const daysByMode: Record<PaymentMode, number> = {
+    monthly: 30,
+    seasonal: 120,
+    annual: 365,
+  };
+
+  const durationDays = daysByMode[mode] ?? 30;
+  const paidUntil = Timestamp.fromMillis(now.toMillis() + durationDays * 24 * 60 * 60 * 1000);
+
+  const legacyPlan =
+    plan === 'basic'
+      ? 'starter'
+      : plan === 'pro'
+        ? 'professional'
+        : 'enterprise';
+
+  await updateDoc(ref, {
+    plan: legacyPlan,
+    subscriptionPlan: plan,
+    'subscription.plan': plan,
+    'subscription.status': 'active',
+    'subscription.billingMode': mode,
+    'subscription.paidUntil': paidUntil,
+  });
 }
 
 /** Write users/{uid} with role company-admin and companyId. Must use auth uid as doc id. */

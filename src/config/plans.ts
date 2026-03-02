@@ -1,63 +1,114 @@
+/** Shared billing mode for pricing across landing, onboarding, and billing. */
+export type BillingMode = 'monthly' | 'season' | 'annual';
+
+export interface PlanPricing {
+  monthly: number | null;
+  season: number | null;
+  annual: number | null;
+}
+
 /** Subscription plans - shared by BillingPage, landing PricingSection, and ChoosePlan. */
 export interface PlanOption {
   name: string;
-  value: string;
-  price: string;
-  period: string;
+  value: 'basic' | 'pro' | 'enterprise';
   description: string;
   features: string[];
   popular: boolean;
+  pricing: PlanPricing;
 }
 
 export const SUBSCRIPTION_PLANS: PlanOption[] = [
   {
-    name: 'Starter',
-    value: 'starter',
-    price: 'KES 2,500',
-    period: '/month',
-    description: 'Perfect for small farms getting started',
+    name: 'Basic',
+    value: 'basic',
+    description: 'For single farms that want clear records and simple tracking.',
     features: [
-      'Up to 5 projects',
-      'Up to 10 users',
-      'Basic reporting',
-      'Email support',
-      '5GB storage',
+      'Max 2 active projects',
+      'Max 3 employees',
+      'Crop stage tracking',
+      'Season budget tracking',
+      'Expense recording',
+      'Harvest recording (any unit)',
+      'Basic reports',
+      '7-day free trial',
     ],
     popular: false,
+    pricing: {
+      monthly: 2500,
+      season: 8500,
+      annual: 24000,
+    },
   },
   {
-    name: 'Professional',
-    value: 'professional',
-    price: 'KES 7,500',
-    period: '/month',
-    description: 'Ideal for growing agricultural businesses',
+    name: 'Pro',
+    value: 'pro',
+    description: 'For serious farms and agribusiness teams that need deeper control.',
     features: [
-      'Up to 20 projects',
-      'Up to 50 users',
-      'Advanced analytics',
+      'Everything in Basic',
+      'Unlimited projects',
+      'Unlimited employees',
+      'Multi-block management',
+      'Advanced reports',
+      'Harvest analytics',
+      'Export to Excel/PDF',
+      'Activity audit log',
       'Priority support',
-      '25GB storage',
-      'API access',
-      'Custom reports',
+      'Future AI & weather features (coming soon)',
     ],
     popular: true,
+    pricing: {
+      monthly: 5000,
+      season: 15000,
+      annual: 48000,
+    },
   },
   {
     name: 'Enterprise',
     value: 'enterprise',
-    price: 'KES 15,000',
-    period: '/month',
-    description: 'For large-scale farm operations',
+    description: 'For large teams, aggregators, and enterprise operations.',
     features: [
-      'Unlimited projects',
-      'Unlimited users',
-      'AI-powered insights',
-      '24/7 phone support',
-      '100GB storage',
+      'Custom onboarding',
+      'Unlimited team members',
+      'Dedicated support',
       'Custom integrations',
-      'Dedicated account manager',
-      'SLA guarantee',
     ],
     popular: false,
+    pricing: {
+      monthly: null,
+      season: null,
+      annual: null,
+    },
   },
 ];
+
+export function getPlanPrice(value: 'basic' | 'pro' | 'enterprise', mode: BillingMode): number | null {
+  const plan = SUBSCRIPTION_PLANS.find((p) => p.value === value);
+  if (!plan) return null;
+  return plan.pricing[mode];
+}
+
+export function getBillingModeLabel(mode: BillingMode): string {
+  switch (mode) {
+    case 'monthly':
+      return 'Monthly';
+    case 'season':
+      return 'Per Season';
+    case 'annual':
+      return 'Annual';
+    default:
+      return 'Monthly';
+  }
+}
+
+export function getBillingModeDurationLabel(mode: BillingMode): string {
+  switch (mode) {
+    case 'monthly':
+      return 'Billed monthly';
+    case 'season':
+      return 'Billed per season';
+    case 'annual':
+      return 'Billed yearly (Best value)';
+    default:
+      return 'Billed monthly';
+  }
+}

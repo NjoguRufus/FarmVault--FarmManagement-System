@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Building2, PlusCircle, Users, FolderKanban, CreditCard, Bell, Loader2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Building2, PlusCircle, Users, FolderKanban, CreditCard, Bell, Loader2, ShieldCheck, Clock, X } from 'lucide-react';
 import { useCollection } from '@/hooks/useCollection';
 import { Company } from '@/types';
 import { Project, Employee } from '@/types';
@@ -22,18 +22,54 @@ import {
   setPaymentReminder,
   clearPaymentReminder,
   type CompanyDoc,
+  type CompanySubscription,
+  type CompanySubscriptionOverride,
+  setCompanySubscriptionOverride,
 } from '@/services/companyService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { format } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 export default function AdminCompaniesPage() {
+  const { user } = useAuth();
   const { data: companies = [], isLoading } = useCollection<Company>('admin-companies-list', 'companies', {
     companyScoped: false,
     isDeveloper: true,
   });
+
+  const { data: allProjects = [] } = useCollection<{ id: string; companyId?: string }>(
+    'admin-companies-projects',
+    'projects',
+    { companyScoped: false, isDeveloper: true },
+  );
+  const { data: allUsers = [] } = useCollection<{ id: string; companyId?: string }>(
+    'admin-companies-users',
+    'users',
+    { companyScoped: false, isDeveloper: true },
+  );
+
+  const enrichedCompanies = useMemo(() => {
+    const projectCountByCompany = new Map<string, number>();
+    const userCountByCompany = new Map<string, number>();
+    allProjects.forEach((p) => {
+      const cid = p.companyId ?? '';
+      if (cid) projectCountByCompany.set(cid, (projectCountByCompany.get(cid) ?? 0) + 1);
+    });
+    allUsers.forEach((u) => {
+      const cid = (u as { companyId?: string }).companyId ?? '';
+      if (cid) userCountByCompany.set(cid, (userCountByCompany.get(cid) ?? 0) + 1);
+    });
+    return companies.map((c) => ({
+      ...c,
+      projectCount: projectCountByCompany.get(c.id) ?? c.projectCount ?? 0,
+      userCount: userCountByCompany.get(c.id) ?? c.userCount ?? 0,
+      revenue: typeof (c as any).revenue === 'number' ? (c as any).revenue : (c as any).revenue ?? 0,
+    }));
+  }, [companies, allProjects, allUsers]);
+
   const [viewMode, setViewMode] = useState<CompaniesViewMode>('list');
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [reminderLoading, setReminderLoading] = useState(false);
@@ -187,7 +223,7 @@ export default function AdminCompaniesPage() {
       {isLoading && <p className="text-sm text-muted-foreground">Loading companies…</p>}
 
       <CompaniesTable
-        companies={companies}
+        companies={enrichedCompanies}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onCompanyClick={setSelectedCompany}
@@ -249,12 +285,68 @@ export default function AdminCompaniesPage() {
                       <CreditCard className="h-4 w-4" />
                       Billing & subscription
                     </h4>
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Billing type / Plan</span>
-                        <span className={cn('fv-badge capitalize', getPlanBadge(companyDetail?.plan ?? selectedCompany.plan))}>
-                          {companyDetail?.plan ?? selectedCompany.plan ?? (companyDetail as CompanyDoc)?.subscriptionPlan ?? '—'}
-                        </span>
+                    <div className="space-y-4 text-sm">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Billing type / Plan</span>
+                          <span className={cn('fv-badge capitalize', getPlanBadge(companyDetail?.plan ?? selectedCompany.plan))}>
+                            {companyDetail?.plan ?? selectedCompany.plan ?? (companyDetail as CompanyDoc)?.subscriptionPlan ?? '—'}
+                          </span>
+                        </div>
+                        {(() => {
+                          const sub = (companyDetail as CompanyDoc)?.subscription as CompanySubscription | undefined;
+                          if (!sub) return null;
+                          const trialEnds = (sub.trialEndsAt as any)?.toDate?.() as Date | undefined;
+                          const paidUntil = (sub.paidUntil as any)?.toDate?.() as Date | undefined;
+                          const now = new Date();
+                          const override = sub.override as CompanySubscriptionOverride | undefined;
+                          const overrideEnds = (override?.overrideEndsAt as any)?.toDate?.() as Date | undefined;
+                          const overrideActive = Boolean(override?.enabled && overrideEnds && overrideEnds > now);
+                          return (
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <p>
+                                Plan:{' '}
+                                <span className="font-medium">
+                                  {sub.plan}
+                                </span>{' '}
+                                · Status:{' '}
+                                <span className="font-medium capitalize">
+                                  {sub.status}
+                                </span>
+                              </p>
+                              {trialEnds && (
+                                <p>
+                                  Trial ends:{' '}
+                                  <span className="font-medium">
+                                    {format(trialEnds, 'PP')}
+                                  </span>
+                                </p>
+                              )}
+                              {paidUntil && (
+                                <p>
+                                  Paid until:{' '}
+                                  <span className="font-medium">
+                                    {format(paidUntil, 'PP')}
+                                  </span>
+                                </p>
+                              )}
+                              {override && (
+                                <p className="flex items-center gap-1">
+                                  <ShieldCheck className="h-3 w-3 text-fv-olive" />
+                                  Override:{' '}
+                                  <span className="font-medium">
+                                    {override.enabled ? (override.type ?? 'custom') : 'disabled'}
+                                  </span>
+                                  {overrideActive && overrideEnds && (
+                                    <span className="ml-1">
+                                      (until {format(overrideEnds, 'PP')})
+                                    </span>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       {companyDetail?.paymentReminderDismissedAt && (
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -308,6 +400,12 @@ export default function AdminCompaniesPage() {
                           </button>
                         )}
                       </div>
+                      {user?.role === 'developer' && (
+                        <DeveloperSubscriptionOverridePanel
+                          companyId={companyId}
+                          company={companyDetail as CompanyDoc | undefined}
+                        />
+                      )}
                     </div>
                   </section>
 
@@ -434,6 +532,192 @@ export default function AdminCompaniesPage() {
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+interface DeveloperSubscriptionOverridePanelProps {
+  companyId: string | null;
+  company?: CompanyDoc;
+}
+
+function DeveloperSubscriptionOverridePanel({ companyId, company }: DeveloperSubscriptionOverridePanelProps) {
+  const [saving, setSaving] = React.useState(false);
+  const sub = (company?.subscription ?? null) as CompanySubscription | null;
+  const override = (sub?.override ?? null) as CompanySubscriptionOverride | null;
+
+  const [fullFree, setFullFree] = React.useState<boolean>(override?.enabled && override?.type === 'full_free');
+  const [extendTrialDays, setExtendTrialDays] = React.useState<string>('');
+  const [customExpiry, setCustomExpiry] = React.useState<string>('');
+  const [reason, setReason] = React.useState<string>(override?.reason ?? '');
+
+  React.useEffect(() => {
+    if (!override) {
+      setFullFree(false);
+      setExtendTrialDays('');
+      setCustomExpiry('');
+      setReason('');
+      return;
+    }
+    setFullFree(override.enabled && override.type === 'full_free');
+    setReason(override.reason ?? '');
+    if (override.overrideEndsAt) {
+      const d = (override.overrideEndsAt as any).toDate?.() as Date | undefined;
+      if (d) {
+        setCustomExpiry(d.toISOString().slice(0, 10));
+      }
+    }
+  }, [override?.enabled, override?.type, (override?.overrideEndsAt as any)?.seconds]);
+
+  const handleSave = async () => {
+    if (!companyId) return;
+    setSaving(true);
+    try {
+      const now = new Date();
+      let nextOverride: CompanySubscriptionOverride;
+
+      if (fullFree) {
+        nextOverride = {
+          enabled: true,
+          type: 'full_free',
+          overrideEndsAt: null,
+          reason: reason || null,
+          grantedBy: 'developer',
+        };
+      } else if (extendTrialDays.trim()) {
+        const days = Number(extendTrialDays.trim());
+        const end = new Date(now.getTime() + Math.max(1, days) * 24 * 60 * 60 * 1000);
+        nextOverride = {
+          enabled: true,
+          type: 'extended_trial',
+          overrideEndsAt: Timestamp.fromDate(end),
+          reason: reason || null,
+          grantedBy: 'developer',
+        };
+      } else if (customExpiry.trim()) {
+        const end = new Date(customExpiry.trim());
+        nextOverride = {
+          enabled: true,
+          type: 'custom',
+          overrideEndsAt: Timestamp.fromDate(end),
+          reason: reason || null,
+          grantedBy: 'developer',
+        };
+      } else {
+        nextOverride = {
+          enabled: false,
+          type: 'custom',
+          overrideEndsAt: null,
+          reason: reason || null,
+          grantedBy: 'developer',
+        };
+      }
+
+      await setCompanySubscriptionOverride(companyId, nextOverride);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRevoke = async () => {
+    if (!companyId) return;
+    setSaving(true);
+    try {
+      await setCompanySubscriptionOverride(companyId, null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const overrideActive = Boolean(override?.enabled);
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/70 bg-muted/40 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-fv-olive" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Subscription Override (Developer)
+          </span>
+        </div>
+        {overrideActive && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 border border-emerald-200">
+            <Clock className="h-3 w-3" />
+            Active
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div className="space-y-2">
+          <label className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Enable full free access</span>
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border"
+              checked={fullFree}
+              onChange={(e) => setFullFree(e.target.checked)}
+            />
+          </label>
+          <label className="space-y-1 block">
+            <span className="text-muted-foreground">Extend trial (days)</span>
+            <input
+              type="number"
+              min={1}
+              className="fv-input h-8 text-xs"
+              value={extendTrialDays}
+              onChange={(e) => setExtendTrialDays(e.target.value)}
+              placeholder="e.g. 14"
+            />
+          </label>
+        </div>
+        <div className="space-y-2">
+          <label className="space-y-1 block">
+            <span className="text-muted-foreground">Custom expiry date</span>
+            <input
+              type="date"
+              className="fv-input h-8 text-xs"
+              value={customExpiry}
+              onChange={(e) => setCustomExpiry(e.target.value)}
+            />
+          </label>
+          <label className="space-y-1 block">
+            <span className="text-muted-foreground">Reason (optional)</span>
+            <input
+              type="text"
+              className="fv-input h-8 text-xs"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Internal note"
+            />
+          </label>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span>Only developer can change override.</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {overrideActive && (
+            <button
+              type="button"
+              disabled={saving}
+              className="fv-btn fv-btn--ghost text-xs text-muted-foreground"
+              onClick={handleRevoke}
+            >
+              <X className="h-3 w-3 mr-1" />
+              Revoke override
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={saving || !companyId}
+            className="fv-btn fv-btn--primary text-xs"
+            onClick={handleSave}
+          >
+            {saving ? 'Saving…' : 'Save override'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   Building2,
   Database,
   Settings,
+  BarChart3,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -55,8 +56,9 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Admin Home', path: '/admin', icon: LayoutDashboard, group: 'main' },
   { label: 'Companies', path: '/admin/companies', icon: Building2, group: 'main' },
   { label: 'Users', path: '/admin/users', icon: Users, group: 'main' },
-  { label: 'Pending Users', path: '/admin/users/pending', icon: Users, group: 'main' },
+  { label: 'Billing Confirmation', path: '/admin/users/pending', icon: Users, group: 'main' },
   { label: 'Finances', path: '/admin/finances', icon: CreditCard, group: 'main' },
+  { label: 'Subscription Analytics', path: '/admin/analytics/subscriptions', icon: BarChart3, group: 'main' },
   { label: 'FarmVault Expenses', path: '/admin/expenses', icon: Receipt, group: 'main' },
   { label: 'Backups', path: '/admin/backups', icon: Database, group: 'main' },
   { label: 'Code Red', path: '/admin/code-red', icon: AlertTriangle, group: 'main' },

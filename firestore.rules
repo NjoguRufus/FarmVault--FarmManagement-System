@@ -36,8 +36,13 @@ service cloud.firestore {
 
     function isDeveloper() {
       let userRef = /databases/$(database)/documents/users/$(request.auth.uid);
-      return isSignedIn() && exists(userRef)
-        && get(userRef).data.get('role', null) == 'developer';
+      return isSignedIn() && (
+        (
+          exists(userRef)
+          && get(userRef).data.get('role', null) == 'developer'
+        )
+        || request.auth.token.role == 'developer'
+      );
     }
 
     function isCompanyAdmin() {
@@ -45,6 +50,16 @@ service cloud.firestore {
       return isSignedIn() && exists(userRef)
         && (get(userRef).data.get('role', null) == 'company-admin'
             || get(userRef).data.get('role', null) == 'company_admin');
+    }
+
+    function getSubscriptionOverride(data) {
+      return data.subscription != null && data.subscription.override != null
+        ? data.subscription.override
+        : null;
+    }
+
+    function isSubscriptionOverrideUnchanged() {
+      return getSubscriptionOverride(resource.data) == getSubscriptionOverride(request.resource.data);
     }
 
     function isManager() {
@@ -67,11 +82,13 @@ service cloud.firestore {
     }
 
     // --- Users ---
-    // Read: own doc, or same-company docs (for listing company users). Uses effective company for token/offline flows.
+    // Read: own doc, same-company docs (for listing company users), or all users for developers.
+    // Uses effective company for token/offline flows.
     // Write: own doc; company-admin/developer can create/update same-company docs. companyId must not change on update.
     match /users/{userId} {
       allow read: if isSignedIn() && (
         request.auth.uid == userId
+        || isDeveloper()
         || (effectiveUserCompanyId() != null && resource.data.get('companyId', null) == effectiveUserCompanyId())
       );
       allow create: if isSignedIn() && (
@@ -93,7 +110,18 @@ service cloud.firestore {
       // Create: any signed-in user (onboarding has no user doc yet).
       // Read/update/delete: only own company (user doc or token) or developer.
       allow create: if isSignedIn();
-      allow read, update, delete: if isSignedIn() && (effectiveUserCompanyId() == companyId || isDeveloper());
+      allow read, delete: if isSignedIn() && (effectiveUserCompanyId() == companyId || isDeveloper());
+      // Update: developer, or same-company when override unchanged or company has no subscription yet (legacy / new billing).
+      allow update: if isSignedIn() && (
+        isDeveloper()
+        || (
+          effectiveUserCompanyId() == companyId
+          && (
+            isSubscriptionOverrideUnchanged()
+            || resource.data.get('subscription', null) == null
+          )
+        )
+      );
     }
 
     // --- Projects ---
@@ -554,6 +582,32 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.get('companyId', null) == effectiveUserCompanyId();
       allow update, delete: if isDeveloper()
         || (isSignedIn() && resource.data.get('companyId', null) == effectiveUserCompanyId() && resource.data.get('createdBy', null) == request.auth.uid);
+    }
+
+    // --- Subscription payments (manual M-Pesa verification) ---
+    match /subscriptionPayments/{paymentId} {
+      allow create: if isSignedIn()
+        && request.resource.data.get('companyId', null) == effectiveUserCompanyId();
+      allow read: if isSignedIn() && (
+        isDeveloper()
+        || resource.data.get('companyId', null) == effectiveUserCompanyId()
+      );
+      allow update: if isSignedIn() && isDeveloper();
+      allow delete: if false;
+    }
+
+    // --- Company subscription snapshots (developer + company visibility) ---
+    match /companySubscriptions/{companyId} {
+      allow read: if isSignedIn() && (
+        isDeveloper()
+        || effectiveUserCompanyId() == companyId
+      );
+      allow write: if isSignedIn() && isDeveloper();
+    }
+
+    // --- Developer billing actions audit log ---
+    match /developerActionsLog/{actionId} {
+      allow read, write: if isSignedIn() && isDeveloper();
     }
 
     // --- Fallback: deny everything else by default ---

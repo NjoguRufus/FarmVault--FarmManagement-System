@@ -3,12 +3,13 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap, RefreshCw } from 'lucide-react';
 import { registerCompanyAdmin } from '@/services/authService';
 import { createCompany, createCompanyUserProfile } from '@/services/companyService';
-import { SUBSCRIPTION_PLANS } from '@/config/plans';
+import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from '@/config/plans';
 import { OnboardingHeader } from '@/components/onboarding/OnboardingHeader';
 import { OnboardingNavButtons } from '@/components/onboarding/OnboardingNavButtons';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
 
 const STEPS = 4;
 
@@ -17,13 +18,15 @@ export default function SetupCompany() {
   const location = useLocation();
   const { setupIncomplete } = useAuth();
   const statePlan = (location.state as { plan?: string })?.plan;
+  const stateBillingMode = (location.state as { billingMode?: BillingMode })?.billingMode;
   const stateMessage = (location.state as { message?: string })?.message;
   const initialPlan =
-    statePlan && ['starter', 'professional', 'enterprise'].includes(statePlan)
+    statePlan && ['basic', 'pro', 'enterprise'].includes(statePlan)
       ? statePlan
       : null;
 
   const [selectedPlan, setSelectedPlan] = useState<string | null>(initialPlan);
+  const [billingMode, setBillingMode] = useState<BillingMode>(stateBillingMode ?? 'monthly');
   const [step, setStep] = useState(1);
 
   useEffect(() => {
@@ -368,9 +371,12 @@ export default function SetupCompany() {
 
               {step === 4 && (
                 <div className="space-y-4">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Pricing
-                  </p>
+                  <div className="space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Pricing
+                    </p>
+                    <BillingModeSelector mode={billingMode} onChange={setBillingMode} />
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 min-w-0">
                     {SUBSCRIPTION_PLANS.map((plan) => {
                       const isSelected = selectedPlan === plan.value;
@@ -396,8 +402,32 @@ export default function SetupCompany() {
                             <h3 className="text-lg font-bold text-foreground">{plan.name}</h3>
                             <p className="text-xs text-muted-foreground mt-1">{plan.description}</p>
                             <div className="mt-3">
-                              <span className="text-xl font-bold">{plan.price}</span>
-                              <span className="text-muted-foreground text-xs">{plan.period}</span>
+                              {(() => {
+                                const amount = getPlanPrice(plan.value, billingMode);
+                                const durationLabel = getBillingModeDurationLabel(billingMode);
+                                if (amount == null) {
+                                  return (
+                                    <p className="text-xs font-medium text-muted-foreground">
+                                      Talk to us for pricing.
+                                    </p>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <span className="text-xl font-bold">
+                                      KES {amount.toLocaleString()}
+                                    </span>
+                                    <span className="block text-muted-foreground text-xs mt-1">
+                                      {durationLabel}
+                                    </span>
+                                    {billingMode === 'annual' && (
+                                      <span className="block text-[11px] text-emerald-700 mt-1">
+                                        Save more with annual billing.
+                                      </span>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                           <ul className="space-y-1.5 mb-3">

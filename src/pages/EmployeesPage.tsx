@@ -35,6 +35,8 @@ import { formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { PermissionEditor } from '@/components/permissions/PermissionEditor';
 import { getDefaultPermissions, getPresetPermissions, resolvePermissions } from '@/lib/permissions';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker';
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
@@ -146,6 +148,8 @@ export default function EmployeesPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editPermissions, setEditPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
   const [editPreset, setEditPreset] = useState<PermissionEditorPreset>('custom');
+  const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const openEdit = (employee: Employee) => {
     const employeeRole = getEmployeeRole(employee);
@@ -221,6 +225,10 @@ export default function EmployeesPage() {
       toast.error('Permission denied', { description: 'You cannot edit employee records.' });
       return;
     }
+    if (!canWrite) {
+      setUpgradeOpen(true);
+      return;
+    }
     setEditSaving(true);
     try {
       const selectedRole = resolveRoleForSave(editRole, editingEmployee);
@@ -265,6 +273,10 @@ export default function EmployeesPage() {
     e.preventDefault();
     if (!canCreateEmployees) {
       toast.error('Permission denied', { description: 'You cannot create employees.' });
+      return;
+    }
+    if (!canWrite) {
+      setUpgradeOpen(true);
       return;
     }
     setSaving(true);
@@ -895,6 +907,13 @@ export default function EmployeesPage() {
           ))}
         </div>
       </div>
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </div>
   );
 }

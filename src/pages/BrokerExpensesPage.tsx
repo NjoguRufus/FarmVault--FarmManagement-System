@@ -26,6 +26,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -85,8 +87,15 @@ export default function BrokerExpensesPage() {
   const [harvestId, setHarvestId] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWrite) {
+      setUpgradeOpen(true);
+      return;
+    }
     const num = Number(amount || '0');
     if (num <= 0) return;
     const harvest = harvestId ? brokerHarvests.find((h) => h.id === harvestId) : null;
@@ -351,6 +360,13 @@ export default function BrokerExpensesPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </div>
   );
 }

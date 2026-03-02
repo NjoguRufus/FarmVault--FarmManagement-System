@@ -44,6 +44,8 @@ import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
 import { applyExpenseDeduction } from '@/services/expenseBudgetService';
 import { getHarvestPickersByIds } from '@/services/harvestCollectionService';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -319,6 +321,9 @@ export default function ExpensesPage() {
   const isTomatoesProject = activeProject?.cropType === 'tomatoes';
   const showBrokerExpensesButton = !isBroker && isTomatoesProject;
 
+  const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
   // Get unpaid work logs for the active project
   const unpaidWorkLogs = useMemo(() => {
     if (!activeProject) return [];
@@ -358,6 +363,10 @@ export default function ExpensesPage() {
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canWrite) {
+      setUpgradeOpen(true);
+      return;
+    }
     if (!canCreateExpense) {
       toast.error('Permission denied', { description: 'You cannot create expenses.' });
       return;
@@ -412,6 +421,10 @@ export default function ExpensesPage() {
   const handleMarkWorkLogAsPaid = async (log: WorkLog) => {
     if (!canApproveExpense) {
       toast.error('Permission denied', { description: 'You cannot approve labour expenses.' });
+      return;
+    }
+    if (!canWrite) {
+      setUpgradeOpen(true);
       return;
     }
     if (!activeProject || !user || !log.id || !log.totalPrice) return;
@@ -1020,6 +1033,13 @@ export default function ExpensesPage() {
           </DialogContent>
         </Dialog>
       )}
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </div>
   );
 }
