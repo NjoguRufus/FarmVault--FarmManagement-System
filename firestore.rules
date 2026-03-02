@@ -22,16 +22,16 @@ service cloud.firestore {
       return fromDoc != null ? fromDoc : request.auth.token.get('companyId', null);
     }
 
-    // For creates: ensure the new document's companyId matches the user's companyId.
+    // For creates: ensure the new document's companyId matches effective company (user doc or token).
     function matchesCompanyOnCreate() {
       return isSignedIn()
-        && request.resource.data.get('companyId', null) == userCompanyId();
+        && request.resource.data.get('companyId', null) == effectiveUserCompanyId();
     }
 
-    // For updates/deletes: ensure the existing doc's companyId matches the user's companyId.
+    // For updates/deletes: ensure the existing doc's companyId matches effective company (user doc or token).
     function matchesCompanyOnDoc() {
       return isSignedIn()
-        && resource.data.get('companyId', null) == userCompanyId();
+        && resource.data.get('companyId', null) == effectiveUserCompanyId();
     }
 
     function isDeveloper() {
@@ -56,31 +56,32 @@ service cloud.firestore {
       );
     }
 
-    // Read company-scoped docs: only when doc.companyId matches user's companyId, or developer.
-    // Prevents leaking docs with companyId == null to normal users.
+    // Read company-scoped docs: doc.companyId matches effective company (user doc or token), or developer, or legacy doc with no companyId.
+    // Prevents cross-company reads; token/offline flows work when user doc is stale.
     function canReadCompanyDoc() {
       return isSignedIn() && (
-        (userCompanyId() != null && resource.data.get('companyId', null) == userCompanyId())
-        || isDeveloper()
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null && resource.data.get('companyId', null) == effectiveUserCompanyId())
+        || (resource.data.get('companyId', null) == null)
       );
     }
 
     // --- Users ---
-    // Read: own doc, or same-company docs (for listing company users).
+    // Read: own doc, or same-company docs (for listing company users). Uses effective company for token/offline flows.
     // Write: own doc; company-admin/developer can create/update same-company docs. companyId must not change on update.
     match /users/{userId} {
       allow read: if isSignedIn() && (
         request.auth.uid == userId
-        || (userCompanyId() != null && resource.data.get('companyId', null) == userCompanyId())
+        || (effectiveUserCompanyId() != null && resource.data.get('companyId', null) == effectiveUserCompanyId())
       );
       allow create: if isSignedIn() && (
         request.auth.uid == userId
-        || (isCompanyAdmin() && request.resource.data.get('companyId', null) == userCompanyId())
+        || (isCompanyAdmin() && request.resource.data.get('companyId', null) == effectiveUserCompanyId())
         || isDeveloper()
       );
       allow update: if isSignedIn() && (
         request.auth.uid == userId
-        || (isCompanyAdmin() && request.resource.data.get('companyId', null) == userCompanyId())
+        || (isCompanyAdmin() && request.resource.data.get('companyId', null) == effectiveUserCompanyId())
         || isDeveloper()
       ) && request.resource.data.get('companyId', null) == resource.data.get('companyId', null);
       allow delete: if isSignedIn() && (request.auth.uid == userId || isDeveloper());
@@ -89,10 +90,10 @@ service cloud.firestore {
     // --- Companies ---
 
     match /companies/{companyId} {
-      // Create: any signed-in user (onboarding has no user doc yet, so userCompanyId() is null).
-      // Read/update/delete: only own company or developer.
+      // Create: any signed-in user (onboarding has no user doc yet).
+      // Read/update/delete: only own company (user doc or token) or developer.
       allow create: if isSignedIn();
-      allow read, update, delete: if isSignedIn() && (userCompanyId() == companyId || isDeveloper());
+      allow read, update, delete: if isSignedIn() && (effectiveUserCompanyId() == companyId || isDeveloper());
     }
 
     // --- Projects ---
@@ -113,24 +114,24 @@ service cloud.firestore {
 
     // --- Stage Notes (company + project + stage scoped) ---
     match /stageNotes/{noteId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
-      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || resource.data.get('companyId', null) == null || isDeveloper());
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
     }
 
     // --- Project Blocks (company + project scoped) ---
 
     match /projectBlocks/{blockId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
-      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || resource.data.get('companyId', null) == null || isDeveloper());
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
+      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
     }
 
     // --- Budget Pools (company scoped) ---
 
     match /budgetPools/{poolId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
-      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || resource.data.get('companyId', null) == null || isDeveloper());
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
+      allow update, delete: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
     }
 
     // --- Work Logs ---
@@ -143,7 +144,7 @@ service cloud.firestore {
 
     // --- Operations Work Cards (Admin creates; Manager submits execution only) ---
     match /operationsWorkCards/{cardId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || resource.data.get('companyId', null) == null || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
     }
@@ -171,8 +172,8 @@ service cloud.firestore {
 
     // --- Challenge Templates (reusable pre-season, company + crop scoped) ---
     match /challengeTemplates/{templateId} {
-      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
-      allow create, update: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == effectiveUserCompanyId() || resource.data.get('companyId', null) == null || isDeveloper());
+      allow create, update: if isSignedIn() && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
     }
 
     // --- Inventory Usage ---
@@ -281,23 +282,18 @@ service cloud.firestore {
 
     match /pickerWeighEntries/{entryId} {
       allow read: if isSignedIn() && (
-        isDeveloper() 
-        || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null && resource.data.get('companyId', null) == effectiveUserCompanyId())
+        || (resource.data.get('companyId', null) == null)
       );
-      
       allow create: if isSignedIn() && (
         isDeveloper()
-        || (request.resource.data.get('companyId', null) != null 
-            && request.resource.data.get('companyId', null) == userCompanyId())
+        || (request.resource.data.get('companyId', null) != null && request.resource.data.get('companyId', null) == effectiveUserCompanyId())
       );
-      
       allow update: if isSignedIn() && (
         isDeveloper()
-        || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+        || (resource.data.get('companyId', null) != null && resource.data.get('companyId', null) == effectiveUserCompanyId())
       );
-      
       allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
     }
 
@@ -431,7 +427,7 @@ service cloud.firestore {
     }
 
     // --- Employees ---
-    // Create: company-admin or manager (same company only), or developer. Requester's user doc must have companyId for company match.
+    // Create: company-admin or manager (same company only), or developer. Uses effective company for token/offline.
     // Allow read when doc doesn't exist so AuthContext can safely getDoc(employees/uid) for new users with no employee record.
     match /employees/{employeeId} {
       allow read: if isSignedIn() && (
@@ -441,8 +437,8 @@ service cloud.firestore {
       );
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (
-        (isCompanyAdmin() && request.resource.data.get('companyId', null) == userCompanyId())
-        || (isManager() && request.resource.data.get('companyId', null) == userCompanyId())
+        (isCompanyAdmin() && request.resource.data.get('companyId', null) == effectiveUserCompanyId())
+        || (isManager() && request.resource.data.get('companyId', null) == effectiveUserCompanyId())
         || isDeveloper()
       );
     }
@@ -473,9 +469,9 @@ service cloud.firestore {
 
     // --- Company data backups: developer can read/write any; company-admin can read/write own company only ---
     match /developerBackups/{companyId} {
-      allow read, write: if isDeveloper() || (isSignedIn() && userCompanyId() == companyId);
+      allow read, write: if isDeveloper() || (isSignedIn() && effectiveUserCompanyId() == companyId);
       match /snapshots/{snapshotId} {
-        allow read, write: if isDeveloper() || (isSignedIn() && userCompanyId() == companyId);
+        allow read, write: if isDeveloper() || (isSignedIn() && effectiveUserCompanyId() == companyId);
       }
     }
 
@@ -497,11 +493,12 @@ service cloud.firestore {
     // --- Inventory audit logs: who did what (restock/deduct/delete/add); company users create and read their own ---
     match /inventoryAuditLogs/{logId} {
       allow create: if isSignedIn() && (
-        request.resource.data.get('companyId', null) == userCompanyId()
+        request.resource.data.get('companyId', null) == effectiveUserCompanyId()
         || isDeveloper()
       );
       allow read: if isSignedIn() && (
-        resource.data.get('companyId', null) == userCompanyId()
+        resource.data.get('companyId', null) == effectiveUserCompanyId()
+        || resource.data.get('companyId', null) == null
         || isDeveloper()
       );
       allow update, delete: if false;
@@ -510,11 +507,12 @@ service cloud.firestore {
     // --- Activity logs: live operations snapshot (tasks, harvest, inventory, payments) ---
     match /activityLogs/{logId} {
       allow create: if isSignedIn() && (
-        request.resource.data.get('companyId', null) == userCompanyId()
+        request.resource.data.get('companyId', null) == effectiveUserCompanyId()
         || isDeveloper()
       );
       allow read: if isSignedIn() && (
-        resource.data.get('companyId', null) == userCompanyId()
+        resource.data.get('companyId', null) == effectiveUserCompanyId()
+        || resource.data.get('companyId', null) == null
         || isDeveloper()
       );
       allow update, delete: if false;
@@ -534,7 +532,9 @@ service cloud.firestore {
     // --- Company note shares (developer shares to company; company can read own) ---
     match /company_note_shares/{shareId} {
       allow read: if isSignedIn() && (
-        isDeveloper() || resource.data.get('companyId', null) == userCompanyId()
+        isDeveloper()
+        || resource.data.get('companyId', null) == effectiveUserCompanyId()
+        || resource.data.get('companyId', null) == null
       );
       allow create, update, delete: if isDeveloper();
     }
@@ -542,28 +542,30 @@ service cloud.firestore {
     // --- Company notes (company-created; company admin CRUD own, developer read all) ---
     match /company_notes/{noteId} {
       allow read: if isSignedIn() && (
-        isDeveloper() || resource.data.get('companyId', null) == userCompanyId()
+        isDeveloper()
+        || resource.data.get('companyId', null) == effectiveUserCompanyId()
+        || resource.data.get('companyId', null) == null
       );
       allow create: if isSignedIn() && isCompanyAdmin()
-        && request.resource.data.get('companyId', null) == userCompanyId();
+        && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
       allow update, delete: if isSignedIn() && (
         isDeveloper()
-        || (resource.data.get('companyId', null) == userCompanyId() && isCompanyAdmin())
+        || (resource.data.get('companyId', null) == effectiveUserCompanyId() && isCompanyAdmin())
       );
     }
 
     // --- Code Red: urgent developer–admin communication (e.g. data recovery) ---
     match /codeRed/{requestId} {
       allow read: if isSignedIn() && (
-        resource.data.get('companyId', null) == userCompanyId() || isDeveloper()
+        resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper()
       );
-      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
-      allow update, delete: if isSignedIn() && (  
-        resource.data.get('companyId', null) == userCompanyId() || isDeveloper()
+      allow create: if isSignedIn() && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
+      allow update, delete: if isSignedIn() && (
+        resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper()
       );
       match /messages/{messageId} {
         allow read, write: if isSignedIn() && (
-          get(/databases/$(database)/documents/codeRed/$(requestId)).data.get('companyId', null) == userCompanyId()
+          get(/databases/$(database)/documents/codeRed/$(requestId)).data.get('companyId', null) == effectiveUserCompanyId()
           || isDeveloper()
         );
       }
