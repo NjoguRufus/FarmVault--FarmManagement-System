@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { OptimizedImage } from "@/components/ui/OptimizedImage";
 
 const features = [
   {
@@ -90,7 +91,7 @@ export function FeaturesSection() {
                 className="bg-card rounded-3xl overflow-hidden shadow-luxury hover:shadow-luxury-hover transition-all duration-500 group"
               >
                 <div className="relative h-56 overflow-hidden">
-                  <img
+                  <OptimizedImage
                     src={feature.image}
                     alt={feature.title}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"

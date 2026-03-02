@@ -3,6 +3,7 @@ import { MoreHorizontal, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Project } from '@/types';
 import { Link } from 'react-router-dom';
+import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
 
 interface ProjectsTableProps {
   projects: Project[];
@@ -84,8 +85,11 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
                         {project.name}
                       </div>
                       {!compact && (
-                        <div className="text-xs text-muted-foreground">
-                          Started {formatDate(project.startDate)}
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                          <div>Started {formatDate(project.startDate)}</div>
+                          {getExpectedHarvestDate(project) && (
+                            <div>Expected Harvest: {formatDate(getExpectedHarvestDate(project))}</div>
+                          )}
                         </div>
                       )}
                     </div>

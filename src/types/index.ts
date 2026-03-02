@@ -285,11 +285,28 @@ export interface CropStage {
   stageIndex: number;
   startDate?: Date;
   endDate?: Date;
+  /** Editable planned timeline */
+  plannedStartDate?: Date;
+  plannedEndDate?: Date;
+  /** Editable actual progress */
+  actualStartDate?: Date;
+  actualEndDate?: Date;
   status: 'pending' | 'in-progress' | 'completed';
   notes?: string;
   recalculated?: boolean;
   recalculatedAt?: Date;
   recalculationReason?: string;
+}
+
+/** Stage note (subcollection or top-level); company-scoped. */
+export interface StageNote {
+  id: string;
+  stageId: string;
+  projectId: string;
+  companyId: string;
+  text: string;
+  createdAt: unknown;
+  createdBy: string;
 }
 
 export interface ProjectBlock {
@@ -359,6 +376,14 @@ export interface Expense {
   paidAt?: Date;
   paidBy?: string;
   paidByName?: string;
+
+  /** Harvest picker payment batch metadata (source: harvest_wallet_picker_payment) */
+  meta?: {
+    source?: string;
+    harvestCollectionId?: string;
+    paymentBatchId?: string;
+    pickerIds?: string[];
+  };
 
   createdAt: Date;
 }
@@ -712,6 +737,27 @@ export interface SeasonChallenge {
   updatedAt?: Date;
 }
 
+/** Reusable pre-season challenge template (company + crop scoped). */
+export type ChallengeTemplatePhase = 'preseason' | 'inseason' | 'harvest';
+
+export interface ChallengeTemplate {
+  id: string;
+  companyId: string;
+  cropType: string;
+  phase: ChallengeTemplatePhase;
+  title: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high';
+  defaultDueOffsetDays?: number;
+  isReusable: true;
+  createdBy: string;
+  createdAt: unknown;
+  /** Resolution / what to do (saved from challenge whatWasDone, plan2IfFails, items) */
+  whatWasDone?: string;
+  plan2IfFails?: string;
+  itemsUsedSummary?: string;
+}
+
 // Items that need to be purchased (derived from challenges)
 export interface NeededItem {
   id: string;
@@ -919,5 +965,7 @@ export interface PickerWeighEntry {
 
   weightKg: number;
   tripNumber: number;
+  /** When user overrides auto trip number, the value we suggested (e.g. 2) so we can show "Trip no 2 changed to 3". */
+  suggestedTripNumber?: number;
   recordedAt: Date | unknown;
 }

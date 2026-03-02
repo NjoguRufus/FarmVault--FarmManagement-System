@@ -25,7 +25,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { upsertChallengeTemplate } from '@/services/challengeTemplatesService';
 
 export default function SeasonChallengesPage() {
   const { activeProject } = useProject();
@@ -108,6 +111,7 @@ export default function SeasonChallengesPage() {
   const [challengeType, setChallengeType] = useState<ChallengeType>('other');
   const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [saving, setSaving] = useState(false);
+  const [saveAsReusable, setSaveAsReusable] = useState(false);
 
   // Edit form state
   const [editTitle, setEditTitle] = useState('');
@@ -119,6 +123,7 @@ export default function SeasonChallengesPage() {
   const [editPlan2IfFails, setEditPlan2IfFails] = useState('');
   const [editItemsUsed, setEditItemsUsed] = useState<Array<{ inventoryItemId?: string; itemName: string; category: InventoryCategory; quantity?: number; unit: string; needsPurchase?: boolean }>>([]);
   const [editingSaving, setEditingSaving] = useState(false);
+  const [saveAsReusableEdit, setSaveAsReusableEdit] = useState(false);
 
   const handleReportChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,11 +146,29 @@ export default function SeasonChallengesPage() {
         createdAt: serverTimestamp(),
       });
       
+      if (saveAsReusable && activeProject?.companyId && user?.id) {
+        try {
+          await upsertChallengeTemplate({
+            companyId: activeProject.companyId,
+            cropType: activeProject.cropType,
+            phase: 'preseason',
+            title,
+            description: description || undefined,
+            priority: severity,
+            createdBy: user.id,
+          });
+          queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+        } catch (templateErr) {
+          console.warn('Failed to save as reusable template:', templateErr);
+          toast.error('Challenge saved but could not save as reusable template.');
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
       setTitle('');
       setDescription('');
       setChallengeType('other');
       setSeverity('medium');
+      setSaveAsReusable(false);
       toast.success(
         isOffline
           ? 'Challenge saved offline. It will sync when online.'
@@ -318,10 +341,34 @@ export default function SeasonChallengesPage() {
       const cleanedUpdateData = cleanUndefined(updateData);
 
       await updateDoc(doc(db, 'seasonChallenges', editingChallenge.id), cleanedUpdateData);
-      
+
+      if (saveAsReusableEdit && editingChallenge.companyId && user?.id) {
+        const itemsUsedSummary = editItemsUsed.length > 0
+          ? editItemsUsed.map((i) => `${i.itemName}${i.quantity != null ? ` (${i.quantity} ${i.unit})` : ''}`).filter(Boolean).join('; ')
+          : undefined;
+        try {
+          await upsertChallengeTemplate({
+            companyId: editingChallenge.companyId,
+            cropType: editingChallenge.cropType,
+            phase: 'preseason',
+            title: editTitle.trim(),
+            description: editDescription.trim() || undefined,
+            priority: editSeverity,
+            createdBy: user.id,
+            whatWasDone: editWhatWasDone.trim() || undefined,
+            plan2IfFails: editPlan2IfFails.trim() || undefined,
+            itemsUsedSummary: itemsUsedSummary || undefined,
+          });
+          queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+        } catch (templateErr) {
+          console.warn('Failed to save as reusable template:', templateErr);
+          toast.error('Challenge saved but could not save as reusable template.');
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
       queryClient.invalidateQueries({ queryKey: ['neededItems'] });
-      
+
       // Reset form state
       setEditOpen(false);
       setEditingChallenge(null);
@@ -333,6 +380,7 @@ export default function SeasonChallengesPage() {
       setEditWhatWasDone('');
       setEditPlan2IfFails('');
       setEditItemsUsed([]);
+      setSaveAsReusableEdit(false);
     } catch (error) {
       console.error('Error saving challenge:', error);
       toast.error('Failed to save challenge. Please try again.');
@@ -433,6 +481,16 @@ export default function SeasonChallengesPage() {
                       <SelectItem value="high">High</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+                  <Label htmlFor="add-save-reusable" className="text-sm font-medium cursor-pointer">
+                    Save as reusable (use for future projects)
+                  </Label>
+                  <Switch
+                    id="add-save-reusable"
+                    checked={saveAsReusable}
+                    onCheckedChange={setSaveAsReusable}
+                  />
                 </div>
                 <DialogFooter>
                   <button
@@ -847,6 +905,16 @@ export default function SeasonChallengesPage() {
                   value={editPlan2IfFails}
                   onChange={(e) => setEditPlan2IfFails(e.target.value)}
                   placeholder="Describe the backup plan if the current solution doesn't work..."
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+                <Label htmlFor="edit-save-reusable" className="text-sm font-medium cursor-pointer">
+                  Save as reusable (use for future projects)
+                </Label>
+                <Switch
+                  id="edit-save-reusable"
+                  checked={saveAsReusableEdit}
+                  onCheckedChange={setSaveAsReusableEdit}
                 />
               </div>
               <DialogFooter>

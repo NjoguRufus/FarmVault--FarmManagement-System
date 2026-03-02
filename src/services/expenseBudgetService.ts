@@ -1,4 +1,4 @@
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocFromCache, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { decrementPoolRemaining } from './budgetPoolService';
 
@@ -17,7 +17,23 @@ export async function applyExpenseDeduction(
   if (!projectId || !companyId || Number(amount) <= 0) return;
 
   const projectRef = doc(db, 'projects', projectId);
-  const snap = await getDoc(projectRef);
+  let snap;
+  try {
+    snap = await getDoc(projectRef);
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    const msg = String((err as Error)?.message ?? '');
+    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+      try {
+        snap = await getDocFromCache(projectRef);
+      } catch {
+        // Offline and no cached project document: skip budget deduction but don't block expense creation.
+        return;
+      }
+    } else {
+      throw err;
+    }
+  }
   if (!snap.exists()) return;
   const data = snap.data();
   if (data?.companyId !== companyId) return;

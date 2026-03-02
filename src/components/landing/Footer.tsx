@@ -7,6 +7,10 @@ const footerLinks = [
   { label: "Pricing", href: "/#pricing" },
   { label: "About", href: "/#about" },
   { label: "Contact", href: "/#contact" },
+  { label: "Farm Management Software Kenya", href: "/farm-management-software-kenya" },
+  { label: "Crop Guides", href: "/crop-guides" },
+  { label: "Farm Calculators", href: "/farm-calculators" },
+  { label: "Blog", href: "/blog" },
 ];
 
 export function Footer() {
@@ -56,7 +60,7 @@ export function Footer() {
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
                   <Phone className="h-3.5 w-3.5 text-primary-foreground/60" />
                 </div>
-                +254 700 123 456
+                <a href="tel:+254714748299" className="hover:text-primary-foreground transition-colors">0714 748299</a>
               </li>
               <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">

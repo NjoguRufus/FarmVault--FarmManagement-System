@@ -40,6 +40,7 @@ import {
 } from '@/services/harvestCollectionService';
 import {
   computeWalletSummary,
+  getWalletLedgerEntries,
   subscribeWalletLedger,
   type ProjectWalletLedgerEntry,
 } from '@/services/projectWalletService';
@@ -101,7 +102,7 @@ export default function HarvestCollectionsPage() {
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newHarvestDate, setNewHarvestDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
-  const [newPricePerKgPicker, setNewPricePerKgPicker] = useState('140');
+  const [newPricePerKgPicker, setNewPricePerKgPicker] = useState('20');
   const [creating, setCreating] = useState(false);
 
   const [addPickerOpen, setAddPickerOpen] = useState(false);
@@ -128,6 +129,7 @@ export default function HarvestCollectionsPage() {
   const [cashDialogSaving, setCashDialogSaving] = useState(false);
   const [walletLedgerEntries, setWalletLedgerEntries] = useState<ProjectWalletLedgerEntry[]>([]);
   const [payingSelected, setPayingSelected] = useState(false);
+  const [payingPickerIds, setPayingPickerIds] = useState<Set<string> | null>(null);
   const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
   const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
   const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
@@ -492,6 +494,25 @@ export default function HarvestCollectionsPage() {
     return counts;
   }, [weighEntriesForCollection]);
 
+  // Latest "Trip no X changed to Y" per picker when user overrode the auto trip number
+  const tripOverrideMessageForPicker = useMemo(() => {
+    const overrides = weighEntriesForCollection.filter(
+      (e) => e.suggestedTripNumber != null && Number(e.suggestedTripNumber) !== Number(e.tripNumber)
+    );
+    const byPicker: Record<string, { msg: string; at: number }> = {};
+    overrides.forEach((e) => {
+      const at = e.recordedAt != null ? toDate(e.recordedAt).getTime() : 0;
+      const suggested = Number(e.suggestedTripNumber);
+      const actual = Number(e.tripNumber);
+      const msg = `Trip no ${suggested} changed to ${actual}`;
+      const key = e.pickerId;
+      if (!byPicker[key] || at > byPicker[key].at) byPicker[key] = { msg, at };
+    });
+    const map: Record<string, string> = {};
+    Object.keys(byPicker).forEach((id) => { map[id] = byPicker[id].msg; });
+    return map;
+  }, [weighEntriesForCollection]);
+
   const totalsFromPickers = useMemo(() => {
     let totalKg = 0;
     let totalPay = 0;
@@ -559,7 +580,7 @@ export default function HarvestCollectionsPage() {
       setViewMode('intake');
       setNewCollectionName('');
       setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
-      setNewPricePerKgPicker('140');
+      setNewPricePerKgPicker('20');
       toast({
         title: isOffline ? 'Collection saved offline' : 'Collection created',
         description: isOffline
@@ -602,6 +623,9 @@ export default function HarvestCollectionsPage() {
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddingPicker(true);
     setAddPickerOpen(false);
+    setNewPickerNumber('');
+    setNewPickerName('');
+    setAddingPicker(false);
     try {
       await addHarvestPicker({
         companyId,
@@ -610,8 +634,6 @@ export default function HarvestCollectionsPage() {
         pickerName: name,
       });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
-      setNewPickerNumber('');
-      setNewPickerName('');
       toast({
         title: isOffline ? 'Picker saved offline' : 'Picker added',
         description: isOffline ? 'It will sync when online.' : undefined,
@@ -640,6 +662,9 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
+    const suggestedTrip = nextTripForPicker[weighPickerId] ?? 1;
+    const tripOverridden = trip !== suggestedTrip;
+
     setAddWeighOpen(false);
     setWeighPickerId('');
     setWeighKg('');
@@ -656,6 +681,7 @@ export default function HarvestCollectionsPage() {
       collectionId: selectedCollectionId,
       weightKg: kg,
       tripNumber: trip,
+      ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
     })
       .then(() => {
         // Realtime snapshots (includeMetadataChanges) drive UI updates, including offline pending writes.
@@ -689,6 +715,27 @@ export default function HarvestCollectionsPage() {
     const payAmount = getPickerTotals(picker.id).totalPay;
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
+    const pendingSingleDebitId =
+      isOffline && isFrenchBeansCollection && effectiveProject?.id && companyId
+        ? `pending-debit-${Date.now()}`
+        : null;
+    if (pendingSingleDebitId) {
+      setWalletLedgerEntries((prev) => [
+        ...prev,
+        {
+          id: pendingSingleDebitId,
+          companyId,
+          projectId: effectiveProject!.id,
+          type: 'DEBIT' as const,
+          amount: payAmount,
+          reason: 'Picker cash payout',
+          createdAtLocal: Date.now(),
+          createdByUid: user?.id ?? '',
+          createdByName: user?.displayName ?? user?.email ?? 'System',
+        } as ProjectWalletLedgerEntry,
+      ]);
+    }
+
     if (isFrenchBeansCollection && selectedCollectionId && effectiveProject && user?.companyId) {
       try {
         await applyHarvestCashPayment({
@@ -699,6 +746,9 @@ export default function HarvestCollectionsPage() {
           amount: payAmount,
         });
       } catch (e: any) {
+        if (pendingSingleDebitId) {
+          setWalletLedgerEntries((prev) => prev.filter((e) => e.id !== pendingSingleDebitId));
+        }
         const isPermissionDenied =
           e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
         toast({
@@ -714,11 +764,22 @@ export default function HarvestCollectionsPage() {
 
     try {
       await markPickerCashPaid(pickerId);
+      if (effectiveProject?.id && companyId) {
+        const refreshWallet = () =>
+          getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
+            .then(setWalletLedgerEntries)
+            .catch(() => {});
+        refreshWallet();
+        if (isOffline) setTimeout(refreshWallet, 200);
+      }
       toast({
         title: isOffline ? 'Payment saved offline' : 'Paid',
         description: isOffline ? 'It will sync when online.' : undefined,
       });
     } catch (e: any) {
+      if (pendingSingleDebitId) {
+        setWalletLedgerEntries((prev) => prev.filter((e) => e.id !== pendingSingleDebitId));
+      }
       toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
     }
@@ -788,6 +849,29 @@ export default function HarvestCollectionsPage() {
     }
 
     setPayingSelected(true);
+      setPaySelectedIds(new Set());
+      setPayingPickerIds(new Set(payableIds));
+      toast({ title: `Paying ${payableIds.length} pickers…`, description: 'Please wait.' });
+
+    const pendingDebitId = isOffline && isFrenchBeansCollection && effectiveProject?.id && companyId
+      ? `pending-debit-${Date.now()}`
+      : null;
+    if (pendingDebitId) {
+      setWalletLedgerEntries((prev) => [
+        ...prev,
+        {
+          id: pendingDebitId,
+          companyId,
+          projectId: effectiveProject!.id,
+          type: 'DEBIT' as const,
+          amount: totalAmount,
+          reason: 'Picker batch payout',
+          createdAtLocal: Date.now(),
+          createdByUid: user?.id ?? '',
+          createdByName: user?.displayName ?? user?.email ?? 'System',
+        } as ProjectWalletLedgerEntry,
+      ]);
+    }
 
     try {
       if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
@@ -808,12 +892,24 @@ export default function HarvestCollectionsPage() {
         });
       }
 
-      setPaySelectedIds(new Set());
+      setPayingPickerIds(null);
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      if (effectiveProject?.id && companyId) {
+        const refreshWallet = () =>
+          getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
+            .then(setWalletLedgerEntries)
+            .catch(() => {});
+        refreshWallet();
+        if (isOffline) setTimeout(refreshWallet, 200);
+      }
       toast({
         title: isOffline ? `${payableIds.length} payments saved offline` : `${payableIds.length} marked paid`,
         description: isOffline ? 'They will sync when online.' : undefined,
       });
     } catch (e: any) {
+      if (pendingDebitId) {
+        setWalletLedgerEntries((prev) => prev.filter((e) => e.id !== pendingDebitId));
+      }
       console.error('Batch payment failed', e);
       const isPermissionDenied =
         e?.code === 'permission-denied' || (e?.message && (e.message.includes('permission') || e.message.includes('Permission')));
@@ -826,6 +922,7 @@ export default function HarvestCollectionsPage() {
       });
     } finally {
       setPayingSelected(false);
+      setPayingPickerIds(null);
     }
   };
 
@@ -1602,6 +1699,11 @@ export default function HarvestCollectionsPage() {
                               )}>
                                 {isPaid ? 'Paid' : '+ add'}
                               </div>
+                              {tripOverrideMessageForPicker[p.id] && (
+                                <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
+                                  {tripOverrideMessageForPicker[p.id]}
+                                </p>
+                              )}
                             </CardContent>
                           </Card>
                         );
@@ -1631,17 +1733,9 @@ export default function HarvestCollectionsPage() {
                   <Button
                     size="sm"
                     className="min-h-9 rounded-lg font-semibold"
-                    disabled={payingSelected}
                     onClick={() => handleMarkMultiplePaid(Array.from(paySelectedIds))}
                   >
-                    {payingSelected ? (
-                      <>
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        Paying selected ({paySelectedIds.size}) — KES {selectedTotalPay.toLocaleString()}
-                      </>
-                    ) : (
-                      <>Pay selected ({paySelectedIds.size}) — KES {selectedTotalPay.toLocaleString()}</>
-                    )}
+                    Pay selected ({paySelectedIds.size}) — KES {selectedTotalPay.toLocaleString()}
                   </Button>
                 )}
               </div>
@@ -1658,6 +1752,7 @@ export default function HarvestCollectionsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           {payUnpaidAndGroups.unpaid.map((p) => {
                             const selected = paySelectedIds.has(p.id);
+                            const isPaying = payingPickerIds?.has(p.id);
                             const tripCount = tripCountForPicker[p.id] ?? 0;
                             const pickerTotals = getPickerTotals(p.id);
                             return (
@@ -1665,9 +1760,10 @@ export default function HarvestCollectionsPage() {
                                 key={p.id}
                                 className={cn(
                                   'relative min-h-[130px] flex flex-col overflow-hidden transition-all active:scale-[0.98] cursor-pointer hover:bg-muted/50 bg-card',
-                                  selected && 'ring-2 ring-primary ring-offset-2'
+                                  selected && 'ring-2 ring-primary ring-offset-2',
+                                  isPaying && 'ring-2 ring-amber-500 ring-offset-2 bg-amber-50/50 dark:bg-amber-950/20'
                                 )}
-                                onClick={() => togglePaySelection(p.id)}
+                                onClick={() => !isPaying && togglePaySelection(p.id)}
                               >
                                 <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
                                   <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
@@ -1690,8 +1786,18 @@ export default function HarvestCollectionsPage() {
                                     </div>
                                   </div>
                                   <div className="min-h-7 flex items-center justify-center rounded bg-muted text-muted-foreground font-medium text-[10px] pt-1">
-                                    {selected ? 'Selected' : 'Tap to select'}
+                                    {isPaying ? (
+                                      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                                        Paying…
+                                      </span>
+                                    ) : selected ? 'Selected' : 'Tap to select'}
                                   </div>
+                                  {tripOverrideMessageForPicker[p.id] && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
+                                      {tripOverrideMessageForPicker[p.id]}
+                                    </p>
+                                  )}
                                 </CardContent>
                               </Card>
                             );
@@ -1913,7 +2019,7 @@ export default function HarvestCollectionsPage() {
                 min="1"
                 value={newPricePerKgPicker}
                 onChange={(e) => setNewPricePerKgPicker(e.target.value)}
-                placeholder="140"
+                placeholder="20"
                 className="mt-1 min-h-11 rounded-xl"
               />
             </div>
@@ -1929,8 +2035,18 @@ export default function HarvestCollectionsPage() {
 
       {/* Harvest cash wallet now uses popovers attached to Wallet buttons (no full-screen modal). */}
 
-      {/* Add picker dialog */}
-      <Dialog open={addPickerOpen} onOpenChange={setAddPickerOpen}>
+      {/* Add picker dialog — reset form and adding state when closed so reopening shows a blank form */}
+      <Dialog
+        open={addPickerOpen}
+        onOpenChange={(open) => {
+          setAddPickerOpen(open);
+          if (!open) {
+            setNewPickerNumber('');
+            setNewPickerName('');
+            setAddingPicker(false);
+          }
+        }}
+      >
         <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
           <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
             <DialogTitle>Add picker</DialogTitle>

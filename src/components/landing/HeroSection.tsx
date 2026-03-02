@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
 import { InstallFarmVault } from "@/components/pwa/InstallFarmVault";
+import { OptimizedImage } from "@/components/ui/OptimizedImage";
 
 export function HeroSection() {
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -20,7 +21,13 @@ export function HeroSection() {
     <>
       <section className="relative min-h-[100vh] flex items-center overflow-hidden">
         <div className="absolute inset-0">
-          <img src="/landing/hero-bg.jpg" alt="" className="w-full h-full object-cover scale-105" />
+          <OptimizedImage
+            src="/landing/hero-bg.jpg"
+            webpSrc="/landing/hero-bg.webp"
+            priority
+            alt=""
+            className="w-full h-full object-cover scale-105"
+          />
           <div className="absolute inset-0 gradient-hero-overlay" />
           <div className="absolute top-1/4 -left-32 w-96 h-96 bg-primary/10 rounded-full blur-[120px] animate-pulse-glow" />
           <div className="absolute bottom-1/4 right-0 w-80 h-80 bg-gold/10 rounded-full blur-[100px] animate-pulse-glow" style={{ animationDelay: "1.5s" }} />
@@ -98,7 +105,7 @@ export function HeroSection() {
               <div className="relative">
                 <div className="absolute inset-0 -m-12 rounded-full bg-gradient-to-br from-primary/20 to-gold/20 blur-[60px] animate-pulse-glow" />
                 <div className="absolute inset-0 -m-6 rounded-full bg-gradient-to-tr from-gold/10 to-primary/10 blur-[40px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
-                <img
+                <OptimizedImage
                   src="/landing/phone-mockup.png"
                   alt="FarmVault dashboard on mobile"
                   className="relative z-10 w-72 md:w-80 lg:w-[380px] drop-shadow-2xl animate-float"

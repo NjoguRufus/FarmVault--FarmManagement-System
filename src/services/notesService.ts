@@ -11,8 +11,10 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
   serverTimestamp,
   writeBatch,
+  type DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { LibraryNote, CompanyNote, CompanyNoteShare, CropDoc } from '@/types';
@@ -148,6 +150,55 @@ export async function getCompanyNotes(companyId: string, cropId?: string): Promi
   }
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as CompanyNote & { id: string }));
+}
+
+/** Paginated company notes for faster initial load. orderBy createdAt desc, limit 30, Load more via lastDoc. */
+export async function getCompanyNotesPaginated(
+  companyId: string,
+  cropId: string | undefined,
+  pageSize: number,
+  lastDoc: DocumentSnapshot | null
+): Promise<{ notes: (CompanyNote & { id: string })[]; lastDoc: DocumentSnapshot | null }> {
+  if (cropId) {
+    const q = lastDoc
+      ? query(
+          collection(db, COMPANY_NOTES),
+          where('companyId', '==', companyId),
+          where('cropId', '==', cropId),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastDoc),
+          limit(pageSize)
+        )
+      : query(
+          collection(db, COMPANY_NOTES),
+          where('companyId', '==', companyId),
+          where('cropId', '==', cropId),
+          orderBy('createdAt', 'desc'),
+          limit(pageSize)
+        );
+    const snap = await getDocs(q);
+    const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CompanyNote & { id: string }));
+    const last = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null;
+    return { notes, lastDoc: last };
+  }
+  const q = lastDoc
+    ? query(
+        collection(db, COMPANY_NOTES),
+        where('companyId', '==', companyId),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastDoc),
+        limit(pageSize)
+      )
+    : query(
+        collection(db, COMPANY_NOTES),
+        where('companyId', '==', companyId),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+      );
+  const snap = await getDocs(q);
+  const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CompanyNote & { id: string }));
+  const last = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null;
+  return { notes, lastDoc: last };
 }
 
 /** Developer: get all company notes (all companies). */

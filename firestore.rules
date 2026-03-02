@@ -16,6 +16,12 @@ service cloud.firestore {
       return exists(userRef) ? get(userRef).data.get('companyId', null) : null;
     }
 
+    // CompanyId from user doc, or from auth token custom claims (for payment flows when user doc may be stale).
+    function effectiveUserCompanyId() {
+      let fromDoc = userCompanyId();
+      return fromDoc != null ? fromDoc : request.auth.token.get('companyId', null);
+    }
+
     // For creates: ensure the new document's companyId matches the user's companyId.
     function matchesCompanyOnCreate() {
       return isSignedIn()
@@ -105,6 +111,12 @@ service cloud.firestore {
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
     }
 
+    // --- Stage Notes (company + project + stage scoped) ---
+    match /stageNotes/{noteId} {
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
+    }
+
     // --- Project Blocks (company + project scoped) ---
 
     match /projectBlocks/{blockId} {
@@ -141,7 +153,12 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
-      allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+      allow create: if isSignedIn() && (
+        isDeveloper()
+        || (request.resource.data.get('companyId', null) != null
+            && (request.resource.data.get('companyId', null) == userCompanyId()
+                || request.resource.data.get('companyId', null) == effectiveUserCompanyId()))
+      );
     }
 
     // --- Season Challenges ---
@@ -150,6 +167,12 @@ service cloud.firestore {
       allow read: if canReadCompanyDoc();
       allow update, delete: if isSignedIn() && (matchesCompanyOnDoc() || isDeveloper());
       allow create: if isSignedIn() && (matchesCompanyOnCreate() || isDeveloper());
+    }
+
+    // --- Challenge Templates (reusable pre-season, company + crop scoped) ---
+    match /challengeTemplates/{templateId} {
+      allow read: if isSignedIn() && (resource.data.get('companyId', null) == userCompanyId() || isDeveloper());
+      allow create, update: if isSignedIn() && request.resource.data.get('companyId', null) == userCompanyId();
     }
 
     // --- Inventory Usage ---
@@ -193,26 +216,29 @@ service cloud.firestore {
     }
 
     // --- Harvest Collections (field cash: pickers + weigh + buyer) ---
-    // FIXED: Simplified permissions to ensure buyer payment can be marked
+    // Use effectiveUserCompanyId so payments keep working even if user doc is slightly stale
     match /harvestCollections/{collectionId} {
       allow read: if isSignedIn() && (
         isDeveloper() 
         || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
-      // Allow create for signed-in users with companyId
+      // Allow create for signed-in users with matching companyId
       allow create: if isSignedIn() && (
         isDeveloper()
         || (request.resource.data.get('companyId', null) != null 
-            && request.resource.data.get('companyId', null) == userCompanyId())
+            && (request.resource.data.get('companyId', null) == userCompanyId()
+                || request.resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
-      // Allow update for any signed-in user from the same company (for marking payments)
+      // Allow update for any signed-in user from the same company (for marking payments, closing collection, etc.)
       allow update: if isSignedIn() && (
         isDeveloper()
         || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       // Delete only for developers or company admins
@@ -224,18 +250,30 @@ service cloud.firestore {
         isDeveloper() 
         || (resource.data.get('companyId', null) != null 
             && resource.data.get('companyId', null) == userCompanyId())
+        || (resource.data.get('companyId', null) != null 
+            && resource.data.get('companyId', null) == effectiveUserCompanyId())
+        || (resource.data.get('collectionId', null) != null
+            && exists(/databases/$(database)/documents/harvestCollections/$(resource.data.collectionId))
+            && (get(/databases/$(database)/documents/harvestCollections/$(resource.data.collectionId)).data.get('companyId', null) == userCompanyId()
+                || get(/databases/$(database)/documents/harvestCollections/$(resource.data.collectionId)).data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       allow create: if isSignedIn() && (
         isDeveloper()
         || (request.resource.data.get('companyId', null) != null 
-            && request.resource.data.get('companyId', null) == userCompanyId())
+            && (request.resource.data.get('companyId', null) == userCompanyId()
+                || request.resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       allow update: if isSignedIn() && (
         isDeveloper()
         || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
+        || (resource.data.get('collectionId', null) != null
+            && effectiveUserCompanyId() != null
+            && exists(/databases/$(database)/documents/harvestCollections/$(resource.data.collectionId))
+            && get(/databases/$(database)/documents/harvestCollections/$(resource.data.collectionId)).data.get('companyId', null) == effectiveUserCompanyId())
       );
       
       allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
@@ -267,19 +305,22 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isDeveloper() 
         || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       allow create: if isSignedIn() && (
         isDeveloper()
         || (request.resource.data.get('companyId', null) != null 
-            && request.resource.data.get('companyId', null) == userCompanyId())
+            && (request.resource.data.get('companyId', null) == userCompanyId()
+                || request.resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       allow update: if isSignedIn() && (
         isDeveloper()
         || (resource.data.get('companyId', null) != null 
-            && resource.data.get('companyId', null) == userCompanyId())
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       
       allow delete: if isSignedIn() && (isCompanyAdmin() || isDeveloper());
@@ -317,11 +358,17 @@ service cloud.firestore {
 
     // --- Project Wallet Ledger (append-only project cash ledger) ---
     match /projectWalletLedger/{entryId} {
-      allow read: if canReadCompanyDoc();
+      allow read: if isSignedIn() && (
+        isDeveloper()
+        || (resource.data.get('companyId', null) != null
+            && (resource.data.get('companyId', null) == userCompanyId()
+                || resource.data.get('companyId', null) == effectiveUserCompanyId()))
+      );
       allow create: if isSignedIn() && (
         isDeveloper()
         || (request.resource.data.get('companyId', null) != null
-            && request.resource.data.get('companyId', null) == userCompanyId())
+            && (request.resource.data.get('companyId', null) == userCompanyId()
+                || request.resource.data.get('companyId', null) == effectiveUserCompanyId()))
       );
       allow update, delete: if false;
     }
@@ -332,20 +379,29 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isDeveloper()
         || (userCompanyId() != null && metaId.matches('^' + userCompanyId() + '_.*'))
+        || (effectiveUserCompanyId() != null && metaId.matches('^' + effectiveUserCompanyId() + '_.*'))
       );
       allow create: if isSignedIn() && (
         isDeveloper()
         || request.resource.data.get('companyId', null) == userCompanyId()
+        || request.resource.data.get('companyId', null) == effectiveUserCompanyId()
         || (request.resource.data.get('companyId', null) == null
             && userCompanyId() != null
             && metaId.matches('^' + userCompanyId() + '_.*'))
+        || (request.resource.data.get('companyId', null) == null
+            && effectiveUserCompanyId() != null
+            && metaId.matches('^' + effectiveUserCompanyId() + '_.*'))
       );
       allow update: if isSignedIn() && (
         isDeveloper()
         || resource.data.get('companyId', null) == userCompanyId()
+        || resource.data.get('companyId', null) == effectiveUserCompanyId()
         || (resource.data.get('companyId', null) == null
             && userCompanyId() != null
             && metaId.matches('^' + userCompanyId() + '_.*'))
+        || (resource.data.get('companyId', null) == null
+            && effectiveUserCompanyId() != null
+            && metaId.matches('^' + effectiveUserCompanyId() + '_.*'))
       );
       allow delete: if false;
     }
