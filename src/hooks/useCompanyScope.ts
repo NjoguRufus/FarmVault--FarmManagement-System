@@ -1,7 +1,17 @@
 import { useMemo } from 'react';
+import type { User } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 
 export const NO_COMPANY = 'NO_COMPANY' as const;
+
+/**
+ * Single source for effective company ID: user.companyId.
+ * Use in pages/hooks when passing companyId to useCollection or services.
+ * Returns '' when no company (caller should not query company-scoped data).
+ */
+export function getEffectiveCompanyId(user: User | null): string {
+  return user?.companyId ?? '';
+}
 
 export type CompanyScopeResult =
   | { companyId: string; userId: string; role: string; isDeveloper: boolean; error: null }

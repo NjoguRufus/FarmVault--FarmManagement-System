@@ -49,6 +49,7 @@ async function createAuditLogSafe(params: {
   targetType: string;
   targetId: string;
   metadata?: Record<string, unknown>;
+  companyId?: string | null;
 }): Promise<void> {
   try {
     await createAuditLog(params);
@@ -186,6 +187,7 @@ export async function createWorkCard(params: {
     targetType: 'WORK_CARD',
     targetId: ref.id,
     metadata: { workTitle: params.workTitle, projectId: params.projectId },
+    companyId: params.companyId,
   });
   return ref.id;
 }
@@ -240,6 +242,7 @@ export async function updateWorkCard(params: {
     actionType: 'WORK_UPDATED',
     targetType: 'WORK_CARD',
     targetId: params.cardId,
+    companyId: card.companyId || undefined,
   });
 }
 
@@ -302,6 +305,7 @@ export async function submitExecution(params: {
     targetType: 'WORK_CARD',
     targetId: params.cardId,
     metadata: { managerId: params.managerId },
+    companyId: card.companyId || undefined,
   });
 }
 
@@ -354,6 +358,7 @@ export async function approveWorkCard(params: {
     actionType: AUDIT_EVENTS.WORK_APPROVED,
     targetType: 'WORK_CARD',
     targetId: params.cardId,
+    companyId: card.companyId || undefined,
   });
 }
 
@@ -363,6 +368,7 @@ export async function rejectWorkCard(params: {
   rejectionReason: string;
   actorEmail: string;
   actorUid: string;
+  companyId?: string | null;
 }): Promise<void> {
   const cardRef = doc(db, COLLECTION, params.cardId);
   await updateDoc(cardRef, {
@@ -376,6 +382,7 @@ export async function rejectWorkCard(params: {
     targetType: 'WORK_CARD',
     targetId: params.cardId,
     metadata: { reason: params.rejectionReason },
+    companyId: params.companyId ?? undefined,
   });
 }
 
@@ -433,31 +440,36 @@ export async function markWorkCardPaid(params: {
     actionType: AUDIT_EVENTS.WORK_PAID,
     targetType: 'WORK_CARD',
     targetId: params.cardId,
+    companyId: card.companyId || undefined,
   });
 }
 
-/** Fetch work cards allocated to a manager (single id). */
+/** Fetch work cards allocated to a manager (single id), scoped to company. */
 export async function getWorkCardsForManager(
+  companyId: string,
   managerId: string
 ): Promise<OperationsWorkCard[]> {
   const q = query(
     collection(db, COLLECTION),
+    where('companyId', '==', companyId),
     where('allocatedManagerId', '==', managerId)
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => mapDoc(d.id, d.data() as Record<string, unknown>));
 }
 
-/** Fetch work cards allocated to any of the given manager ids (e.g. user.id + employee.id). */
+/** Fetch work cards allocated to any of the given manager ids (e.g. user.id + employee.id), scoped to company. */
 export async function getWorkCardsForManagers(
+  companyId: string,
   managerIds: string[]
 ): Promise<OperationsWorkCard[]> {
-  if (managerIds.length === 0) return [];
+  if (managerIds.length === 0 || !companyId) return [];
   const deduped = [...new Set(managerIds)].filter(Boolean);
   if (deduped.length === 0) return [];
-  if (deduped.length === 1) return getWorkCardsForManager(deduped[0]);
+  if (deduped.length === 1) return getWorkCardsForManager(companyId, deduped[0]);
   const q = query(
     collection(db, COLLECTION),
+    where('companyId', '==', companyId),
     where('allocatedManagerId', 'in', deduped.slice(0, 30))
   );
   const snap = await getDocs(q);
@@ -476,12 +488,15 @@ export async function getWorkCardsForCompany(
   return snap.docs.map((d) => mapDoc(d.id, d.data() as Record<string, unknown>));
 }
 
-/** Fetch work cards for a project (admin). */
+/** Fetch work cards for a project, scoped to company. */
 export async function getWorkCardsForProject(
+  companyId: string,
   projectId: string
 ): Promise<OperationsWorkCard[]> {
+  if (!companyId) return [];
   const q = query(
     collection(db, COLLECTION),
+    where('companyId', '==', companyId),
     where('projectId', '==', projectId)
   );
   const snap = await getDocs(q);

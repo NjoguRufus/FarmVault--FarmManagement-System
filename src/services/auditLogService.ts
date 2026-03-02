@@ -1,4 +1,4 @@
-import { collection, getDocs, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, Timestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export interface AuditLogDoc {
@@ -19,10 +19,13 @@ function toDate(v: unknown): Date {
   return new Date();
 }
 
-/** Fetch audit logs (sorted by createdAt desc in memory to avoid requiring a Firestore index). */
-export async function getAuditLogs(maxResults: number = 200): Promise<AuditLogDoc[]> {
-  const ref = collection(db, 'auditLogs');
-  const snap = await getDocs(ref);
+/** Fetch audit logs. When companyId is provided, only that company's logs; otherwise all (developer only). */
+export async function getAuditLogs(maxResults: number = 200, companyId?: string | null): Promise<AuditLogDoc[]> {
+  const coll = collection(db, 'auditLogs');
+  const q = companyId
+    ? query(coll, where('companyId', '==', companyId))
+    : coll;
+  const snap = await getDocs(q);
   const list = snap.docs.map((d) => {
     const data = d.data();
     return {
@@ -40,7 +43,7 @@ export async function getAuditLogs(maxResults: number = 200): Promise<AuditLogDo
   return list.slice(0, maxResults);
 }
 
-/** Record an audit log entry (developer only). Use for testing or from developer actions. */
+/** Record an audit log entry. Pass companyId when the action is scoped to a company. */
 export async function createAuditLog(params: {
   actorEmail: string;
   actorUid: string;
@@ -48,8 +51,9 @@ export async function createAuditLog(params: {
   targetType: string;
   targetId: string;
   metadata?: Record<string, unknown>;
+  companyId?: string | null;
 }): Promise<string> {
-  const ref = await addDoc(collection(db, 'auditLogs'), {
+  const payload: Record<string, unknown> = {
     actorEmail: params.actorEmail,
     actorUid: params.actorUid,
     actionType: params.actionType,
@@ -57,6 +61,8 @@ export async function createAuditLog(params: {
     targetId: params.targetId,
     metadata: params.metadata ?? null,
     createdAt: serverTimestamp(),
-  });
+  };
+  if (params.companyId) payload.companyId = params.companyId;
+  const ref = await addDoc(collection(db, 'auditLogs'), payload);
   return ref.id;
 }

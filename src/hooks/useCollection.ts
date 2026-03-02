@@ -60,10 +60,8 @@ function buildScopedConstraints(options: UseCollectionOptions): QueryConstraint[
 
   const out: QueryConstraint[] = [];
 
-  if (companyScoped && (companyId || isDeveloper)) {
-    if (companyId) {
-      out.push(where('companyId', '==', companyId));
-    }
+  if (companyScoped && companyId) {
+    out.push(where('companyId', '==', companyId));
   }
 
   if (projectId) {
@@ -104,7 +102,8 @@ export function useCollection<T = any>(
   const isDeveloper = options?.isDeveloper === true;
   const enabled = options?.enabled !== false;
 
-  const noCompany = companyScoped && !isDeveloper && !companyId;
+  /** When company-scoped, require companyId to subscribe; no developer bypass to avoid cross-company data. */
+  const noCompany = companyScoped && !companyId;
   const shouldSubscribe = enabled && !noCompany;
 
   useEffect(() => {

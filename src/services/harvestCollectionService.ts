@@ -645,6 +645,7 @@ export async function payPickersFromWalletBatchFirestore(params: {
     const chunk = pickerIds.slice(i, i + IN_LIMIT);
     const q = query(
       collection(db, PICKERS),
+      where('companyId', '==', companyId),
       where(documentId(), 'in', chunk)
     );
     const snap = await getDocsWithCache(q);
