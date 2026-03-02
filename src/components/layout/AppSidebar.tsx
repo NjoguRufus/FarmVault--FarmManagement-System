@@ -44,7 +44,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   });
 
   return (
-    <div className="hidden md:block">
+    <div className="hidden lg:block">
       {/* Mobile overlay when sidebar is open (desktop only - sidebar hidden on mobile) */}
       {!collapsed && (
         <div
@@ -56,10 +56,10 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       <aside
         className={cn(
           'fixed left-0 top-0 z-40 flex h-screen flex-col transition-all duration-300 fv-sidebar',
-          // On mobile: overlay behavior - slide in/out
-          // On desktop: always visible, just changes width
+          // On small screens: overlay behavior - slide in/out (handled by translate classes)
+          // On large screens: always visible, just changes width
           collapsed 
-            ? 'w-16 -translate-x-full md:translate-x-0' 
+            ? 'w-16 -translate-x-full lg:translate-x-0' 
             : 'w-60 translate-x-0'
         )}
         style={{

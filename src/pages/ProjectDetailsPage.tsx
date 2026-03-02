@@ -37,9 +37,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { EditTimelineModal } from '@/components/projects/EditTimelineModal';
+import { StageEditModal } from '@/components/projects/StageEditModal';
 import { Button } from '@/components/ui/button';
-import { Pencil } from 'lucide-react';
 
 if (import.meta.env?.DEV) {
   assertCropStagesDev();
@@ -98,7 +97,8 @@ export default function ProjectDetailsPage() {
     [allStages, companyId, projectId],
   );
 
-  const [editTimelineOpen, setEditTimelineOpen] = useState(false);
+  const [stageEditOpen, setStageEditOpen] = useState(false);
+  const [selectedStageForEdit, setSelectedStageForEdit] = useState<CropStage | null>(null);
 
   const workLogs = useMemo(
     () =>
@@ -776,16 +776,11 @@ export default function ProjectDetailsPage() {
         )}
       </div>
 
-      {/* Crop stage timeline — driven by project.plantingDate + stage template */}
+      {/* Crop stage timeline — driven by project.plantingDate + stage template. Click a stage to edit and add notes. */}
       <div className="fv-card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Crop Stage Timeline</h2>
-          {projectStages.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setEditTimelineOpen(true)}>
-              <Pencil className="h-4 w-4 mr-1" />
-              Edit Timeline
-            </Button>
-          )}
+          <p className="text-xs text-muted-foreground">Click a stage to edit dates and add notes.</p>
         </div>
         {!plantingDate && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -817,8 +812,34 @@ export default function ProjectDetailsPage() {
             const statusLabel = item.status === 'completed' ? 'completed' : item.status === 'current' ? 'active' : 'pending';
             const estimatedEnd = plantingDate ? getStageEndDate(plantingDate, item.estimatedEndDay) : null;
             const dayRange = `Day ${item.stage.dayStart}–${item.stage.dayEnd}`;
+            const existingStage = projectStages.find((s) => s.stageIndex === index);
+            const stageForEdit: CropStage = existingStage ?? ({
+              id: `placeholder-${index}`,
+              projectId: projectId ?? '',
+              companyId: companyId ?? '',
+              cropType: (project?.cropType as any) ?? '',
+              stageName: templateStages[index]?.label ?? `Stage ${index}`,
+              stageIndex: index,
+              status: 'pending',
+            } as CropStage);
             return (
-              <div key={item.stage.key} className="flex items-start gap-4">
+              <div
+                key={item.stage.key}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedStageForEdit(stageForEdit);
+                  setStageEditOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedStageForEdit(stageForEdit);
+                    setStageEditOpen(true);
+                  }
+                }}
+                className="flex items-start gap-4 cursor-pointer rounded-lg p-2 -mx-2 hover:bg-muted/40 transition-colors"
+              >
                 <div className="flex flex-col items-center">
                   <div
                     className={[
@@ -1099,12 +1120,11 @@ export default function ProjectDetailsPage() {
           </AlertDialog>
         </div>
       </div>
-      <EditTimelineModal
-        open={editTimelineOpen}
-        onOpenChange={setEditTimelineOpen}
-        projectId={projectId ?? ''}
-        companyId={companyId ?? ''}
-        stages={projectStages}
+      <StageEditModal
+        open={stageEditOpen}
+        onOpenChange={setStageEditOpen}
+        stage={selectedStageForEdit}
+        project={project ? { id: project.id, companyId: project.companyId, cropType: project.cropType } : null}
         createdBy={user?.id ?? ''}
         onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
       />

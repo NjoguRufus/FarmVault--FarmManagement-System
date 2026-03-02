@@ -217,6 +217,60 @@ export interface CropDoc {
   createdAt?: unknown;
 }
 
+// --- Records (knowledge/field records by crop) ---
+export type RecordCategory =
+  | 'Timing'
+  | 'Fertilizer'
+  | 'Pests & Diseases'
+  | 'Sprays'
+  | 'Yield'
+  | 'General';
+
+export interface LibraryRecord {
+  id: string;
+  cropId: string;
+  category: RecordCategory;
+  title: string;
+  content: string;
+  highlights: string[];
+  tags: string[];
+  status: 'draft' | 'published';
+  createdBy: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+export interface CompanyRecordShare {
+  id: string;
+  companyId: string;
+  recordId: string;
+  cropId: string;
+  title: string;
+  category: RecordCategory;
+  highlights: string[];
+  tags: string[];
+  /** Denormalized for company read-only view */
+  content?: string;
+  sharedBy: string;
+  sharedAt: unknown;
+  visibility: 'visible' | 'hidden';
+  pinned: boolean;
+}
+
+export interface CompanyRecord {
+  id: string;
+  companyId: string;
+  cropId: string;
+  category: RecordCategory;
+  title: string;
+  content: string;
+  highlights: string[];
+  tags: string[];
+  createdBy: string;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
 export interface Project {
   id: string;
   name: string;

@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { StageEditModal } from '@/components/projects/StageEditModal';
 import {
   Select,
   SelectContent,
@@ -51,6 +52,7 @@ export default function CropStagesPage() {
 
   const [selectedStage, setSelectedStage] = useState<CropStage | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [stageEditOpen, setStageEditOpen] = useState(false);
   const [markingComplete, setMarkingComplete] = useState(false);
   const [addChallengeOpen, setAddChallengeOpen] = useState(false);
   const [challengeTitle, setChallengeTitle] = useState('');
@@ -411,7 +413,26 @@ export default function CropStagesPage() {
             return (
               <div
                 key={item.stage.key}
-                className="flex items-start gap-4 p-4 rounded-lg hover:bg-muted/30 transition-colors"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  const stage = sortedStages[index];
+                  if (stage) {
+                    setSelectedStage(stage);
+                    setStageEditOpen(true);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    const stage = sortedStages[index];
+                    if (stage) {
+                      setSelectedStage(stage);
+                      setStageEditOpen(true);
+                    }
+                  }
+                }}
+                className="flex items-start gap-4 p-4 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
               >
                 <div className="flex flex-col items-center">
                   <div
@@ -834,6 +855,15 @@ export default function CropStagesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <StageEditModal
+        open={stageEditOpen}
+        onOpenChange={setStageEditOpen}
+        stage={selectedStage}
+        project={activeProject ? { id: activeProject.id, companyId: activeProject.companyId, cropType: activeProject.cropType } : null}
+        createdBy={user?.id ?? ''}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
+      />
     </div>
   );
 }

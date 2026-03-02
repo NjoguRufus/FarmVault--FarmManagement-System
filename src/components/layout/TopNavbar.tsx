@@ -54,10 +54,10 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
       id="main-navbar"
       className={cn(
         'fixed top-0 right-0 z-40 h-16 bg-card border-b border-border transition-all duration-300',
-        // On mobile, navbar spans full width (sidebar overlays)
-        // On desktop, adjust based on sidebar state
-        'left-0 md:left-16 md:left-60',
-        sidebarCollapsed ? 'md:left-16' : 'md:left-60'
+        // On mobile, navbar spans full width.
+        // On large screens, shift to align with sidebar width.
+        'left-0',
+        sidebarCollapsed ? 'lg:left-16' : 'lg:left-60'
       )}
     >
       <div className="flex h-full items-center justify-between px-4 sm:px-6">
