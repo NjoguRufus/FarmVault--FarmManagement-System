@@ -13,13 +13,13 @@ export default function AdminAuditLogsPage() {
   const [tab, setTab] = useState<'platform' | 'inventory'>('platform');
 
   const { data: logs = [], isLoading, error } = useQuery({
-    queryKey: ['audit-logs'],
-    queryFn: () => getAuditLogs(200),
+    queryKey: ['audit-logs', user?.companyId ?? 'all'],
+    queryFn: () => getAuditLogs(200, user?.companyId ?? undefined),
   });
 
   const { data: inventoryLogs = [], isLoading: inventoryLoading } = useQuery({
-    queryKey: ['inventory-audit-logs'],
-    queryFn: () => getInventoryAuditLogs(200),
+    queryKey: ['inventory-audit-logs', user?.companyId ?? 'all'],
+    queryFn: () => getInventoryAuditLogs(200, user?.companyId ?? undefined),
   });
 
   const recordTestAction = async () => {
@@ -33,6 +33,7 @@ export default function AdminAuditLogsPage() {
         targetType: 'SYSTEM',
         targetId: 'audit-logs-page',
         metadata: { note: 'Test entry from Audit Logs page' },
+        companyId: user.companyId ?? undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
     } finally {

@@ -134,6 +134,10 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const [creatingPool, setCreatingPool] = useState(false);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
 
+  const selectedCrop = useMemo(
+    () => findCropKnowledgeByTypeKey(cropCatalog, form.cropTypeKey),
+    [cropCatalog, form.cropTypeKey],
+  );
   const projectCropTypeForTemplates = useMemo(
     () => (selectedCrop ? toProjectCropTypeKey(normalizeCropTypeKey(selectedCrop.cropTypeKey)) : ''),
     [selectedCrop],
@@ -168,10 +172,6 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     }
   );
 
-  const selectedCrop = useMemo(
-    () => findCropKnowledgeByTypeKey(cropCatalog, form.cropTypeKey),
-    [cropCatalog, form.cropTypeKey],
-  );
   const stageOptions = selectedCrop?.stages ?? [];
   const resolvedEnvironmentType = getEffectiveEnvironmentForCrop(selectedCrop, form.environmentType);
   const detectedStage = useMemo(

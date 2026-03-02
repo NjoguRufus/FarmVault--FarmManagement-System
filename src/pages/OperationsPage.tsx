@@ -394,6 +394,7 @@ export default function OperationsPage() {
         rejectionReason: rejectReason.trim(),
         actorEmail: user.email,
         actorUid: user.id,
+        companyId: selectedWorkCard.companyId ?? user.companyId ?? undefined,
       });
       invalidateWorkCards();
       setSelectedWorkCard({ ...selectedWorkCard, status: 'rejected', rejectionReason: rejectReason.trim() });

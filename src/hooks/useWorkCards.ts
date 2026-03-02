@@ -47,10 +47,10 @@ export function useWorkCardsForManager(
     return [where('allocatedManagerId', 'in', dedupedManagerIds)];
   }, [dedupedManagerIds]);
 
-  const enabled = dedupedManagerIds.length > 0 && (companyId !== undefined ? Boolean(companyId) : true);
+  const enabled = dedupedManagerIds.length > 0 && Boolean(companyId);
 
   return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-manager-${companyId ?? 'all'}-${dedupedManagerIds.join(',')}`,
+    `${WORK_CARDS_KEY}-manager-${companyId ?? 'none'}-${dedupedManagerIds.join(',')}`,
     {
       enabled,
       companyId: companyId ?? null,
