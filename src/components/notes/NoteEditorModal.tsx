@@ -76,6 +76,11 @@ export function NoteEditorModal({
     try {
       await onSubmit(form);
       onOpenChange(false);
+    } catch (err) {
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.error('NoteEditorModal submit failed', err);
+      }
     } finally {
       setSaving(false);
     }
@@ -167,6 +172,7 @@ export function NoteEditorModal({
                     placeholder="Use **bold**, lists with -, and > ⚠️ for warnings."
                     rows={8}
                     className="font-mono text-sm"
+                    required
                   />
                 </TabsContent>
                 <TabsContent value="preview">

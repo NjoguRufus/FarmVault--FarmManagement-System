@@ -108,40 +108,65 @@ export default function DeveloperCropNotesPage() {
     : null;
 
   const handleSave = async (values: NoteFormValues) => {
-    if (editingId) {
-      await updateLibraryNote(editingId, {
-        title: values.title,
-        category: values.category,
-        content: values.content,
-        highlights: values.highlights,
-        tags: values.tags,
-        status: values.status,
-      });
-      toast.success('Note updated.');
-    } else {
-      await createLibraryNote({
-        cropId: cropId!,
-        category: values.category,
-        title: values.title,
-        content: values.content,
-        highlights: values.highlights,
-        tags: values.tags,
-        status: values.status ?? 'draft',
-        createdBy: user?.id ?? '',
-      });
-      toast.success('Note created.');
+    try {
+      if (editingId) {
+        await updateLibraryNote(editingId, {
+          title: values.title,
+          category: values.category,
+          content: values.content,
+          highlights: values.highlights,
+          tags: values.tags,
+          status: values.status,
+        });
+        toast.success('Note updated.');
+      } else {
+        await createLibraryNote({
+          cropId: cropId!,
+          category: values.category,
+          title: values.title,
+          content: values.content,
+          highlights: values.highlights,
+          tags: values.tags,
+          status: values.status ?? 'draft',
+          createdBy: user?.id ?? '',
+        });
+        toast.success('Note created.');
+      }
+      queryClient.invalidateQueries({ queryKey: ['notes-library'] });
+      setEditorOpen(false);
+      setEditingId(null);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to save library note', err);
+      toast.error(
+        `Failed to save note: ${
+          err?.message === 'Missing or insufficient permissions.'
+            ? 'You do not have permission to save this note.'
+            : err?.message ?? 'Unknown error'
+        }`
+      );
+      throw err;
     }
-    queryClient.invalidateQueries({ queryKey: ['notes-library'] });
-    setEditorOpen(false);
-    setEditingId(null);
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this note?')) return;
-    await deleteLibraryNote(id);
-    toast.success('Note deleted.');
-    queryClient.invalidateQueries({ queryKey: ['notes-library'] });
-    setViewNoteId(null);
+    try {
+      await deleteLibraryNote(id);
+      toast.success('Note deleted.');
+      queryClient.invalidateQueries({ queryKey: ['notes-library'] });
+      setViewNoteId(null);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to delete library note', err);
+      toast.error(
+        `Failed to delete note: ${
+          err?.message === 'Missing or insufficient permissions.'
+            ? 'You do not have permission to delete this note.'
+            : err?.message ?? 'Unknown error'
+        }`
+      );
+    }
   };
 
   const isLoading = libLoading || companyLoading;

@@ -39,7 +39,12 @@ export default function AdminCropNotesPage() {
   const [viewNoteType, setViewNoteType] = useState<'shared' | 'company' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { data: sharedNotes = [], isLoading: sharedLoading } = useQuery({
+  const {
+    data: sharedNotes = [],
+    isLoading: sharedLoading,
+    error: sharedError,
+    refetch: refetchShared,
+  } = useQuery({
     queryKey: ['notes-shared', companyId, cropId],
     queryFn: () => getSharedLibraryNotesForCompany(companyId),
     enabled: !!companyId,
@@ -50,9 +55,11 @@ export default function AdminCropNotesPage() {
   const {
     data: companyNotesData,
     isLoading: companyLoading,
+    error: companyError,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    refetch: refetchCompany,
   } = useInfiniteQuery({
     queryKey: ['notes-company', companyId, cropId ?? ''],
     queryFn: ({ pageParam }) =>
@@ -102,48 +109,77 @@ export default function AdminCropNotesPage() {
     : null;
 
   const handleSave = async (values: NoteFormValues) => {
-    if (!companyId || !user?.id) return;
-    if (editingId) {
-      await updateCompanyNote(
-        editingId,
-        {
-          title: values.title,
+    if (!companyId || !user?.id) {
+      toast.error('Missing company or user information for saving notes.');
+      throw new Error('Missing companyId or user.id');
+    }
+    try {
+      if (editingId) {
+        await updateCompanyNote(
+          editingId,
+          {
+            title: values.title,
+            category: values.category,
+            content: values.content,
+            highlights: values.highlights,
+            tags: values.tags,
+          },
+          companyId
+        );
+        toast.success('Note updated.');
+      } else {
+        await createCompanyNote({
+          companyId,
+          cropId: cropId!,
           category: values.category,
+          title: values.title,
           content: values.content,
           highlights: values.highlights,
           tags: values.tags,
-        },
-        companyId
+          createdBy: user.id,
+        });
+        toast.success('Note created.');
+      }
+      queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
+      setEditorOpen(false);
+      setEditingId(null);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to save company note', err);
+      toast.error(
+        `Failed to save note: ${
+          err?.message === 'Missing or insufficient permissions.'
+            ? 'You do not have permission to save this note.'
+            : err?.message ?? 'Unknown error'
+        }`
       );
-      toast.success('Note updated.');
-    } else {
-      await createCompanyNote({
-        companyId,
-        cropId: cropId!,
-        category: values.category,
-        title: values.title,
-        content: values.content,
-        highlights: values.highlights,
-        tags: values.tags,
-        createdBy: user.id,
-      });
-      toast.success('Note created.');
+      throw err;
     }
-    queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
-    setEditorOpen(false);
-    setEditingId(null);
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this note?')) return;
-    await deleteCompanyNote(id);
-    toast.success('Note deleted.');
-    queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
-    setViewNoteId(null);
-    setViewNoteType(null);
+    try {
+      await deleteCompanyNote(id);
+      toast.success('Note deleted.');
+      queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
+      setViewNoteId(null);
+      setViewNoteType(null);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to delete company note', err);
+      toast.error(
+        `Failed to delete note: ${
+          err?.message === 'Missing or insufficient permissions.'
+            ? 'You do not have permission to delete this note.'
+            : err?.message ?? 'Unknown error'
+        }`
+      );
+    }
   };
 
   const isLoading = companyLoading;
+  const loadError = sharedError || companyError;
   const cropName = getCropDisplayName(cropId ?? '');
   const cropIcon = getCropIcon(cropId ?? '');
 
@@ -171,6 +207,22 @@ export default function AdminCropNotesPage() {
           Add company note
         </Button>
       </div>
+
+      {loadError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 text-destructive px-4 py-2 flex items-center justify-between">
+          <span className="text-sm">Failed to load notes. Please try again.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              refetchShared();
+              refetchCompany();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
