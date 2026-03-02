@@ -11,15 +11,15 @@ import {
 } from 'firebase/firestore';
 
 // Firebase configuration for FarmVault
-// Consider moving these values into environment variables for production.
+// Values are pulled from Vite env vars so we don't hard-code keys in the repo.
 const firebaseConfig = {
-  apiKey: 'AIzaSyCl4yKhukewEypX-YZNg1WuPvSw-dKFrgk',
-  authDomain: 'farmvault-dabfe.firebaseapp.com',
-  projectId: 'farmvault-dabfe',
-  storageBucket: 'farmvault-dabfe.firebasestorage.app',
-  messagingSenderId: '945657601146',
-  appId: '1:945657601146:web:b620f2dc4b05dbbf9d2fc3',
-  measurementId: 'G-PYRECCDET1',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 // Initialize Firebase core app (singleton)
