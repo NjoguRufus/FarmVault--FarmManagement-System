@@ -12,6 +12,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getDocWithCache, getDocsWithCache } from '@/lib/firestoreCache';
 
 const BACKUP_ROOT = 'developerBackups';
 
@@ -84,7 +85,7 @@ export async function listCompanyBackups(companyId: string): Promise<
     collection(db, BACKUP_ROOT, companyId, 'snapshots'),
     orderBy('createdAt', 'desc')
   );
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   return snap.docs.map((d) => {
     const data = d.data();
     return {
@@ -102,7 +103,7 @@ export async function getBackupSnapshot(
   snapshotId: string
 ): Promise<CompanyBackupSnapshot | null> {
   const ref = doc(db, BACKUP_ROOT, companyId, 'snapshots', snapshotId);
-  const snap = await getDoc(ref);
+  const snap = await getDocWithCache(ref);
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as CompanyBackupSnapshot;
 }

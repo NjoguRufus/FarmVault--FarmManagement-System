@@ -13,6 +13,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getDocWithCache, getDocsWithCache } from '@/lib/firestoreCache';
 
 const CODE_RED_COLLECTION = 'codeRed';
 
@@ -68,7 +69,7 @@ export async function listAllCodeReds(): Promise<CodeRedRequestData[]> {
     orderBy('updatedAt', 'desc'),
     limit(100)
   );
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   return snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
@@ -85,7 +86,7 @@ export async function listCodeRedsForCompany(companyId: string): Promise<CodeRed
     orderBy('updatedAt', 'desc'),
     limit(50)
   );
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   return snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
@@ -97,7 +98,7 @@ export async function listCodeRedsForCompany(companyId: string): Promise<CodeRed
 /** Get a single Code Red request. */
 export async function getCodeRed(requestId: string): Promise<CodeRedRequestData | null> {
   const ref = doc(db, CODE_RED_COLLECTION, requestId);
-  const snap = await getDoc(ref);
+  const snap = await getDocWithCache(ref);
   if (!snap.exists()) return null;
   const data = snap.data();
   return {
@@ -135,7 +136,7 @@ export async function listCodeRedMessages(requestId: string): Promise<CodeRedMes
     orderBy('createdAt', 'asc'),
     limit(200)
   );
-  const snap = await getDocs(q);
+  const snap = await getDocsWithCache(q);
   return snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
