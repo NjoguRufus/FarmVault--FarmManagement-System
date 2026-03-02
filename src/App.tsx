@@ -86,10 +86,12 @@ import AdminCodeRedPage from "@/pages/admin/AdminCodeRedPage";
 import AdminFeedbackPage from "@/pages/admin/AdminFeedbackPage";
 import AdminFinancesPage from "@/pages/admin/AdminFinancesPage";
 import AdminExpensesPage from "@/pages/admin/AdminExpensesPage";
-import DeveloperNotesLibraryPage from "@/pages/admin/DeveloperNotesLibraryPage";
-import DeveloperCropNotesPage from "@/pages/admin/DeveloperCropNotesPage";
-import AdminNotesPage from "@/pages/notes/AdminNotesPage";
-import AdminCropNotesPage from "@/pages/notes/AdminCropNotesPage";
+import DeveloperRecordsPage from "@/pages/admin/DeveloperRecordsPage";
+import DeveloperCropRecordsPage from "@/pages/admin/DeveloperCropRecordsPage";
+import DeveloperRecordDetailPage from "@/pages/admin/DeveloperRecordDetailPage";
+import AdminRecordsPage from "@/pages/records/AdminRecordsPage";
+import AdminCropRecordsPage from "@/pages/records/AdminCropRecordsPage";
+import AdminRecordDetailPage from "@/pages/records/AdminRecordDetailPage";
 import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -235,8 +237,16 @@ const App = () => (
                 <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
                 <Route path="/support" element={<SupportPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />
-                <Route path="/notes" element={<PermissionRoute module="notes"><AdminNotesPage /></PermissionRoute>} />
-                <Route path="/notes/:cropId" element={<PermissionRoute module="notes"><AdminCropNotesPage /></PermissionRoute>} />
+                <Route path="/records" element={<PermissionRoute module="notes"><AdminRecordsPage /></PermissionRoute>} />
+                <Route path="/records/:cropId" element={<PermissionRoute module="notes"><AdminCropRecordsPage /></PermissionRoute>} />
+                <Route
+                  path="/records/:cropId/record/:recordId"
+                  element={
+                    <PermissionRoute module="notes">
+                      <AdminRecordDetailPage />
+                    </PermissionRoute>
+                  }
+                />
               </Route>
 
               {/* Role-based dashboard routes */}
@@ -296,8 +306,10 @@ const App = () => (
                 <Route path="/admin/feedback" element={<AdminFeedbackPage />} />
                 <Route path="/admin/finances" element={<AdminFinancesPage />} />
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
-                <Route path="/admin/notes" element={<DeveloperNotesLibraryPage />} />
-                <Route path="/admin/notes/:cropId" element={<DeveloperCropNotesPage />} />
+                <Route path="/developer/records" element={<DeveloperRecordsPage />} />
+                <Route path="/developer/records/:cropId" element={<DeveloperCropRecordsPage />} />
+                <Route path="/developer/records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
+                <Route path="/admin/records" element={<Navigate to="/developer/records" replace />} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

@@ -88,9 +88,9 @@ export function MainLayout() {
         className={cn(
           'pt-16 min-h-screen transition-all duration-300',
           // On mobile: bottom padding so content never hides behind bottom nav (110px)
-          'pb-[110px] md:pb-0',
-          // On desktop: add padding based on sidebar state
-          sidebarCollapsed ? 'md:pl-16' : 'md:pl-60'
+          'pb-[110px] lg:pb-0',
+          // On large screens: add padding based on sidebar state to accommodate sidebar width
+          sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-60'
         )}
       >
         <div className="p-6">

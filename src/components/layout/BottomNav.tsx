@@ -16,7 +16,8 @@ const NAV_ITEM_TRANSITION = {
   ease: 'easeInOut' as const,
 };
 const ACTIVE_TAB_SHADOW = '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
-const MAX_BOTTOM_TABS = 5;
+const MAX_BOTTOM_TABS_NARROW = 5;
+const MAX_BOTTOM_TABS_WIDE = 7; // e.g. tablets around 770px wide
 
 function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undefined {
   if (type === 'more') return 'mobile-nav-more';
@@ -51,16 +52,56 @@ export function BottomNav() {
   });
   const [moreOpen, setMoreOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isWide, setIsWide] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // Treat mobile screens wider than ~380px (up to below lg) as \"wide mobile\" for nav layout.
+  useEffect(() => {
+    const update = () => {
+      if (typeof window === 'undefined') return;
+      const width = window.innerWidth;
+      // Below lg (handled by lg:hidden on the nav), but wide enough to comfortably show Harvest.
+      setIsWide(width >= 380 && width < 1024);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   const visibleMainItems = useMemo(() => {
-    const slotForMore = moreItems.length > 0 || mainItems.length > MAX_BOTTOM_TABS ? 1 : 0;
-    const maxDirectTabs = Math.max(1, MAX_BOTTOM_TABS - slotForMore);
-    return mainItems.slice(0, maxDirectTabs);
-  }, [mainItems, moreItems.length]);
+    const maxTabs = isWide ? MAX_BOTTOM_TABS_WIDE : MAX_BOTTOM_TABS_NARROW;
+    const slotForMore = moreItems.length > 0 || mainItems.length > MAX_BOTTOM_TABS_NARROW ? 1 : 0;
+    const maxDirectTabs = Math.max(1, maxTabs - slotForMore);
+
+    // Base source of items
+    const allMain = [...mainItems];
+
+    // On wide-but-not-lg screens, we want a specific priority:
+    // 1) Dashboard first, 2) all other main items, 3) Harvest & Sales last (just before More).
+    if (isWide) {
+      const dashboard = allMain.find((i) => i.path === '/dashboard');
+      const harvestFromMain = allMain.find((i) => i.path === '/harvest-sales');
+      const harvestFromMore = moreItems.find((i) => i.path === '/harvest-sales');
+      const harvest = harvestFromMain ?? harvestFromMore;
+
+      const rest = allMain.filter(
+        (i) => i.path !== '/dashboard' && i.path !== '/harvest-sales'
+      );
+
+      const ordered: BottomNavItem[] = [];
+      if (dashboard) ordered.push(dashboard);
+      ordered.push(...rest);
+      if (harvest) ordered.push(harvest);
+
+      return ordered.slice(0, maxDirectTabs);
+    }
+
+    // Narrow screens: just take main items in their original order.
+    return allMain.slice(0, maxDirectTabs);
+  }, [mainItems, moreItems, isWide]);
 
   const drawerItems = useMemo(() => {
     const overflowMainItems = mainItems.slice(visibleMainItems.length);
@@ -104,7 +145,7 @@ export function BottomNav() {
 
   const navNode = (
     <div
-      className="fixed inset-x-0 bottom-3.5 z-[60] md:hidden flex justify-center pointer-events-none"
+      className="fixed inset-x-0 bottom-3.5 z-[60] lg:hidden flex justify-center pointer-events-none"
       style={{
         position: 'fixed',
         left: 0,

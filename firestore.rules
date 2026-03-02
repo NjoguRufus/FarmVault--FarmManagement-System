@@ -518,40 +518,10 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // --- Crops (reference list for notes; developer can write, all read) ---
+    // --- Crops (reference list; developer can write, all read) ---
     match /crops/{cropId} {
       allow read: if isSignedIn();
       allow write: if isDeveloper();
-    }
-
-    // --- Notes library (global; developer only) ---
-    match /notes_library/{noteId} {
-      allow read, write: if isDeveloper();
-    }
-
-    // --- Company note shares (developer shares to company; company can read own) ---
-    match /company_note_shares/{shareId} {
-      allow read: if isSignedIn() && (
-        isDeveloper()
-        || resource.data.get('companyId', null) == effectiveUserCompanyId()
-        || resource.data.get('companyId', null) == null
-      );
-      allow create, update, delete: if isDeveloper();
-    }
-
-    // --- Company notes (company-created; company admin CRUD own, developer read all) ---
-    match /company_notes/{noteId} {
-      allow read: if isSignedIn() && (
-        isDeveloper()
-        || resource.data.get('companyId', null) == effectiveUserCompanyId()
-        || resource.data.get('companyId', null) == null
-      );
-      allow create: if isSignedIn() && isCompanyAdmin()
-        && (request.resource.data.get('companyId', null) == effectiveUserCompanyId() || isDeveloper());
-      allow update, delete: if isSignedIn() && (
-        isDeveloper()
-        || (resource.data.get('companyId', null) == effectiveUserCompanyId() && isCompanyAdmin())
-      );
     }
 
     // --- Code Red: urgent developer–admin communication (e.g. data recovery) ---
@@ -569,6 +539,21 @@ service cloud.firestore {
           || isDeveloper()
         );
       }
+    }
+
+    // --- Records: library (developer), shares (developer write; dev or company read), company records ---
+    match /records_library/{recordId} {
+      allow read, write: if isDeveloper();
+    }
+    match /company_record_shares/{shareId} {
+      allow read: if isDeveloper() || (isSignedIn() && resource.data.get('companyId', null) == effectiveUserCompanyId());
+      allow write: if isDeveloper();
+    }
+    match /company_records/{companyRecordId} {
+      allow read: if isDeveloper() || (isSignedIn() && resource.data.get('companyId', null) == effectiveUserCompanyId());
+      allow create: if isSignedIn() && request.resource.data.get('companyId', null) == effectiveUserCompanyId();
+      allow update, delete: if isDeveloper()
+        || (isSignedIn() && resource.data.get('companyId', null) == effectiveUserCompanyId() && resource.data.get('createdBy', null) == request.auth.uid);
     }
 
     // --- Fallback: deny everything else by default ---

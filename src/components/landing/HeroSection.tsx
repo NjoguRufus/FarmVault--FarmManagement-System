@@ -106,9 +106,9 @@ export function HeroSection() {
                 <div className="absolute inset-0 -m-12 rounded-full bg-gradient-to-br from-primary/20 to-gold/20 blur-[60px] animate-pulse-glow" />
                 <div className="absolute inset-0 -m-6 rounded-full bg-gradient-to-tr from-gold/10 to-primary/10 blur-[40px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
                 <OptimizedImage
-                  src="/landing/phone-mockup.png"
+                  src="/landing/landing%20page%20mock.png"
                   alt="FarmVault on desktop, tablet and mobile"
-                  className="relative z-10 w-80 md:w-[380px] lg:w-[420px] drop-shadow-2xl animate-float"
+                  className="relative z-10 w-[20rem] md:w-[26rem] lg:w-[30rem] xl:w-[34rem] drop-shadow-2xl animate-float"
                 />
                 <motion.div
                   animate={{ y: [-5, 5, -5] }}

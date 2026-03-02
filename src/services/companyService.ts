@@ -26,6 +26,15 @@ export async function getCompany(companyId: string): Promise<CompanyDoc | null> 
   return { id: snap.id, ...snap.data() } as CompanyDoc;
 }
 
+/** List all companies (developer use, e.g. share records). */
+export async function listCompanies(): Promise<{ id: string; name: string }[]> {
+  const snap = await getDocs(collection(db, 'companies'));
+  return snap.docs.map((d) => ({
+    id: d.id,
+    name: String((d.data() as { name?: string }).name ?? d.id),
+  }));
+}
+
 export async function setPaymentReminder(companyId: string, nextPaymentAt?: Date): Promise<void> {
   const ref = doc(db, 'companies', companyId);
   await updateDoc(ref, {
