@@ -11,6 +11,28 @@ export default defineConfig(({ mode }) => ({
     hmr: { overlay: false },
   },
 
+  build: {
+    minify: "esbuild",
+    cssMinify: true,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes("node_modules")) {
+            if (id.includes("react-dom") || id.includes("react/")) return "vendor-react";
+            if (id.includes("framer-motion")) return "vendor-motion";
+            if (id.includes("firebase")) return "vendor-firebase";
+            if (id.includes("@radix-ui")) return "vendor-radix";
+            return "vendor";
+        }
+          return null;
+        },
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
+      },
+    },
+    chunkSizeWarningLimit: 600,
+  },
+
   plugins: [
     react(),
     mode === "development" && componentTagger(),

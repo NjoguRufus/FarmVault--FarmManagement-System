@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NoteCard } from '@/components/notes/NoteCard';
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   getSharedLibraryNotesForCompany,
-  getCompanyNotes,
+  getCompanyNotesPaginated,
   getLibraryNote,
   getCompanyNote,
   createCompanyNote,
@@ -46,12 +46,23 @@ export default function AdminCropNotesPage() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: companyNotes = [], isLoading: companyLoading } = useQuery({
-    queryKey: ['notes-company', companyId, cropId],
-    queryFn: () => getCompanyNotes(companyId, cropId ?? ''),
+  const PAGE_SIZE = 30;
+  const {
+    data: companyNotesData,
+    isLoading: companyLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['notes-company', companyId, cropId ?? ''],
+    queryFn: ({ pageParam }) =>
+      getCompanyNotesPaginated(companyId, cropId ?? undefined, PAGE_SIZE, pageParam ?? null),
+    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
+    getNextPageParam: (lastPage) => lastPage.lastDoc,
     enabled: !!companyId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 60 * 1000,
   });
+  const companyNotes = companyNotesData?.pages.flatMap((p) => p.notes) ?? [];
 
   const sharedForCrop = sharedNotes.filter((n: { cropId: string }) => n.cropId === cropId);
 
@@ -118,7 +129,7 @@ export default function AdminCropNotesPage() {
       });
       toast.success('Note created.');
     }
-    queryClient.invalidateQueries({ queryKey: ['notes-company'] });
+    queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
     setEditorOpen(false);
     setEditingId(null);
   };
@@ -127,12 +138,12 @@ export default function AdminCropNotesPage() {
     if (!confirm('Delete this note?')) return;
     await deleteCompanyNote(id);
     toast.success('Note deleted.');
-    queryClient.invalidateQueries({ queryKey: ['notes-company'] });
+    queryClient.invalidateQueries({ queryKey: ['notes-company', companyId, cropId ?? ''] });
     setViewNoteId(null);
     setViewNoteType(null);
   };
 
-  const isLoading = sharedLoading || companyLoading;
+  const isLoading = companyLoading;
   const cropName = getCropDisplayName(cropId ?? '');
   const cropIcon = getCropIcon(cropId ?? '');
 
@@ -163,8 +174,8 @@ export default function AdminCropNotesPage() {
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton key={i} className="h-40 rounded-lg" />
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-32 rounded-lg" />
           ))}
         </div>
       ) : (
@@ -217,6 +228,17 @@ export default function AdminCropNotesPage() {
         <p className="text-muted-foreground text-center py-8">
           No notes yet. Add a company note or ask your admin to share notes.
         </p>
+      )}
+      {hasNextPage && (
+        <div className="flex justify-center pt-4">
+          <Button
+            variant="outline"
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? 'Loading…' : 'Load more'}
+          </Button>
+        </div>
       )}
 
       <NoteEditorModal

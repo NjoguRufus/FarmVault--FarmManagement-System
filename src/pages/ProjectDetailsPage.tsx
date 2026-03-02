@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, CheckCircle, ChevronDown, ChevronLeft, ChevronUp, Clock, Package, Users, Activity, Wallet, Wrench as WrenchIcon, ListChecks, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChallengeType, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
+import { ChallengeType, CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
 import { useProject } from '@/contexts/ProjectContext';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { EditTimelineModal } from '@/components/projects/EditTimelineModal';
+import { Button } from '@/components/ui/button';
+import { Pencil } from 'lucide-react';
 
 if (import.meta.env?.DEV) {
   assertCropStagesDev();
@@ -82,6 +85,20 @@ export default function ProjectDetailsPage() {
     'inventoryUsage',
     { ...scope, projectId: projectId ?? null },
   );
+  const { data: allStages = [] } = useCollection<CropStage>(
+    'project-details-stages',
+    'projectStages',
+    { ...scope, projectId: projectId ?? null },
+  );
+  const projectStages = useMemo(
+    () =>
+      companyId && projectId
+        ? [...allStages].filter((s) => s.companyId === companyId && s.projectId === projectId).sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0))
+        : [],
+    [allStages, companyId, projectId],
+  );
+
+  const [editTimelineOpen, setEditTimelineOpen] = useState(false);
 
   const workLogs = useMemo(
     () =>
@@ -761,7 +778,15 @@ export default function ProjectDetailsPage() {
 
       {/* Crop stage timeline — driven by project.plantingDate + stage template */}
       <div className="fv-card">
-        <h2 className="text-lg font-semibold mb-4">Crop Stage Timeline</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Crop Stage Timeline</h2>
+          {projectStages.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setEditTimelineOpen(true)}>
+              <Pencil className="h-4 w-4 mr-1" />
+              Edit Timeline
+            </Button>
+          )}
+        </div>
         {!plantingDate && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <AlertTriangle className="h-4 w-4" />
@@ -1074,6 +1099,15 @@ export default function ProjectDetailsPage() {
           </AlertDialog>
         </div>
       </div>
+      <EditTimelineModal
+        open={editTimelineOpen}
+        onOpenChange={setEditTimelineOpen}
+        projectId={projectId ?? ''}
+        companyId={companyId ?? ''}
+        stages={projectStages}
+        createdBy={user?.id ?? ''}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
+      />
     </div>
   );
 }

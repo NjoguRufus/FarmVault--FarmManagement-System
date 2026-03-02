@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
 import { generateStageTimeline, getCropStages } from '@/lib/cropStageConfig';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
 import { createProjectBlock } from '@/services/projectBlockService';
 import { createBudgetPool } from '@/services/budgetPoolService';
+import { getChallengeTemplates } from '@/services/challengeTemplatesService';
 import type { BudgetPool } from '@/types';
 import {
   cropSupportsEnvironment,
@@ -131,6 +132,30 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const [createPoolName, setCreatePoolName] = useState('');
   const [createPoolAmount, setCreatePoolAmount] = useState('');
   const [creatingPool, setCreatingPool] = useState(false);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
+
+  const projectCropTypeForTemplates = useMemo(
+    () => (selectedCrop ? toProjectCropTypeKey(normalizeCropTypeKey(selectedCrop.cropTypeKey)) : ''),
+    [selectedCrop],
+  );
+  const { data: challengeTemplates = [] } = useQuery({
+    queryKey: ['challengeTemplates', user?.companyId ?? '', projectCropTypeForTemplates, 'preseason'],
+    queryFn: () =>
+      getChallengeTemplates(user!.companyId, projectCropTypeForTemplates, 'preseason'),
+    enabled: !!user?.companyId && !!projectCropTypeForTemplates,
+    staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
+  });
+
+  const templateIdsKey = useMemo(
+    () => challengeTemplates.map((t) => t.id).sort().join(','),
+    [challengeTemplates],
+  );
+  useEffect(() => {
+    if (challengeTemplates.length > 0) {
+      setSelectedTemplateIds(new Set(challengeTemplates.map((t) => t.id)));
+    }
+  }, [projectCropTypeForTemplates, templateIdsKey]);
 
   const { data: budgetPools = [] } = useCollection<BudgetPool>(
     `budget-pools-${user?.companyId ?? ''}`,
@@ -327,6 +352,40 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         await updateDoc(doc(db, 'projects', projectRef.id), { setupComplete: true });
         queryClient.invalidateQueries({ queryKey: ['projects'] });
         queryClient.invalidateQueries({ queryKey: ['project-blocks'] });
+        const toCopyBlocks = challengeTemplates.filter((t) => selectedTemplateIds.has(t.id));
+        if (toCopyBlocks.length > 0 && user?.companyId) {
+          try {
+            const batch = writeBatch(db);
+            const projectCropTypeBlocks = toProjectCropTypeKey(normalizeCropTypeKey(selectedCrop!.cropTypeKey));
+            for (const t of toCopyBlocks) {
+              const ref = doc(collection(db, 'seasonChallenges'));
+              batch.set(ref, {
+                projectId: projectRef.id,
+                companyId: user.companyId,
+                cropType: projectCropTypeBlocks,
+                title: t.title,
+                description: t.description ?? '',
+                challengeType: 'other',
+                severity: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
+                status: 'identified',
+                dateIdentified: serverTimestamp(),
+                createdAt: serverTimestamp(),
+                source: 'template',
+                templateId: t.id,
+                createdBy: user.id,
+                createdByName: (user as { name?: string }).name ?? (user as { email?: string }).email ?? 'Unknown',
+                ...((t as { whatWasDone?: string }).whatWasDone && { whatWasDone: (t as { whatWasDone?: string }).whatWasDone }),
+                ...((t as { plan2IfFails?: string }).plan2IfFails && { plan2IfFails: (t as { plan2IfFails?: string }).plan2IfFails }),
+              });
+            }
+            await batch.commit();
+            queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
+          } catch (templateErr) {
+            console.warn('Failed to add suggested challenges:', templateErr);
+            const { toast } = await import('sonner');
+            toast.warning('Project created but some suggested challenges could not be added.');
+          }
+        }
         onSuccess?.();
         setSaving(false);
         return;
@@ -420,6 +479,40 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
           queryClient.invalidateQueries({ queryKey: ['projects'] });
           queryClient.invalidateQueries({ queryKey: ['projectStages'] });
           queryClient.invalidateQueries({ queryKey: ['project'] });
+
+          const toCopy = challengeTemplates.filter((t) => selectedTemplateIds.has(t.id));
+          if (toCopy.length > 0 && user?.companyId) {
+            try {
+              const batch = writeBatch(db);
+              for (const t of toCopy) {
+                const ref = doc(collection(db, 'seasonChallenges'));
+                batch.set(ref, {
+                  projectId: projectRef.id,
+                  companyId: user.companyId,
+                  cropType: projectCropType,
+                  title: t.title,
+                  description: t.description ?? '',
+                  challengeType: 'other',
+                  severity: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
+                  status: 'identified',
+                  dateIdentified: serverTimestamp(),
+                  createdAt: serverTimestamp(),
+                  source: 'template',
+                  templateId: t.id,
+                  createdBy: user.id,
+                  createdByName: (user as { name?: string }).name ?? (user as { email?: string }).email ?? 'Unknown',
+                  ...((t as { whatWasDone?: string }).whatWasDone && { whatWasDone: (t as { whatWasDone?: string }).whatWasDone }),
+                  ...((t as { plan2IfFails?: string }).plan2IfFails && { plan2IfFails: (t as { plan2IfFails?: string }).plan2IfFails }),
+                });
+              }
+              await batch.commit();
+              queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
+            } catch (templateErr) {
+              console.warn('Failed to add suggested challenges:', templateErr);
+              const { toast } = await import('sonner');
+              toast.warning('Project created but some suggested challenges could not be added.');
+            }
+          }
         } catch (err) {
           console.error('Error creating stages:', err);
         }
@@ -774,6 +867,39 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                   </button>
                 </div>
               </div>
+
+              {challengeTemplates.length > 0 && (
+                <div className="space-y-2 rounded-lg border border-border/70 px-3 py-3">
+                  <p className="text-sm font-medium text-foreground">Suggested Pre-Season Challenges</p>
+                  <p className="text-xs text-muted-foreground">These will be added to the project. Uncheck any you don’t want.</p>
+                  <ul className="space-y-2">
+                    {challengeTemplates.map((t) => (
+                      <li key={t.id} className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          id={`template-${t.id}`}
+                          checked={selectedTemplateIds.has(t.id)}
+                          onChange={(e) => {
+                            setSelectedTemplateIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(t.id);
+                              else next.delete(t.id);
+                              return next;
+                            });
+                          }}
+                          className="mt-1 rounded border-border"
+                        />
+                        <label htmlFor={`template-${t.id}`} className="text-sm cursor-pointer flex-1">
+                          <span className="font-medium text-foreground">{t.title}</span>
+                          {t.description && (
+                            <span className="block text-xs text-muted-foreground mt-0.5">{t.description}</span>
+                          )}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Location</label>

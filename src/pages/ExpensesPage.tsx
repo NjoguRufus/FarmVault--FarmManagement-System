@@ -43,11 +43,103 @@ import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
 import { applyExpenseDeduction } from '@/services/expenseBudgetService';
+import { getHarvestPickersByIds } from '@/services/harvestCollectionService';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
   fromCache?: boolean;
 };
+
+type PickerPaymentGroup = {
+  collectionId: string;
+  displayName: string;
+  totalAmount: number;
+  latestDate: Date;
+  expenses: ExpenseWithSyncState[];
+};
+
+function PickerPaymentDetailContent({
+  group,
+  formatCurrency,
+  formatDate,
+}: {
+  group: PickerPaymentGroup;
+  formatCurrency: (n: number) => string;
+  formatDate: (d: Date | unknown) => string;
+  onClose: () => void;
+}) {
+  const [pickersMap, setPickersMap] = useState<Record<string, { pickerNumber?: number; pickerName?: string; totalPay?: number }>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ids = Array.from(
+      new Set(group.expenses.flatMap((e) => e.meta?.pickerIds ?? []))
+    );
+    if (!ids.length) {
+      setPickersMap({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    getHarvestPickersByIds(ids)
+      .then((list) => {
+        const map: Record<string, { pickerNumber?: number; pickerName?: string; totalPay?: number }> = {};
+        list.forEach((p) => {
+          map[p.id] = {
+            pickerNumber: p.pickerNumber,
+            pickerName: p.pickerName,
+            totalPay: p.totalPay,
+          };
+        });
+        setPickersMap(map);
+      })
+      .finally(() => setLoading(false));
+  }, [group.collectionId, group.expenses]);
+
+  const batches = useMemo(() => {
+    return [...group.expenses].sort((a, b) => {
+      const ta = toDate(a.date)?.getTime() ?? 0;
+      const tb = toDate(b.date)?.getTime() ?? 0;
+      return tb - ta;
+    });
+  }, [group.expenses]);
+
+  return (
+    <div className="overflow-y-auto flex-1 min-h-0 space-y-4 pr-1">
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading pickers…</p>
+      ) : (
+        batches.map((expense, idx) => {
+          const pickerIds = expense.meta?.pickerIds ?? [];
+          const pickers = pickerIds
+            .map((id) => ({ id, ...pickersMap[id] }))
+            .filter((p) => p.id);
+          const isGroup = pickers.length > 1;
+          return (
+            <div key={expense.id} className="rounded-lg border bg-muted/20 p-3 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">
+                  {isGroup ? `Group payment` : `Payment`} — {formatDate(expense.date)}
+                </span>
+                <span className="font-semibold">{formatCurrency(expense.amount)}</span>
+              </div>
+              <ul className="space-y-1.5 text-sm">
+                {pickers.map((p) => (
+                  <li key={p.id} className="flex justify-between items-center">
+                    <span className="text-muted-foreground">
+                      #{p.pickerNumber ?? '—'} {p.pickerName ?? 'Unknown'}
+                    </span>
+                    <span>{p.totalPay != null ? formatCurrency(p.totalPay) : '—'}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
 
 export default function ExpensesPage() {
   const { activeProject } = useProject();
@@ -113,6 +205,64 @@ export default function ExpensesPage() {
 
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
 
+  // Group picker labour expenses by harvest collection for "Recent Expenses" (one row per collection)
+  const pickerPaymentGroups = useMemo(() => {
+    const pickerExpenses = filteredExpenses.filter(
+      (e) => (e.meta?.source === 'harvest_wallet_picker_payment' && e.meta?.harvestCollectionId)
+    ) as ExpenseWithSyncState[];
+    const byCollection = new Map<
+      string,
+      { collectionId: string; displayName: string; totalAmount: number; latestDate: Date; expenses: ExpenseWithSyncState[] }
+    >();
+    pickerExpenses.forEach((e) => {
+      const cid = e.meta!.harvestCollectionId!;
+      const existing = byCollection.get(cid);
+      const collectionName = e.description.replace(/^Picker labour –\s*/i, '').trim() || cid;
+      const displayName = `${collectionName} Picker Payments`;
+      const d = toDate(e.date);
+      const t = d ? d.getTime() : 0;
+      if (!existing) {
+        byCollection.set(cid, {
+          collectionId: cid,
+          displayName,
+          totalAmount: e.amount,
+          latestDate: d || new Date(0),
+          expenses: [e],
+        });
+      } else {
+        existing.totalAmount += e.amount;
+        existing.expenses.push(e);
+        if (t > existing.latestDate.getTime()) existing.latestDate = d || existing.latestDate;
+      }
+    });
+    return Array.from(byCollection.values()).sort((a, b) => b.latestDate.getTime() - a.latestDate.getTime());
+  }, [filteredExpenses]);
+
+  // Recent table rows: picker groups (one per collection) + all other expenses (exclude raw picker labour lines)
+  const recentTableRows = useMemo(() => {
+    const pickerIds = new Set(
+      filteredExpenses
+        .filter((e) => e.meta?.source === 'harvest_wallet_picker_payment')
+        .map((e) => e.id)
+    );
+    const others = filteredExpenses.filter((e) => !pickerIds.has(e.id));
+    const groupRows = pickerPaymentGroups.map((g) => ({
+      type: 'picker_group' as const,
+      key: `picker-${g.collectionId}`,
+      ...g,
+    }));
+    const expenseRows = others.map((e) => ({ type: 'expense' as const, key: e.id, expense: e }));
+    const combined = [...groupRows, ...expenseRows];
+    combined.sort((a, b) => {
+      const dateA = a.type === 'picker_group' ? a.latestDate : toDate(a.expense.date);
+      const dateB = b.type === 'picker_group' ? b.latestDate : toDate(b.expense.date);
+      const tA = dateA ? dateA.getTime() : 0;
+      const tB = dateB ? dateB.getTime() : 0;
+      return tB - tA;
+    });
+    return combined;
+  }, [filteredExpenses, pickerPaymentGroups]);
+
   // Broker expense categories (for admin view)
   const brokerCategoryValues = useMemo(
     () => new Set(BROKER_EXPENSE_CATEGORIES.map((c) => c.value)),
@@ -155,6 +305,13 @@ export default function ExpensesPage() {
   const [labourExpensesOpen, setLabourExpensesOpen] = useState(false);
   const [brokerExpensesOpen, setBrokerExpensesOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const [pickerPaymentDetailGroup, setPickerPaymentDetailGroup] = useState<{
+    collectionId: string;
+    displayName: string;
+    totalAmount: number;
+    latestDate: Date;
+    expenses: ExpenseWithSyncState[];
+  } | null>(null);
   const canCreateExpense = can('expenses', 'create');
   const canApproveExpense = can('expenses', 'approve');
   const canExportExpenseReport = can('reports', 'export');
@@ -639,83 +796,150 @@ export default function ExpensesPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredExpenses.map((expense) => (
-                <tr key={expense.id}>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground">{expense.description}</span>
-                      {expense.pending && (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                          Syncing...
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    <span className={cn('fv-badge', getCategoryColor(expense.category))}>
-                      {expense.category}
-                    </span>
-                  </td>
-                  <td className="font-medium">{formatCurrency(expense.amount)}</td>
-                  <td className="text-muted-foreground">
-                    {formatDate(expense.date)}
-                  </td>
-                  <td>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+              {recentTableRows.map((row) => {
+                if (row.type === 'picker_group') {
+                  return (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setPickerPaymentDetailGroup(row)}
+                    >
+                      <td>
+                        <span className="font-medium text-foreground">{row.displayName}</span>
+                      </td>
+                      <td>
+                        <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
+                      </td>
+                      <td className="font-medium">{formatCurrency(row.totalAmount)}</td>
+                      <td className="text-muted-foreground">{formatDate(row.latestDate)}</td>
+                      <td onClick={(ev) => ev.stopPropagation()}>
                         <button
                           type="button"
                           className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setPickerPaymentDetailGroup(row)}
                         >
                           <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                         </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="cursor-pointer"
-                          onClick={() => {
-                            const msg = `${expense.description}\nCategory: ${expense.category}\nAmount: ${formatCurrency(expense.amount)}\nDate: ${formatDate(expense.date)}`;
-                            alert(msg);
-                          }}
-                        >
-                          View details
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
+                      </td>
+                    </tr>
+                  );
+                }
+                const expense = row.expense;
+                return (
+                  <tr key={row.key}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-foreground">{expense.description}</span>
+                        {expense.pending && (
+                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                            Syncing...
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={cn('fv-badge', getCategoryColor(expense.category))}>
+                        {expense.category}
+                      </span>
+                    </td>
+                    <td className="font-medium">{formatCurrency(expense.amount)}</td>
+                    <td className="text-muted-foreground">{formatDate(expense.date)}</td>
+                    <td>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => {
+                              const msg = `${expense.description}\nCategory: ${expense.category}\nAmount: ${formatCurrency(expense.amount)}\nDate: ${formatDate(expense.date)}`;
+                              alert(msg);
+                            }}
+                          >
+                            View details
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
         {/* Mobile Cards: scrollable when 5+ so card stays same size */}
         <div className="md:hidden overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-1">
-          {filteredExpenses.map((expense) => (
-            <div key={expense.id} className="p-4 bg-muted/30 rounded-lg">
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-foreground">{expense.description}</p>
-                    {expense.pending && (
-                      <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                        Syncing...
-                      </span>
-                    )}
+          {recentTableRows.map((row) => {
+            if (row.type === 'picker_group') {
+              return (
+                <div
+                  key={row.key}
+                  role="button"
+                  tabIndex={0}
+                  className="p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
+                  onClick={() => setPickerPaymentDetailGroup(row)}
+                  onKeyDown={(ev) => ev.key === 'Enter' && setPickerPaymentDetailGroup(row)}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="font-medium text-foreground">{row.displayName}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(row.latestDate)}</p>
+                    </div>
+                    <span className="font-semibold">{formatCurrency(row.totalAmount)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(expense.date)}
-                  </p>
+                  <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
                 </div>
-                <span className="font-semibold">{formatCurrency(expense.amount)}</span>
+              );
+            }
+            const expense = row.expense;
+            return (
+              <div key={row.key} className="p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-foreground">{expense.description}</p>
+                      {expense.pending && (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                          Syncing...
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{formatDate(expense.date)}</p>
+                  </div>
+                  <span className="font-semibold">{formatCurrency(expense.amount)}</span>
+                </div>
+                <span className={cn('fv-badge', getCategoryColor(expense.category))}>
+                  {expense.category}
+                </span>
               </div>
-              <span className={cn('fv-badge', getCategoryColor(expense.category))}>
-                {expense.category}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
+
+      {/* Picker payment detail modal: show batches and pickers (names, numbers, amounts) */}
+      <Dialog open={!!pickerPaymentDetailGroup} onOpenChange={(open) => !open && setPickerPaymentDetailGroup(null)}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{pickerPaymentDetailGroup?.displayName ?? 'Picker payments'}</DialogTitle>
+          </DialogHeader>
+          {pickerPaymentDetailGroup && (
+            <PickerPaymentDetailContent
+              group={pickerPaymentDetailGroup}
+              formatCurrency={formatCurrency}
+              formatDate={formatDate}
+              onClose={() => setPickerPaymentDetailGroup(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Broker expenses modal (tomatoes project only; visible to admin/manager, not to brokers) */}
       {showBrokerExpensesButton && (

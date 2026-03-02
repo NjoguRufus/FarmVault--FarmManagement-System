@@ -4,7 +4,9 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
+  getDocsFromCache,
   limit,
   onSnapshot,
   query,
@@ -12,6 +14,7 @@ import {
   setDoc,
   where,
   writeBatch,
+  type Query,
 } from 'firebase/firestore';
 
 const LEDGER_COLLECTION = 'projectWalletLedger';
@@ -114,14 +117,41 @@ function mapLedgerDoc(docSnap: {
   };
 }
 
-async function getLedgerEntriesOnce(projectId: string, companyId: string): Promise<ProjectWalletLedgerEntry[]> {
-  const snap = await getDocs(
-    query(
-      collection(db, LEDGER_COLLECTION),
-      where('companyId', '==', companyId),
-      where('projectId', '==', projectId),
-    ),
+/** getDocs with offline fallback: try cache when getDocs fails (e.g. unavailable). */
+async function getDocsWithCache(q: Query): Promise<Awaited<ReturnType<typeof getDocs>>> {
+  try {
+    return await getDocs(q);
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? '');
+    const code = (err as { code?: string })?.code;
+    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+      return await getDocsFromCache(q);
+    }
+    throw err;
+  }
+}
+
+async function getLedgerEntriesOnce(
+  projectId: string,
+  companyId: string,
+  forceFromCache?: boolean,
+): Promise<ProjectWalletLedgerEntry[]> {
+  const q = query(
+    collection(db, LEDGER_COLLECTION),
+    where('companyId', '==', companyId),
+    where('projectId', '==', projectId),
   );
+  const useCache = forceFromCache || (typeof navigator !== 'undefined' && !navigator.onLine);
+  let snap: Awaited<ReturnType<typeof getDocs>>;
+  if (useCache) {
+    try {
+      snap = await getDocsFromCache(q);
+    } catch {
+      snap = await getDocsWithCache(q);
+    }
+  } else {
+    snap = await getDocsWithCache(q);
+  }
   return snap.docs.map((d) => mapLedgerDoc(d));
 }
 
@@ -133,6 +163,18 @@ async function hasIdempotencyKey(
   if (!idempotencyKey) return false;
   const entries = await getLedgerEntriesOnce(projectId, companyId);
   return entries.some((e) => e.idempotencyKey === idempotencyKey);
+}
+
+/** Get ledger entries (from server or cache when offline). Use after a payout to refresh wallet balance. When offline, forces cache read so pending debits are visible. */
+export async function getWalletLedgerEntries(
+  projectId: string,
+  companyId: string,
+  options?: { forceFromCache?: boolean },
+): Promise<ProjectWalletLedgerEntry[]> {
+  if (!projectId || !companyId) return [];
+  const forceFromCache =
+    options?.forceFromCache ?? (typeof navigator !== 'undefined' && !navigator.onLine);
+  return getLedgerEntriesOnce(projectId, companyId, forceFromCache);
 }
 
 export function computeWalletSummary(ledgerEntries: ProjectWalletLedgerEntry[]): WalletSummary {
@@ -165,17 +207,30 @@ export async function ensureProjectWalletMigration(projectId: string, companyId:
   if (!projectId || !companyId) return;
 
   const metaRef = doc(db, META_COLLECTION, getProjectWalletMetaId(projectId, companyId));
-  const metaSnap = await getDoc(metaRef);
+  let metaSnap: Awaited<ReturnType<typeof getDoc>>;
+  try {
+    metaSnap = await getDoc(metaRef);
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'unavailable') {
+      try {
+        metaSnap = await getDocFromCache(metaRef);
+      } catch {
+        // Meta not in cache (e.g. first time offline). Skip migration so ledger writes (debits) can still run.
+        return;
+      }
+    } else {
+      throw err;
+    }
+  }
   if (metaSnap.exists() && metaSnap.data()?.migrated === true) return;
 
-  const existingLedger = await getDocs(
-    query(
-      collection(db, LEDGER_COLLECTION),
-      where('companyId', '==', companyId),
-      where('projectId', '==', projectId),
-      limit(1),
-    ),
+  const ledgerQuery = query(
+    collection(db, LEDGER_COLLECTION),
+    where('companyId', '==', companyId),
+    where('projectId', '==', projectId),
+    limit(1),
   );
+  const existingLedger = await getDocsWithCache(ledgerQuery);
 
   // Ledger already exists: mark migration done and stop.
   if (!existingLedger.empty) {
@@ -193,13 +248,12 @@ export async function ensureProjectWalletMigration(projectId: string, companyId:
     return;
   }
 
-  const legacySnap = await getDocs(
-    query(
-      collection(db, LEGACY_WALLET_COLLECTION),
-      where('companyId', '==', companyId),
-      where('projectId', '==', projectId),
-    ),
+  const legacyQuery = query(
+    collection(db, LEGACY_WALLET_COLLECTION),
+    where('companyId', '==', companyId),
+    where('projectId', '==', projectId),
   );
+  const legacySnap = await getDocsWithCache(legacyQuery);
 
   let legacyReceived = 0;
   let legacyPaidOut = 0;
@@ -349,7 +403,17 @@ export async function addWalletDebit(
 
 export async function getWalletSummaryOnce(projectId: string, companyId: string): Promise<WalletSummary> {
   if (!projectId || !companyId) return { ...EMPTY_SUMMARY };
-  await ensureProjectWalletMigration(projectId, companyId);
+  try {
+    await ensureProjectWalletMigration(projectId, companyId);
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    const msg = String((err as Error)?.message ?? '');
+    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+      // Offline or cache issue: still compute summary from cached ledger so pay flow can proceed
+    } else {
+      throw err;
+    }
+  }
   const entries = await getLedgerEntriesOnce(projectId, companyId);
   return computeWalletSummary(entries);
 }
@@ -382,8 +446,16 @@ export function subscribeWalletLedger(
       callback(snap.docs.map((d) => mapLedgerDoc(d)));
     },
     (err) => {
-      console.error('[projectWallet] subscribe failed', err);
-      callback([]);
+      console.warn('[projectWallet] subscribe error (e.g. offline):', err);
+      const code = (err as { code?: string })?.code;
+      const msg = String((err as Error)?.message ?? '');
+      if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+        getDocsFromCache(q)
+          .then((snap) => callback(snap.docs.map((d) => mapLedgerDoc(d))))
+          .catch(() => callback([]));
+      } else {
+        callback([]);
+      }
     },
   );
 }

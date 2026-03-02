@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
+import { OptimizedImage } from "@/components/ui/OptimizedImage";
 
 export function CtaSection() {
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -19,7 +20,12 @@ export function CtaSection() {
     <>
       <section className="relative py-28 lg:py-36 overflow-hidden">
         <div className="absolute inset-0">
-          <img src="/landing/cta-bg.jpg" alt="" className="w-full h-full object-cover" />
+          <OptimizedImage
+          src="/landing/cta-bg.jpg"
+          webpSrc="/landing/cta-bg.webp"
+          alt=""
+          className="w-full h-full object-cover"
+        />
           <div className="absolute inset-0 gradient-cta-overlay" />
           <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-primary/10 rounded-full blur-[80px] animate-pulse-glow" />
           <div className="absolute bottom-1/4 right-1/3 w-48 h-48 bg-gold/10 rounded-full blur-[60px] animate-pulse-glow" style={{ animationDelay: "2s" }} />

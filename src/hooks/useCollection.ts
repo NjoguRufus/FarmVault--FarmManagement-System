@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, orderBy, limit, type QueryConstraint } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocsFromCache,
+  type QueryConstraint,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from '@/hooks/use-toast';
 import { NO_COMPANY } from '@/hooks/useCompanyScope';
@@ -144,14 +153,54 @@ export function useCollection<T = any>(
         setError(null);
       },
       (err) => {
-        console.error(`[useCollection] Snapshot error for ${path} (key: ${key}):`, err);
-        setIsLoading(false);
+        console.warn(`[useCollection] Snapshot error for ${path} (key: ${key}):`, err);
+        const isOffline =
+          typeof navigator !== 'undefined' &&
+          !navigator.onLine;
+        const isUnavailable =
+          (err as { code?: string })?.code === 'unavailable' ||
+          String((err as Error)?.message ?? '').toLowerCase().includes('unavailable') ||
+          String((err as Error)?.message ?? '').toLowerCase().includes('offline') ||
+          String((err as Error)?.message ?? '').toLowerCase().includes('failed to get');
+
+        if (isOffline || isUnavailable) {
+          getDocsFromCache(source)
+            .then((snap) => {
+              setData(
+                snap.docs.map((docSnap) => ({
+                  id: docSnap.id,
+                  ...docSnap.data(),
+                  pending: docSnap.metadata?.hasPendingWrites ?? false,
+                  fromCache: true,
+                })) as T[]
+              );
+              setFromCache(true);
+              setHasPendingWrites(snap.metadata?.hasPendingWrites ?? false);
+              setError(null);
+              setIsLoading(false);
+            })
+            .catch(() => {
+              setData([]);
+              setFromCache(true);
+              setError(null);
+              setIsLoading(false);
+              if (!offlineUnavailableToastByPath.has(path)) {
+                offlineUnavailableToastByPath.add(path);
+                toast({
+                  title: 'Offline',
+                  description: 'No cached data for this list. Changes will sync when back online.',
+                });
+              }
+            });
+          return;
+        }
         setError(err);
-        if (typeof navigator !== 'undefined' && !navigator.onLine && !offlineUnavailableToastByPath.has(path)) {
+        setIsLoading(false);
+        if (!offlineUnavailableToastByPath.has(path)) {
           offlineUnavailableToastByPath.add(path);
           toast({
-            title: 'Offline data unavailable',
-            description: "This data isn't available offline yet.",
+            title: 'Could not load data',
+            description: (err as Error)?.message ?? 'Please try again.',
           });
         }
       }

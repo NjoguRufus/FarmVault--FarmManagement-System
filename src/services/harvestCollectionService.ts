@@ -5,12 +5,16 @@ import {
   updateDoc,
   doc,
   getDoc,
+  getDocFromCache,
+  getDocs,
+  getDocsFromCache,
   serverTimestamp,
   writeBatch,
-  getDocs,
   query,
   where,
+  documentId,
   runTransaction,
+  type Query,
 } from 'firebase/firestore';
 import type { HarvestCollectionStatus } from '@/types';
 import {
@@ -22,6 +26,34 @@ import { applyExpenseDeduction } from '@/services/expenseBudgetService';
 
 const COLLECTIONS = 'harvestCollections';
 const PICKERS = 'harvestPickers';
+
+/** getDocs with offline fallback: use cache when getDocs fails (e.g. unavailable). */
+async function getDocsWithCache(q: Query): Promise<Awaited<ReturnType<typeof getDocs>>> {
+  try {
+    return await getDocs(q);
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    const msg = String((err as Error)?.message ?? '');
+    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+      return await getDocsFromCache(q);
+    }
+    throw err;
+  }
+}
+
+/** getDoc with offline fallback. */
+async function getDocWithCache(ref: ReturnType<typeof doc>): Promise<Awaited<ReturnType<typeof getDoc>>> {
+  try {
+    return await getDoc(ref);
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    const msg = String((err as Error)?.message ?? '');
+    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
+      return await getDocFromCache(ref);
+    }
+    throw err;
+  }
+}
 const WEIGH_ENTRIES = 'pickerWeighEntries';
 const PAYMENT_BATCHES = 'harvestPaymentBatches';
 
@@ -77,8 +109,10 @@ export async function addPickerWeighEntry(params: {
   collectionId: string;
   weightKg: number;
   tripNumber: number;
+  /** When user overrides auto trip number, pass the suggested value so we store it for "Trip no X changed to Y" */
+  suggestedTripNumber?: number;
 }): Promise<string> {
-  const ref = await addDoc(collection(db, WEIGH_ENTRIES), {
+  const data: Record<string, unknown> = {
     companyId: params.companyId,
     pickerId: params.pickerId,
     collectionId: params.collectionId,
@@ -87,7 +121,11 @@ export async function addPickerWeighEntry(params: {
     recordedAt: serverTimestamp(),
     recordedAtLocal: Date.now(),
     dateLocalISO: new Date().toISOString(),
-  });
+  };
+  if (params.suggestedTripNumber != null && params.suggestedTripNumber !== params.tripNumber) {
+    data.suggestedTripNumber = params.suggestedTripNumber;
+  }
+  const ref = await addDoc(collection(db, WEIGH_ENTRIES), data);
   return ref.id;
 }
 
@@ -102,7 +140,7 @@ async function computeCollectionTotalsFromWeighEntries(
   collectionId: string,
   pricePerKgPicker: number,
 ): Promise<{ totalHarvestKg: number; totalPickerCost: number }> {
-  const entriesSnap = await getDocs(
+  const entriesSnap = await getDocsWithCache(
     query(collection(db, WEIGH_ENTRIES), where('collectionId', '==', collectionId))
   );
 
@@ -600,20 +638,26 @@ export async function payPickersFromWalletBatchFirestore(params: {
   const { companyId, projectId, cropType, collectionId, pickerIds, pickerAmountsById } = params;
   if (!pickerIds.length) return;
 
-  const pickerRefs = pickerIds.map((id) => doc(db, PICKERS, id));
-  const pickerSnaps = await Promise.all(pickerRefs.map((ref) => getDoc(ref)));
-
+  // Single batched read: fetch all picker docs by id in one or more queries (Firestore 'in' max 30)
+  const IN_LIMIT = 30;
   const toPay: { ref: any; amount: number }[] = [];
-  pickerSnaps.forEach((snap) => {
-    if (!snap.exists()) return;
-    const picker = snap.data() as any;
-    if (picker.isPaid) return;
-    const amountFromInput = Number(pickerAmountsById?.[snap.id] ?? NaN);
-    const amount = Number.isFinite(amountFromInput) ? amountFromInput : Number(picker.totalPay ?? 0);
-    if (amount > 0) {
-      toPay.push({ ref: snap.ref, amount });
-    }
-  });
+  for (let i = 0; i < pickerIds.length; i += IN_LIMIT) {
+    const chunk = pickerIds.slice(i, i + IN_LIMIT);
+    const q = query(
+      collection(db, PICKERS),
+      where(documentId(), 'in', chunk)
+    );
+    const snap = await getDocsWithCache(q);
+    snap.docs.forEach((d) => {
+      const picker = d.data() as any;
+      if (picker.isPaid) return;
+      const amountFromInput = Number(pickerAmountsById?.[d.id] ?? NaN);
+      const amount = Number.isFinite(amountFromInput) ? amountFromInput : Number(picker.totalPay ?? 0);
+      if (amount > 0) {
+        toPay.push({ ref: d.ref, amount });
+      }
+    });
+  }
 
   if (!toPay.length) {
     throw new Error('All selected pickers are already paid or zero.');
@@ -650,24 +694,25 @@ export async function payPickersFromWalletBatchFirestore(params: {
 
   await wb.commit();
 
-  await addWalletDebit(
-    projectId,
-    companyId,
-    totalAmount,
-    'Picker batch payout',
-    {
-      refType: 'COLLECTION',
-      refId: collectionId,
-      paymentBatchId: paymentBatchRef.id,
-      idempotencyKey: `paymentBatch:${paymentBatchRef.id}`,
-      pickerIds: paidPickerIds,
-      cropType,
-      reasonType: 'PICKER_BATCH_PAYMENT',
-    },
-  );
-
-  // Record the amount deducted from harvest wallet as an expense (dynamic per batch).
-  const colSnap = await getDoc(doc(db, COLLECTIONS, collectionId));
+  const colRef = doc(db, COLLECTIONS, collectionId);
+  const [, colSnap] = await Promise.all([
+    addWalletDebit(
+      projectId,
+      companyId,
+      totalAmount,
+      'Picker batch payout',
+      {
+        refType: 'COLLECTION',
+        refId: collectionId,
+        paymentBatchId: paymentBatchRef.id,
+        idempotencyKey: `paymentBatch:${paymentBatchRef.id}`,
+        pickerIds: paidPickerIds,
+        cropType,
+        reasonType: 'PICKER_BATCH_PAYMENT',
+      },
+    ),
+    getDocWithCache(colRef),
+  ]);
   const colData = colSnap.data();
   const collectionName = colData?.name ?? collectionId;
   const userName = auth.currentUser?.displayName ?? auth.currentUser?.email ?? 'System';
@@ -694,7 +739,7 @@ export async function payPickersFromWalletBatchFirestore(params: {
   await applyExpenseDeduction(companyId, projectId, totalAmount);
 
   // When all pickers in this collection are now paid, update collection totals and create final labour expense for the collection.
-  const allPickersSnap = await getDocs(
+  const allPickersSnap = await getDocsWithCache(
     query(collection(db, PICKERS), where('collectionId', '==', collectionId))
   );
   const allPaid = allPickersSnap.docs.every((d) => d.data()?.isPaid === true);
@@ -703,11 +748,33 @@ export async function payPickersFromWalletBatchFirestore(params: {
       collectionId,
       colData?.pricePerKgPicker ?? 0
     );
-    await updateDoc(doc(db, COLLECTIONS, collectionId), {
+    await updateDoc(colRef, {
       totalHarvestKg,
       totalPickerCost,
     });
   }
+}
+
+/** Fetch harvest pickers by document IDs (e.g. for expense detail modal). Chunks by 30 for Firestore 'in' limit. */
+export async function getHarvestPickersByIds(pickerIds: string[]): Promise<{ id: string; pickerNumber?: number; pickerName?: string; totalPay?: number }[]> {
+  if (!pickerIds.length) return [];
+  const IN_LIMIT = 30;
+  const out: { id: string; pickerNumber?: number; pickerName?: string; totalPay?: number }[] = [];
+  for (let i = 0; i < pickerIds.length; i += IN_LIMIT) {
+    const chunk = pickerIds.slice(i, i + IN_LIMIT);
+    const q = query(collection(db, PICKERS), where(documentId(), 'in', chunk));
+    const snap = await getDocs(q);
+    snap.docs.forEach((d) => {
+      const dta = d.data() as { pickerNumber?: number; pickerName?: string; totalPay?: number };
+      out.push({
+        id: d.id,
+        pickerNumber: dta.pickerNumber,
+        pickerName: dta.pickerName,
+        totalPay: dta.totalPay != null ? Number(dta.totalPay) : undefined,
+      });
+    });
+  }
+  return out;
 }
 
 /** Get project wallet summary (compat wrapper for existing callers). */

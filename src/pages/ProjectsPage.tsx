@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Project } from '@/types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { formatDate } from '@/lib/dateUtils';
+import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   DropdownMenu,
@@ -192,10 +193,15 @@ export default function ProjectsPage() {
             </div>
 
             <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between gap-2">
-              <div className="flex flex-col">
+              <div className="flex flex-col space-y-0.5">
                 <span className="text-xs text-muted-foreground">
                   Started {formatDate(project.startDate)}
                 </span>
+                {getExpectedHarvestDate(project) && (
+                  <span className="text-xs text-muted-foreground">
+                    Expected Harvest: {formatDate(getExpectedHarvestDate(project))}
+                  </span>
+                )}
               </div>
               <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                 <DropdownMenu>

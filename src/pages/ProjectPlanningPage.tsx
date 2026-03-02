@@ -22,7 +22,10 @@ import { detectStageForCrop } from '@/knowledge/stageDetection';
 import { findCropKnowledgeByTypeKey } from '@/knowledge/cropCatalog';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { upsertChallengeTemplate } from '@/services/challengeTemplatesService';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -132,6 +135,7 @@ export default function ProjectPlanningPage() {
   const [newChallengeSeverity, setNewChallengeSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [savingChallenge, setSavingChallenge] = useState(false);
   const [showAddPreSeasonForm, setShowAddPreSeasonForm] = useState(false);
+  const [saveAsReusable, setSaveAsReusable] = useState(false);
   const [editingSeed, setEditingSeed] = useState(false);
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [addingSupplier, setAddingSupplier] = useState(false);
@@ -523,10 +527,28 @@ export default function ProjectPlanningPage() {
       });
       await batch.commit();
       queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
+      if (saveAsReusable && companyId) {
+        try {
+          await upsertChallengeTemplate({
+            companyId,
+            cropType: project.cropType,
+            phase: 'preseason',
+            title: entry.title,
+            description: entry.description || undefined,
+            priority: entry.severity,
+            createdBy: user?.id ?? 'unknown',
+          });
+          queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+        } catch (templateErr) {
+          console.warn('Failed to save as reusable template:', templateErr);
+          toast.error('Challenge added but could not save as reusable template.');
+        }
+      }
       setNewChallengeTitle('');
       setNewChallengeDescription('');
       setNewChallengeType('other');
       setNewChallengeSeverity('medium');
+      setSaveAsReusable(false);
       setShowAddPreSeasonForm(false);
       toast.success(
         isOffline
@@ -977,6 +999,16 @@ export default function ProjectPlanningPage() {
                       <option value="high">High</option>
                     </select>
                   </div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+                  <Label htmlFor="save-as-reusable" className="text-sm font-medium cursor-pointer">
+                    Save as reusable (use for future projects)
+                  </Label>
+                  <Switch
+                    id="save-as-reusable"
+                    checked={saveAsReusable}
+                    onCheckedChange={setSaveAsReusable}
+                  />
                 </div>
                 <div className="flex justify-end gap-2">
                   {preSeasonChallenges.length > 0 && (

@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
@@ -36,6 +37,35 @@ import SettingsPage from "@/pages/SettingsPage";
 import FeedbackPage from "@/pages/FeedbackPage";
 import NotFound from "./pages/NotFound";
 import Index from "@/pages/Index";
+import FarmManagementSoftwareKenyaPage from "@/pages/seo/FarmManagementSoftwareKenyaPage";
+import CropMonitoringSoftwarePage from "@/pages/seo/CropMonitoringSoftwarePage";
+import FarmInventoryManagementPage from "@/pages/seo/FarmInventoryManagementPage";
+import FarmExpenseTrackingPage from "@/pages/seo/FarmExpenseTrackingPage";
+import FarmHarvestManagementPage from "@/pages/seo/FarmHarvestManagementPage";
+import FarmProjectManagementPage from "@/pages/seo/FarmProjectManagementPage";
+import FarmBudgetingSoftwarePage from "@/pages/seo/FarmBudgetingSoftwarePage";
+import TomatoFarmingKenyaPage from "@/pages/seo/TomatoFarmingKenyaPage";
+import MaizeFarmingKenyaPage from "@/pages/seo/MaizeFarmingKenyaPage";
+import RiceFarmingKenyaPage from "@/pages/seo/RiceFarmingKenyaPage";
+import FrenchBeansFarmingKenyaPage from "@/pages/seo/FrenchBeansFarmingKenyaPage";
+import CapsicumFarmingKenyaPage from "@/pages/seo/CapsicumFarmingKenyaPage";
+import WatermelonFarmingKenyaPage from "@/pages/seo/WatermelonFarmingKenyaPage";
+import FarmManagementNairobiPage from "@/pages/seo/FarmManagementNairobiPage";
+import FarmManagementEldoretPage from "@/pages/seo/FarmManagementEldoretPage";
+import FarmManagementNakuruPage from "@/pages/seo/FarmManagementNakuruPage";
+import FarmManagementKisumuPage from "@/pages/seo/FarmManagementKisumuPage";
+import FarmManagementMombasaPage from "@/pages/seo/FarmManagementMombasaPage";
+import CropGuidesHubPage from "@/pages/seo/CropGuidesHubPage";
+import FarmBudgetGuidesHubPage from "@/pages/seo/FarmBudgetGuidesHubPage";
+import FarmChemicalsGuideHubPage from "@/pages/seo/FarmChemicalsGuideHubPage";
+import CropDiseaseDatabaseHubPage from "@/pages/seo/CropDiseaseDatabaseHubPage";
+import FarmCalculatorsHubPage from "@/pages/seo/FarmCalculatorsHubPage";
+import TomatoProfitCalculatorPage from "@/pages/seo/calculators/TomatoProfitCalculatorPage";
+import MaizeProfitCalculatorPage from "@/pages/seo/calculators/MaizeProfitCalculatorPage";
+import FarmBudgetCalculatorPage from "@/pages/seo/calculators/FarmBudgetCalculatorPage";
+import YieldPerAcreCalculatorPage from "@/pages/seo/calculators/YieldPerAcreCalculatorPage";
+import BlogIndexPage from "@/pages/seo/BlogIndexPage";
+import BlogPostPage from "@/pages/seo/BlogPostPage";
 import LoginPage from "@/pages/Auth/LoginPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
@@ -134,6 +164,7 @@ const App = () => (
             <Toaster />
             <Sonner />
             <BrowserRouter>
+              <HelmetProvider>
               <RoutePersistence />
               <TourProvider>
               <Routes>
@@ -143,6 +174,37 @@ const App = () => (
               <Route path="/choose-plan" element={<Navigate to="/setup-company" replace />} />
               <Route path="/setup-company" element={<SetupCompany />} />
               <Route path="/setup" element={<Navigate to="/setup-company" replace />} />
+
+              {/* Public SEO pillar pages */}
+              <Route path="/farm-management-software-kenya" element={<FarmManagementSoftwareKenyaPage />} />
+              <Route path="/crop-monitoring-software" element={<CropMonitoringSoftwarePage />} />
+              <Route path="/farm-inventory-management-system" element={<FarmInventoryManagementPage />} />
+              <Route path="/farm-expense-tracking-software" element={<FarmExpenseTrackingPage />} />
+              <Route path="/farm-harvest-management-system" element={<FarmHarvestManagementPage />} />
+              <Route path="/farm-project-management-software" element={<FarmProjectManagementPage />} />
+              <Route path="/farm-budgeting-software" element={<FarmBudgetingSoftwarePage />} />
+              <Route path="/crop-guides" element={<CropGuidesHubPage />} />
+              <Route path="/farm-budget-guides" element={<FarmBudgetGuidesHubPage />} />
+              <Route path="/farm-chemicals-guide" element={<FarmChemicalsGuideHubPage />} />
+              <Route path="/crop-disease-database" element={<CropDiseaseDatabaseHubPage />} />
+              <Route path="/farm-calculators" element={<FarmCalculatorsHubPage />} />
+              <Route path="/tomato-farming-kenya" element={<TomatoFarmingKenyaPage />} />
+              <Route path="/maize-farming-kenya" element={<MaizeFarmingKenyaPage />} />
+              <Route path="/rice-farming-kenya" element={<RiceFarmingKenyaPage />} />
+              <Route path="/french-beans-farming-kenya" element={<FrenchBeansFarmingKenyaPage />} />
+              <Route path="/capsicum-farming-kenya" element={<CapsicumFarmingKenyaPage />} />
+              <Route path="/watermelon-farming-kenya" element={<WatermelonFarmingKenyaPage />} />
+              <Route path="/farm-management-software-nairobi" element={<FarmManagementNairobiPage />} />
+              <Route path="/farm-management-software-eldoret" element={<FarmManagementEldoretPage />} />
+              <Route path="/farm-management-software-nakuru" element={<FarmManagementNakuruPage />} />
+              <Route path="/farm-management-software-kisumu" element={<FarmManagementKisumuPage />} />
+              <Route path="/farm-management-software-mombasa" element={<FarmManagementMombasaPage />} />
+              <Route path="/tomato-profit-calculator" element={<TomatoProfitCalculatorPage />} />
+              <Route path="/maize-profit-calculator" element={<MaizeProfitCalculatorPage />} />
+              <Route path="/farm-budget-calculator" element={<FarmBudgetCalculatorPage />} />
+              <Route path="/yield-per-acre-calculator" element={<YieldPerAcreCalculatorPage />} />
+              <Route path="/blog" element={<BlogIndexPage />} />
+              <Route path="/blog/:slug" element={<BlogPostPage />} />
 
               {/* Protected app routes (company-level) */}
               <Route
@@ -240,6 +302,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
               </Routes>
               </TourProvider>
+              </HelmetProvider>
             </BrowserRouter>
           </TooltipProvider>
           </ConnectivityProvider>
