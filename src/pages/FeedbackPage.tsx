@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Star, MessageSquare } from 'lucide-react';
+import { Send, Star, MessageSquare, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,34 +11,49 @@ export default function FeedbackPage() {
   const [hoveredRating, setHoveredRating] = useState(0);
   const [feedbackType, setFeedbackType] = useState('general');
   const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmitting) return;
+
+    setError(null);
+    setSuccess(null);
+
     if (!message.trim()) {
-      alert('Please enter your feedback message.');
+      setError('Please enter your feedback message.');
       return;
     }
 
     const roleLabel = user ? getDisplayRole(user) : 'Unknown';
 
-    await addDoc(collection(db, 'feedback'), {
-      rating,
-      type: feedbackType,
-      message,
-      companyId: user?.companyId ?? null,
-      userId: user?.id ?? null,
-      userName: user?.name ?? null,
-      userEmail: user?.email ?? null,
-      userRole: user?.role ?? null,
-      userRoleLabel: roleLabel,
-      employeeRole: (user as { employeeRole?: string })?.employeeRole ?? null,
-      createdAt: serverTimestamp(),
-    });
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'feedback'), {
+        rating,
+        type: feedbackType,
+        message,
+        companyId: user?.companyId ?? null,
+        userId: user?.id ?? null,
+        userName: user?.name ?? null,
+        userEmail: user?.email ?? null,
+        userRole: user?.role ?? null,
+        userRoleLabel: roleLabel,
+        employeeRole: (user as { employeeRole?: string })?.employeeRole ?? null,
+        createdAt: serverTimestamp(),
+      });
 
-    alert('Feedback submitted to the relevant team.');
-    setRating(0);
-    setMessage('');
+      setRating(0);
+      setMessage('');
+      setSuccess('Thanks, your feedback has been submitted.');
+    } catch (err) {
+      setError('Could not submit feedback. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -54,6 +69,16 @@ export default function FeedbackPage() {
       {/* Feedback Form */}
       <form onSubmit={handleSubmit} className="fv-card">
         <div className="space-y-6">
+          {error && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+              {success}
+            </div>
+          )}
           {/* Rating */}
           <div>
             <label className="block text-sm font-medium mb-3">How would you rate your experience?</label>
@@ -118,9 +143,18 @@ export default function FeedbackPage() {
           </div>
 
           {/* Submit */}
-          <button type="submit" className="fv-btn fv-btn--primary w-full">
-            <Send className="h-4 w-4" />
-            Submit Feedback
+          <button type="submit" className="fv-btn fv-btn--primary w-full" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="ml-1">Submitting…</span>
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                <span className="ml-1">Submit Feedback</span>
+              </>
+            )}
           </button>
         </div>
       </form>

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Bell, Search, ChevronDown, Settings, LogOut, User, Menu, HelpCircle, CheckCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bell, Search, ChevronDown, Settings, LogOut, User, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -16,6 +16,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatDistanceToNow } from 'date-fns';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -28,6 +30,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
   const { notifications, markAsRead, markAllRead, unreadCount } = useNotifications();
+  const { isTrial, isExpired, daysRemaining, status } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const companyProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
 
@@ -147,6 +151,34 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
         <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3">
           <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
 
+          {status === 'pending_payment' && (
+            <div className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200">
+              Payment submitted. Awaiting confirmation.
+            </div>
+          )}
+
+          {/* Subscription status badge */}
+          {!isExpired && isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && (
+            <button
+              type="button"
+              onClick={() => setUpgradeOpen(true)}
+              className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200 hover:bg-amber-100"
+            >
+              <Crown className="h-3 w-3" />
+              {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
+            </button>
+          )}
+          {isExpired && (
+            <button
+              type="button"
+              onClick={() => setUpgradeOpen(true)}
+              className="hidden sm:inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-medium text-destructive border border-destructive/40 hover:bg-destructive/15"
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Trial expired – Upgrade
+            </button>
+          )}
+
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger className="relative mr-1 md:mr-0 flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors">
@@ -245,6 +277,13 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           </DropdownMenu>
         </div>
       </div>
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </header>
   );
 }

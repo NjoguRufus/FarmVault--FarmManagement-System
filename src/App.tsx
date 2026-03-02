@@ -86,6 +86,9 @@ import AdminCodeRedPage from "@/pages/admin/AdminCodeRedPage";
 import AdminFeedbackPage from "@/pages/admin/AdminFeedbackPage";
 import AdminFinancesPage from "@/pages/admin/AdminFinancesPage";
 import AdminExpensesPage from "@/pages/admin/AdminExpensesPage";
+import AdminPendingPaymentsPage from "@/pages/admin/AdminPendingPaymentsPage";
+import AdminSubscriptionAnalyticsPage from "@/pages/admin/AdminSubscriptionAnalyticsPage";
+import AdminBillingPage from "@/pages/admin/AdminBillingPage";
 import DeveloperRecordsPage from "@/pages/admin/DeveloperRecordsPage";
 import DeveloperCropRecordsPage from "@/pages/admin/DeveloperCropRecordsPage";
 import DeveloperRecordDetailPage from "@/pages/admin/DeveloperRecordDetailPage";
@@ -305,7 +308,10 @@ const App = () => (
                 <Route path="/admin/code-red" element={<AdminCodeRedPage />} />
                 <Route path="/admin/feedback" element={<AdminFeedbackPage />} />
                 <Route path="/admin/finances" element={<AdminFinancesPage />} />
+                <Route path="/admin/analytics/subscriptions" element={<AdminSubscriptionAnalyticsPage />} />
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
+                <Route path="/admin/billing" element={<AdminBillingPage />} />
+                <Route path="/admin/payments" element={<AdminPendingPaymentsPage />} />
                 <Route path="/developer/records" element={<DeveloperRecordsPage />} />
                 <Route path="/developer/records/:cropId" element={<DeveloperCropRecordsPage />} />
                 <Route path="/developer/records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />

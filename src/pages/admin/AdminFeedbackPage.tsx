@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { MessageSquare, Filter, Star, Loader2 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { collection, getDocs, orderBy, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { format } from 'date-fns';
 import { useCollection } from '@/hooks/useCollection';
 import { Company } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
 
 const FEEDBACK_TYPES = [
   { value: 'all', label: 'All' },
@@ -26,10 +27,19 @@ interface FeedbackDoc {
   userRoleLabel?: string | null;
   userRole?: string | null;
   createdAt?: { toDate?: () => Date; seconds?: number } | null;
+  replyText?: string | null;
+  replyByName?: string | null;
+  replyByRole?: string | null;
+  replyAt?: { toDate?: () => Date; seconds?: number } | null;
 }
 
 export default function AdminFeedbackPage() {
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const { data: companies = [] } = useCollection<Company>('admin-feedback-companies', 'companies', {
     companyScoped: false,
@@ -62,6 +72,29 @@ export default function AdminFeedbackPage() {
     return '—';
   };
 
+  const handleSendReply = async (feedbackId: string) => {
+    const text = (replyDrafts[feedbackId] ?? '').trim();
+    if (!text) return;
+    setSendingId(feedbackId);
+    setError(null);
+    try {
+      const ref = doc(db, 'feedback', feedbackId);
+      await updateDoc(ref, {
+        replyText: text,
+        replyByUserId: user?.id ?? null,
+        replyByName: user?.name ?? null,
+        replyByRole: user?.role ?? null,
+        replyAt: serverTimestamp(),
+      });
+      setReplyDrafts((prev) => ({ ...prev, [feedbackId]: '' }));
+      queryClient.invalidateQueries({ queryKey: ['admin-feedback'] });
+    } catch (e: any) {
+      setError(e?.message || 'Failed to send reply');
+    } finally {
+      setSendingId(null);
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in w-full min-w-0 px-2 sm:px-0">
       <div className="min-w-0">
@@ -73,6 +106,12 @@ export default function AdminFeedbackPage() {
           All feedback from companies. Filter by type or browse all.
         </p>
       </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -128,6 +167,45 @@ export default function AdminFeedbackPage() {
                 <span>·</span>
                 <span>Company: {getCompanyName(f.companyId)}</span>
               </p>
+              <div className="mt-3 border-t pt-3 space-y-2">
+                {f.replyText && (
+                  <div className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+                    <p className="font-medium text-foreground mb-1">Reply</p>
+                    <p className="text-sm text-foreground whitespace-pre-wrap break-words">
+                      {f.replyText}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {f.replyByName ?? 'Developer'}
+                      {f.replyAt ? ` · ${formatDate(f.replyAt)}` : null}
+                    </p>
+                  </div>
+                )}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <textarea
+                    className="fv-input text-sm flex-1 min-h-[60px]"
+                    placeholder={f.replyText ? 'Update reply…' : 'Write a reply to this feedback…'}
+                    value={replyDrafts[f.id] ?? ''}
+                    onChange={(e) =>
+                      setReplyDrafts((prev) => ({ ...prev, [f.id]: e.target.value }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="fv-btn fv-btn--primary sm:self-end"
+                    disabled={sendingId === f.id || !(replyDrafts[f.id]?.trim())}
+                    onClick={() => handleSendReply(f.id)}
+                  >
+                    {sendingId === f.id ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="ml-1">Sending…</span>
+                      </>
+                    ) : (
+                      'Send reply'
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
         </div>

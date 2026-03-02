@@ -36,6 +36,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 interface NewProjectFormProps {
   onCancel: () => void;
@@ -133,6 +135,8 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const [createPoolAmount, setCreatePoolAmount] = useState('');
   const [creatingPool, setCreatingPool] = useState(false);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
+  const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const selectedCrop = useMemo(
     () => findCropKnowledgeByTypeKey(cropCatalog, form.cropTypeKey),
@@ -283,6 +287,10 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     e.preventDefault();
     if (step === 1 || step === 2) {
       handleContinue();
+      return;
+    }
+    if (!canWrite) {
+      setUpgradeOpen(true);
       return;
     }
     if (!stepTwoReadyToSubmit) return;
@@ -1054,6 +1062,13 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
           )}
         </div>
       </form>
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </div>
   );
 }

@@ -31,8 +31,8 @@ const Index = () => {
       <HeroSection />
       <FeaturesSection />
       <HowItWorksSection />
-      <WhyFarmVault />
       <PricingSection />
+      <WhyFarmVault />
       <AboutSection />
       <HomeTestimonialsSection />
       <ContactSection />

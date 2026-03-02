@@ -178,14 +178,14 @@ function StageRow({
   };
 
   return (
-    <div className="border rounded-lg p-4 space-y-3">
+    <div className="border rounded-lg p-4 space-y-3 bg-muted/40">
       <h4 className="font-medium text-foreground">{stage.stageName}</h4>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
         <div>
           <label className="text-xs text-muted-foreground">Planned start</label>
           <input
             type="date"
-            className="w-full border rounded px-2 py-1 mt-0.5"
+            className="fv-input w-full mt-0.5"
             value={draft.plannedStart ?? ''}
             onChange={(e) => onDraftChange({ plannedStart: e.target.value || undefined })}
           />
@@ -194,7 +194,7 @@ function StageRow({
           <label className="text-xs text-muted-foreground">Planned end</label>
           <input
             type="date"
-            className="w-full border rounded px-2 py-1 mt-0.5"
+            className="fv-input w-full mt-0.5"
             value={draft.plannedEnd ?? ''}
             onChange={(e) => onDraftChange({ plannedEnd: e.target.value || undefined })}
           />
@@ -203,7 +203,7 @@ function StageRow({
           <label className="text-xs text-muted-foreground">Actual start</label>
           <input
             type="date"
-            className="w-full border rounded px-2 py-1 mt-0.5"
+            className="fv-input w-full mt-0.5"
             value={draft.actualStart ?? ''}
             onChange={(e) => onDraftChange({ actualStart: e.target.value || undefined })}
           />
@@ -212,7 +212,7 @@ function StageRow({
           <label className="text-xs text-muted-foreground">Actual end</label>
           <input
             type="date"
-            className="w-full border rounded px-2 py-1 mt-0.5"
+            className="fv-input w-full mt-0.5"
             value={draft.actualEnd ?? ''}
             onChange={(e) => onDraftChange({ actualEnd: e.target.value || undefined })}
           />
@@ -230,13 +230,20 @@ function StageRow({
             <input
               type="text"
               placeholder="Add a note…"
-              className="flex-1 border rounded px-2 py-1.5 text-sm"
+              className="fv-input flex-1 text-sm"
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddNote()}
             />
             <Button size="sm" onClick={handleAddNote} disabled={!noteText.trim() || addingNote}>
-              Save note
+              {addingNote ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Save note'
+              )}
             </Button>
           </div>
           <ul className="space-y-1 text-sm max-h-40 overflow-y-auto">

@@ -29,6 +29,8 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { upsertChallengeTemplate } from '@/services/challengeTemplatesService';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 export default function SeasonChallengesPage() {
   const { activeProject } = useProject();
@@ -124,10 +126,16 @@ export default function SeasonChallengesPage() {
   const [editItemsUsed, setEditItemsUsed] = useState<Array<{ inventoryItemId?: string; itemName: string; category: InventoryCategory; quantity?: number; unit: string; needsPurchase?: boolean }>>([]);
   const [editingSaving, setEditingSaving] = useState(false);
   const [saveAsReusableEdit, setSaveAsReusableEdit] = useState(false);
+  const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const handleReportChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeProject) return;
+    if (!canWrite) {
+      setUpgradeOpen(true);
+      return;
+    }
     setSaving(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddOpen(false);
@@ -216,6 +224,10 @@ export default function SeasonChallengesPage() {
     e.stopPropagation();
     if (!editingChallenge || !user || !activeProject) {
       console.error('Missing required data:', { editingChallenge, user, activeProject });
+      return;
+    }
+    if (!canWrite) {
+      setUpgradeOpen(true);
       return;
     }
     setEditingSaving(true);
@@ -945,6 +957,13 @@ export default function SeasonChallengesPage() {
           )}
         </DialogContent>
       </Dialog>
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        isTrial={isTrial}
+        isExpired={isExpired}
+        daysRemaining={daysRemaining}
+      />
     </div>
   );
 }

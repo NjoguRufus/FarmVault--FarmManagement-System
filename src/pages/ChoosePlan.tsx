@@ -2,22 +2,26 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Check, ArrowRight, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SUBSCRIPTION_PLANS } from '@/config/plans';
+import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from '@/config/plans';
+import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
 
 export default function ChoosePlan() {
   const navigate = useNavigate();
   const location = useLocation();
   const statePlan = (location.state as { plan?: string })?.plan;
-  const [selectedPlan, setSelectedPlan] = useState<string>(statePlan && SUBSCRIPTION_PLANS.some(p => p.value === statePlan) ? statePlan : 'professional');
+  const [selectedPlan, setSelectedPlan] = useState<string>(
+    statePlan && SUBSCRIPTION_PLANS.some((p) => p.value === statePlan) ? statePlan : 'pro',
+  );
+  const [billingMode, setBillingMode] = useState<BillingMode>('monthly');
 
   const handleContinue = () => {
-    navigate('/setup-company', { state: { plan: selectedPlan }, replace: true });
+    navigate('/setup-company', { state: { plan: selectedPlan, billingMode }, replace: true });
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-emerald-950 via-background to-emerald-900 px-4 py-12">
       <div className="w-full max-w-4xl">
-        <div className="flex flex-col items-center gap-3 mb-8 text-center">
+        <div className="flex flex-col items-center gap-3 mb-6 text-center">
           <img
             src="/Logo/FarmVault_Logo dark mode.png"
             alt="FarmVault"
@@ -27,6 +31,10 @@ export default function ChoosePlan() {
           <p className="text-sm text-muted-foreground max-w-md">
             Select a package to continue. You can change it later in Billing.
           </p>
+        </div>
+
+        <div className="flex justify-center mb-8">
+          <BillingModeSelector mode={billingMode} onChange={setBillingMode} />
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 mb-8">
@@ -54,8 +62,32 @@ export default function ChoosePlan() {
                   <h3 className="text-xl font-bold text-foreground">{plan.name}</h3>
                   <p className="text-sm text-muted-foreground mt-1">{plan.description}</p>
                   <div className="mt-4">
-                    <span className="text-2xl font-bold">{plan.price}</span>
-                    <span className="text-muted-foreground text-sm">{plan.period}</span>
+                    {(() => {
+                      const amount = getPlanPrice(plan.value, billingMode);
+                      const durationLabel = getBillingModeDurationLabel(billingMode);
+                      if (amount == null) {
+                        return (
+                          <p className="text-sm font-medium text-muted-foreground">
+                            Talk to us for pricing.
+                          </p>
+                        );
+                      }
+                      return (
+                        <>
+                          <span className="text-2xl font-bold">
+                            KES {amount.toLocaleString()}
+                          </span>
+                          <span className="block text-muted-foreground text-xs mt-1">
+                            {durationLabel}
+                          </span>
+                          {billingMode === 'annual' && (
+                            <span className="block text-[11px] text-emerald-700 mt-1">
+                              Save more with annual billing.
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 <ul className="space-y-2 mb-4">
