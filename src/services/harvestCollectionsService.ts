@@ -23,7 +23,6 @@ type DbCollection = {
   status?: string;
   unit: string | null;
   buyer_price_per_unit: number | null;
-  buyer_paid?: boolean;
   is_closed?: boolean;
   closed_at: string | null;
   crop_type: string | null;
@@ -98,7 +97,7 @@ function mapCollection(row: DbCollection): {
     totalHarvestKg: 0,
     totalPickerCost: 0,
     status: mapCollectionStatus(status),
-    buyerPaidAt: (row.buyer_paid ?? row.is_closed) ? row.closed_at ?? undefined : undefined,
+    buyerPaidAt: row.is_closed ? row.closed_at ?? undefined : undefined,
     createdAt: row.created_at,
   };
 }
@@ -444,7 +443,7 @@ export async function setBuyerPriceAndClose(params: {
 }): Promise<void> {
   const update: Record<string, unknown> = {
     buyer_price_per_unit: params.pricePerKgBuyer,
-    buyer_paid: params.markBuyerPaid,
+    is_closed: params.markBuyerPaid,
     status: params.markBuyerPaid ? 'closed' : 'open',
   };
   if (params.markBuyerPaid) {

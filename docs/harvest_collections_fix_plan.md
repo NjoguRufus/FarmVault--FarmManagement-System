@@ -49,7 +49,7 @@ id, company_id, project_id, crop_type, collection_date, buyer_price_per_unit, un
 
 **After (fixed):**  
 - **Select:** no longer `select('*')`. Uses explicit list:  
-  `id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,buyer_paid,closed_at,created_by,created_at,price_per_kg,notes,status`  
+  `id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status`  
   so PostgREST does not depend on a stale cache.  
 - **Insert:** unchanged in code to stay compatible with existing migrations that use `status` and `price_per_kg`.  
   If your DB uses **picker_price_per_unit** instead of **price_per_kg**, change the insert in `createHarvestCollection` to use `picker_price_per_unit` and drop `price_per_kg`.  
@@ -129,14 +129,14 @@ Do **not** send: `recorded_by`, `harvested_on`, `kg`, `weight`, `amount`.
 ### src/services/harvestCollectionsService.ts
 
 - **DbCollection type:**  
-  Added optional `status?`, `is_closed?`, `picker_price_per_unit?`, `buyer_paid?`, `notes?` so both schemas (status/price_per_kg vs is_closed/picker_price_per_unit) can be read.
+  Added optional `status?`, `is_closed?`, `picker_price_per_unit?`, `notes?` so both schemas (status/price_per_kg vs is_closed/picker_price_per_unit) can be read. Table has no `buyer_paid`; use `is_closed` and `closed_at` for buyer-paid logic.
 
 - **mapCollection:**  
   Derives `status` from `row.status ?? (row.is_closed ? 'closed' : 'open')` and price from `row.picker_price_per_unit ?? row.price_per_kg`.
 
 - **HARVEST_COLLECTIONS_SELECT:**  
   New constant with explicit column list (no `*`):  
-  `id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,buyer_paid,closed_at,created_by,created_at,price_per_kg,notes,status`
+  `id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status`
 
 - **listHarvestCollections / getHarvestCollection:**  
   Use `.select(HARVEST_COLLECTIONS_SELECT)` instead of `.select('*')`.
