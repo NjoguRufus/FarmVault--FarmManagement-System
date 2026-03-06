@@ -97,7 +97,7 @@ function mapEmployeeRow(row: any): Employee {
     joinDate: row.join_date ?? undefined,
     createdAt: row.created_at ?? undefined,
     createdBy: row.created_by != null ? String(row.created_by) : undefined,
-    authUserId: row.auth_user_id != null ? String(row.auth_user_id) : undefined,
+    authUserId: row.clerk_user_id != null ? String(row.clerk_user_id) : (row.auth_user_id != null ? String(row.auth_user_id) : undefined),
   };
 }
 
@@ -107,7 +107,7 @@ async function loadEmployeeProfile(uid: string): Promise<Employee | null> {
       .public()
       .from('employees')
       .select('*')
-      .eq('auth_user_id', uid)
+      .eq('clerk_user_id', uid)
       .order('created_at', { ascending: false })
       .limit(1);
 
@@ -295,6 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 2) If this is a platform developer, short-circuit tenant onboarding entirely
         // and treat them as a global developer user (role = 'developer').
         if (dev) {
+          const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
           const devUser: User = {
             id: userId,
             email: fallbackEmail,
@@ -302,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: 'developer',
             employeeRole: undefined,
             companyId: null,
-            avatar: undefined,
+            avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
           setUser(devUser);
@@ -367,6 +368,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         }
 
+        const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
         const mapped: User = {
           id: userId,
           email: fallbackEmail,
@@ -374,7 +376,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: normalizedRole,
           employeeRole: undefined,
           companyId: hasCompanyId && hasRole ? contextCompanyId : null,
-          avatar: undefined,
+          avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
           createdAt: new Date(),
         };
 
@@ -390,6 +392,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const employee = await loadEmployeeProfile(userId);
         if (cancelled) return;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[Employees Query Fixed]', {
+            clerkUserId: userId,
+            companyId: mapped.companyId ?? null,
+            queryEnabled: true,
+            employeeFound: !!employee,
+          });
+        }
         const effectivePermissions = buildEffectivePermissions(mapped, employee);
         setUser(mapped);
         setEmployeeProfile(employee);
@@ -408,6 +419,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
           const fallbackName = clerkUser?.fullName ?? 'User';
+          const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
           const fallbackUser: User = {
             id: userId,
             email: fallbackEmail,
@@ -415,7 +427,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: 'employee',
             employeeRole: undefined,
             companyId: null,
-            avatar: undefined,
+            avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
           setUser(fallbackUser);

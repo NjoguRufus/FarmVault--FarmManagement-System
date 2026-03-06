@@ -43,6 +43,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     queryFn: () => listProjects(companyId),
     enabled: canSubscribeProjects,
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProject] = useState<Project | null>(null);
