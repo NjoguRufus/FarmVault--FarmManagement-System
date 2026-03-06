@@ -166,6 +166,7 @@ export default function HarvestCollectionsPage() {
   const [quickIntakeKg, setQuickIntakeKg] = useState('');
   const quickIntakePickerNumberRef = useRef<HTMLInputElement>(null);
   const quickIntakeKgRef = useRef<HTMLInputElement>(null);
+  const quickIntakeContainerRef = useRef<HTMLDivElement>(null);
   const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
   const canManageIntake = can('harvest', 'recordIntake') || can('harvest', 'edit') || can('harvest', 'create');
   const canPayPickers = can('harvest', 'payPickers');
@@ -1106,6 +1107,11 @@ export default function HarvestCollectionsPage() {
       .catch((e: any) => {
         toast({ title: 'Save failed', description: e?.message ?? 'Could not save weight', variant: 'destructive' });
       });
+  };
+
+  /** Scroll Quick Intake container into view so it stays above keyboard and bottom nav when inputs are focused (mobile). */
+  const scrollQuickIntakeIntoView = () => {
+    quickIntakeContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const handleQuickIntakeNextPicker = (saveAndStay: boolean) => {
@@ -2267,38 +2273,44 @@ export default function HarvestCollectionsPage() {
             <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
               {quickMode ? (
                 <>
-                  {/* A) Quick Intake header — compact */}
-                  <div className="space-y-0.5">
-                    <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-                      <Zap className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
-                      Quick Intake
-                    </h3>
-                    <p className="text-xs text-muted-foreground max-w-sm">
-                      Enter picker number and kg, then move to the next picker.
-                    </p>
-                  </div>
+                  {/* Quick Intake container: scroll-margin keeps it above keyboard + bottom nav when inputs focused (mobile) */}
+                  <div
+                    ref={quickIntakeContainerRef}
+                    style={{ scrollMarginBottom: 'min(20rem, 50vh)' }}
+                  >
+                    {/* A) Quick Intake header — compact */}
+                    <div className="space-y-0.5">
+                      <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                        <Zap className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+                        Quick Intake
+                      </h3>
+                      <p className="text-xs text-muted-foreground max-w-sm">
+                        Enter picker number and kg, then move to the next picker.
+                      </p>
+                    </div>
 
-                  {/* B) Main input card — compact, professional */}
-                  <div className="rounded-md border border-sky-200/80 dark:border-sky-800/80 bg-card shadow-sm p-3 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="quick-intake-picker-num" className="text-sm font-medium text-foreground">
-                          Picker number
-                        </Label>
-                        <Input
-                          id="quick-intake-picker-num"
-                          ref={quickIntakePickerNumberRef}
-                          type="text"
-                          inputMode="numeric"
-                          value={quickIntakePickerNumber}
-                          onChange={(e) => setQuickIntakePickerNumber(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') quickIntakeKgRef.current?.focus();
-                          }}
-                          placeholder="e.g. 5"
-                          className="min-h-12 text-lg font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 transition-colors"
-                          autoFocus
-                        />
+                    {/* B) Main input card — compact, professional */}
+                    <div className="rounded-md border border-sky-200/80 dark:border-sky-800/80 bg-card shadow-sm p-3 space-y-3 mt-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="quick-intake-picker-num" className="text-sm font-medium text-foreground">
+                            Picker number
+                          </Label>
+                          <Input
+                            id="quick-intake-picker-num"
+                            ref={quickIntakePickerNumberRef}
+                            type="text"
+                            inputMode="numeric"
+                            value={quickIntakePickerNumber}
+                            onChange={(e) => setQuickIntakePickerNumber(e.target.value)}
+                            onFocus={scrollQuickIntakeIntoView}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') quickIntakeKgRef.current?.focus();
+                            }}
+                            placeholder="e.g. 5"
+                            className="min-h-12 text-lg font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 transition-colors"
+                            autoFocus
+                          />
                         {quickIntakePickerNumber.trim() !== '' && (
                           <div className="mt-1.5">
                             {quickIntakePickerLookup.matchedPicker ? (
@@ -2333,6 +2345,7 @@ export default function HarvestCollectionsPage() {
                           step="0.1"
                           value={quickIntakeKg}
                           onChange={(e) => setQuickIntakeKg(e.target.value)}
+                          onFocus={scrollQuickIntakeIntoView}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleQuickIntakeNextPicker(false);
                           }}
@@ -2368,6 +2381,7 @@ export default function HarvestCollectionsPage() {
                         Save & Stay
                       </Button>
                     </div>
+                  </div>
                   </div>
 
                   {/* C) Recent entries — single-row compact */}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Building2, AlertTriangle, Trash2, Loader2, Lock, Save } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Settings as SettingsIcon, Building2, AlertTriangle, Trash2, Loader2, Lock, Save, User, Upload, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { doc, getDoc } from '@/lib/firestore-stub';
@@ -8,6 +8,8 @@ import { deleteAllCompanyData } from '@/services/companyDataService';
 import { updateCompany } from '@/services/companyService';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useTour } from '@/tour/TourProvider';
+import { UserAvatar } from '@/components/UserAvatar';
+import { uploadAvatar, clearAvatar } from '@/services/avatarService';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -22,7 +24,7 @@ const STATUSES = [
 ] as const;
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, refreshUserAvatar } = useAuth();
   const queryClient = useQueryClient();
   const { addNotification } = useNotifications();
   const { startTour } = useTour();
@@ -32,6 +34,9 @@ export default function SettingsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const deletePasswordRequired = import.meta.env.VITE_COMPANY_DELETE_PASSWORD ?? '';
 
@@ -116,6 +121,93 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">
           Edit your company details and preferences
         </p>
+      </div>
+
+      {/* Profile / Account: avatar upload (email/password or Google; custom overrides Google) */}
+      <div className="fv-card">
+        <div className="flex items-center gap-2 mb-4">
+          <User className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold text-foreground">Profile</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <UserAvatar
+            avatarUrl={user?.avatar}
+            name={user?.name}
+            size="lg"
+            className="h-20 w-20 shrink-0 rounded-full border-2 border-border"
+          />
+          <div className="flex-1 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {user?.avatar
+                ? 'Custom avatar or Google photo. Upload a new image to replace it, or remove to use default.'
+                : 'Upload a profile photo. Google sign-in users can override their Google photo with a custom avatar.'}
+            </p>
+            {avatarError && (
+              <p className="text-sm text-destructive">{avatarError}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file || !user?.id) return;
+                  setAvatarError(null);
+                  setAvatarUploading(true);
+                  try {
+                    await uploadAvatar({
+                      file,
+                      clerkUserId: user.id,
+                      companyId: user.companyId ?? null,
+                    });
+                    await refreshUserAvatar?.();
+                    addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', type: 'success' });
+                  } catch (err: any) {
+                    setAvatarError(err?.message ?? 'Upload failed');
+                  } finally {
+                    setAvatarUploading(false);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                disabled={avatarUploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5"
+              >
+                {avatarUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {avatarUploading ? 'Uploading…' : 'Upload photo'}
+              </button>
+              {user?.avatar && (
+                <button
+                  type="button"
+                  disabled={avatarUploading}
+                  onClick={async () => {
+                    if (!user?.id) return;
+                    setAvatarError(null);
+                    setAvatarUploading(true);
+                    try {
+                      await clearAvatar(user.id);
+                      await refreshUserAvatar?.();
+                      addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', type: 'success' });
+                    } catch (err: any) {
+                      setAvatarError(err?.message ?? 'Failed to remove');
+                    } finally {
+                      setAvatarUploading(false);
+                    }
+                  }}
+                  className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                  Remove photo
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="fv-card">

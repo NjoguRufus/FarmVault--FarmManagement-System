@@ -15,7 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
@@ -246,12 +246,12 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1.5 md:gap-2 rounded-lg px-1.5 md:px-2 py-1.5 hover:bg-muted transition-colors">
-              <Avatar className="h-7 w-7 md:h-8 md:w-8 shrink-0">
-                <AvatarImage src={user?.avatar} alt={user?.name} />
-                <AvatarFallback className="bg-primary text-primary-foreground font-medium text-xs md:text-sm">
-                  {user?.name?.charAt(0) ?? '?'}
-                </AvatarFallback>
-              </Avatar>
+              <UserAvatar
+                avatarUrl={user?.avatar}
+                name={user?.name}
+                className="h-7 w-7 md:h-8 md:w-8 shrink-0"
+                size="sm"
+              />
               <div className="hidden md:flex flex-col items-start">
                 <span className="text-sm font-medium">{user?.name}</span>
               </div>
