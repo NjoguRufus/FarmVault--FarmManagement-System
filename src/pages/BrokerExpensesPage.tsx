@@ -3,7 +3,7 @@ import { Plus, Receipt, List, LayoutGrid } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { useQueryClient } from '@tanstack/react-query';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { Expense, ExpenseCategory, Harvest } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';

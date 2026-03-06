@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, query, where, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, query, where, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc } from '@/lib/firestore-stub';
 import { auth, db } from '@/lib/firebase';
 import {
   type SubscriptionPlan,

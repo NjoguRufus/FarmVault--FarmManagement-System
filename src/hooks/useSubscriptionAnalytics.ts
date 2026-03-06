@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import {
-  fetchSubscriptionAnalytics,
+  fetchSubscriptionAnalyticsRpc,
   type AnalyticsRangePreset,
   type SubscriptionAnalyticsPayload,
 } from '@/services/subscriptionAnalyticsService';
@@ -8,7 +8,7 @@ import {
 export function useSubscriptionAnalytics(range: AnalyticsRangePreset) {
   const query = useQuery<SubscriptionAnalyticsPayload>({
     queryKey: ['subscription-analytics', range],
-    queryFn: () => fetchSubscriptionAnalytics(range),
+    queryFn: () => fetchSubscriptionAnalyticsRpc(range),
     staleTime: 60_000,
   });
 

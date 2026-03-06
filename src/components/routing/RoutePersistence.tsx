@@ -3,7 +3,17 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
 const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
-const NON_PERSISTED_PATHS = new Set(['/login', '/choose-plan', '/setup-company', '/setup']);
+const NON_PERSISTED_PATHS = new Set([
+  '/login',
+  '/sign-in',
+  '/sign-up',
+  '/choose-plan',
+  '/setup-company',
+  '/setup',
+  '/dev/sign-in',
+  '/dev/sign-up',
+  '/dev/bootstrap',
+]);
 
 export function RoutePersistence() {
   const location = useLocation();
@@ -14,7 +24,13 @@ export function RoutePersistence() {
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
     const currentPath = location.pathname;
-    if (currentPath === '/' || NON_PERSISTED_PATHS.has(currentPath)) return;
+    const isPublicPath =
+      currentPath === '/' ||
+      NON_PERSISTED_PATHS.has(currentPath) ||
+      currentPath.startsWith('/sign-in') ||
+      currentPath.startsWith('/sign-up') ||
+      currentPath.startsWith('/dev/');
+    if (isPublicPath) return;
 
     const fullPath = `${location.pathname}${location.search}${location.hash}`;
     try {

@@ -9,7 +9,7 @@ import {
   doc,
   updateDoc,
   increment,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import type { BudgetPool } from '@/types';
 

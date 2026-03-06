@@ -38,10 +38,30 @@ export default function HarvestDetailsPage() {
     [allSales, harvestId],
   );
 
-  const harvestExpenses = useMemo(
-    () => (harvestId ? allExpenses.filter((e) => e.harvestId === harvestId) : []),
-    [allExpenses, harvestId],
-  );
+  const harvestExpenses = useMemo(() => {
+    if (!harvestId) return [];
+    const base = allExpenses.filter((e) => e.harvestId === harvestId);
+    const isFrenchBeans =
+      String(harvest?.cropType ?? '')
+        .toLowerCase()
+        .replace('_', '-') === 'french-beans';
+
+    if (!isFrenchBeans || !harvest) {
+      return base;
+    }
+
+    // For French beans, also include picker labour expenses that were created
+    // from harvest wallet picker payments for this project.
+    const pickerExpenses = allExpenses.filter(
+      (e) =>
+        e.projectId === harvest.projectId &&
+        e.companyId === harvest.companyId &&
+        (e.meta as any)?.source === 'harvest_wallet_picker_payment',
+    );
+
+    const extra = pickerExpenses.filter((e) => !base.some((b) => b.id === e.id));
+    return [...base, ...extra];
+  }, [allExpenses, harvestId, harvest]);
 
   const totalRevenue = harvestSales.reduce((sum, s) => sum + s.totalAmount, 0);
   const totalExpensesAmount = harvestExpenses.reduce((sum, e) => sum + e.amount, 0);

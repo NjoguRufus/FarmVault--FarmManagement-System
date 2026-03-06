@@ -8,7 +8,7 @@ import {
   orderBy,
   serverTimestamp,
   Timestamp,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { getDocsWithCache } from '@/lib/firestoreCache';
 

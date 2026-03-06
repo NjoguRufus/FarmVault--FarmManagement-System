@@ -1,34 +1,29 @@
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
+import { useAuth } from '@clerk/react';
 import Index from '@/pages/Index';
 
 const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
 
 /**
- * Handles the root path "/". When the user is logged in, redirect to dashboard
- * (or last saved route) so they never see the landing page. When not logged in,
- * show the landing page. While auth is still loading, show a loading screen.
+ * Handles the root path "/". Uses Clerk only so the page renders immediately.
+ * Signed-in users are redirected to dashboard (RequireOnboarding will send to /onboarding if needed).
  */
 export function RootRoute() {
-  const { authReady, isAuthenticated, setupIncomplete } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
 
-  if (!authReady) {
-    return <AuthLoadingScreen message="Loading…" />;
+  if (!isLoaded) {
+    return <Index />;
   }
 
-  if (isAuthenticated) {
-    if (setupIncomplete) {
-      return <Navigate to="/setup-company" replace state={{ message: 'Your company setup is incomplete. Please finish setup.' }} />;
-    }
+  if (isSignedIn) {
     let to = '/dashboard';
     try {
       const saved = window.localStorage.getItem(LAST_ROUTE_KEY) || '';
-      if (saved && saved !== '/' && !saved.startsWith('/login')) {
+      if (saved && saved !== '/' && !saved.startsWith('/login') && !saved.startsWith('/sign-in')) {
         to = saved;
       }
     } catch {
-      // Ignore localStorage errors
+      // ignore
     }
     return <Navigate to={to} replace />;
   }

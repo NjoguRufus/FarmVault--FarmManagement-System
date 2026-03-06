@@ -3,7 +3,7 @@ import { Plus, AlertTriangle, CheckCircle, Clock, MoreHorizontal, Edit, ChevronD
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { SeasonChallenge, ChallengeType, InventoryItem, InventoryCategory, NeededItem } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';

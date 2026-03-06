@@ -49,6 +49,9 @@ import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince } from '@/utils/cropStages';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
+import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
+import { useNavigate } from 'react-router-dom';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -544,6 +547,42 @@ export function CompanyDashboard() {
     activeProjectEnvironment,
   ]);
 
+  const navigate = useNavigate();
+  const subscriptionStatus = useSubscriptionStatus();
+  const [showAppLockModal, setShowAppLockModal] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (subscriptionStatus.isLoading) return;
+    const should = shouldShowAppLockAnnouncement(user, { isDuringOnboarding: false });
+    if (should) {
+      setShowAppLockModal(true);
+    }
+  }, [subscriptionStatus.isLoading, user]);
+
+  const isProEligible =
+    subscriptionStatus.plan === 'pro' &&
+    (subscriptionStatus.status === 'active' ||
+      subscriptionStatus.status === 'grace' ||
+      subscriptionStatus.isOverrideActive);
+
+  const handleCloseAppLockModal = (open: boolean) => {
+    setShowAppLockModal(open);
+    if (!open) {
+      markAppLockAnnouncementSeen();
+    }
+  };
+
+  const handleAppLockPrimary = () => {
+    markAppLockAnnouncementSeen();
+    if (isProEligible) {
+      navigate('/settings', { state: { focusAppLock: true, feature: 'app-lock' } });
+    } else {
+      navigate('/billing?feature=app-lock');
+    }
+    setShowAppLockModal(false);
+  };
+
   if (projectsLoading) {
     return <DashboardSkeleton />;
   }
@@ -812,6 +851,13 @@ export function CompanyDashboard() {
 
       {/* Projects Table */}
       <ProjectsTable projects={filteredProjects} compact />
+
+      <NewFeatureModal
+        open={showAppLockModal}
+        onOpenChange={handleCloseAppLockModal}
+        isProEligible={isProEligible}
+        onPrimary={handleAppLockPrimary}
+      />
     </div>
   );
 }

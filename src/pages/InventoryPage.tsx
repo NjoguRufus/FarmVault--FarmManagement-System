@@ -4,7 +4,7 @@ import { Plus, Search, Package, MoreHorizontal, AlertTriangle, ShoppingCart, Min
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, writeBatch, increment, updateDoc, deleteDoc } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { InventoryItem, InventoryCategory, ExpenseCategory, Supplier, CropType, InventoryCategoryItem, NeededItem, ChemicalPackagingType, FuelType, InventoryUsage } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';

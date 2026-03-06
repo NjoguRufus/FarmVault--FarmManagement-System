@@ -7,9 +7,6 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 
 type ConnectivityStatus = 'online' | 'offline' | 'syncing';
@@ -25,7 +22,6 @@ interface ConnectivityContextValue {
 const ConnectivityContext = createContext<ConnectivityContextValue | undefined>(undefined);
 
 export function ConnectivityProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, authReady, user } = useAuth();
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine
   );
@@ -67,37 +63,11 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline]);
 
+  // Supabase-only: no Firestore metadata; sync state is based on navigator.onLine only.
   useEffect(() => {
-    const isDeveloper = user?.role === 'developer';
-    const companyId = user?.companyId ?? null;
-    const canProbeProjects = authReady && isAuthenticated && (isDeveloper || !!companyId);
-
-    if (!canProbeProjects) {
-      setHasPendingWrites(false);
-      setFromCache(false);
-      return;
-    }
-
-    // Single lightweight listener for metadata-only sync state.
-    const syncProbeQuery = isDeveloper
-      ? query(collection(db, 'projects'), limit(1))
-      : query(collection(db, 'projects'), where('companyId', '==', companyId), limit(1));
-
-    const unsub = onSnapshot(
-      syncProbeQuery,
-      { includeMetadataChanges: true },
-      (snapshot) => {
-        setHasPendingWrites(snapshot.metadata.hasPendingWrites);
-        setFromCache(snapshot.metadata.fromCache);
-      },
-      (error) => {
-        console.warn('[connectivity] Sync probe listener unavailable:', error);
-        setHasPendingWrites(false);
-      }
-    );
-
-    return () => unsub();
-  }, [authReady, isAuthenticated, user?.companyId, user?.role]);
+    setHasPendingWrites(false);
+    setFromCache(false);
+  }, []);
 
   const value = useMemo<ConnectivityContextValue>(() => {
     const isSyncing = isOnline && hasPendingWrites;

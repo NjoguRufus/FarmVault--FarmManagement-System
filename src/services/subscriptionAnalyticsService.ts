@@ -5,8 +5,9 @@ import {
   query,
   Timestamp,
   where,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 import type { SubscriptionPaymentDoc } from '@/services/subscriptionPaymentService';
 import type { CompanySubscriptionRecord } from '@/services/subscriptionAdminService';
 
@@ -74,6 +75,33 @@ export interface SubscriptionAnalyticsPayload {
   funnel: FunnelMetrics;
   topCompanies: TopCompanyRow[];
   expiringSoon: ExpiringSubscriptionRow[];
+}
+
+// New RPC-based implementation for Supabase-backed analytics.
+export async function fetchSubscriptionAnalyticsRpc(
+  trendRange: AnalyticsRangePreset,
+): Promise<SubscriptionAnalyticsPayload> {
+  const { data, error } = await supabase.rpc('subscription_analytics', {
+    preset: trendRange,
+  });
+
+  if (error) {
+    throw new Error(error.message ?? 'Failed to load subscription analytics');
+  }
+
+  const payload = (data as SubscriptionAnalyticsPayload | null) ?? {
+    revenue: { totalThisMonth: 0, totalLast30Days: 0 },
+    active: { activeSubscriptions: 0, activeTrials: 0 },
+    conversion: { trialsStarted: 0, firstPayments: 0, conversionRate: 0, churned: 0 },
+    revenueTrend: [],
+    planMix: [],
+    modeMix: [],
+    funnel: { trialsStarted: 0, activePaid: 0, renewed: 0 },
+    topCompanies: [],
+    expiringSoon: [],
+  };
+
+  return payload;
 }
 
 export function buildPresetRange(preset: AnalyticsRangePreset): DateRange {

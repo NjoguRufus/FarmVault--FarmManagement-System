@@ -2,22 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  doc,
-  collection,
-  updateDoc,
-  serverTimestamp,
-  addDoc,
-  writeBatch,
-} from 'firebase/firestore';
-import { arrayUnion } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { ChallengeType, CropStage, EnvironmentType, Project, SeasonChallenge, Supplier } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
 import { useCollection } from '@/hooks/useCollection';
-import { useQueryClient } from '@tanstack/react-query';
-import { generateStageTimeline, getCropStages, type GeneratedStage } from '@/lib/cropStageConfig';
-import { getLegacyStartingStageIndex } from '@/lib/stageDetection';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { detectStageForCrop } from '@/knowledge/stageDetection';
 import { findCropKnowledgeByTypeKey } from '@/knowledge/cropCatalog';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
@@ -25,7 +13,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { upsertChallengeTemplate } from '@/services/challengeTemplatesService';
+import { getProject } from '@/services/projectsService';
+import { db } from '@/lib/db';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -37,16 +26,15 @@ export default function ProjectPlanningPage() {
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper, enabled: !!companyId || isDeveloper };
 
-  const { data: projects = [], isLoading: projectLoading } = useCollection<Project>(
-    'project-planning-projects',
-    'projects',
-    scope,
-  );
-  const project = useMemo(() => {
-    if (!companyId || !projectId) return null;
-    const found = projects.find((p) => p.id === projectId && p.companyId === companyId);
-    return found ?? null;
-  }, [projects, companyId, projectId]);
+  const {
+    data: project,
+    isLoading: projectLoading,
+  } = useQuery<Project | null>({
+    queryKey: ['project', companyId, projectId],
+    queryFn: () => (projectId ? getProject(projectId) : Promise.resolve(null)),
+    enabled: !!companyId && !!projectId,
+    staleTime: 60_000,
+  });
 
   const { data: stages = [], isLoading: stagesLoading } = useProjectStages(
     companyId,
@@ -75,23 +63,8 @@ export default function ProjectPlanningPage() {
     if (!name || !companyId || addingSupplier) return;
     setAddingSupplier(true);
     try {
-      await addDoc(collection(db, 'suppliers'), {
-        name,
-        contact: '',
-        email: null,
-        category: 'Seeds',
-        categories: ['Seeds'],
-        rating: 0,
-        status: 'active',
-        companyId,
-        createdAt: serverTimestamp(),
-      });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      toast.error('Adding suppliers from this screen is not yet supported with Supabase.');
       setSupplierDropdownOpen(false);
-      toast.success('Supplier added.');
-    } catch (error) {
-      console.error('Failed to add supplier:', error);
-      toast.error('Failed to add supplier.');
     } finally {
       setAddingSupplier(false);
     }
@@ -204,8 +177,7 @@ export default function ProjectPlanningPage() {
       return;
     }
     const raw = project.plantingDate as any;
-    const dateObj: Date =
-      raw && typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
+    const dateObj: Date = raw instanceof Date ? raw : new Date(raw);
     if (!isNaN(dateObj.getTime())) {
       setPlantingDateInput(dateObj.toISOString().slice(0, 10));
     }
@@ -242,12 +214,7 @@ export default function ProjectPlanningPage() {
     const newDate = newDateRaw;
 
     const rawOld = project.plantingDate as any;
-    const oldDate =
-      rawOld && typeof rawOld.toDate === 'function'
-        ? (rawOld.toDate() as Date)
-        : rawOld
-        ? new Date(rawOld)
-        : null;
+    const oldDate = rawOld instanceof Date ? rawOld : rawOld ? new Date(rawOld) : null;
     const changed =
       !oldDate || oldDate.getTime() !== newDate.getTime();
     if (!changed) return;
@@ -258,7 +225,6 @@ export default function ProjectPlanningPage() {
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setChangePlantingModalOpen(false);
     try {
-      const projectRef = doc(db, 'projects', projectId);
       const changedAt = new Date().toISOString();
       const historyEntry = {
         field: 'plantingDate',
@@ -269,109 +235,37 @@ export default function ProjectPlanningPage() {
         changedBy: user?.id ?? 'unknown',
       };
 
-      const detectedStage = detectStageForCrop(
-        selectedProjectCrop,
-        newDate,
-        (project.environmentType as EnvironmentType | undefined) ?? 'open_field',
-      );
-      const nextAutoStageKey =
-        detectedStage?.stage.key ??
-        project.stageAutoDetected ??
-        project.currentStage ??
-        project.stageSelected ??
-        '';
-      const nextCurrentStageKey = project.stageWasManuallyOverridden
-        ? project.currentStage || project.stageSelected || nextAutoStageKey
-        : nextAutoStageKey;
-      const nextDaysSincePlanting =
-        typeof detectedStage?.daysSincePlanting === 'number'
-          ? detectedStage.daysSincePlanting
-          : project.daysSincePlanting ?? 0;
-      const fallbackStageIndex = Math.max(
-        0,
-        selectedProjectCrop?.stages.findIndex((stage) => stage.key === nextCurrentStageKey) ?? 0,
-      );
-      const legacyStartIndex = getLegacyStartingStageIndex(
-        project.cropType,
-        nextCurrentStageKey,
-        fallbackStageIndex || project.startingStageIndex || 0,
-      );
-      const legacyDefs = getCropStages(project.cropType as any);
-      const startIndex = legacyDefs.length > 0 ? legacyStartIndex : fallbackStageIndex;
+      const { data, error } = await db
+        .projects()
+        .from('projects')
+        .select('planning')
+        .eq('id', projectId)
+        .maybeSingle();
+      if (error) throw error;
 
-      await updateDoc(projectRef, {
-        plantingDate: newDate,
-        currentStage: nextCurrentStageKey || project.currentStage || '',
-        stageSelected: nextCurrentStageKey || project.stageSelected || '',
-        stageAutoDetected: nextAutoStageKey || project.stageAutoDetected || '',
-        daysSincePlanting: nextDaysSincePlanting,
-        startingStageIndex: startIndex,
-        'planning.planHistory': arrayUnion(historyEntry),
-      });
+      const planning = (data?.planning as Project['planning']) ?? {};
+      const existingHistory = planning?.planHistory ?? [];
+      const nextPlanning: Project['planning'] = {
+        ...planning,
+        planHistory: [...existingHistory, historyEntry],
+      };
 
-      // Recalculate stages for active + pending only
-      if (project.cropType) {
-        if (legacyDefs.length > 0) {
-          const timeline = generateStageTimeline(project.cropType, newDate, startIndex);
-          const byIndex = new Map<number, GeneratedStage>();
-          timeline.forEach((t) => byIndex.set(t.stageIndex, t));
+      const { error: updateError } = await db
+        .projects()
+        .from('projects')
+        .update({
+          planting_date: newDate.toISOString().slice(0, 10),
+          planning: nextPlanning,
+        })
+        .eq('id', projectId);
+      if (updateError) throw updateError;
 
-          const batch = writeBatch(db);
-          sortedStages.forEach((s) => {
-            if (!s.startDate || !s.endDate) return;
-            const end = new Date(s.endDate);
-            const isCompleted = today > end;
-            if (isCompleted) return; // preserve completed
-
-            const updated = byIndex.get(s.stageIndex);
-            if (!updated) return;
-
-            const stageRef = doc(db, 'projectStages', s.id);
-            batch.update(stageRef, {
-              startDate: updated.startDate,
-              endDate: updated.endDate,
-              recalculated: true,
-              recalculatedAt: serverTimestamp(),
-              recalculationReason: 'Change of plan: planting date updated',
-            });
-          });
-          await batch.commit();
-        } else if (selectedProjectCrop?.stages?.length) {
-          const envAdjustment = detectedStage?.environmentDayAdjustment ?? 0;
-          const batch = writeBatch(db);
-          sortedStages.forEach((s) => {
-            if (!s.startDate || !s.endDate) return;
-            const end = new Date(s.endDate);
-            if (today > end) return; // preserve completed
-
-            const stageRule = selectedProjectCrop.stages[s.stageIndex];
-            if (!stageRule) return;
-
-            const adjustedStart = Math.max(0, stageRule.baseDayStart + envAdjustment);
-            const adjustedEnd = Math.max(adjustedStart, stageRule.baseDayEnd + envAdjustment);
-            const stageStart = new Date(newDate);
-            stageStart.setDate(stageStart.getDate() + adjustedStart);
-            const stageEnd = new Date(newDate);
-            stageEnd.setDate(stageEnd.getDate() + adjustedEnd);
-
-            const stageRef = doc(db, 'projectStages', s.id);
-            batch.update(stageRef, {
-              startDate: stageStart,
-              endDate: stageEnd,
-              expectedDurationDays: Math.max(1, adjustedEnd - adjustedStart + 1),
-              recalculated: true,
-              recalculatedAt: serverTimestamp(),
-              recalculationReason: 'Change of plan: planting date updated',
-            });
-          });
-          await batch.commit();
-        }
-      }
+      await queryClient.invalidateQueries({ queryKey: ['project', companyId, projectId] });
 
       setPlantingReason('');
       toast.success(
         isOffline
-          ? 'Planting date change saved offline. It will sync when online.'
+          ? 'Planting date change saved. (Offline mode – will reflect after sync.)'
           : 'Planting date updated.',
       );
     } catch (error) {
@@ -395,23 +289,9 @@ export default function ProjectPlanningPage() {
     try {
       // If supplier name is not in list, add it to Suppliers so it appears there
       if (seedSupplier.trim() && !companySuppliers.some((s) => s.name.trim().toLowerCase() === seedSupplier.trim().toLowerCase())) {
-        if (companyId) {
-          await addDoc(collection(db, 'suppliers'), {
-            name: seedSupplier.trim(),
-            contact: '',
-            email: null,
-            category: 'Seeds',
-            categories: ['Seeds'],
-            rating: 0,
-            status: 'active',
-            companyId,
-            createdAt: serverTimestamp(),
-          });
-          queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-        }
+        toast.error('Adding new suppliers from this screen is not yet supported with Supabase.');
       }
 
-      const projectRef = doc(db, 'projects', projectId);
       const oldSeed = project.planning?.seed ?? {};
       const newSeed = {
         name: seedName,
@@ -440,28 +320,49 @@ export default function ProjectPlanningPage() {
         }
       }
 
-      const update: any = {
-        'planning.seed': newSeed,
-      };
-      if (historyEntries.length) {
-        update['planning.planHistory'] = arrayUnion(...historyEntries);
-      } else if (isFirstTimeSeed) {
-        update['planning.planHistory'] = arrayUnion({
-          field: 'planning.seed',
-          oldValue: null,
-          newValue: seedName,
-          reason: 'Initial seed plan',
-          changedAt,
-          changedBy: user?.id ?? 'unknown',
-        });
-      }
+      const { data, error } = await db
+        .projects()
+        .from('projects')
+        .select('planning')
+        .eq('id', projectId)
+        .maybeSingle();
+      if (error) throw error;
 
-      await updateDoc(projectRef, update);
+      const planning = (data?.planning as Project['planning']) ?? {};
+      const existingHistory = planning?.planHistory ?? [];
+      const nextPlanning: Project['planning'] = {
+        ...planning,
+        seed: newSeed,
+        planHistory: [
+          ...existingHistory,
+          ...(historyEntries.length
+            ? historyEntries
+            : [
+                {
+                  field: 'planning.seed',
+                  oldValue: null,
+                  newValue: seedName,
+                  reason: 'Initial seed plan',
+                  changedAt,
+                  changedBy: user?.id ?? 'unknown',
+                },
+              ]),
+        ],
+      };
+
+      const { error: updateError } = await db
+        .projects()
+        .from('projects')
+        .update({ planning: nextPlanning })
+        .eq('id', projectId);
+      if (updateError) throw updateError;
+
+      await queryClient.invalidateQueries({ queryKey: ['project', companyId, projectId] });
       setSeedReason('');
       setEditingSeed(false);
       toast.success(
         isOffline
-          ? 'Seed plan saved offline. It will sync when online.'
+          ? 'Seed plan saved. (Offline mode – will reflect after sync.)'
           : 'Seed plan updated.',
       );
     } catch (error) {
@@ -480,8 +381,6 @@ export default function ProjectPlanningPage() {
     setSavingChallenge(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
-      const projectRef = doc(db, 'projects', projectId);
-      const seasonChallengeRef = doc(collection(db, 'seasonChallenges'));
       const changedAt = new Date().toISOString();
       const challengeId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const entry = {
@@ -503,47 +402,31 @@ export default function ProjectPlanningPage() {
         changedBy: user?.id ?? 'unknown',
       };
 
-      const batch = writeBatch(db);
-      batch.set(seasonChallengeRef, {
-        title: entry.title,
-        description: entry.description || entry.title,
-        challengeType: entry.challengeType,
-        severity: entry.severity,
-        status: 'identified',
-        projectId: project.id,
-        companyId: project.companyId,
-        cropType: project.cropType,
-        stageIndex: project.startingStageIndex || 0,
-        createdBy: user?.id ?? 'unknown',
-        createdByName: user?.name ?? user?.email ?? 'Unknown',
-        dateIdentified: serverTimestamp(),
-        createdAt: serverTimestamp(),
-        source: 'preseason-plan',
-        sourcePlanChallengeId: entry.id,
-      });
-      batch.update(projectRef, {
-        'planning.expectedChallenges': arrayUnion(entry),
-        'planning.planHistory': arrayUnion(historyEntry),
-      });
-      await batch.commit();
-      queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
-      if (saveAsReusable && companyId) {
-        try {
-          await upsertChallengeTemplate({
-            companyId,
-            cropType: project.cropType,
-            phase: 'preseason',
-            title: entry.title,
-            description: entry.description || undefined,
-            priority: entry.severity,
-            createdBy: user?.id ?? 'unknown',
-          });
-          queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
-        } catch (templateErr) {
-          console.warn('Failed to save as reusable template:', templateErr);
-          toast.error('Challenge added but could not save as reusable template.');
-        }
-      }
+      const { data, error } = await db
+        .projects()
+        .from('projects')
+        .select('planning')
+        .eq('id', projectId)
+        .maybeSingle();
+      if (error) throw error;
+
+      const planning = (data?.planning as Project['planning']) ?? {};
+      const existingChallenges = planning?.expectedChallenges ?? [];
+      const existingHistory = planning?.planHistory ?? [];
+
+      const nextPlanning: Project['planning'] = {
+        ...planning,
+        expectedChallenges: [...existingChallenges, entry],
+        planHistory: [...existingHistory, historyEntry],
+      };
+
+      const { error: updateError } = await db
+        .projects()
+        .from('projects')
+        .update({ planning: nextPlanning })
+        .eq('id', projectId);
+      if (updateError) throw updateError;
+
       setNewChallengeTitle('');
       setNewChallengeDescription('');
       setNewChallengeType('other');
@@ -552,7 +435,7 @@ export default function ProjectPlanningPage() {
       setShowAddPreSeasonForm(false);
       toast.success(
         isOffline
-          ? 'Planned challenge saved offline. It will sync when online.'
+          ? 'Planned challenge saved. (Offline mode – will reflect after sync.)'
           : 'Planned challenge added.',
       );
     } catch (error) {

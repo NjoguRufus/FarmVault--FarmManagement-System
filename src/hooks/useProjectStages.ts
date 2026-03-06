@@ -1,19 +1,24 @@
-import { useCallback } from 'react';
-import { useCollection } from '@/hooks/useCollection';
-import { CropStage } from '@/types';
+import { useQuery } from '@tanstack/react-query';
+import { listProjectStages } from '@/services/projectsService';
+import type { CropStage } from '@/types';
 
 export function useProjectStages(companyId: string | null | undefined, projectId: string | undefined) {
   const enabled = !!companyId && !!projectId;
 
-  const snapshot = useCollection<CropStage>('project-stages', 'projectStages', {
+  const { data, isLoading, error, refetch } = useQuery<CropStage[]>({
+    queryKey: ['projectStages', companyId, projectId],
+    queryFn: () => listProjectStages(projectId!),
     enabled,
-    companyScoped: true,
-    companyId: companyId ?? null,
-    projectId: projectId ?? null,
+    staleTime: 60_000,
   });
 
-  const refetch = useCallback(async () => undefined, []);
-
-  return { ...snapshot, refetch };
+  return {
+    data: data ?? [],
+    isLoading,
+    error,
+    fromCache: false,
+    hasPendingWrites: false,
+    refetch,
+  };
 }
 

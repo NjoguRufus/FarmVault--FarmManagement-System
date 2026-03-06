@@ -17,7 +17,7 @@ import { getCropStages } from '@/lib/cropStageConfig';
 import { addDays } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { db } from '@/lib/firebase';
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection, serverTimestamp } from '@/lib/firestore-stub';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import {

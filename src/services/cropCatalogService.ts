@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { normalizeCropTypeKey, type CropCatalogDoc, type CropKnowledge } from '@/knowledge/cropCatalog';
 

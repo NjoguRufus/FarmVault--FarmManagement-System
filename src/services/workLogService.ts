@@ -6,7 +6,7 @@ import {
   doc,
   query,
   where,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { safeFormatDate, safeToDate } from '@/lib/safeTime';
 import { WorkLog, Expense, ExpenseCategory } from '@/types';

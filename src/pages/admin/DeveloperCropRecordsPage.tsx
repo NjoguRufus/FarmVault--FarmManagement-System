@@ -55,7 +55,7 @@ export default function DeveloperCropRecordsPage() {
     queryFn: ({ pageParam }) =>
       listLibraryRecordsByCrop(cropId!, PAGE_SIZE, pageParam),
     getNextPageParam: (last) => last.lastDoc,
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
+    initialPageParam: null as import('@/lib/firestore-stub').DocumentSnapshot | null,
     enabled: !!cropId,
   });
 
@@ -70,7 +70,7 @@ export default function DeveloperCropRecordsPage() {
     queryFn: ({ pageParam }) =>
       listCompanyRecordsByCropForDeveloper(cropId!, PAGE_SIZE, pageParam),
     getNextPageParam: (last) => last.lastDoc,
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
+    initialPageParam: null as import('@/lib/firestore-stub').DocumentSnapshot | null,
     enabled: !!cropId,
   });
 

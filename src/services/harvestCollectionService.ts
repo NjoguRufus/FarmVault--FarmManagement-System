@@ -1,3 +1,7 @@
+/**
+ * @deprecated Harvest collections UI now uses harvestCollectionsService (Supabase).
+ * This file is kept for reference; new code should use src/services/harvestCollectionsService.ts.
+ */
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
@@ -15,7 +19,7 @@ import {
   documentId,
   runTransaction,
   type Query,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import type { HarvestCollectionStatus } from '@/types';
 import {
   addWalletCredit,

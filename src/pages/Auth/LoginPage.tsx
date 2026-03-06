@@ -1,12 +1,17 @@
+/**
+ * Clerk-based sign-in. Renders form immediately; uses useAuth (Clerk) to redirect when already signed in.
+ */
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link, Navigate } from 'react-router-dom';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
+  const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
   const { login, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation() as any;
+  const location = useLocation() as { state?: { from?: { pathname?: string } } };
   const from = location.state?.from?.pathname || '/dashboard';
 
   const [email, setEmail] = useState('');
@@ -15,50 +20,31 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Redirect when authenticated (handles both initial load and after login)
+  // After login, redirect by role or to dashboard (RequireOnboarding may send to /onboarding)
   useEffect(() => {
     if (!isAuthenticated || !user) return;
-
     setLoading(false);
-
-    // Role-based default landing route after login
     const employeeRole = (user as any).employeeRole as string | undefined;
-
-    // Company admin → company dashboard
     if (user.role === 'company-admin' || user.role === ('company_admin' as any)) {
       navigate('/dashboard', { replace: true });
       return;
     }
-
-    // Developer → admin area
     if (user.role === 'developer') {
       navigate('/admin', { replace: true });
       return;
     }
-
-    // Manager (platform role or employeeRole) → manager dashboard
-    if (
-      user.role === 'manager' ||
-      employeeRole === 'manager' ||
-      employeeRole === 'operations-manager'
-    ) {
+    if (user.role === 'manager' || employeeRole === 'manager' || employeeRole === 'operations-manager') {
       navigate('/manager', { replace: true });
       return;
     }
-
-    // Broker → broker dashboard
     if (user.role === 'broker' || employeeRole === 'sales-broker' || employeeRole === 'broker') {
       navigate('/broker', { replace: true });
       return;
     }
-
-    // Driver → driver dashboard
     if (employeeRole === 'logistics-driver' || employeeRole === 'driver') {
       navigate('/driver', { replace: true });
       return;
     }
-
-    // Fallback: previously intended route or dashboard.
     navigate(from || '/dashboard', { replace: true });
   }, [isAuthenticated, user, navigate, from]);
 
@@ -70,22 +56,28 @@ export default function LoginPage() {
       await login(email, password);
       // Navigation will happen via useEffect when isAuthenticated becomes true
     } catch (err: unknown) {
-      const code = (err as { code?: string })?.code;
-      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/invalid-login-credentials') {
-        setError('Incorrect password. Try again.');
-      } else if (code === 'auth/user-not-found') {
-        setError('No account found with this email. Try again or contact your admin.');
+      const e = err as { code?: string; errors?: Array<{ message?: string; code?: string }> };
+      const clerkMsg = e?.errors?.[0]?.message;
+      const code = e?.code ?? e?.errors?.[0]?.code;
+      if (clerkMsg) {
+        setError(clerkMsg);
+      } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'form_identifier_exists' || code === 'form_password_pwned') {
+        setError('Incorrect email or password. Try again.');
+      } else if (code === 'auth/user-not-found' || code === 'form_identifier_not_found') {
+        setError('No account found with this email. Create an account or try again.');
       } else if (code === 'auth/invalid-email') {
         setError('Invalid email address. Please check and try again.');
-      } else if (code?.startsWith('auth/')) {
-        setError('Unable to sign in. Check your email and password, then try again.');
       } else {
-        setError('Failed to sign in. Please try again.');
+        setError(err instanceof Error ? err.message : 'Sign in failed. Please try again.');
       }
       setLoading(false);
     }
   };
 
+
+  if (clerkLoaded && clerkSignedIn) {
+    return <Navigate to={from || '/dashboard'} replace />;
+  }
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -197,10 +189,10 @@ export default function LoginPage() {
             <div className="pt-4 text-center text-sm text-[#2D4A3E]">
               <span>Don&apos;t have an account? </span>
               <Link
-                to="/setup-company"
+                to="/sign-up"
                 className="font-semibold underline-offset-2 hover:underline"
               >
-                Create one
+                Create account
               </Link>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { CropStage, CropType } from '@/types';
-import { collection, query, where } from 'firebase/firestore';
+import { collection, query, where } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { safeToDate } from '@/lib/safeTime';
 import { getDocsWithCache } from '@/lib/firestoreCache';

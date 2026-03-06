@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquare, Filter, Star, Loader2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { collection, getDocs, orderBy, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, doc, updateDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { format } from 'date-fns';
 import { useCollection } from '@/hooks/useCollection';

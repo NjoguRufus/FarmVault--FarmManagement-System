@@ -15,7 +15,7 @@ import {
   where,
   writeBatch,
   type Query,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 
 const LEDGER_COLLECTION = 'projectWalletLedger';
 const META_COLLECTION = 'projectWalletMeta';

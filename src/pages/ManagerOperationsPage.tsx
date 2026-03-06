@@ -44,7 +44,7 @@ import { format } from 'date-fns';
 import { toDate } from '@/lib/dateUtils';
 import { exportToExcel } from '@/lib/exportUtils';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, updateDoc, doc, writeBatch, increment } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, updateDoc, doc, writeBatch, increment } from '@/lib/firestore-stub';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { recordInventoryUsage } from '@/services/inventoryService';
 import { getCompany, updateCompany } from '@/services/companyService';

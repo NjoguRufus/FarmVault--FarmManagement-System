@@ -926,6 +926,9 @@ export interface OperationsWorkCard {
   projectId: string;
   stageId: string;
   stageName?: string;
+  /** When project uses blocks, optional block this work is planned for. */
+  blockId?: string | null;
+  blockName?: string | null;
   workTitle: string;
   workCategory: string;
 

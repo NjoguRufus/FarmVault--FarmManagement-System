@@ -1,4 +1,4 @@
-import { doc, getDoc, getDocFromCache, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocFromCache, updateDoc } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { decrementPoolRemaining } from './budgetPoolService';
 

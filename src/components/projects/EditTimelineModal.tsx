@@ -4,10 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useQueryClient, useMutation, useInfiniteQuery } from '@tanstack/react-query';
-import { updateDoc, doc, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { addStageNote, getStageNotes } from '@/services/stageNotesService';
+import { updateStageDates } from '@/services/projectsService';
 import type { CropStage } from '@/types';
 
 const NOTES_PAGE_SIZE = 10;
@@ -68,17 +67,17 @@ export function EditTimelineModal({
     try {
       for (const stage of stages) {
         const d = draft[stage.id] ?? {};
-        const payload: Record<string, unknown> = {};
         const ps = inputValueToDate(d.plannedStart ?? '');
         const pe = inputValueToDate(d.plannedEnd ?? '');
         const as = inputValueToDate(d.actualStart ?? '');
         const ae = inputValueToDate(d.actualEnd ?? '');
-        if (ps) payload.plannedStartDate = Timestamp.fromDate(ps);
-        if (pe) payload.plannedEndDate = Timestamp.fromDate(pe);
-        if (as) payload.actualStartDate = Timestamp.fromDate(as);
-        if (ae) payload.actualEndDate = Timestamp.fromDate(ae);
-        if (Object.keys(payload).length > 0) {
-          await updateDoc(doc(db, 'projectStages', stage.id), payload);
+        if (ps || pe || as || ae) {
+          await updateStageDates(stage.id, {
+            plannedStart: ps ? ps.toISOString().slice(0, 10) : undefined,
+            plannedEnd: pe ? pe.toISOString().slice(0, 10) : undefined,
+            actualStart: as ? as.toISOString().slice(0, 10) : undefined,
+            actualEnd: ae ? ae.toISOString().slice(0, 10) : undefined,
+          });
         }
       }
       queryClient.invalidateQueries({ queryKey: ['projectStages'] });
@@ -151,8 +150,8 @@ function StageRow({
     queryKey: ['stageNotes', companyId, projectId, stage.id],
     queryFn: ({ pageParam }) =>
       getStageNotes(companyId, projectId, stage.id, NOTES_PAGE_SIZE, pageParam ?? null),
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
-    getNextPageParam: (lastPage) => lastPage.lastDoc,
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.lastCursor,
     enabled: notesOpen && !!companyId && !!projectId,
     staleTime: 60_000,
   });

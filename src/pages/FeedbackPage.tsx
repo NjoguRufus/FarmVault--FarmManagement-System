@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Star, MessageSquare, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDisplayRole } from '@/lib/utils';
 

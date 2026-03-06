@@ -9,7 +9,7 @@ import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useQueryClient } from '@tanstack/react-query';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 
 export function DriverDashboard() {

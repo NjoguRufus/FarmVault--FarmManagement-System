@@ -8,7 +8,7 @@ interface RequireDeveloperProps {
 }
 
 export function RequireDeveloper({ children }: RequireDeveloperProps) {
-  const { user, isAuthenticated, authReady } = useAuth();
+  const { isAuthenticated, authReady, isDeveloper, user } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -16,10 +16,23 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Route] Redirecting to /dev/sign-in from RequireDeveloper (not authenticated)', {
+        from: location.pathname,
+      });
+    }
+    return <Navigate to="/dev/sign-in" replace state={{ from: location }} />;
   }
 
-  if (user?.role !== 'developer') {
+  if (!isDeveloper) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Route] Redirecting to /dashboard from RequireDeveloper (not developer)', {
+        uid: user?.id,
+        companyId: user?.companyId ?? null,
+      });
+    }
     return <Navigate to="/dashboard" replace />;
   }
 

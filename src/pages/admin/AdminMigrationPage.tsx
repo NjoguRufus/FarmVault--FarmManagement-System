@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { collection, getDocs, writeBatch, doc, limit, query } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, limit, query } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
