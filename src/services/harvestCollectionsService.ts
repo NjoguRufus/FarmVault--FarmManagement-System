@@ -739,6 +739,7 @@ export async function markPickerCashPaid(params: {
   pickerId: string;
   amount: number;
   projectId?: string;
+  note?: string | null;
 }): Promise<void> {
   if (params.amount <= 0) return;
   const paymentEntryId = await recordPickerPayment({
@@ -746,6 +747,7 @@ export async function markPickerCashPaid(params: {
     collectionId: params.collectionId,
     pickerId: params.pickerId,
     amount: params.amount,
+    note: params.note ?? null,
   });
   if (params.projectId && paymentEntryId) {
     await syncPickerPaymentToExpense({
