@@ -41,10 +41,13 @@ import {
   listPickerIntakeByCollectionIds,
   listPickerPaymentsByCollectionIds,
   mapPicker,
+  computeCollectionFinancials,
 } from '@/services/harvestCollectionsService';
 import {
   computeWalletSummary,
   getWalletLedgerEntries,
+  getWalletLedgerEntriesSupabase,
+  getFinanceWalletTotals,
   subscribeWalletLedger,
   type ProjectWalletLedgerEntry,
 } from '@/services/projectWalletService';
@@ -183,6 +186,11 @@ export default function HarvestCollectionsPage() {
         source: resolvedSource,
         receivedBy: user?.name || user?.email || user?.id || 'unknown',
       });
+      queryClient.invalidateQueries({ queryKey: ['projectWalletTotals', companyId, cashDialogCollection.projectId] });
+      queryClient.invalidateQueries({ queryKey: ['projectWalletLedger', companyId, cashDialogCollection.projectId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
       setCashDialogCollection(null);
       setCashAmount('');
       toast({ title: 'Cash registered' });
@@ -308,20 +316,52 @@ export default function HarvestCollectionsPage() {
 
   const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
 
+  /** Finance schema wallet totals (source of truth for Harvest Cash when French Beans). */
+  const { data: financeWalletTotals } = useQuery({
+    queryKey: ['projectWalletTotals', companyId ?? '', effectiveProjectId ?? ''],
+    queryFn: () => getFinanceWalletTotals(effectiveProjectId!, companyId!),
+    enabled: !!companyId && !!effectiveProjectId && isFrenchBeansProject,
+  });
+
+  /** French Beans: ledger from Supabase (no Firebase). Other projects: Firestore subscription. */
+  const { data: supabaseLedgerEntries } = useQuery({
+    queryKey: ['projectWalletLedger', companyId ?? '', effectiveProjectId ?? ''],
+    queryFn: () => getWalletLedgerEntriesSupabase(effectiveProjectId!, companyId!),
+    enabled: !!companyId && !!effectiveProjectId && isFrenchBeansProject,
+  });
+
+  const walletEntriesForSummary = isFrenchBeansProject ? (supabaseLedgerEntries ?? []) : walletLedgerEntries;
+
   useEffect(() => {
-    if (!companyId || !effectiveProject?.id || !isFrenchBeansProject) {
-      setWalletLedgerEntries([]);
-      return;
-    }
+    if (!companyId || !effectiveProject?.id || isFrenchBeansProject) return;
     return subscribeWalletLedger(effectiveProject.id, companyId, (entries) => {
       setWalletLedgerEntries(entries);
     });
   }, [companyId, effectiveProject?.id, isFrenchBeansProject]);
 
-  const walletSummary = useMemo(
-    () => computeWalletSummary(walletLedgerEntries),
-    [walletLedgerEntries]
-  );
+  /** French Beans: use finance.project_wallet_ledger totals; else Firestore subscription. */
+  const walletSummary = useMemo(() => {
+    if (isFrenchBeansProject && financeWalletTotals) {
+      return {
+        cashReceivedTotal: financeWalletTotals.totalCredits,
+        cashPaidOutTotal: financeWalletTotals.totalDebits,
+        currentBalance: financeWalletTotals.balance,
+      };
+    }
+    return computeWalletSummary(walletEntriesForSummary);
+  }, [isFrenchBeansProject, financeWalletTotals, walletEntriesForSummary]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV && isFrenchBeansProject && effectiveProjectId && companyId && financeWalletTotals) {
+      console.log('[Harvest Wallet Totals]', {
+        companyId,
+        projectId: effectiveProjectId,
+        totalCredits: financeWalletTotals.totalCredits,
+        totalDebits: financeWalletTotals.totalDebits,
+        balance: financeWalletTotals.balance,
+      });
+    }
+  }, [isFrenchBeansProject, effectiveProjectId, companyId, financeWalletTotals]);
 
   const collections = useMemo(() => {
     if (!effectiveProject) return allCollections;
@@ -379,7 +419,7 @@ export default function HarvestCollectionsPage() {
   useEffect(() => {
     const toSync = collections.filter(
       (c) =>
-        String(c.cropType).toLowerCase() === 'french-beans' &&
+        String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans' &&
         (c.status === 'closed' || !!c.buyerPaidAt) &&
         (c.totalRevenue ?? 0) > 0 &&
         (c.totalHarvestKg ?? 0) > 0 &&
@@ -412,13 +452,22 @@ export default function HarvestCollectionsPage() {
     [allCollections, selectedCollectionId]
   );
 
-  const isFrenchBeansCollection = useMemo(
-    () => (selectedCollection?.cropType as string | undefined)?.toLowerCase() === 'french-beans',
-    [selectedCollection?.cropType]
-  );
+  /** Sync buyer price input from DB when selecting a collection that has buyer_price_per_unit set. */
+  useEffect(() => {
+    if (!selectedCollection) return;
+    const fromDb = selectedCollection.pricePerKgBuyer;
+    if (fromDb != null && Number(fromDb) > 0) {
+      setBuyerPricePerKg(String(fromDb));
+    }
+  }, [selectedCollection?.id, selectedCollection?.pricePerKgBuyer]);
+
+  const isFrenchBeansCollection = useMemo(() => {
+    const ct = (selectedCollection?.cropType as string | undefined)?.toLowerCase().replace('_', '-');
+    return ct === 'french-beans';
+  }, [selectedCollection?.cropType]);
 
   const hasFrenchBeansCollections = useMemo(
-    () => collections.some((c) => String(c.cropType).toLowerCase() === 'french-beans'),
+    () => collections.some((c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'),
     [collections]
   );
 
@@ -433,6 +482,54 @@ export default function HarvestCollectionsPage() {
     if (!selectedCollectionId) return [];
     return allWeighEntries.filter((e) => e.collectionId === selectedCollectionId);
   }, [allWeighEntries, selectedCollectionId]);
+
+  /** Payments for selected collection only (harvest.picker_payment_entries). */
+  const paymentsForCollection = useMemo(() => {
+    if (!selectedCollectionId) return [];
+    return (paymentsRaw ?? []).filter((p) => p.collection_id === selectedCollectionId);
+  }, [paymentsRaw, selectedCollectionId]);
+
+  /** DB-backed financials for selected collection (intake + payments + collection prices). */
+  const collectionFinancials = useMemo(() => {
+    if (!selectedCollection || !selectedCollectionId) {
+      return {
+        totalHarvestQty: 0,
+        pickerPricePerUnit: 20,
+        buyerPricePerUnit: 0,
+        totalPickerDue: 0,
+        totalPaidOut: 0,
+        pickerBalance: 0,
+        revenue: 0,
+        profit: 0,
+      };
+    }
+    const intakeEntries = weighEntriesForCollection.map((e) => ({ quantity: e.weightKg, weightKg: e.weightKg }));
+    const paymentEntries = paymentsForCollection.map((p) => ({ amount_paid: p.amount_paid }));
+    return computeCollectionFinancials({
+      collection: {
+        picker_price_per_unit: selectedCollection.pricePerKgPicker,
+        buyer_price_per_unit: selectedCollection.pricePerKgBuyer ?? null,
+      },
+      intakeEntries,
+      paymentEntries,
+    });
+  }, [selectedCollection, selectedCollectionId, weighEntriesForCollection, paymentsForCollection]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV && selectedCollectionId && selectedCollection) {
+      console.log('[Collection Financials]', {
+        collectionId: selectedCollectionId,
+        totalHarvestQty: collectionFinancials.totalHarvestQty,
+        pickerPricePerUnit: collectionFinancials.pickerPricePerUnit,
+        buyerPricePerUnit: collectionFinancials.buyerPricePerUnit,
+        totalPickerDue: collectionFinancials.totalPickerDue,
+        totalPaidOut: collectionFinancials.totalPaidOut,
+        pickerBalance: collectionFinancials.pickerBalance,
+        revenue: collectionFinancials.revenue,
+        profit: collectionFinancials.profit,
+      });
+    }
+  }, [selectedCollectionId, selectedCollection, collectionFinancials]);
 
   const pickerTotalsById = useMemo(() => {
     const totals: Record<string, { totalKg: number; totalPay: number }> = {};
@@ -460,13 +557,11 @@ export default function HarvestCollectionsPage() {
     return pickerTotalsById[pickerId] ?? { totalKg: 0, totalPay: 0 };
   };
 
-  /** Amount paid out for the selected collection (for Wallet popover inside pickers) */
-  const amountPaidOutThisCollection = useMemo(() => {
-    if (!selectedCollectionId) return 0;
-    return pickersForCollection
-      .filter((p) => p.isPaid)
-      .reduce((s, p) => s + getPickerTotals(p.id).totalPay, 0);
-  }, [selectedCollectionId, pickersForCollection, pickerTotalsById]);
+  /** Amount paid out for the selected collection: sum(amount_paid) from harvest.picker_payment_entries. */
+  const amountPaidOutThisCollection = useMemo(
+    () => collectionFinancials.totalPaidOut,
+    [collectionFinancials.totalPaidOut]
+  );
 
   const filteredPickers = useMemo(() => {
     const q = (pickerSearch || '').trim().toLowerCase();
@@ -615,14 +710,19 @@ export default function HarvestCollectionsPage() {
     [pickersForCollection]
   );
 
+  /** Revenue = totalHarvestQty * buyerPrice. Uses DB buyer_price_per_unit when set, else form input (preview). */
   const totalRevenue = useMemo(() => {
-    const price = Number(buyerPricePerKg || 0);
-    return totalsFromPickers.totalKg * price;
-  }, [totalsFromPickers.totalKg, buyerPricePerKg]);
+    const buyerPrice =
+      selectedCollection?.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0
+        ? Number(selectedCollection.pricePerKgBuyer)
+        : Number(buyerPricePerKg || 0) || 0;
+    return (collectionFinancials.totalHarvestQty || 0) * buyerPrice;
+  }, [collectionFinancials.totalHarvestQty, selectedCollection?.pricePerKgBuyer, buyerPricePerKg]);
 
+  /** Profit = revenue - totalPaidOut (DB-backed). */
   const profit = useMemo(
-    () => totalRevenue - totalsFromPickers.totalPay,
-    [totalRevenue, totalsFromPickers.totalPay]
+    () => (totalRevenue || 0) - (collectionFinancials.totalPaidOut || 0),
+    [totalRevenue, collectionFinancials.totalPaidOut]
   );
 
   const handleCreateCollection = async () => {
@@ -666,6 +766,8 @@ export default function HarvestCollectionsPage() {
         pricePerKgPicker: price,
       });
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
       setSelectedCollectionId(id);
       setViewMode('intake');
       setNewCollectionName('');
@@ -859,16 +961,27 @@ export default function HarvestCollectionsPage() {
         companyId: companyId!,
         pickerId,
         amount: payAmount,
+        projectId: effectiveProject?.id,
       });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
       if (effectiveProject?.id && companyId) {
-        const refreshWallet = () =>
-          getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
-            .then(setWalletLedgerEntries)
-            .catch(() => {});
-        refreshWallet();
-        if (isOffline) setTimeout(refreshWallet, 200);
+        queryClient.invalidateQueries({ queryKey: ['projectWalletTotals', companyId, effectiveProject.id] });
+        queryClient.invalidateQueries({ queryKey: ['projectWalletLedger', companyId, effectiveProject.id] });
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+        queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
+        if (!isFrenchBeansProject) {
+          const refreshWallet = () =>
+            getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
+              .then(setWalletLedgerEntries)
+              .catch(() => {});
+          refreshWallet();
+          if (isOffline) setTimeout(refreshWallet, 200);
+        }
       }
       toast({
         title: isOffline ? 'Payment saved offline' : 'Paid',
@@ -989,19 +1102,30 @@ export default function HarvestCollectionsPage() {
           pickerIds: payableIds,
           totalAmount,
           pickerAmountsById,
+          projectId: effectiveProject?.id,
         });
       }
 
       setPayingPickerIds(null);
       queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
       if (effectiveProject?.id && companyId) {
-        const refreshWallet = () =>
-          getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
-            .then(setWalletLedgerEntries)
-            .catch(() => {});
-        refreshWallet();
-        if (isOffline) setTimeout(refreshWallet, 200);
+        queryClient.invalidateQueries({ queryKey: ['projectWalletTotals', companyId, effectiveProject.id] });
+        queryClient.invalidateQueries({ queryKey: ['projectWalletLedger', companyId, effectiveProject.id] });
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+        queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
+        if (!isFrenchBeansProject) {
+          const refreshWallet = () =>
+            getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
+              .then(setWalletLedgerEntries)
+              .catch(() => {});
+          refreshWallet();
+          if (isOffline) setTimeout(refreshWallet, 200);
+        }
       }
       toast({
         title: isOffline ? `${payableIds.length} payments saved offline` : `${payableIds.length} marked paid`,
@@ -1079,6 +1203,8 @@ export default function HarvestCollectionsPage() {
         existingHarvestId: selectedCollection?.harvestId,
       });
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
       if (markBuyerPaid) {
         queryClient.invalidateQueries({ queryKey: ['harvests'] });
         queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -1165,7 +1291,7 @@ export default function HarvestCollectionsPage() {
             )}
             {canViewFinancials && hasFrenchBeansCollections && (() => {
               const fb = collections.find(
-                (c) => String(c.cropType).toLowerCase() === 'french-beans'
+                (c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'
               );
               if (!fb) return null;
               const totalPaidOut = walletSummary.cashPaidOutTotal;
@@ -1528,8 +1654,9 @@ export default function HarvestCollectionsPage() {
                     (() => {
                       const canShowBuyerSettlementCard =
                         canViewFinancials &&
-                        ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) ||
-                          selectedCollection.status === 'closed');
+                        (collectionFinancials.totalHarvestQty > 0 ||
+                          selectedCollection.status === 'closed' ||
+                          (selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0));
                       const statCount =
                         1 + (canViewPaymentAmounts ? 1 : 0) + (canShowBuyerSettlementCard ? 1 : 0);
                       if (statCount <= 1) return 'grid-cols-1';
@@ -1541,7 +1668,7 @@ export default function HarvestCollectionsPage() {
                   <SimpleStatCard
                     layout="mobile-compact"
                     title="Total kg"
-                    value={((totalsFromPickers.totalKg ?? selectedCollection.totalHarvestKg) ?? 0).toFixed(1)}
+                    value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
                     icon={Scale}
                     iconVariant="primary"
                     className="py-2 px-2 text-sm"
@@ -1549,22 +1676,23 @@ export default function HarvestCollectionsPage() {
                   {canViewPaymentAmounts && (
                     <SimpleStatCard
                       layout="mobile-compact"
-                      title="Total amount"
-                      value={`KES ${((totalsFromPickers.totalPay ?? selectedCollection.totalPickerCost) ?? 0).toLocaleString()}`}
+                      title="Total picker due"
+                      value={`KES ${(collectionFinancials.totalPickerDue ?? 0).toLocaleString()}`}
                       icon={Banknote}
                       iconVariant="primary"
                       className="py-2 px-2 text-sm"
                     />
                   )}
                   {canViewFinancials &&
-                    ((selectedCollection.totalRevenue != null && selectedCollection.totalRevenue > 0) ||
-                      selectedCollection.status === 'closed') && (
+                    (collectionFinancials.totalHarvestQty > 0 ||
+                      selectedCollection.status === 'closed' ||
+                      (selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0)) && (
                     <div className="rounded-lg border bg-card py-2 px-2 text-sm flex flex-col justify-center gap-2 min-h-[3.5rem] col-span-2 sm:col-span-1">
                       <div className="flex items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" />
                           <span className="text-xs font-medium text-muted-foreground">
-                            Buyer sale · {((totalsFromPickers.totalKg ?? selectedCollection.totalHarvestKg) ?? 0).toFixed(1)} kg
+                            Buyer sale · {(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)} kg
                             {(selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0) && (
                               <> @ {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} Ksh</>
                             )}
@@ -1582,15 +1710,21 @@ export default function HarvestCollectionsPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-border pt-2">
                         <div>
-                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Payment</p>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Revenue</p>
                           <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm')}>
-                            {showPaidAndProfit ? `KES ${Number(selectedCollection.totalRevenue ?? 0).toLocaleString()}` : '•••'}
+                            {showPaidAndProfit ? `KES ${Number(totalRevenue ?? 0).toLocaleString()}` : '•••'}
                           </p>
                         </div>
                         <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Paid out</p>
+                          <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm')}>
+                            {showPaidAndProfit ? `KES ${(collectionFinancials.totalPaidOut ?? 0).toLocaleString()}` : '•••'}
+                          </p>
+                        </div>
+                        <div className="col-span-2">
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Profit</p>
-                          <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm', Number(selectedCollection.profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                            {showPaidAndProfit ? `KES ${Number(selectedCollection.profit ?? 0).toLocaleString()}` : '•••'}
+                          <p className={cn('text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm', Number(profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
+                            {showPaidAndProfit ? `KES ${Number(profit ?? 0).toLocaleString()}` : '•••'}
                           </p>
                         </div>
                       </div>
@@ -1644,7 +1778,7 @@ export default function HarvestCollectionsPage() {
                               !cashDialogVisible && 'blur-sm select-none'
                             )}
                           >
-                            KES {amountPaidOutThisCollection.toLocaleString()}
+                            KES {(Number(amountPaidOutThisCollection) || 0).toLocaleString()}
                           </p>
                           <button
                             type="button"
@@ -1654,6 +1788,10 @@ export default function HarvestCollectionsPage() {
                             {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </button>
                         </div>
+                        <p className="text-[11px] text-emerald-100">Remaining picker balance</p>
+                        <p className={cn('text-sm font-semibold tabular-nums text-emerald-50', !cashDialogVisible && 'blur-sm select-none')}>
+                          KES {(Number(collectionFinancials.pickerBalance) || 0).toLocaleString()}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -2036,11 +2174,14 @@ export default function HarvestCollectionsPage() {
                   {selectedCollection.status !== 'closed' && Number(buyerPricePerKg || 0) > 0 && (
                     <div className="space-y-1 text-sm">
                       <p>
-                        Total revenue: <strong>KES {totalRevenue.toLocaleString()}</strong>
+                        Total revenue: <strong>KES {(Number(totalRevenue) || 0).toLocaleString()}</strong>
                       </p>
                       <p>
-                        Profit: <strong className={profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                          KES {profit.toLocaleString()}
+                        Total paid out: <strong>KES {(Number(collectionFinancials.totalPaidOut) || 0).toLocaleString()}</strong>
+                      </p>
+                      <p>
+                        Profit: <strong className={(Number(profit) || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                          KES {(Number(profit) || 0).toLocaleString()}
                         </strong>
                       </p>
                     </div>
