@@ -10,6 +10,10 @@ interface MembershipRow {
 }
 
 export function DevAuthDebugPanel() {
+  // Hidden in production builds and everyday use; leave implementation
+  // in place for future debugging, but render nothing.
+  return null;
+
   const { user, isDeveloper, authReady, setupIncomplete } = useAuth();
   const location = useLocation();
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);

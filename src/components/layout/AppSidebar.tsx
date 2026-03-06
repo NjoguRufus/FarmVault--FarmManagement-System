@@ -7,6 +7,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { getNavItemsForSidebar } from '@/config/navConfig';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -118,9 +119,12 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       {!collapsed && user && (
         <div className="shrink-0 border-t border-sidebar-border/30 p-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sidebar-accent text-sidebar-foreground font-medium text-sm">
-              {user.name.charAt(0)}
-            </div>
+            <Avatar className="h-9 w-9 shrink-0">
+              <AvatarImage src={user.avatar} alt={user.name} />
+              <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground font-medium text-sm">
+                {user.name?.charAt(0) ?? '?'}
+              </AvatarFallback>
+            </Avatar>
             <div className="flex flex-col">
               <span className="text-sm font-medium text-sidebar-foreground">{user.name}</span>
               <span className="text-xs text-sidebar-muted">{getDisplayRole(user)}</span>

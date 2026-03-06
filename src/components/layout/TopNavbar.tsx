@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Search, ChevronDown, Settings, LogOut, User, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -6,7 +6,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useTour } from '@/tour/TourProvider';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
-import { cn, getDisplayRole } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
@@ -34,6 +35,17 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const companyProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
+
+  useEffect(() => {
+    if (import.meta.env.DEV && user) {
+      // eslint-disable-next-line no-console
+      console.log('[Navbar Avatar]', {
+        name: user?.name,
+        email: user?.email,
+        imageUrl: user?.avatar ?? null,
+      });
+    }
+  }, [user?.name, user?.email, user?.avatar]);
 
   const empRole = (user as any)?.employeeRole;
   const isDriver = Boolean(
@@ -234,14 +246,14 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1.5 md:gap-2 rounded-lg px-1.5 md:px-2 py-1.5 hover:bg-muted transition-colors">
-              <div className="flex h-7 w-7 md:h-8 md:w-8 items-center justify-center rounded-full bg-primary text-primary-foreground font-medium text-xs md:text-sm">
-                {user?.name.charAt(0)}
-              </div>
+              <Avatar className="h-7 w-7 md:h-8 md:w-8 shrink-0">
+                <AvatarImage src={user?.avatar} alt={user?.name} />
+                <AvatarFallback className="bg-primary text-primary-foreground font-medium text-xs md:text-sm">
+                  {user?.name?.charAt(0) ?? '?'}
+                </AvatarFallback>
+              </Avatar>
               <div className="hidden md:flex flex-col items-start">
                 <span className="text-sm font-medium">{user?.name}</span>
-                <span className="text-xs text-muted-foreground capitalize">
-                  {user ? getDisplayRole(user) : ''}
-                </span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground hidden md:block" />
             </DropdownMenuTrigger>

@@ -29,7 +29,7 @@ function mapRowToEmployee(row: Record<string, unknown>): Employee {
     department: row.department != null ? String(row.department) : undefined,
     status: (row.status as Employee['status']) ?? 'active',
     permissions: row.permissions as PermissionMap | undefined,
-    authUserId: row.auth_user_id != null ? String(row.auth_user_id) : undefined,
+    authUserId: row.clerk_user_id != null ? String(row.clerk_user_id) : (row.auth_user_id != null ? String(row.auth_user_id) : undefined),
     createdAt: row.created_at,
     joinDate: row.join_date,
     createdBy: row.created_by != null ? String(row.created_by) : undefined,
@@ -119,11 +119,11 @@ export async function updateEmployee(
   const { data: employee, error: empError } = await db
     .public()
     .from('employees')
-    .select('auth_user_id')
+    .select('clerk_user_id')
     .eq('id', employeeId)
     .single();
 
-  if (empError || !employee?.auth_user_id) {
+  if (empError || !employee?.clerk_user_id) {
     throw new Error(empError?.message ?? 'Employee not found');
   }
 
@@ -142,7 +142,7 @@ export async function updateEmployee(
       .core()
       .from('profiles')
       .update({ permissions: payload.permissions, updated_at: new Date().toISOString() })
-      .eq('clerk_user_id', employee.auth_user_id);
+      .eq('clerk_user_id', employee.clerk_user_id);
 
     if (profileError) {
       throw new Error(profileError.message ?? 'Employee updated but profile permissions failed');

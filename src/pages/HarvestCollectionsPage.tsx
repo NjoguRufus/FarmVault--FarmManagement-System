@@ -117,6 +117,7 @@ export default function HarvestCollectionsPage() {
   const [newPickerNumber, setNewPickerNumber] = useState('');
   const [newPickerName, setNewPickerName] = useState('');
   const [addingPicker, setAddingPicker] = useState(false);
+  const newPickerNumberRef = useRef<HTMLInputElement>(null);
 
   const [addWeighOpen, setAddWeighOpen] = useState(false);
   const [weighPickerId, setWeighPickerId] = useState('');
@@ -131,9 +132,16 @@ export default function HarvestCollectionsPage() {
   const [quickPayOpen, setQuickPayOpen] = useState(false);
   const [quickPayPickerId, setQuickPayPickerId] = useState<string | null>(null);
   const [quickPayAmount, setQuickPayAmount] = useState('');
-  const [quickPayShortOfCoins, setQuickPayShortOfCoins] = useState(false);
-  const [quickPayNotePreset, setQuickPayNotePreset] = useState<string>('');
   const [quickPaySaving, setQuickPaySaving] = useState(false);
+  const [quickPayPartialOpen, setQuickPayPartialOpen] = useState(false);
+  /** Max amount for Pay Partial (current picker balance when partial was opened). */
+  const [quickPayPartialBalance, setQuickPayPartialBalance] = useState(0);
+  /** Local overlay to keep queue/balances responsive until refetch completes. */
+  const [quickPayLocalPaidByPickerId, setQuickPayLocalPaidByPickerId] = useState<Record<string, number>>({});
+  /** Quick Pay summary (description + queue count) collapsed by default; chevron toggles. */
+  const [quickPaySummaryExpanded, setQuickPaySummaryExpanded] = useState(false);
+  /** When true, auto-select effect should not re-select first picker (user just clicked Skip). */
+  const skipJustClickedRef = useRef(false);
 
   const [buyerPricePerKg, setBuyerPricePerKg] = useState('');
   const [markingBuyerPaid, setMarkingBuyerPaid] = useState(false);
@@ -173,6 +181,40 @@ export default function HarvestCollectionsPage() {
     return modes;
   }, [canManageIntake, canPayPickers, canViewBuyerSection]);
   const defaultDetailMode: ViewMode = detailModes[0] ?? 'list';
+
+  const companyId = user?.companyId ?? null;
+  const effectiveProjectId = effectiveProject?.id ?? null;
+
+  // Mount/unmount debug: if unmount/mount keeps firing, something up the tree is remounting this page.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.log('[Reload Debug] mount');
+    return () => {
+      // eslint-disable-next-line no-console
+      console.log('[Reload Debug] unmount');
+    };
+  }, []);
+
+  // Log only when meaningful deps change (not on every parent rerender).
+  const reloadDebugPrevRef = useRef<{ viewMode: ViewMode; quickMode: boolean; selectedCollectionId: string | null; companyId: string | null; effectiveProjectId: string | null } | null>(null);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const next = {
+      viewMode,
+      quickMode,
+      selectedCollectionId,
+      companyId,
+      effectiveProjectId,
+    };
+    const prev = reloadDebugPrevRef.current;
+    const changed = !prev || prev.viewMode !== next.viewMode || prev.quickMode !== next.quickMode || prev.selectedCollectionId !== next.selectedCollectionId || prev.companyId !== next.companyId || prev.effectiveProjectId !== next.effectiveProjectId;
+    reloadDebugPrevRef.current = next;
+    if (changed) {
+      // eslint-disable-next-line no-console
+      console.log('[Reload Debug] state changed', next);
+    }
+  }, [viewMode, quickMode, selectedCollectionId, companyId, effectiveProjectId]);
 
   const handleSaveCash = async () => {
     if (!canViewFinancials) {
@@ -236,13 +278,14 @@ export default function HarvestCollectionsPage() {
     }
   }, [selectedCollectionId, viewMode, detailModes]);
 
-  const companyId = user?.companyId ?? null;
-  const effectiveProjectId = effectiveProject?.id ?? null;
-
   const { data: collectionsRaw = [], isLoading: loadingCollections } = useQuery({
     queryKey: ['harvestCollections', companyId, effectiveProjectId],
     queryFn: () => listHarvestCollections(companyId!, effectiveProjectId ?? undefined),
     enabled: !!companyId,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   const collectionIds = useMemo(() => collectionsRaw.map((c) => c.id), [collectionsRaw]);
@@ -251,18 +294,30 @@ export default function HarvestCollectionsPage() {
     queryKey: ['harvestPickers', companyId, collectionIds],
     queryFn: () => listPickersByCollectionIds(collectionIds),
     enabled: collectionIds.length > 0,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   const { data: intakeRaw = [] } = useQuery({
     queryKey: ['pickerIntake', companyId, collectionIds],
     queryFn: () => listPickerIntakeByCollectionIds(collectionIds),
     enabled: collectionIds.length > 0,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   const { data: paymentsRaw = [] } = useQuery({
     queryKey: ['pickerPayments', companyId, collectionIds],
     queryFn: () => listPickerPaymentsByCollectionIds(collectionIds),
     enabled: collectionIds.length > 0,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   const allCollections = useMemo(() => {
@@ -329,6 +384,10 @@ export default function HarvestCollectionsPage() {
     queryKey: ['projectWalletTotals', companyId ?? '', effectiveProjectId ?? ''],
     queryFn: () => getFinanceWalletTotals(effectiveProjectId!, companyId!),
     enabled: !!companyId && !!effectiveProjectId && isFrenchBeansProject,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   /** French Beans: ledger from Supabase (no Firebase). Other projects: Firestore subscription. */
@@ -336,6 +395,10 @@ export default function HarvestCollectionsPage() {
     queryKey: ['projectWalletLedger', companyId ?? '', effectiveProjectId ?? ''],
     queryFn: () => getWalletLedgerEntriesSupabase(effectiveProjectId!, companyId!),
     enabled: !!companyId && !!effectiveProjectId && isFrenchBeansProject,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 
   const walletEntriesForSummary = isFrenchBeansProject ? (supabaseLedgerEntries ?? []) : walletLedgerEntries;
@@ -579,6 +642,78 @@ export default function HarvestCollectionsPage() {
     });
     return map;
   }, [paymentsForCollection]);
+
+  // When payments refetch updates, drop local overlays to avoid double-counting.
+  useEffect(() => {
+    if (Object.keys(quickPayLocalPaidByPickerId).length === 0) return;
+    setQuickPayLocalPaidByPickerId({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentsForCollection]);
+
+  type QuickPayQueueItem = {
+    pickerId: string;
+    pickerNumber: number;
+    pickerName: string;
+    totalKg: number;
+    totalDue: number;
+    totalPaid: number;
+    balance: number;
+  };
+
+  const quickPayQueue = useMemo<QuickPayQueueItem[]>(() => {
+    const items: QuickPayQueueItem[] = [];
+    pickersForCollection.forEach((p) => {
+      const totals = getPickerTotals(p.id);
+      const paid = (paidByPickerId[p.id] ?? 0) + (quickPayLocalPaidByPickerId[p.id] ?? 0);
+      const balance = Math.max(0, totals.totalPay - paid);
+      if (balance <= 0) return;
+      items.push({
+        pickerId: p.id,
+        pickerNumber: Number(p.pickerNumber ?? 0),
+        pickerName: String(p.pickerName ?? ''),
+        totalKg: totals.totalKg,
+        totalDue: totals.totalPay,
+        totalPaid: paid,
+        balance,
+      });
+    });
+    items.sort((a, b) => a.pickerNumber - b.pickerNumber);
+    return items;
+  }, [pickersForCollection, pickerTotalsById, paidByPickerId, quickPayLocalPaidByPickerId]);
+
+  useEffect(() => {
+    if (!(quickMode && viewMode === 'pay')) return;
+    // Required debug log for queue-based Quick Pay mode.
+    // eslint-disable-next-line no-console
+    console.log('[Quick Pay Queue]', quickPayQueue);
+  }, [quickPayQueue, quickMode, viewMode]);
+
+  useEffect(() => {
+    // Auto-select first unpaid picker in queue when Quick Pay is active.
+    if (!(quickMode && viewMode === 'pay')) return;
+    if (quickPayPartialOpen) return;
+    if (selectedCollection?.status === 'closed') return;
+    if (skipJustClickedRef.current) {
+      skipJustClickedRef.current = false;
+      return;
+    }
+    const first = quickPayQueue[0];
+    if (!first) {
+      setQuickPayPickerId(null);
+      return;
+    }
+    if (quickPayPickerId == null || !quickPayQueue.some((q) => q.pickerId === quickPayPickerId)) {
+      setQuickPayPickerId(first.pickerId);
+    }
+  }, [quickMode, viewMode, quickPayQueue, quickPayPickerId, quickPayPartialOpen, selectedCollection?.status]);
+
+  useEffect(() => {
+    if (!(quickMode && viewMode === 'pay') || !quickPayPickerId) return;
+    const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
+    const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
+    // eslint-disable-next-line no-console
+    console.log('[Quick Pay Current Picker]', picker ? { id: picker.id, pickerNumber: picker.pickerNumber, pickerName: picker.pickerName, balance: queueRow?.balance } : null);
+  }, [quickMode, viewMode, quickPayPickerId, pickersForCollection, quickPayQueue]);
 
   /** Amount paid out for the selected collection: sum(amount_paid) from harvest.picker_payment_entries. */
   const amountPaidOutThisCollection = useMemo(
@@ -850,7 +985,7 @@ export default function HarvestCollectionsPage() {
       return;
     }
     if (!companyId || !selectedCollectionId) return;
-    const num = Number(newPickerNumber || '0');
+    const num = Number(newPickerNumber || nextPickerNumber || '0');
     const name = (newPickerName || '').trim();
     if (num <= 0 || !name) {
       toast({ title: 'Invalid input', description: 'Picker number and name required', variant: 'destructive' });
@@ -868,10 +1003,6 @@ export default function HarvestCollectionsPage() {
 
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddingPicker(true);
-    setAddPickerOpen(false);
-    setNewPickerNumber('');
-    setNewPickerName('');
-    setAddingPicker(false);
     try {
       await addHarvestPicker({
         companyId,
@@ -879,11 +1010,22 @@ export default function HarvestCollectionsPage() {
         pickerNumber: num,
         pickerName: name,
       });
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+      }
       queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
       toast({
         title: isOffline ? 'Picker saved offline' : 'Picker added',
         description: isOffline ? 'It will sync when online.' : undefined,
       });
+      // Fast entry UX: keep dialog open, reset for next picker.
+      const nextNum = num + 1;
+      setNewPickerNumber(String(nextNum));
+      setNewPickerName('');
+      setTimeout(() => {
+        newPickerNumberRef.current?.focus();
+      }, 0);
     } catch (e: any) {
       toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
     } finally {
@@ -1142,19 +1284,40 @@ export default function HarvestCollectionsPage() {
   const openQuickPay = (pickerId: string) => {
     const picker = pickersForCollection.find((p) => p.id === pickerId);
     if (!picker || picker.isPaid) return;
-    const due = getPickerTotals(pickerId).totalPay;
-    const paid = paidByPickerId[pickerId] ?? 0;
-    const balance = Math.max(0, due - paid);
     setQuickPayPickerId(pickerId);
-    setQuickPayAmount(String(balance));
-    setQuickPayShortOfCoins(false);
-    setQuickPayNotePreset('');
+    setQuickPayAmount('');
     setQuickPayOpen(true);
   };
 
-  const handleQuickPaySubmit = async () => {
+  const getNextQuickPayPickerId = (params: {
+    currentPickerId: string;
+    currentPickerNumber: number;
+    removeCurrent: boolean;
+  }): string | null => {
+    const remaining = params.removeCurrent
+      ? quickPayQueue.filter((q) => q.pickerId !== params.currentPickerId)
+      : quickPayQueue;
+    if (remaining.length === 0) return null;
+
+    const currentIndex = remaining.findIndex((q) => q.pickerId === params.currentPickerId);
+    if (currentIndex === -1) {
+      return remaining[0]?.pickerId ?? null;
+    }
+
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < remaining.length) {
+      return remaining[nextIndex].pickerId;
+    }
+
+    // Wrap around to the first in queue.
+    return remaining[0]?.pickerId ?? null;
+  };
+
+  const handleQuickPaySubmit = async (amountOverride?: number) => {
     if (!quickPayPickerId || !companyId || !selectedCollectionId || !canPayPickers) return;
-    const amount = Math.round(Number(quickPayAmount || '0'));
+    const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
+    const balance = queueRow?.balance ?? 0;
+    const amount = Math.round(Number(amountOverride ?? quickPayAmount ?? '0'));
     if (amount <= 0) {
       toast({ title: 'Invalid amount', description: 'Enter an amount greater than 0.', variant: 'destructive' });
       return;
@@ -1165,7 +1328,7 @@ export default function HarvestCollectionsPage() {
       setQuickPayOpen(false);
       return;
     }
-    const note = quickPayNotePreset.trim() || undefined;
+    const amountClamped = balance > 0 ? Math.min(amount, balance) : amount;
     setQuickPaySaving(true);
     try {
       if (isFrenchBeansCollection && effectiveProject?.id && user?.companyId) {
@@ -1174,17 +1337,21 @@ export default function HarvestCollectionsPage() {
           projectId: effectiveProject.id,
           cropType: String(effectiveProject.cropType),
           collectionId: selectedCollectionId,
-          amount,
+          amount: amountClamped,
         });
       }
       await markPickerCashPaid({
         collectionId: selectedCollectionId,
         companyId,
         pickerId: quickPayPickerId,
-        amount,
+        amount: amountClamped,
         projectId: effectiveProject?.id,
-        note: note || undefined,
+        note: undefined,
       });
+      setQuickPayLocalPaidByPickerId((prev) => ({
+        ...prev,
+        [quickPayPickerId]: (prev[quickPayPickerId] ?? 0) + amountClamped,
+      }));
       queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
@@ -1197,13 +1364,26 @@ export default function HarvestCollectionsPage() {
       }
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
+      const remainingBalance = Math.max(0, balance - amountClamped);
+      // eslint-disable-next-line no-console
+      console.log('[Quick Pay Save]', {
+        pickerId: quickPayPickerId,
+        amountPaid: amountClamped,
+        remainingBalance,
+      });
       toast({ title: 'Paid' });
-      setQuickPayOpen(false);
-      setQuickPayPickerId(null);
       setQuickPayAmount('');
-      const nextUnpaid = unpaidPickersByBalance.find((p) => p.id !== quickPayPickerId);
-      if (nextUnpaid) {
-        openQuickPay(nextUnpaid.id);
+      const nextId = getNextQuickPayPickerId({
+        currentPickerId: quickPayPickerId,
+        currentPickerNumber: Number(picker.pickerNumber ?? 0),
+        removeCurrent: remainingBalance <= 0,
+      });
+      if (nextId) {
+        setQuickPayPickerId(nextId);
+        setQuickPayOpen(true);
+      } else {
+        setQuickPayOpen(false);
+        setQuickPayPickerId(null);
       }
     } catch (e: any) {
       toast({ title: 'Payment failed', description: e?.message ?? 'Could not save payment', variant: 'destructive' });
@@ -1212,7 +1392,21 @@ export default function HarvestCollectionsPage() {
     }
   };
 
-  const QUICK_PAY_NOTE_PRESETS = ['Short of coins', 'Advance', 'Balance later', 'Cash paid'] as const;
+  const handleQuickPaySkip = () => {
+    if (!quickPayPickerId) return;
+    const nextId = getNextQuickPayPickerId({
+      currentPickerId: quickPayPickerId,
+      currentPickerNumber: 0,
+      removeCurrent: false,
+    });
+    // If "next" is the same picker (e.g. only one in queue), clear selection so Skip has visible effect.
+    if (nextId === quickPayPickerId || !nextId) {
+      skipJustClickedRef.current = true;
+      setQuickPayPickerId(null);
+      return;
+    }
+    setQuickPayPickerId(nextId);
+  };
 
   const handleMarkMultiplePaid = async (pickerIds: string[]) => {
     if (!canPayPickers) {
@@ -1926,7 +2120,7 @@ export default function HarvestCollectionsPage() {
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => setStatsExpanded((e) => !e)}
@@ -1936,29 +2130,45 @@ export default function HarvestCollectionsPage() {
               >
                 {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </button>
-              {canViewFinancials && isFrenchBeansCollection && selectedCollection && (
-                <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
-                    onClick={() => {
-                      setCashDialogCollection(selectedCollection as any);
-                      // For top-up UX, keep input empty so user types the new amount to add
-                      setCashAmount('');
-                      setCashSource('bank');
-                      setCashDialogVisible(false);
-                    }}
-                  >
-                    <Banknote className="h-3 w-3" />
-                    <span>Wallet</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-80 md:w-[420px] text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50"
-                  align="center"
-                  side="bottom"
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setQuickMode((q) => !q)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full font-semibold shadow-md border-2 transition-all touch-manipulation',
+                    quickMode
+                      ? 'bg-sky-500 text-white border-sky-600 ring-1 ring-sky-400/60'
+                      : 'bg-muted/80 text-muted-foreground border-border hover:bg-muted'
+                  )}
+                  title={quickMode ? 'Quick Mode on' : 'Quick Mode off'}
+                  aria-pressed={quickMode}
                 >
+                  <Zap className="h-3.5 w-3.5 shrink-0" />
+                  Quick Mode
+                </button>
+                {canViewFinancials && isFrenchBeansCollection && selectedCollection && (
+                  <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                      onClick={() => {
+                        setCashDialogCollection(selectedCollection as any);
+                        // For top-up UX, keep input empty so user types the new amount to add
+                        setCashAmount('');
+                        setCashSource('bank');
+                        setCashDialogVisible(false);
+                      }}
+                    >
+                      <Banknote className="h-3 w-3" />
+                      <span>Wallet</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-80 md:w-[420px] text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50"
+                    align="center"
+                    side="bottom"
+                  >
                   <div className="space-y-4 text-center py-3">
                     <div className="flex flex-col items-center gap-3">
                       <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
@@ -1988,9 +2198,10 @@ export default function HarvestCollectionsPage() {
                       </div>
                     </div>
                   </div>
-                </PopoverContent>
-              </Popover>
-              )}
+                  </PopoverContent>
+                </Popover>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2050,21 +2261,6 @@ export default function HarvestCollectionsPage() {
                   Buyer
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setQuickMode((q) => !q)}
-                className={cn(
-                  'flex-shrink-0 min-h-11 sm:min-h-10 px-3 sm:px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98] ml-auto',
-                  quickMode
-                    ? 'bg-sky-500 text-white border-sky-600 ring-2 ring-sky-400/50'
-                    : 'bg-muted/80 text-muted-foreground border-border hover:bg-muted'
-                )}
-                title={quickMode ? 'Quick Mode on' : 'Quick Mode off'}
-                aria-pressed={quickMode}
-              >
-                <Zap className="h-3.5 w-3.5 shrink-0" />
-                Quick Mode
-              </button>
             </div>
 
             {canManageIntake && (
@@ -2246,41 +2442,6 @@ export default function HarvestCollectionsPage() {
                   </div>
                 )}
               </div>
-              {recentPickersForIntake.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  <span className="text-xs text-muted-foreground font-medium shrink-0">Recent:</span>
-                  {recentPickersForIntake.slice(0, 8).map((p) => {
-                    const nextTrip = nextTripForPicker[p.id] ?? 1;
-                    const isPaid = p.isPaid;
-                    const totals = getPickerTotals(p.id);
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        disabled={isPaid || selectedCollection?.status === 'closed'}
-                        onClick={() => {
-                          setWeighPickerId(p.id);
-                          setWeighTrip(String(nextTrip));
-                          setWeighKg('');
-                          setWeighOpenedFromCard(true);
-                          setAddWeighOpen(true);
-                          setRecentPickerIds((prev) => [p.id, ...prev.filter((id) => id !== p.id)].slice(0, 10));
-                        }}
-                        className={cn(
-                          'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium touch-manipulation border transition-all',
-                          isPaid
-                            ? 'opacity-60 cursor-not-allowed bg-muted border-border'
-                            : 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-200'
-                        )}
-                      >
-                        <span className="tabular-nums">#{p.pickerNumber}</span>
-                        <span className="truncate max-w-[4rem]">{p.pickerName}</span>
-                        <span className="text-muted-foreground tabular-nums">{totals.totalKg.toFixed(1)} kg</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
               {pickersForCollection.length === 0 ? (
                 <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
               ) : (
@@ -2357,6 +2518,309 @@ export default function HarvestCollectionsPage() {
 
             {canPayPickers && (
             <TabsContent value="pay" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
+              {quickMode ? (
+                <>
+                  {/* Quick Pay mode: inline, queue-based fast payments; summary collapsed by default */}
+                  <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuickPaySummaryExpanded((e) => !e)}
+                      className="w-full flex items-center justify-between gap-2 text-left rounded-md hover:bg-amber-100/50 dark:hover:bg-amber-900/20 -mx-1 px-1 py-0.5 transition-colors"
+                      aria-expanded={quickPaySummaryExpanded}
+                      title={quickPaySummaryExpanded ? 'Hide summary' : 'Show summary'}
+                    >
+                      <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                        <Banknote className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        Quick Pay
+                      </h3>
+                      {quickPaySummaryExpanded ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
+                    </button>
+                    {quickPaySummaryExpanded && (
+                      <>
+                        <p className="text-sm text-muted-foreground">
+                          Pay pickers in number order. Use Pay Full or Pay Partial, then move to the next unpaid picker.
+                        </p>
+                        {quickPayQueue.length === 0 ? (
+                          <p className="text-sm font-medium text-foreground">No unpaid pickers — queue is empty.</p>
+                        ) : (
+                          <p className="text-sm font-medium text-foreground tabular-nums">
+                            {quickPayQueue.length} picker{quickPayQueue.length !== 1 ? 's' : ''} in queue · KES{' '}
+                            {(collectionFinancials.pickerBalance ?? 0).toLocaleString()} remaining
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Quick Pay card: always visible (like Quick Intake); content or empty state */}
+                  <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-4">
+                  {quickPayQueue.length > 0 && quickPayPickerId && (() => {
+                    const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
+                    if (!picker) return null;
+                    const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
+                    const pickerRate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
+                    const due = queueRow?.totalDue ?? getPickerTotals(quickPayPickerId).totalPay;
+                    const paid = queueRow?.totalPaid ?? ((paidByPickerId[quickPayPickerId] ?? 0) + (quickPayLocalPaidByPickerId[quickPayPickerId] ?? 0));
+                    const balance = Math.max(0, queueRow?.balance ?? (due - paid));
+                    const remainingKg = pickerRate > 0 ? balance / pickerRate : 0;
+
+                    const toTime = (t: any): number => {
+                      if (t == null) return 0;
+                      if (typeof t === 'object' && 'toMillis' in t) return (t as { toMillis: () => number }).toMillis();
+                      if (t instanceof Date) return t.getTime();
+                      return Number(t) || 0;
+                    };
+
+                    const entries = weighEntriesForCollection
+                      .filter((e) => String(e.pickerId ?? '') === quickPayPickerId)
+                      .slice()
+                      .sort((a, b) => toTime(a.recordedAt) - toTime(b.recordedAt))
+                      .map((e) => {
+                        const kg = Number(e.weightKg ?? 0);
+                        const amt = Math.round(kg * pickerRate);
+                        return {
+                          id: String(e.id ?? `${e.pickerId}-${toTime(e.recordedAt)}-${kg}`),
+                          kg,
+                          amount: amt,
+                        };
+                      })
+                      .filter((x) => Number.isFinite(x.kg) && x.kg > 0);
+
+                    return (
+                      <>
+                        <div className="flex flex-col items-center text-center gap-2">
+                          <div className="h-14 w-14 rounded-full bg-emerald-600 text-emerald-50 flex items-center justify-center text-2xl font-extrabold tabular-nums shadow">
+                            {picker.pickerNumber}
+                          </div>
+                          <p className="text-base font-semibold text-foreground leading-tight truncate w-full">
+                            #{picker.pickerNumber} {picker.pickerName}
+                          </p>
+                        </div>
+
+                        <div className="rounded-lg border border-border bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">Balance</p>
+                          <p className="text-2xl font-extrabold tabular-nums text-foreground">KES {balance.toLocaleString()}</p>
+                          <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                            ({remainingKg.toFixed(1)}kg remaining)
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                            <div className="rounded-md bg-background/60 border border-border p-2">
+                              <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
+                              <p className="font-semibold tabular-nums">KES {due.toLocaleString()}</p>
+                            </div>
+                            <div className="rounded-md bg-background/60 border border-border p-2">
+                              <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
+                              <p className="font-semibold tabular-nums">KES {paid.toLocaleString()}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              onClick={() => handleQuickPaySubmit(balance)}
+                              disabled={quickPaySaving || balance <= 0}
+                              className="min-h-12 w-full font-semibold touch-manipulation"
+                            >
+                              {quickPaySaving ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  Paying…
+                                </>
+                              ) : (
+                                'Pay Full'
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setQuickPayPartialBalance(balance);
+                                setQuickPayAmount('');
+                                setQuickPayPartialOpen(true);
+                              }}
+                              disabled={quickPaySaving || balance <= 0}
+                              className="min-h-12 w-full font-semibold touch-manipulation"
+                            >
+                              Pay Partial
+                            </Button>
+                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={handleQuickPaySkip}
+                            disabled={quickPaySaving}
+                            className="min-h-12 w-full touch-manipulation"
+                          >
+                            Skip
+                          </Button>
+                        </div>
+
+                        {quickPayPartialOpen && (
+                          <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                            <Label htmlFor="quick-pay-partial-amount-inline">Enter amount (KES)</Label>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Max: KES {quickPayPartialBalance.toLocaleString()}
+                            </p>
+                            <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                              Remaining after pay: KES{' '}
+                              {Math.max(0, quickPayPartialBalance - Math.round(Number(quickPayAmount || '0'))).toLocaleString()}
+                            </p>
+                            <Input
+                              id="quick-pay-partial-amount-inline"
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              max={quickPayPartialBalance}
+                              value={quickPayAmount}
+                              onChange={(e) => setQuickPayAmount(e.target.value)}
+                              className="mt-1 min-h-11 text-base font-semibold tabular-nums touch-manipulation"
+                              autoFocus
+                            />
+                            <div className="flex gap-2 mt-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  setQuickPayPartialOpen(false);
+                                  setQuickPayAmount('');
+                                  setQuickPayPartialBalance(0);
+                                }}
+                                disabled={quickPaySaving}
+                                className="min-h-10 flex-1 touch-manipulation"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={async () => {
+                                  const raw = Math.round(Number(quickPayAmount || '0'));
+                                  const amt =
+                                    quickPayPartialBalance > 0 ? Math.min(raw, quickPayPartialBalance) : raw;
+                                  if (amt <= 0) {
+                                    toast({
+                                      title: 'Invalid amount',
+                                      description: 'Enter an amount greater than 0.',
+                                      variant: 'destructive',
+                                    });
+                                    return;
+                                  }
+                                  await handleQuickPaySubmit(amt);
+                                  setQuickPayPartialOpen(false);
+                                  setQuickPayAmount('');
+                                  setQuickPayPartialBalance(0);
+                                }}
+                                disabled={quickPaySaving || !quickPayAmount || Number(quickPayAmount) <= 0}
+                                className="min-h-10 flex-1 font-semibold touch-manipulation"
+                              >
+                                {quickPaySaving ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    Paying…
+                                  </>
+                                ) : (
+                                  'Confirm'
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-foreground">Entries</p>
+                          <div className="rounded-lg border border-border bg-card overflow-hidden">
+                            {entries.length === 0 ? (
+                              <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
+                            ) : (
+                              <div className="max-h-[220px] overflow-y-auto">
+                                {entries.map((e) => (
+                                  <div
+                                    key={e.id}
+                                    className="px-3 py-2 border-b border-border last:border-b-0 flex items-center justify-between gap-3"
+                                  >
+                                    <span className="text-sm tabular-nums text-foreground">
+                                      {e.kg.toFixed(1)}kg
+                                    </span>
+                                    <span className="text-sm tabular-nums font-semibold text-foreground">
+                                      → {e.amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                  {!(quickPayQueue.length > 0 && quickPayPickerId) && (
+                    <>
+                      <div className="flex flex-col items-center text-center gap-2 opacity-70">
+                        <div className="h-14 w-14 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl font-extrabold tabular-nums shadow-inner">
+                          –
+                        </div>
+                        <p className="text-base font-semibold text-muted-foreground leading-tight">
+                          No unpaid pickers in queue
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-muted/30 p-3 opacity-70">
+                        <p className="text-xs text-muted-foreground">Balance</p>
+                        <p className="text-2xl font-extrabold tabular-nums text-muted-foreground">KES 0</p>
+                        <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                          (0.0kg remaining)
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                          <div className="rounded-md bg-background/60 border border-border p-2">
+                            <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
+                            <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
+                          </div>
+                          <div className="rounded-md bg-background/60 border border-border p-2">
+                            <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
+                            <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 opacity-70">
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button
+                            disabled
+                            className="min-h-12 w-full font-semibold touch-manipulation"
+                          >
+                            Pay Full
+                          </Button>
+                          <Button
+                            variant="outline"
+                            disabled
+                            className="min-h-12 w-full font-semibold touch-manipulation"
+                          >
+                            Pay Partial
+                          </Button>
+                        </div>
+                        <Button
+                          variant="outline"
+                          disabled
+                          className="min-h-12 w-full touch-manipulation"
+                        >
+                          Skip
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2 opacity-70">
+                        <p className="text-sm font-semibold text-muted-foreground">Entries</p>
+                        <div className="rounded-lg border border-border bg-card overflow-hidden">
+                          <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  </div>
+                </>
+              ) : (
+                <>
               {payUnpaidAndGroups.unpaid.length > 0 && (
                 <div className="rounded-xl border border-border bg-muted/30 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
                   <span className="font-medium text-muted-foreground">
@@ -2570,6 +3034,8 @@ export default function HarvestCollectionsPage() {
                   </>
                 )}
               </div>
+                </>
+              )}
             </TabsContent>
             )}
 
@@ -2732,6 +3198,7 @@ export default function HarvestCollectionsPage() {
             <div>
               <Label>Picker number</Label>
               <Input
+                ref={newPickerNumberRef}
                 type="number"
                 min="1"
                 value={newPickerNumber}
@@ -2751,9 +3218,8 @@ export default function HarvestCollectionsPage() {
             </div>
           </div>
           <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
-            <Button variant="outline" onClick={() => setAddPickerOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddPicker} disabled={addingPicker}>
-              {addingPicker ? 'Adding…' : 'Add'}
+            <Button onClick={handleAddPicker} disabled={addingPicker} className="min-h-11 w-full font-semibold touch-manipulation">
+              {addingPicker ? 'Saving…' : 'Next'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2851,128 +3317,6 @@ export default function HarvestCollectionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Quick Pay — ultra-fast single picker payment */}
-      <Dialog
-        open={quickPayOpen}
-        onOpenChange={(open) => {
-          if (quickPaySaving) return;
-          setQuickPayOpen(open);
-          if (!open) {
-            setQuickPayPickerId(null);
-            setQuickPayAmount('');
-            setQuickPayNotePreset('');
-          }
-        }}
-      >
-        <DialogContent className="w-[92vw] max-w-sm rounded-2xl mx-auto p-0 gap-0 overflow-hidden">
-          {quickPayPickerId && (() => {
-            const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
-            if (!picker) return null;
-            const due = getPickerTotals(quickPayPickerId).totalPay;
-            const paid = paidByPickerId[quickPayPickerId] ?? 0;
-            const balance = Math.max(0, due - paid);
-            return (
-              <>
-                <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
-                  <DialogTitle>Quick Pay</DialogTitle>
-                  <DialogDescription>
-                    #{picker.pickerNumber} {picker.pickerName} · {getPickerTotals(quickPayPickerId).totalKg.toFixed(1)} kg
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="px-4 space-y-4 pb-2">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded-lg bg-muted/50 p-2">
-                      <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
-                      <p className="font-semibold tabular-nums">KES {due.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg bg-muted/50 p-2">
-                      <p className="text-[10px] text-muted-foreground uppercase">Already paid</p>
-                      <p className="font-semibold tabular-nums">KES {paid.toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <p className="text-xs font-medium text-muted-foreground">Balance: KES {balance.toLocaleString()}</p>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 min-h-10 touch-manipulation"
-                      onClick={() => setQuickPayAmount(String(balance))}
-                    >
-                      Pay Full
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 min-h-10 touch-manipulation"
-                      onClick={() => setQuickPayAmount(String(Math.round(balance / 2)))}
-                    >
-                      Pay Half
-                    </Button>
-                  </div>
-                  <div>
-                    <Label>Amount (KES)</Label>
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      value={quickPayAmount}
-                      onChange={(e) => setQuickPayAmount(e.target.value)}
-                      className="mt-1 min-h-12 text-lg font-semibold tabular-nums touch-manipulation"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="quick-pay-short"
-                      checked={quickPayShortOfCoins}
-                      onChange={(e) => setQuickPayShortOfCoins(e.target.checked)}
-                      className="rounded border-input"
-                    />
-                    <Label htmlFor="quick-pay-short" className="text-sm cursor-pointer">Short of coins</Label>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Note (optional)</Label>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {QUICK_PAY_NOTE_PRESETS.map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setQuickPayNotePreset(quickPayNotePreset === preset ? '' : preset)}
-                          className={cn(
-                            'px-2.5 py-1.5 rounded-lg text-xs font-medium border touch-manipulation',
-                            quickPayNotePreset === preset
-                              ? 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-900/50 dark:border-amber-700 dark:text-amber-100'
-                              : 'bg-muted/50 border-border hover:bg-muted'
-                          )}
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border gap-2">
-                  <Button variant="outline" onClick={() => setQuickPayOpen(false)} disabled={quickPaySaving} className="min-h-11 touch-manipulation">
-                    Cancel
-                  </Button>
-                  <Button onClick={handleQuickPaySubmit} disabled={quickPaySaving || !quickPayAmount || Number(quickPayAmount) <= 0} className="min-h-12 flex-1 font-semibold touch-manipulation">
-                    {quickPaySaving ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        Paying…
-                      </>
-                    ) : (
-                      `Pay KES ${Number(quickPayAmount || 0).toLocaleString()}`
-                    )}
-                  </Button>
-                </DialogFooter>
-              </>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
