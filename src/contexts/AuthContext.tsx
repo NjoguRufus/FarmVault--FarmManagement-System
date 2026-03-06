@@ -20,6 +20,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   switchRole: (role: UserRole) => void;
+  /** Refetch profile avatar and update user.avatar (e.g. after avatar upload). */
+  refreshUserAvatar: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -296,6 +298,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // and treat them as a global developer user (role = 'developer').
         if (dev) {
           const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
+          const devProfileAvatar = await (async () => {
+            try {
+              const { data: r } = await db.core().from('profiles').select('avatar_url').eq('clerk_user_id', userId).maybeSingle();
+              return r?.avatar_url ?? null;
+            } catch {
+              return null;
+            }
+          })();
           const devUser: User = {
             id: userId,
             email: fallbackEmail,
@@ -303,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: 'developer',
             employeeRole: undefined,
             companyId: null,
-            avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
+            avatar: (devProfileAvatar || clerkImageUrl) ? String(devProfileAvatar || clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
           setUser(devUser);
@@ -335,6 +345,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (upsertError && import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn('[Auth] Profile upsert warning:', upsertError);
+        }
+
+        // 3b) Load profile avatar_url for avatar priority: custom upload > Clerk/Google imageUrl
+        let profileAvatarUrl: string | null = null;
+        try {
+          const { data: profileRow } = await db
+            .core()
+            .from('profiles')
+            .select('avatar_url')
+            .eq('clerk_user_id', userId)
+            .maybeSingle();
+          profileAvatarUrl = profileRow?.avatar_url ?? null;
+        } catch {
+          // Non-blocking; fall back to Clerk image
         }
 
         // 4) Single source of truth: current_context() returns { company_id, role } from core.profiles + core.company_members.
@@ -369,6 +393,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
+        // Avatar priority: 1) profile.avatar_url (custom upload), 2) Clerk/Google imageUrl, 3) UI shows initials
+        const resolvedAvatar = profileAvatarUrl || clerkImageUrl || null;
         const mapped: User = {
           id: userId,
           email: fallbackEmail,
@@ -376,7 +402,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: normalizedRole,
           employeeRole: undefined,
           companyId: hasCompanyId && hasRole ? contextCompanyId : null,
-          avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
+          avatar: resolvedAvatar ? String(resolvedAvatar) : undefined,
           createdAt: new Date(),
         };
 
@@ -504,6 +530,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshUserAvatar = async () => {
+    if (!userId || !user) return;
+    try {
+      const { data: profileRow } = await db
+        .core()
+        .from('profiles')
+        .select('avatar_url')
+        .eq('clerk_user_id', userId)
+        .maybeSingle();
+      const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
+      // Same priority: profile.avatar_url > Clerk imageUrl > (UI initials)
+      const resolvedAvatar = profileRow?.avatar_url || clerkImageUrl || null;
+      const next = { ...user, avatar: resolvedAvatar ? String(resolvedAvatar) : undefined };
+      setUser(next);
+      writeCachedUser(next);
+    } catch {
+      // Non-blocking
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -517,6 +563,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         switchRole,
+        refreshUserAvatar,
       }}
     >
       {children}
