@@ -16,6 +16,7 @@ import {
   writeBatch,
   type Query,
 } from '@/lib/firestore-stub';
+import { db as dbSupabase } from '@/lib/db';
 
 const LEDGER_COLLECTION = 'projectWalletLedger';
 const META_COLLECTION = 'projectWalletMeta';
@@ -434,10 +435,8 @@ export function subscribeWalletLedger(
     where('projectId', '==', projectId),
   );
 
-  // Fire and forget: migration writes will flow through this listener.
-  void ensureProjectWalletMigration(projectId, companyId).catch((err) => {
-    console.error('[projectWallet] migration check failed', err);
-  });
+  // Fire and forget: migration only needed for legacy Firestore wallet; skip to avoid Firebase stub errors when using Supabase.
+  void ensureProjectWalletMigration(projectId, companyId).catch(() => {});
 
   return onSnapshot(
     q,
@@ -458,4 +457,95 @@ export function subscribeWalletLedger(
       }
     },
   );
+}
+
+// ---- Supabase: finance.project_wallet_ledger (source of truth for Harvest Cash Wallet) ----
+
+type FinanceLedgerRow = {
+  id: string;
+  company_id: string;
+  project_id: string;
+  entry_type: 'credit' | 'debit';
+  amount: number;
+  note: string | null;
+  ref_type: string | null;
+  ref_id: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+/**
+ * Fetch project wallet ledger from finance.project_wallet_ledger.
+ * Use for Harvest Cash Wallet display (balance = credits - debits).
+ */
+export async function getWalletLedgerEntriesSupabase(
+  projectId: string,
+  companyId: string,
+): Promise<ProjectWalletLedgerEntry[]> {
+  if (!projectId || !companyId) return [];
+  const { data, error } = await dbSupabase
+    .finance()
+    .from('project_wallet_ledger')
+    .select('id,company_id,project_id,entry_type,amount,note,ref_type,ref_id,created_by,created_at')
+    .eq('company_id', companyId)
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  const rows = (data ?? []) as FinanceLedgerRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    projectId: row.project_id,
+    type: (row.entry_type.toUpperCase() as WalletEntryType),
+    amount: Number(row.amount ?? 0),
+    reason: row.note ?? '',
+    refId: row.ref_id ?? undefined,
+    createdAt: row.created_at,
+    createdAtLocal: new Date(row.created_at).getTime(),
+    createdByUid: row.created_by ?? '',
+    createdByName: '',
+  }));
+}
+
+export type FinanceWalletTotals = {
+  totalCredits: number;
+  totalDebits: number;
+  balance: number;
+};
+
+/**
+ * Compute wallet totals from finance.project_wallet_ledger.
+ * totalCredits = sum(amount where entry_type = 'credit')
+ * totalDebits = sum(amount where entry_type = 'debit')
+ * balance = totalCredits - totalDebits
+ */
+export async function getFinanceWalletTotals(
+  projectId: string,
+  companyId: string,
+): Promise<FinanceWalletTotals> {
+  if (!projectId || !companyId) {
+    return { totalCredits: 0, totalDebits: 0, balance: 0 };
+  }
+  const { data, error } = await dbSupabase
+    .finance()
+    .from('project_wallet_ledger')
+    .select('entry_type,amount')
+    .eq('company_id', companyId)
+    .eq('project_id', projectId);
+
+  if (error) throw error;
+  const rows = (data ?? []) as { entry_type: string; amount: number }[];
+  let totalCredits = 0;
+  let totalDebits = 0;
+  rows.forEach((r) => {
+    const amt = Number(r.amount ?? 0) || 0;
+    if (String(r.entry_type).toLowerCase() === 'credit') totalCredits += amt;
+    else totalDebits += amt;
+  });
+  return {
+    totalCredits,
+    totalDebits,
+    balance: totalCredits - totalDebits,
+  };
 }

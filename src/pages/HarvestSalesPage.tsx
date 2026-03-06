@@ -37,6 +37,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { hasHarvestCollectionsModule } from '@/lib/cropModules';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
+import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
 
 const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
@@ -134,8 +136,56 @@ export default function HarvestSalesPage() {
     return stock;
   }, [harvests, sales]);
 
-  const totalHarvest = harvests.reduce((sum, h) => sum + h.quantity, 0);
-  const totalSales = sales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const firestoreTotalHarvest = harvests.reduce((sum, h) => sum + h.quantity, 0);
+  const firestoreTotalSales = sales.reduce((sum, s) => sum + s.totalAmount, 0);
+
+  const { data: harvestSalesTotals } = useQuery({
+    queryKey: ['harvestSalesTotals', companyId, activeProject?.id],
+    queryFn: () =>
+      getCompanyCollectionFinancialsAggregate(companyId ?? '', activeProject?.id ?? null),
+    enabled: Boolean(showHarvestCollections && companyId),
+  });
+
+  const totalHarvestKg = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.totalHarvestKg
+    : firestoreTotalHarvest;
+  const totalSalesAmount = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.totalSales
+    : firestoreTotalSales;
+  const completedSalesAmount = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.completedSales
+    : sales.filter((s) => s.status === 'completed').reduce((sum, s) => sum + s.totalAmount, 0);
+  const pendingSalesAmount = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.pendingSales
+    : sales.filter((s) => s.status === 'pending').reduce((sum, s) => sum + s.totalAmount, 0);
+  const completedSalesCount = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.collections.filter((c) => c.isClosed).length
+    : sales.filter((s) => s.status === 'completed').length;
+  const pendingSalesCount = showHarvestCollections && harvestSalesTotals
+    ? harvestSalesTotals.collections.filter((c) => !c.isClosed).length
+    : sales.filter((s) => s.status === 'pending').length;
+
+  const collectionRecords = (showHarvestCollections && harvestSalesTotals?.collections) ?? [];
+
+  useEffect(() => {
+    if (import.meta.env.DEV && showHarvestCollections) {
+      console.log('[Harvest Sales Totals]', {
+        totalHarvestKg,
+        totalSales: totalSalesAmount,
+        completedSales: completedSalesAmount,
+        pendingSales: pendingSalesAmount,
+      });
+      console.log('[Harvest Sales Records]', {
+        companyId,
+        projectId: activeProject?.id,
+        rowCount: collectionRecords.length,
+        data: collectionRecords,
+      });
+    }
+  }, [showHarvestCollections, companyId, activeProject?.id, collectionRecords.length, totalHarvestKg, totalSalesAmount, completedSalesAmount, pendingSalesAmount]);
+
+  const totalHarvest = totalHarvestKg;
+  const totalSales = totalSalesAmount;
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -1499,21 +1549,80 @@ export default function HarvestSalesPage() {
         {canSeeSalesRecords && (
           <SimpleStatCard
             title="Completed Sales"
-            value={sales.filter(s => s.status === 'completed').length}
+            value={showHarvestCollections && harvestSalesTotals ? formatCurrency(completedSalesAmount) : String(completedSalesCount)}
             layout="vertical"
           />
         )}
         {canSeeSalesRecords && (
           <SimpleStatCard
             title="Pending Sales"
-            value={sales.filter(s => s.status === 'pending').length}
+            value={showHarvestCollections && harvestSalesTotals ? formatCurrency(pendingSalesAmount) : String(pendingSalesCount)}
             valueVariant="warning"
             layout="vertical"
           />
         )}
       </div>
 
-      {/* Harvests Section */}
+      {/* French Beans: Harvest Collections (Supabase) */}
+      {showHarvestCollections && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Harvest Collections</h3>
+          {collectionRecords.length === 0 && !loadingHarvests && (
+            <p className="text-sm text-muted-foreground">No collections yet. Create one from Harvest Collections.</p>
+          )}
+          {collectionRecords.length > 0 && (
+            <div className="fv-card overflow-x-auto">
+              <table className="fv-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Total kg</th>
+                    <th>Buyer price/kg</th>
+                    <th>Revenue</th>
+                    <th>Paid out</th>
+                    <th>Profit</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectionRecords
+                    .sort((a, b) => String(b.collectionDate).localeCompare(String(a.collectionDate)))
+                    .map((row) => (
+                      <tr
+                        key={row.collectionId}
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => navigate(`/harvest-collections?collection=${row.collectionId}`)}
+                      >
+                        <td>{formatDate(row.collectionDate)}</td>
+                        <td className="font-medium">{row.totalHarvestQty.toLocaleString()}</td>
+                        <td>{row.buyerPricePerUnit > 0 ? formatCurrency(row.buyerPricePerUnit) : '—'}</td>
+                        <td>{formatCurrency(row.revenue)}</td>
+                        <td>{formatCurrency(row.totalPaidOut)}</td>
+                        <td className={row.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                          {formatCurrency(row.profit)}
+                        </td>
+                        <td>
+                          <span className={cn('fv-badge', row.isClosed ? 'fv-badge--active' : 'fv-badge--warning')}>
+                            {row.status === 'closed' ? 'Closed' : 'Open'}
+                          </span>
+                        </td>
+                        <td>
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/harvest-collections?collection=${row.collectionId}`); }}>
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Harvests Section (Firestore – non–French Beans or legacy) */}
+      {!showHarvestCollections && (
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
           <h3 className="text-lg font-semibold">Harvest Records</h3>
@@ -1733,6 +1842,7 @@ export default function HarvestSalesPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Sales Section */}
       {canSeeSalesRecords ? (

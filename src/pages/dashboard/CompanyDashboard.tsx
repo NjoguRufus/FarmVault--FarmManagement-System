@@ -52,6 +52,8 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
 import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -427,11 +429,33 @@ export function CompanyDashboard() {
     return 'normal';
   }, [filteredExpenses]);
 
-  const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const netBalance = totalSales - totalExpenses;
+  const { data: fbTotals } = useQuery({
+    queryKey: ['dashboardFinancialTotals', companyId],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? ''),
+    enabled: Boolean(companyId),
+  });
+
+  const firestoreExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const firestoreSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const totalRevenue = firestoreSales + (fbTotals?.totalRevenue ?? 0);
+  const totalExpenses = firestoreExpenses + (fbTotals?.totalExpenses ?? 0);
+  const profitLoss = totalRevenue - totalExpenses;
+  const netBalance = profitLoss;
+  const totalSales = totalRevenue;
   const totalBudget = filteredProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
   const remainingBudget = totalBudget - totalExpenses;
+
+  useEffect(() => {
+    if (import.meta.env.DEV && (fbTotals?.totalRevenue !== undefined || fbTotals?.totalExpenses !== undefined)) {
+      console.log('[Dashboard Financial Totals]', {
+        totalRevenue,
+        totalExpenses,
+        profitLoss,
+        fbRevenue: fbTotals?.totalRevenue,
+        fbExpenses: fbTotals?.totalExpenses,
+      });
+    }
+  }, [fbTotals?.totalRevenue, fbTotals?.totalExpenses, totalRevenue, totalExpenses, profitLoss]);
 
   const recentTransactions = useMemo((): RecentTransactionItem[] => {
     const items: RecentTransactionItem[] = [];

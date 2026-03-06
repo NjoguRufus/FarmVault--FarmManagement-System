@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
+import { useQuery } from '@tanstack/react-query';
+import { getFinanceExpenses } from '@/services/financeExpenseService';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
@@ -152,13 +154,41 @@ export default function ExpensesPage() {
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: allExpenses = [], isLoading } = useCollection<ExpenseWithSyncState>('expenses', 'expenses', scope);
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
-  const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
-
+  const expensesCollection = useCollection<ExpenseWithSyncState>('expenses', 'expenses', scope);
+  const allExpensesFirestore = expensesCollection.data ?? [];
+  const loadingFirestore = expensesCollection.isLoading;
+  const stagesCollection = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const allStages = stagesCollection.data ?? [];
+  const workLogsCollection = useCollection<WorkLog>('workLogs', 'workLogs', scope);
+  const allWorkLogs = workLogsCollection.data ?? [];
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date } | undefined>();
+  const { data: allExpensesSupabase = [], isLoading: loadingSupabase } = useQuery({
+    queryKey: ['financeExpenses', companyId ?? '', activeProject?.id ?? ''],
+    queryFn: () => getFinanceExpenses(companyId ?? '', activeProject?.id ?? null),
+    enabled: Boolean(companyId),
+  });
+
+  const allExpenses = useMemo(() => {
+    const firestore = allExpensesFirestore ?? [];
+    const supabase = (allExpensesSupabase ?? []) as (ExpenseWithSyncState & { date: Date | string })[];
+    return [...firestore, ...supabase];
+  }, [allExpensesFirestore, allExpensesSupabase]);
+
+  const isLoading = loadingFirestore || loadingSupabase;
+
+  useEffect(() => {
+    if (import.meta.env.DEV && companyId) {
+      console.log('[Expenses Page Query]', {
+        companyId,
+        projectId: activeProject?.id,
+        firestoreCount: allExpensesFirestore.length,
+        supabaseCount: (allExpensesSupabase ?? []).length,
+        rowCount: allExpenses.length,
+      });
+    }
+  }, [companyId, activeProject?.id, allExpensesFirestore.length, allExpensesSupabase?.length, allExpenses.length]);
 
   // Filter expenses based on user role
   // Brokers should only see expenses they incurred (related to their sales activities)
@@ -328,10 +358,12 @@ export default function ExpensesPage() {
   const unpaidWorkLogs = useMemo(() => {
     if (!activeProject) return [];
     return allWorkLogs.filter(
-      w => w.projectId === activeProject.id && 
-      w.companyId === activeProject.companyId &&
-      !w.paid &&
-      w.totalPrice && w.totalPrice > 0
+      (w) =>
+        w.projectId === activeProject.id &&
+        w.companyId === activeProject.companyId &&
+        !w.paid &&
+        w.totalPrice != null &&
+        w.totalPrice > 0
     ).sort((a, b) => {
       const dateA = toDate(a.date);
       const dateB = toDate(b.date);

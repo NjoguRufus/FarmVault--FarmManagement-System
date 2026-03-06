@@ -2,15 +2,34 @@
  * French Beans harvest collections – Supabase-only.
  * Tables: harvest.harvest_collections, harvest.harvest_pickers,
  * harvest.picker_intake_entries, harvest.picker_payment_entries.
+ * Wallet: finance.project_wallets + finance.project_wallet_ledger (source of truth).
  * Prefers RPCs (harvest.record_intake, harvest.record_payment) when recording intake/payment by picker_id.
  * No Firebase/Firestore.
  */
 
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import type { HarvestCollectionStatus } from '@/types';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
+
+/** Ensure a row exists in finance.project_wallets for company_id + project_id (for Harvest Cash). */
+async function ensureProjectWallet(companyId: string, projectId: string): Promise<void> {
+  const { data: existing } = await db
+    .finance()
+    .from('project_wallets')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('project_id', projectId)
+    .maybeSingle();
+  if (existing?.id) return;
+  const { error } = await db
+    .finance()
+    .from('project_wallets')
+    .insert({ company_id: companyId, project_id: projectId, currency: 'KES' });
+  if (error) throw error;
+}
 
 // ---- Types (DB row shapes) ----
 
@@ -389,7 +408,198 @@ export async function listPickerPaymentsByCollectionIds(collectionIds: string[])
   return (data ?? []) as DbPaymentEntry[];
 }
 
-/** Record a single picker payment (marks as paid in DB). Prefers RPC so server sets paid_by. */
+// ---- Collection financials (DB-backed) ----
+
+export type HarvestCollectionFinancials = {
+  totalHarvestQty: number;
+  pickerPricePerUnit: number;
+  buyerPricePerUnit: number;
+  totalPickerDue: number;
+  totalPaidOut: number;
+  pickerBalance: number;
+  revenue: number;
+  profit: number;
+};
+
+const PICKER_PRICE_FALLBACK = 20;
+
+/**
+ * Compute collection-level financials from DB-backed data only.
+ * Uses harvest.harvest_collections (picker_price_per_unit, buyer_price_per_unit),
+ * harvest.picker_intake_entries (quantity), harvest.picker_payment_entries (amount_paid).
+ */
+export function computeCollectionFinancials(params: {
+  collection: { picker_price_per_unit?: number | null; buyer_price_per_unit?: number | null };
+  intakeEntries: { quantity?: number; weightKg?: number }[];
+  paymentEntries: { amount_paid: number }[];
+}): HarvestCollectionFinancials {
+  const totalHarvestQty =
+    (params.intakeEntries ?? []).reduce(
+      (sum, e) => sum + (Number(e.quantity ?? e.weightKg ?? 0) || 0),
+      0
+    ) || 0;
+  const pickerPricePerUnit =
+    Number(params.collection.picker_price_per_unit ?? null) || PICKER_PRICE_FALLBACK;
+  const buyerPricePerUnit =
+    Number(params.collection.buyer_price_per_unit ?? null) || 0;
+  const totalPickerDue = totalHarvestQty * pickerPricePerUnit;
+  const totalPaidOut =
+    (params.paymentEntries ?? []).reduce(
+      (sum, p) => sum + (Number(p.amount_paid ?? 0) || 0),
+      0
+    ) || 0;
+  const pickerBalance = totalPickerDue - totalPaidOut;
+  const revenue = totalHarvestQty * buyerPricePerUnit;
+  const profit = revenue - totalPaidOut;
+
+  return {
+    totalHarvestQty,
+    pickerPricePerUnit,
+    buyerPricePerUnit,
+    totalPickerDue,
+    totalPaidOut,
+    pickerBalance,
+    revenue,
+    profit,
+  };
+}
+
+/**
+ * Fetch collection, intake, and payments for a collection and return DB-backed financials.
+ */
+export async function getHarvestCollectionFinancials(
+  collectionId: string
+): Promise<HarvestCollectionFinancials | null> {
+  const [collection, intake, payments] = await Promise.all([
+    getHarvestCollection(collectionId),
+    listPickerIntake(collectionId),
+    listPickerPayments(collectionId),
+  ]);
+  if (!collection) return null;
+  const intakeRows = intake.map((e) => ({ quantity: e.weightKg, weightKg: e.weightKg }));
+  const paymentRows = payments.map((p) => ({ amount_paid: p.amount_paid }));
+  return computeCollectionFinancials({
+    collection: {
+      picker_price_per_unit: collection.pricePerKgPicker,
+      buyer_price_per_unit: collection.pricePerKgBuyer ?? null,
+    },
+    intakeEntries: intakeRows,
+    paymentEntries: paymentRows,
+  });
+}
+
+// ---- Company/project financial aggregation (dashboard + harvest sales) ----
+
+export type CollectionFinancialRow = {
+  collectionId: string;
+  projectId: string;
+  collectionDate: string;
+  totalHarvestQty: number;
+  buyerPricePerUnit: number;
+  revenue: number;
+  totalPaidOut: number;
+  profit: number;
+  status: string;
+  isClosed: boolean;
+};
+
+export type CompanyFinancialTotals = {
+  collections: CollectionFinancialRow[];
+  totalRevenue: number;
+  totalExpenses: number;
+  profitLoss: number;
+  totalHarvestKg: number;
+  totalSales: number;
+  completedSales: number;
+  pendingSales: number;
+};
+
+const FRENCH_BEANS_CROP = 'french_beans';
+
+/**
+ * Aggregate French Beans collection financials for a company (optionally by project).
+ * Uses harvest.harvest_collections, picker_intake_entries, picker_payment_entries.
+ */
+export async function getCompanyCollectionFinancialsAggregate(
+  companyId: string,
+  projectId?: string | null
+): Promise<CompanyFinancialTotals> {
+  const collections = await listHarvestCollections(companyId, projectId ?? undefined);
+  const frenchCollections = collections.filter(
+    (c) => (c.cropType ?? '').toString().toLowerCase().replace('_', '-') === 'french-beans' ||
+      (c.cropType ?? '').toString().toLowerCase() === 'french_beans'
+  );
+  if (frenchCollections.length === 0) {
+    return {
+      collections: [],
+      totalRevenue: 0,
+      totalExpenses: 0,
+      profitLoss: 0,
+      totalHarvestKg: 0,
+      totalSales: 0,
+      completedSales: 0,
+      pendingSales: 0,
+    };
+  }
+  const collectionIds = frenchCollections.map((c) => c.id);
+  const [intakeList, paymentList] = await Promise.all([
+    listPickerIntakeByCollectionIds(collectionIds),
+    listPickerPaymentsByCollectionIds(collectionIds),
+  ]);
+  const intakeByCollection = new Map<string, number>();
+  intakeList.forEach((e) => {
+    const cur = intakeByCollection.get(e.collectionId) ?? 0;
+    intakeByCollection.set(e.collectionId, cur + (e.weightKg ?? 0));
+  });
+  const paidByCollection = new Map<string, number>();
+  paymentList.forEach((p) => {
+    const cur = paidByCollection.get(p.collection_id) ?? 0;
+    paidByCollection.set(p.collection_id, cur + Number(p.amount_paid ?? 0));
+  });
+  const rows: CollectionFinancialRow[] = [];
+  let totalRevenue = 0;
+  let totalExpenses = 0;
+  let totalHarvestKg = 0;
+  let completedSales = 0;
+  let pendingSales = 0;
+  frenchCollections.forEach((c) => {
+    const totalHarvestQty = intakeByCollection.get(c.id) ?? 0;
+    const totalPaidOut = paidByCollection.get(c.id) ?? 0;
+    const buyerPricePerUnit = Number(c.pricePerKgBuyer ?? 0) || 0;
+    const revenue = totalHarvestQty * buyerPricePerUnit;
+    const profit = revenue - totalPaidOut;
+    const isClosed = c.status === 'closed' || (c as { is_closed?: boolean }).is_closed === true;
+    rows.push({
+      collectionId: c.id,
+      projectId: c.projectId,
+      collectionDate: c.harvestDate != null ? String(c.harvestDate) : '',
+      totalHarvestQty,
+      buyerPricePerUnit,
+      revenue,
+      totalPaidOut,
+      profit,
+      status: c.status ?? 'open',
+      isClosed: !!isClosed,
+    });
+    totalRevenue += revenue;
+    totalExpenses += totalPaidOut;
+    totalHarvestKg += totalHarvestQty;
+    if (isClosed) completedSales += revenue;
+    else pendingSales += revenue;
+  });
+  return {
+    collections: rows,
+    totalRevenue,
+    totalExpenses,
+    profitLoss: totalRevenue - totalExpenses,
+    totalHarvestKg,
+    totalSales: totalRevenue,
+    completedSales,
+    pendingSales,
+  };
+}
+
+/** Record a single picker payment (marks as paid in DB). Uses direct insert so we get id for expense sync. */
 export async function recordPickerPayment(params: {
   collectionId: string;
   companyId: string;
@@ -397,19 +607,6 @@ export async function recordPickerPayment(params: {
   amount: number;
   note?: string | null;
 }): Promise<string> {
-  const { error: rpcError } = await supabase
-    .schema('harvest')
-    .rpc('record_payment', {
-      p_collection_id: params.collectionId,
-      p_picker_id: params.pickerId,
-      p_amount_paid: params.amount,
-      p_note: params.note ?? null,
-    });
-
-  if (!rpcError) {
-    return 'rpc-ok';
-  }
-
   const { data, error } = await harvest()
     .from('picker_payment_entries')
     .insert({
@@ -490,31 +687,88 @@ export async function addPickerWeighEntry(params: {
   });
 }
 
-/** Mark one picker as paid by recording a payment entry. */
+/** Ensure one expense row in finance.expenses for this picker payment (no duplicates). Uses real schema: category, amount, currency, expense_date, note. */
+async function syncPickerPaymentToExpense(params: {
+  companyId: string;
+  projectId: string;
+  collectionId: string;
+  pickerId: string;
+  amountPaid: number;
+  paymentEntryId: string;
+}): Promise<void> {
+  const note = `French beans picker payout | collection:${params.collectionId} | picker:${params.pickerId}`;
+  const expenseDate = new Date().toISOString().slice(0, 10);
+
+  const { data: existing } = await db
+    .finance()
+    .from('expenses')
+    .select('id')
+    .eq('project_id', params.projectId)
+    .eq('category', 'picker_payout')
+    .eq('amount', params.amountPaid)
+    .eq('note', note)
+    .maybeSingle();
+  if (existing?.id) return;
+
+  const payload = {
+    company_id: params.companyId,
+    project_id: params.projectId,
+    category: 'picker_payout',
+    amount: params.amountPaid,
+    currency: 'KES',
+    expense_date: expenseDate,
+    note,
+  };
+  console.log('[Picker Payment Expense Payload]', payload);
+
+  const { error } = await db
+    .finance()
+    .from('expenses')
+    .insert(payload);
+
+  if (error) {
+    console.error('[Picker Payment Expense Error]', error);
+    throw error;
+  }
+}
+
+/** Mark one picker as paid by recording a payment entry and syncing to finance.expenses. */
 export async function markPickerCashPaid(params: {
   collectionId: string;
   companyId: string;
   pickerId: string;
   amount: number;
+  projectId?: string;
 }): Promise<void> {
   if (params.amount <= 0) return;
-  await recordPickerPayment({
+  const paymentEntryId = await recordPickerPayment({
     companyId: params.companyId,
     collectionId: params.collectionId,
     pickerId: params.pickerId,
     amount: params.amount,
   });
+  if (params.projectId && paymentEntryId) {
+    await syncPickerPaymentToExpense({
+      companyId: params.companyId,
+      projectId: params.projectId,
+      collectionId: params.collectionId,
+      pickerId: params.pickerId,
+      amountPaid: params.amount,
+      paymentEntryId,
+    });
+  }
 }
 
-/** Mark multiple pickers as paid (record payment entry per picker). */
+/** Mark multiple pickers as paid (record payment entry per picker and sync to expenses). */
 export async function markPickersPaidInBatch(params: {
   companyId: string;
   collectionId: string;
   pickerIds: string[];
   totalAmount: number;
   pickerAmountsById?: Record<string, number>;
+  projectId?: string;
 }): Promise<void> {
-  const { companyId, collectionId, pickerIds, totalAmount, pickerAmountsById } = params;
+  const { companyId, collectionId, pickerIds, totalAmount, pickerAmountsById, projectId } = params;
   if (pickerIds.length === 0) return;
 
   const perPicker = pickerAmountsById ?? {};
@@ -522,7 +776,17 @@ export async function markPickersPaidInBatch(params: {
   for (const pickerId of pickerIds) {
     const amount = perPicker[pickerId] ?? fallbackEach;
     if (amount > 0) {
-      await recordPickerPayment({ companyId, collectionId, pickerId, amount });
+      const paymentEntryId = await recordPickerPayment({ companyId, collectionId, pickerId, amount });
+      if (projectId && paymentEntryId) {
+        await syncPickerPaymentToExpense({
+          companyId,
+          projectId,
+          collectionId,
+          pickerId,
+          amountPaid: amount,
+          paymentEntryId,
+        });
+      }
     }
   }
 }
@@ -568,9 +832,13 @@ export async function getHarvestPickersByIds(
   }));
 }
 
-// ---- Stubs for wallet / legacy compatibility (no Firebase) ----
+// ---- Harvest Cash Wallet: finance.project_wallets + finance.project_wallet_ledger ----
 
-export async function registerHarvestCash(_params: {
+/**
+ * Register harvest cash: ensure wallet exists, then insert a CREDIT into finance.project_wallet_ledger.
+ * Balance is derived from ledger (credits - debits). No success unless DB write succeeds.
+ */
+export async function registerHarvestCash(params: {
   collectionId: string;
   projectId: string;
   companyId: string;
@@ -579,20 +847,69 @@ export async function registerHarvestCash(_params: {
   source: string;
   receivedBy: string;
 }): Promise<void> {
-  // Wallet not yet in Supabase; no-op to avoid Firebase.
+  const amount = Number(params.cashReceived);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Cash received must be greater than 0.');
+  }
+  await ensureProjectWallet(params.companyId, params.projectId);
+  const note = `Harvest cash: ${params.source} (${params.receivedBy})`;
+  const payload = {
+    company_id: params.companyId,
+    project_id: params.projectId,
+    entry_type: 'credit' as const,
+    amount,
+    note,
+    ref_type: 'harvest_cash' as const,
+    ref_id: params.collectionId || null,
+  };
+  if (import.meta.env.DEV) {
+    console.log('[Harvest Cash Register payload]', payload);
+  }
+  const { data, error } = await db
+    .finance()
+    .from('project_wallet_ledger')
+    .insert(payload)
+    .select('id')
+    .single();
+
+  if (import.meta.env.DEV) {
+    console.log('[Harvest Cash Register result]', { data, error });
+  }
+  if (error) throw error;
 }
 
-export async function applyHarvestCashPayment(_params: {
+/**
+ * Record a wallet DEBIT when paying a picker (single payment).
+ * Call after recording the payment in harvest.picker_payment_entries.
+ */
+export async function applyHarvestCashPayment(params: {
   companyId: string;
   projectId: string;
   cropType: string;
   collectionId: string;
   amount: number;
 }): Promise<void> {
-  // Wallet not yet in Supabase; no-op.
+  const amount = Number(params.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  await ensureProjectWallet(params.companyId, params.projectId);
+  const payload = {
+    company_id: params.companyId,
+    project_id: params.projectId,
+    entry_type: 'debit' as const,
+    amount,
+    note: 'Picker cash payout',
+    ref_type: 'picker_payment' as const,
+    ref_id: params.collectionId || null,
+  };
+  const { error } = await db
+    .finance()
+    .from('project_wallet_ledger')
+    .insert(payload);
+
+  if (error) throw error;
 }
 
-/** Mark multiple pickers as paid by recording payment entries (no wallet). */
+/** Mark multiple pickers as paid: record payment entries, sync each to expenses, and one wallet DEBIT for total. */
 export async function payPickersFromWalletBatchFirestore(params: {
   companyId: string;
   projectId: string;
@@ -602,16 +919,44 @@ export async function payPickersFromWalletBatchFirestore(params: {
   pickerAmountsById?: Record<string, number>;
 }): Promise<void> {
   const amounts = params.pickerAmountsById ?? {};
+  let totalDebit = 0;
   for (const pickerId of params.pickerIds) {
     const amount = amounts[pickerId];
     if (amount != null && amount > 0) {
-      await recordPickerPayment({
+      const paymentEntryId = await recordPickerPayment({
         companyId: params.companyId,
         collectionId: params.collectionId,
         pickerId,
         amount,
       });
+      if (paymentEntryId) {
+        await syncPickerPaymentToExpense({
+          companyId: params.companyId,
+          projectId: params.projectId,
+          collectionId: params.collectionId,
+          pickerId,
+          amountPaid: amount,
+          paymentEntryId,
+        });
+      }
+      totalDebit += amount;
     }
+  }
+  if (totalDebit > 0) {
+    await ensureProjectWallet(params.companyId, params.projectId);
+    const { error } = await db
+      .finance()
+      .from('project_wallet_ledger')
+      .insert({
+        company_id: params.companyId,
+        project_id: params.projectId,
+        entry_type: 'debit',
+        amount: totalDebit,
+        note: 'Picker batch payout',
+        ref_type: 'picker_payment',
+        ref_id: params.collectionId || null,
+      });
+    if (error) throw error;
   }
 }
 
