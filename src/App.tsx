@@ -67,8 +67,8 @@ import YieldPerAcreCalculatorPage from "@/pages/seo/calculators/YieldPerAcreCalc
 import BlogIndexPage from "@/pages/seo/BlogIndexPage";
 import BlogPostPage from "@/pages/seo/BlogPostPage";
 import LoginPage from "@/pages/Auth/LoginPage";
-import SignInPage from "@/pages/auth/SignInPage";
-import SignUpPage from "@/pages/auth/SignUpPage";
+import SignInPage from "@/pages/Auth/SignInPage";
+import SignUpPage from "@/pages/Auth/SignUpPage";
 import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
