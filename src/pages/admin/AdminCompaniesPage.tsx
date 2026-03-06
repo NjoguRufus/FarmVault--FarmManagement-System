@@ -24,17 +24,19 @@ import {
   type CompanyDoc,
   type CompanySubscription,
   type CompanySubscriptionOverride,
-  setCompanySubscriptionOverride,
 } from '@/services/companyService';
+import { overrideSubscription } from '@/services/developerAdminService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function AdminCompaniesPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const { data: companies = [], isLoading } = useCollection<Company>('admin-companies-list', 'companies', {
     companyScoped: false,
     isDeveloper: true,
@@ -543,93 +545,35 @@ interface DeveloperSubscriptionOverridePanelProps {
 
 function DeveloperSubscriptionOverridePanel({ companyId, company }: DeveloperSubscriptionOverridePanelProps) {
   const [saving, setSaving] = React.useState(false);
-  const sub = (company?.subscription ?? null) as CompanySubscription | null;
-  const override = (sub?.override ?? null) as CompanySubscriptionOverride | null;
+  const { toast } = useToast();
 
-  const [fullFree, setFullFree] = React.useState<boolean>(override?.enabled && override?.type === 'full_free');
-  const [extendTrialDays, setExtendTrialDays] = React.useState<string>('');
-  const [customExpiry, setCustomExpiry] = React.useState<string>('');
-  const [reason, setReason] = React.useState<string>(override?.reason ?? '');
-
-  React.useEffect(() => {
-    if (!override) {
-      setFullFree(false);
-      setExtendTrialDays('');
-      setCustomExpiry('');
-      setReason('');
-      return;
-    }
-    setFullFree(override.enabled && override.type === 'full_free');
-    setReason(override.reason ?? '');
-    if (override.overrideEndsAt) {
-      const d = (override.overrideEndsAt as any).toDate?.() as Date | undefined;
-      if (d) {
-        setCustomExpiry(d.toISOString().slice(0, 10));
-      }
-    }
-  }, [override?.enabled, override?.type, (override?.overrideEndsAt as any)?.seconds]);
-
-  const handleSave = async () => {
+  const runOverride = async (mode: 'start_trial' | 'free_until' | 'free_forever' | 'paid_active', extra?: {
+    days?: number;
+    until?: string | null;
+  }) => {
     if (!companyId) return;
     setSaving(true);
     try {
-      const now = new Date();
-      let nextOverride: CompanySubscriptionOverride;
-
-      if (fullFree) {
-        nextOverride = {
-          enabled: true,
-          type: 'full_free',
-          overrideEndsAt: null,
-          reason: reason || null,
-          grantedBy: 'developer',
-        };
-      } else if (extendTrialDays.trim()) {
-        const days = Number(extendTrialDays.trim());
-        const end = new Date(now.getTime() + Math.max(1, days) * 24 * 60 * 60 * 1000);
-        nextOverride = {
-          enabled: true,
-          type: 'extended_trial',
-          overrideEndsAt: Timestamp.fromDate(end),
-          reason: reason || null,
-          grantedBy: 'developer',
-        };
-      } else if (customExpiry.trim()) {
-        const end = new Date(customExpiry.trim());
-        nextOverride = {
-          enabled: true,
-          type: 'custom',
-          overrideEndsAt: Timestamp.fromDate(end),
-          reason: reason || null,
-          grantedBy: 'developer',
-        };
-      } else {
-        nextOverride = {
-          enabled: false,
-          type: 'custom',
-          overrideEndsAt: null,
-          reason: reason || null,
-          grantedBy: 'developer',
-        };
-      }
-
-      await setCompanySubscriptionOverride(companyId, nextOverride);
+      await overrideSubscription({
+        companyId,
+        mode,
+        days: extra?.days ?? null,
+        until: extra?.until ?? null,
+      });
+      toast({
+        title: 'Subscription updated',
+        description: `Override "${mode}" applied for this company.`,
+      });
+    } catch (e) {
+      toast({
+        title: 'Override failed',
+        description: e instanceof Error ? e.message : 'Unable to update subscription.',
+        variant: 'destructive',
+      });
     } finally {
       setSaving(false);
     }
   };
-
-  const handleRevoke = async () => {
-    if (!companyId) return;
-    setSaving(true);
-    try {
-      await setCompanySubscriptionOverride(companyId, null);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const overrideActive = Boolean(override?.enabled);
 
   return (
     <div className="mt-4 rounded-lg border border-border/70 bg-muted/40 p-3 space-y-3">
@@ -640,84 +584,48 @@ function DeveloperSubscriptionOverridePanel({ companyId, company }: DeveloperSub
             Subscription Override (Developer)
           </span>
         </div>
-        {overrideActive && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 border border-emerald-200">
-            <Clock className="h-3 w-3" />
-            Active
-          </span>
-        )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-        <div className="space-y-2">
-          <label className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Enable full free access</span>
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border"
-              checked={fullFree}
-              onChange={(e) => setFullFree(e.target.checked)}
-            />
-          </label>
-          <label className="space-y-1 block">
-            <span className="text-muted-foreground">Extend trial (days)</span>
-            <input
-              type="number"
-              min={1}
-              className="fv-input h-8 text-xs"
-              value={extendTrialDays}
-              onChange={(e) => setExtendTrialDays(e.target.value)}
-              placeholder="e.g. 14"
-            />
-          </label>
-        </div>
-        <div className="space-y-2">
-          <label className="space-y-1 block">
-            <span className="text-muted-foreground">Custom expiry date</span>
-            <input
-              type="date"
-              className="fv-input h-8 text-xs"
-              value={customExpiry}
-              onChange={(e) => setCustomExpiry(e.target.value)}
-            />
-          </label>
-          <label className="space-y-1 block">
-            <span className="text-muted-foreground">Reason (optional)</span>
-            <input
-              type="text"
-              className="fv-input h-8 text-xs"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Internal note"
-            />
-          </label>
-        </div>
+        <button
+          type="button"
+          disabled={saving || !companyId}
+          className="fv-btn fv-btn--primary text-xs justify-center"
+          onClick={() => runOverride('start_trial', { days: 7 })}
+        >
+          Start 7-day trial
+        </button>
+        <button
+          type="button"
+          disabled={saving || !companyId}
+          className="fv-btn fv-btn--secondary text-xs justify-center"
+          onClick={() => {
+            const v = window.prompt('Free until (YYYY-MM-DD)?');
+            if (!v) return;
+            runOverride('free_until', { until: v });
+          }}
+        >
+          Free until date…
+        </button>
+        <button
+          type="button"
+          disabled={saving || !companyId}
+          className="fv-btn fv-btn--outline text-xs justify-center"
+          onClick={() => runOverride('free_forever')}
+        >
+          Free forever
+        </button>
+        <button
+          type="button"
+          disabled={saving || !companyId}
+          className="fv-btn fv-btn--primary text-xs justify-center"
+          onClick={() => runOverride('paid_active', { days: 30 })}
+        >
+          Mark paid active (30 days)
+        </button>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-          <span>Only developer can change override.</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {overrideActive && (
-            <button
-              type="button"
-              disabled={saving}
-              className="fv-btn fv-btn--ghost text-xs text-muted-foreground"
-              onClick={handleRevoke}
-            >
-              <X className="h-3 w-3 mr-1" />
-              Revoke override
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={saving || !companyId}
-            className="fv-btn fv-btn--primary text-xs"
-            onClick={handleSave}
-          >
-            {saving ? 'Saving…' : 'Save override'}
-          </button>
-        </div>
-      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Uses Supabase RPC <code>override_subscription</code>. Check backend implementation for exact behaviour.
+      </p>
     </div>
   );
 }

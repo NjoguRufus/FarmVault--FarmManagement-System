@@ -7,8 +7,12 @@ interface RequireAuthProps {
   children: React.ReactElement;
 }
 
+/**
+ * Protects routes: only authenticated users can access. Redirects to /sign-in if not.
+ * Does NOT check onboarding; use RequireOnboarding for app routes that need a company.
+ */
 export function RequireAuth({ children }: RequireAuthProps) {
-  const { isAuthenticated, authReady, setupIncomplete } = useAuth();
+  const { isAuthenticated, authReady } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -16,17 +20,7 @@ export function RequireAuth({ children }: RequireAuthProps) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-
-  if (setupIncomplete) {
-    return (
-      <Navigate
-        to="/setup-company"
-        replace
-        state={{ from: location, message: 'Your company setup is incomplete. Please finish setup.' }}
-      />
-    );
+    return <Navigate to="/sign-in" replace state={{ from: location }} />;
   }
 
   return children;

@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCompany, type CompanyDoc } from '@/services/companyService';
 
@@ -10,18 +9,18 @@ type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused' | 'pending_p
 export interface CompanySubscriptionOverride {
   enabled: boolean;
   type?: 'full_free' | 'extended_trial' | 'custom';
-  overrideEndsAt?: Timestamp | null;
+  overrideEndsAt?: Date | string | null;
   reason?: string | null;
   grantedBy?: string;
-  grantedAt?: Timestamp;
+  grantedAt?: Date | string;
 }
 
 export interface CompanySubscription {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
-  trialStartAt?: Timestamp;
-  trialEndsAt?: Timestamp;
-  paidUntil?: Timestamp | null;
+  trialStartAt?: Date | string;
+  trialEndsAt?: Date | string;
+  paidUntil?: Date | string | null;
   override?: CompanySubscriptionOverride;
 }
 

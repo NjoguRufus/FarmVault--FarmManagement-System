@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Search, Star, Phone, Mail, List, LayoutGrid, Pencil, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { Supplier, InventoryItem } from '@/types';
 import { useQueryClient } from '@tanstack/react-query';

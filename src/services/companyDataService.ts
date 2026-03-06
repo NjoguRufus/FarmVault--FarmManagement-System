@@ -6,7 +6,7 @@ import {
   where,
   writeBatch,
   deleteDoc,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 
 /** Company-scoped collections to wipe when "Delete everything" is used. Company doc and users are kept. */

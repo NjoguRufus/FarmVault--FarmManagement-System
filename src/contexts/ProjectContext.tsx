@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Project } from '@/types';
-import { useCollection } from '@/hooks/useCollection';
 import { useAuth } from '@/contexts/AuthContext';
+import { listProjects } from '@/services/projectsService';
 
 interface ProjectContextType {
   projects: Project[];
@@ -38,13 +38,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     data: projectsData = [],
     isLoading,
     error,
-    fromCache,
-    hasPendingWrites,
-  } = useCollection<Project>('projects', 'projects', {
+  } = useQuery({
+    queryKey: ['projects', companyId],
+    queryFn: () => listProjects(companyId),
     enabled: canSubscribeProjects,
-    companyScoped: true,
-    companyId,
-    isDeveloper,
+    staleTime: 60_000,
   });
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -75,18 +73,24 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!canSubscribeProjects || isLoading) return;
-    // Persist only fully-synced snapshots (including empty arrays) to avoid stale cache drift.
-    if (!fromCache && !hasPendingWrites) {
-      setCachedProjects(projectsData);
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(PROJECTS_CACHE_KEY, JSON.stringify(projectsData));
-        } catch {
-          // Ignore quota/private mode failures.
-        }
+    if (error) return;
+
+    // Avoid infinite update loop: only update cache when data actually changes.
+    const sameLength = cachedProjects.length === projectsData.length;
+    const sameIds =
+      sameLength &&
+      cachedProjects.every((p, idx) => p.id === projectsData[idx]?.id);
+    if (sameIds) return;
+
+    setCachedProjects(projectsData);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(PROJECTS_CACHE_KEY, JSON.stringify(projectsData));
+      } catch {
+        // Ignore quota/private mode failures.
       }
     }
-  }, [projectsData, isLoading, fromCache, hasPendingWrites, canSubscribeProjects]);
+  }, [projectsData, cachedProjects, isLoading, error, canSubscribeProjects]);
 
   const projects = useMemo(() => {
     if (!canSubscribeProjects) {

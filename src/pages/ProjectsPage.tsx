@@ -3,11 +3,12 @@ import { Plus, Search, MoreHorizontal, ExternalLink, Star, Loader2 } from 'lucid
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
-import { Project } from '@/types';
+import { Project, ProjectBlock } from '@/types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { formatDate } from '@/lib/dateUtils';
-import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
+import { formatDate, toDate } from '@/lib/dateUtils';
+import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useCollection } from '@/hooks/useCollection';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,21 @@ export default function ProjectsPage() {
   const isCreateDialogOpen = canCreateProject && searchParams.get('new') === '1';
 
   const visibleProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
+
+  if (import.meta.env.DEV) {
+    console.log('[Projects] companyId', user?.companyId, 'total', projects.length, 'visible', visibleProjects.length);
+  }
+
+  const { data: projectBlocks = [] } = useCollection<ProjectBlock>(
+    `projects-page-blocks-${user?.companyId ?? ''}`,
+    'projectBlocks',
+    {
+      companyId: user?.companyId ?? null,
+      orderByField: 'createdAt',
+      orderByDirection: 'asc',
+      enabled: Boolean(user?.companyId),
+    },
+  );
 
   const openCreateDialog = () => {
     const next = new URLSearchParams(searchParams);
@@ -139,103 +155,147 @@ export default function ProjectsPage() {
       </div>
 
       {/* Projects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-tour="projects-grid">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" data-tour="projects-grid">
         {visibleProjects.map((project) => {
           const isCreating = (project as Project & { setupComplete?: boolean }).setupComplete === false;
+          const blocksForProject = projectBlocks.filter((b) => b.projectId === project.id);
+          const cropDays = project.useBlocks ? getCropDaysToHarvest(project.cropType) : null;
+
           return (
-          <div
-            key={project.id}
-            className={cn(
-              'fv-card transition-shadow flex flex-col justify-between',
-              isCreating ? 'cursor-wait opacity-90' : 'hover:shadow-card-hover cursor-pointer'
-            )}
-            onClick={() => {
-              if (isCreating) return;
-              setActiveProject(project);
-              navigate(`/projects/${project.id}`);
-            }}
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">{getCropEmoji(project.cropType)}</span>
-                <div>
-                  <h3 className="font-semibold text-foreground">{project.name}</h3>
-                  <p className="text-xs text-muted-foreground capitalize">
-                    {project.cropType.replace('-', ' ')}
-                  </p>
-                </div>
-              </div>
-              {isCreating ? (
-                <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Creating project…
-                </span>
-              ) : (
-                <span className={cn('fv-badge capitalize', getStatusBadge(project.status))}>
-                  {project.status}
-                </span>
+            <div
+              key={project.id}
+              className={cn(
+                'fv-card transition-shadow flex flex-col justify-between',
+                isCreating ? 'cursor-wait opacity-90' : 'hover:shadow-card-hover cursor-pointer',
               )}
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Location</span>
-                <span className="font-medium">{project.location}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Acreage</span>
-                <span className="font-medium">{project.acreage} acres</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Budget</span>
-                <span className="font-medium">{formatCurrency(project.budget)}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between gap-2">
-              <div className="flex flex-col space-y-0.5">
-                <span className="text-xs text-muted-foreground">
-                  Started {formatDate(project.startDate)}
-                </span>
-                {getExpectedHarvestDate(project) && (
-                  <span className="text-xs text-muted-foreground">
-                    Expected Harvest: {formatDate(getExpectedHarvestDate(project))}
+              onClick={() => {
+                if (isCreating) return;
+                setActiveProject(project);
+                navigate(`/projects/${project.id}`);
+              }}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">{getCropEmoji(project.cropType)}</span>
+                  <div>
+                    <h3 className="font-semibold text-foreground">{project.name}</h3>
+                    <p className="text-xs text-muted-foreground capitalize">
+                      {project.cropType.replace('-', ' ')}
+                    </p>
+                  </div>
+                </div>
+                {isCreating ? (
+                  <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Creating project…
+                  </span>
+                ) : (
+                  <span className={cn('fv-badge capitalize', getStatusBadge(project.status))}>
+                    {project.status}
                   </span>
                 )}
               </div>
-              <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="p-1.5 hover:bg-muted rounded-lg transition-colors"
-                    >
-                      <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      onClick={() => {
-                        setActiveProject(project);
-                        navigate(`/projects/${project.id}`);
-                      }}
-                    >
-                      <ExternalLink className="mr-2 h-4 w-4" />
-                      View project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      onClick={() => setActiveProject(project)}
-                    >
-                      <Star className="mr-2 h-4 w-4" />
-                      Set as active project
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Location</span>
+                  <span className="font-medium">{project.location}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Budget</span>
+                  <span className="font-medium">{formatCurrency(project.budget)}</span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between gap-2">
+                <div className="flex flex-col space-y-1">
+                  {project.useBlocks && blocksForProject.length > 0 ? (
+                    <>
+                      <span className="text-xs text-muted-foreground">
+                        Blocks ({blocksForProject.length})
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {blocksForProject.slice(0, 4).map((block) => {
+                          const planted = toDate(block.plantingDate);
+                          const expected =
+                            block.expectedEndDate
+                              ? toDate(block.expectedEndDate)
+                              : (() => {
+                                  if (!planted || cropDays == null) return null;
+                                  const d = new Date(planted);
+                                  d.setDate(d.getDate() + cropDays);
+                                  return d;
+                                })();
+
+                          return (
+                            <span
+                              key={block.id}
+                              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 bg-muted/40 text-[11px] text-muted-foreground"
+                            >
+                              <span className="font-medium text-foreground">
+                                {block.blockName}
+                              </span>
+                              {typeof block.acreage === 'number' && (
+                                <span>· {block.acreage} ac</span>
+                              )}
+                              {planted && <span>· Planted {formatDate(planted)}</span>}
+                              {expected && <span>· Harvest {formatDate(expected)}</span>}
+                            </span>
+                          );
+                        })}
+                        {blocksForProject.length > 4 && (
+                          <span className="text-[11px] text-muted-foreground">
+                            +{blocksForProject.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs text-muted-foreground">
+                        Started {formatDate(project.startDate)}
+                      </span>
+                      {getExpectedHarvestDate(project) && (
+                        <span className="text-xs text-muted-foreground">
+                          Expected Harvest: {formatDate(getExpectedHarvestDate(project))}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="p-1.5 hover:bg-muted rounded-lg transition-colors"
+                      >
+                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => {
+                          setActiveProject(project);
+                          navigate(`/projects/${project.id}`);
+                        }}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        View project
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setActiveProject(project)}
+                      >
+                        <Star className="mr-2 h-4 w-4" />
+                        Set as active project
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </div>
-          </div>
           );
         })}
       </div>

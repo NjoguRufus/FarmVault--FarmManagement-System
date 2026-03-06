@@ -51,7 +51,7 @@ export default function AdminCropRecordsPage() {
     queryFn: ({ pageParam }) =>
       listSharesByCropForCompany(companyId!, cropId!, PAGE_SIZE, pageParam),
     getNextPageParam: (last) => last.lastDoc,
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
+    initialPageParam: null as import('@/lib/firestore-stub').DocumentSnapshot | null,
     enabled: !!companyId && !!cropId,
   });
 
@@ -66,7 +66,7 @@ export default function AdminCropRecordsPage() {
     queryFn: ({ pageParam }) =>
       listCompanyRecordsByCrop(companyId!, cropId!, PAGE_SIZE, pageParam),
     getNextPageParam: (last) => last.lastDoc,
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
+    initialPageParam: null as import('@/lib/firestore-stub').DocumentSnapshot | null,
     enabled: !!companyId && !!cropId,
   });
 

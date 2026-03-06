@@ -8,7 +8,7 @@ import {
   type DocumentSnapshot,
   type Query,
   type QuerySnapshot,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 
 type WithCacheOptions = {
   /** When true, try cache first before hitting the server. Default: false (server first). */

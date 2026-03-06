@@ -1,4 +1,4 @@
-import { collection, getDocs, addDoc, serverTimestamp, Timestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, Timestamp, query, where } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 
 export interface AuditLogDoc {

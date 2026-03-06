@@ -20,9 +20,8 @@ import {
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCollection } from '@/hooks/useCollection';
 import { usePermissions } from '@/hooks/usePermissions';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import type { HarvestCollection, HarvestPicker, PickerWeighEntry } from '@/types';
@@ -37,7 +36,12 @@ import {
   applyHarvestCashPayment,
   payPickersFromWalletBatchFirestore,
   syncClosedCollectionToHarvestSale,
-} from '@/services/harvestCollectionService';
+  listHarvestCollections,
+  listPickersByCollectionIds,
+  listPickerIntakeByCollectionIds,
+  listPickerPaymentsByCollectionIds,
+  mapPicker,
+} from '@/services/harvestCollectionsService';
 import {
   computeWalletSummary,
   getWalletLedgerEntries,
@@ -206,19 +210,101 @@ export default function HarvestCollectionsPage() {
   }, [selectedCollectionId, viewMode, detailModes]);
 
   const companyId = user?.companyId ?? null;
-  const isDeveloper = user?.role === 'developer';
-  const scope = { companyScoped: true, companyId, isDeveloper };
-  const { data: allCollections = [], isLoading: loadingCollections } = useCollection<HarvestCollection>(
-    'harvestCollections',
-    'harvestCollections',
-    scope,
-  );
-  const { data: allPickers = [] } = useCollection<HarvestPicker>('harvestPickers', 'harvestPickers', scope);
-  const { data: allWeighEntries = [] } = useCollection<PickerWeighEntry>(
-    'pickerWeighEntries',
-    'pickerWeighEntries',
-    scope,
-  );
+  const effectiveProjectId = effectiveProject?.id ?? null;
+
+  const { data: collectionsRaw = [], isLoading: loadingCollections } = useQuery({
+    queryKey: ['harvestCollections', companyId, effectiveProjectId],
+    queryFn: () => listHarvestCollections(companyId!, effectiveProjectId ?? undefined),
+    enabled: !!companyId,
+  });
+
+  const collectionIds = useMemo(() => collectionsRaw.map((c) => c.id), [collectionsRaw]);
+
+  const { data: pickersRaw = [] } = useQuery({
+    queryKey: ['harvestPickers', companyId, collectionIds],
+    queryFn: () => listPickersByCollectionIds(collectionIds),
+    enabled: collectionIds.length > 0,
+  });
+
+  const { data: intakeRaw = [] } = useQuery({
+    queryKey: ['pickerIntake', companyId, collectionIds],
+    queryFn: () => listPickerIntakeByCollectionIds(collectionIds),
+    enabled: collectionIds.length > 0,
+  });
+
+  const { data: paymentsRaw = [] } = useQuery({
+    queryKey: ['pickerPayments', companyId, collectionIds],
+    queryFn: () => listPickerPaymentsByCollectionIds(collectionIds),
+    enabled: collectionIds.length > 0,
+  });
+
+  const allCollections = useMemo(() => {
+    const priceByCollection = new Map<string, number>();
+    collectionsRaw.forEach((c) => priceByCollection.set(c.id, c.pricePerKgPicker ?? 0));
+    const kgByCollectionPicker = new Map<string, number>();
+    intakeRaw.forEach((e) => {
+      const key = `${e.collectionId}::${e.pickerId}`;
+      const cur = kgByCollectionPicker.get(key) ?? 0;
+      kgByCollectionPicker.set(key, cur + (e.weightKg ?? 0));
+    });
+    return collectionsRaw.map((c) => {
+      let totalHarvestKg = 0;
+      let totalPickerCost = 0;
+      kgByCollectionPicker.forEach((kg, key) => {
+        if (key.startsWith(`${c.id}::`)) {
+          totalHarvestKg += kg;
+          totalPickerCost += Math.round(kg * (priceByCollection.get(c.id) ?? 0));
+        }
+      });
+      return { ...c, totalHarvestKg, totalPickerCost } as HarvestCollection;
+    });
+  }, [collectionsRaw, intakeRaw]);
+
+  const allPickers = useMemo((): HarvestPicker[] => {
+    const priceByCollection = new Map<string, number>();
+    collectionsRaw.forEach((c) => priceByCollection.set(c.id, c.pricePerKgPicker ?? 0));
+    const kgByPicker = new Map<string, number>();
+    intakeRaw.forEach((e) => {
+      const cur = kgByPicker.get(e.pickerId) ?? 0;
+      kgByPicker.set(e.pickerId, cur + (e.weightKg ?? 0));
+    });
+    const paidByPicker = new Map<string, number>();
+    paymentsRaw.forEach((p) => {
+      const cur = paidByPicker.get(p.picker_id) ?? 0;
+      paidByPicker.set(p.picker_id, cur + Number(p.amount_paid));
+    });
+    return pickersRaw.map((p) => {
+      const totalKg = kgByPicker.get(p.id) ?? 0;
+      const pricePerKg = priceByCollection.get(p.collection_id) ?? 0;
+      const totalPay = Math.round(totalKg * pricePerKg);
+      const paid = paidByPicker.get(p.id) ?? 0;
+      const isPaid = totalPay > 0 && paid >= totalPay;
+      return mapPicker(p, totalKg, totalPay, isPaid) as HarvestPicker;
+    });
+  }, [pickersRaw, intakeRaw, paymentsRaw, collectionsRaw]);
+
+  const allWeighEntries = useMemo((): PickerWeighEntry[] => {
+    return intakeRaw.map((e) => ({
+      id: e.id,
+      companyId: e.companyId,
+      pickerId: e.pickerId,
+      collectionId: e.collectionId,
+      weightKg: e.weightKg,
+      tripNumber: e.tripNumber ?? 0,
+      recordedAt: e.recordedAt,
+    }));
+  }, [intakeRaw]);
+
+  if (import.meta.env.DEV && companyId && effectiveProjectId) {
+    console.log('[HarvestCollections]', {
+      companyId,
+      projectId: effectiveProjectId,
+      table: 'harvest.harvest_collections',
+      collectionsCount: allCollections.length,
+      pickersCount: allPickers.length,
+      intakeCount: allWeighEntries.length,
+    });
+  }
 
   const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
 
@@ -313,7 +399,7 @@ export default function HarvestCollectionsPage() {
         }
       }
       if (synced > 0) {
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
         queryClient.invalidateQueries({ queryKey: ['harvests'] });
         queryClient.invalidateQueries({ queryKey: ['sales'] });
         toast({ title: 'Synced', description: `${synced} closed collection(s) added to Harvest & Sales.` });
@@ -566,6 +652,10 @@ export default function HarvestCollectionsPage() {
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setCreating(true);
     setNewCollectionOpen(false);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[HC auth check]', { clerkUserId: user?.id, companyId: user?.companyId, role: user?.role });
+    }
     try {
       const id = await createHarvestCollection({
         companyId,
@@ -575,7 +665,7 @@ export default function HarvestCollectionsPage() {
         harvestDate,
         pricePerKgPicker: price,
       });
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
       setSelectedCollectionId(id);
       setViewMode('intake');
       setNewCollectionName('');
@@ -633,7 +723,7 @@ export default function HarvestCollectionsPage() {
         pickerNumber: num,
         pickerName: name,
       });
-      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
       toast({
         title: isOffline ? 'Picker saved offline' : 'Picker added',
         description: isOffline ? 'It will sync when online.' : undefined,
@@ -684,7 +774,8 @@ export default function HarvestCollectionsPage() {
       ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
     })
       .then(() => {
-        // Realtime snapshots (includeMetadataChanges) drive UI updates, including offline pending writes.
+        queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       })
       .catch((e: any) => {
         toast({ title: 'Save failed', description: e?.message ?? 'Could not save weight', variant: 'destructive' });
@@ -763,7 +854,14 @@ export default function HarvestCollectionsPage() {
     }
 
     try {
-      await markPickerCashPaid(pickerId);
+      await markPickerCashPaid({
+        collectionId: selectedCollectionId,
+        companyId: companyId!,
+        pickerId,
+        amount: payAmount,
+      });
+      queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
       if (effectiveProject?.id && companyId) {
         const refreshWallet = () =>
           getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
@@ -782,6 +880,7 @@ export default function HarvestCollectionsPage() {
       }
       toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
     }
   };
 
@@ -889,11 +988,13 @@ export default function HarvestCollectionsPage() {
           collectionId: selectedCollectionId,
           pickerIds: payableIds,
           totalAmount,
+          pickerAmountsById,
         });
       }
 
       setPayingPickerIds(null);
-      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
+      queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
       if (effectiveProject?.id && companyId) {
         const refreshWallet = () =>
           getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
@@ -977,7 +1078,7 @@ export default function HarvestCollectionsPage() {
         collectionName: selectedCollection?.name,
         existingHarvestId: selectedCollection?.harvestId,
       });
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
       if (markBuyerPaid) {
         queryClient.invalidateQueries({ queryKey: ['harvests'] });
         queryClient.invalidateQueries({ queryKey: ['sales'] });

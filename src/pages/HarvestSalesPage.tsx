@@ -5,7 +5,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Harvest, Sale, Employee, User, InventoryItem } from '@/types';

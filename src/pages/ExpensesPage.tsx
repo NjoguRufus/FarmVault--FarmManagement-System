@@ -7,7 +7,7 @@ import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
@@ -43,7 +43,7 @@ import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
 import { applyExpenseDeduction } from '@/services/expenseBudgetService';
-import { getHarvestPickersByIds } from '@/services/harvestCollectionService';
+import { getHarvestPickersByIds } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 

@@ -17,7 +17,7 @@ import {
   writeBatch,
   documentId,
   type DocumentSnapshot,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { getCompany } from '@/services/companyService';
 import type {

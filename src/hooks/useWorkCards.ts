@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { where, type QueryConstraint } from 'firebase/firestore';
+import { where, type QueryConstraint } from '@/lib/firestore-stub';
 import type { OperationsWorkCard } from '@/types';
 import { useCollection } from '@/hooks/useCollection';
 

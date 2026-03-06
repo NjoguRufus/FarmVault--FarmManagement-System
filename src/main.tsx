@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
+import { ClerkProvider } from "@clerk/react";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -59,6 +60,18 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
   }
 }
 
+const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+if (!pk) {
+  throw new Error(
+    "Missing Clerk configuration. Set VITE_CLERK_PUBLISHABLE_KEY in your environment.",
+  );
+}
+
 if (shouldRenderApp) {
-  createRoot(document.getElementById("root")!).render(<App />);
+  createRoot(document.getElementById("root")!).render(
+    <ClerkProvider publishableKey={pk} afterSignOutUrl="/">
+      <App />
+    </ClerkProvider>,
+  );
 }

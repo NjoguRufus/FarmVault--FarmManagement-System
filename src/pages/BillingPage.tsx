@@ -3,7 +3,7 @@ import { Check, Crown, AlertTriangle, Zap, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { getCompany, type CompanyDoc, type CompanySubscription } from '@/services/companyService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';

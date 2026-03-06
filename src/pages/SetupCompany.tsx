@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap, RefreshCw } from 'lucide-react';
-import { registerCompanyAdmin } from '@/services/authService';
-import { createCompany, createCompanyUserProfile } from '@/services/companyService';
+import { useSignUp } from '@clerk/react';
 import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from '@/config/plans';
 import { OnboardingHeader } from '@/components/onboarding/OnboardingHeader';
 import { OnboardingNavButtons } from '@/components/onboarding/OnboardingNavButtons';
@@ -10,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
+import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
 
 const STEPS = 4;
 
@@ -17,6 +17,7 @@ export default function SetupCompany() {
   const navigate = useNavigate();
   const location = useLocation();
   const { setupIncomplete } = useAuth();
+  const { isLoaded: signUpLoaded, signUp, setActive } = useSignUp();
   const statePlan = (location.state as { plan?: string })?.plan;
   const stateBillingMode = (location.state as { billingMode?: BillingMode })?.billingMode;
   const stateMessage = (location.state as { message?: string })?.message;
@@ -40,6 +41,7 @@ export default function SetupCompany() {
   const [adminEmail, setAdminEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [adminAccountCreated, setAdminAccountCreated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -63,6 +65,44 @@ export default function SetupCompany() {
     passwordValid &&
     passwordsMatch;
 
+  const ensureClerkAdminAccount = async (): Promise<boolean> => {
+    if (adminAccountCreated) {
+      return true;
+    }
+    if (!signUpLoaded) {
+      return false;
+    }
+    if (!signUp || !setActive) {
+      setError('Unexpected auth error. Please try again.');
+      return false;
+    }
+    try {
+      const result = await signUp.create({
+        emailAddress: adminEmail.trim(),
+        password,
+      });
+
+      if (result.status === 'complete') {
+        await setActive({ session: result.createdSessionId });
+        setAdminAccountCreated(true);
+        return true;
+      }
+
+      // If additional steps (like email verification) are required, surface a helpful message.
+      setError('Check your email to verify your account, then return to continue setup.');
+      return false;
+    } catch (err: unknown) {
+      const anyErr = err as any;
+      const firstClerkError = anyErr?.errors?.[0];
+      const message =
+        firstClerkError?.longMessage ||
+        firstClerkError?.message ||
+        (err instanceof Error ? err.message : 'Failed to create admin account');
+      setError(message);
+      return false;
+    }
+  };
+
   const handleContinue = async () => {
     setError(null);
 
@@ -71,6 +111,10 @@ export default function SetupCompany() {
       return;
     }
     if (step === 2 && step2Valid) {
+      const ok = await ensureClerkAdminAccount();
+      if (!ok) {
+        return;
+      }
       setStep(3);
       return;
     }
@@ -93,18 +137,49 @@ export default function SetupCompany() {
     setError(null);
 
     try {
-      const user = await registerCompanyAdmin(adminEmail, password);
-      const companyId = await createCompany(
-        companyName.trim(),
-        companyEmail.trim(),
-        selectedPlan!
-      );
-      await createCompanyUserProfile({
-        uid: user.uid,
-        companyId,
-        name: adminName.trim(),
-        email: adminEmail.trim(),
+      const ok = await ensureClerkAdminAccount();
+      if (!ok) {
+        setLoading(false);
+        return;
+      }
+
+      const accessToken = await getSupabaseAccessToken();
+      if (!accessToken) {
+        setError('You must be signed in to complete setup. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      const { error: fnError, data: fnData } = await supabase.functions.invoke<{
+        companyId?: string;
+        userId?: string;
+        error?: string;
+        detail?: string;
+      }>('create-company-onboarding', {
+        body: {
+          companyName: companyName.trim(),
+          companyEmail: companyEmail.trim(),
+          selectedPlan,
+          billingMode,
+          adminName: adminName.trim(),
+          adminEmail: adminEmail.trim(),
+        },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
+
+      if (fnError) {
+        setError(fnError.message || 'Failed to create company');
+        setLoading(false);
+        return;
+      }
+      if (fnData?.error) {
+        setError(fnData.detail || fnData.error);
+        setLoading(false);
+        return;
+      }
+
       setSuccess(true);
     } catch (err: unknown) {
       const message =
@@ -176,7 +251,7 @@ export default function SetupCompany() {
 
   const canContinue =
     (step === 1 && step1Valid) ||
-    (step === 2 && step2Valid) ||
+    (step === 2 && step2Valid && signUpLoaded) ||
     (step === 3) ||
     (step === 4 && step4Valid && !loading);
 

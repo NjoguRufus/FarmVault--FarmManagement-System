@@ -7,7 +7,7 @@ import {
   where,
   orderBy,
   serverTimestamp,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import type { ChallengeTemplate, ChallengeTemplatePhase } from '@/types';
 

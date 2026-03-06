@@ -1,5 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, where, serverTimestamp, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db } from '@/lib/db';
 
 export type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'enterprise';
 export type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused';
@@ -7,18 +6,18 @@ export type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused';
 export interface CompanySubscriptionOverride {
   enabled: boolean;
   type?: 'full_free' | 'extended_trial' | 'custom';
-  overrideEndsAt?: Timestamp | null;
+  overrideEndsAt?: Date | string | null;
   reason?: string | null;
   grantedBy?: string;
-  grantedAt?: Timestamp;
+  grantedAt?: Date | string;
 }
 
 export interface CompanySubscription {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
-  trialStartAt?: Timestamp;
-  trialEndsAt?: Timestamp;
-  paidUntil?: Timestamp | null;
+  trialStartAt?: Date | string;
+  trialEndsAt?: Date | string;
+  paidUntil?: Date | string | null;
   billingMode?: PaymentMode;
   override?: CompanySubscriptionOverride;
 }
@@ -33,53 +32,98 @@ export interface CompanyDoc {
   projectCount?: number;
   revenue?: number;
   createdAt?: unknown;
-  nextPaymentAt?: Timestamp | null;
+  nextPaymentAt?: Date | string | null;
   paymentReminderActive?: boolean;
-  paymentReminderSetAt?: Timestamp | null;
-  paymentReminderDismissedAt?: Timestamp | null;
+  paymentReminderSetAt?: Date | string | null;
+  paymentReminderDismissedAt?: Date | string | null;
   paymentReminderDismissedBy?: string | null;
   subscriptionPlan?: string;
   subscription?: CompanySubscription;
   [key: string]: unknown;
 }
 
+export type PaymentMode = 'monthly' | 'seasonal' | 'annual';
+
+function mapRowToCompanyDoc(row: Record<string, unknown>): CompanyDoc {
+  const sub = row.subscription as CompanySubscription | undefined;
+  return {
+    id: String(row.id ?? ''),
+    name: row.name != null ? String(row.name) : undefined,
+    email: row.email != null ? String(row.email) : undefined,
+    status: row.status != null ? String(row.status) : undefined,
+    plan: row.plan != null ? String(row.plan) : undefined,
+    userCount: row.user_count != null ? Number(row.user_count) : undefined,
+    projectCount: row.project_count != null ? Number(row.project_count) : undefined,
+    revenue: row.revenue != null ? Number(row.revenue) : undefined,
+    createdAt: row.created_at ?? undefined,
+    subscription: sub ?? undefined,
+    subscriptionPlan: sub?.plan ?? undefined,
+  };
+}
+
 export async function getCompany(companyId: string): Promise<CompanyDoc | null> {
-  const snap = await getDoc(doc(db, 'companies', companyId));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as CompanyDoc;
+  const { data, error } = await db
+    .core()
+    .from('companies')
+    .select('*')
+    .eq('id', companyId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return mapRowToCompanyDoc(data as Record<string, unknown>);
 }
 
 /** List all companies (developer use, e.g. share records). */
 export async function listCompanies(): Promise<{ id: string; name: string }[]> {
-  const snap = await getDocs(collection(db, 'companies'));
-  return snap.docs.map((d) => ({
-    id: d.id,
-    name: String((d.data() as { name?: string }).name ?? d.id),
+  const { data, error } = await db.core().from('companies').select('id, name');
+
+  if (error || !data) return [];
+  return (data as { id: string; name: string }[]).map((r) => ({
+    id: r.id,
+    name: r.name ?? r.id,
   }));
 }
 
 export async function setPaymentReminder(companyId: string, nextPaymentAt?: Date): Promise<void> {
-  const ref = doc(db, 'companies', companyId);
-  await updateDoc(ref, {
-    paymentReminderActive: true,
-    paymentReminderSetAt: serverTimestamp(),
-    ...(nextPaymentAt && { nextPaymentAt: Timestamp.fromDate(nextPaymentAt) }),
-  });
+  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const subscription = (data?.subscription as Record<string, unknown>) ?? {};
+  await db
+    .core()
+    .from('companies')
+    .update({
+      subscription: {
+        ...subscription,
+        paymentReminderActive: true,
+        paymentReminderSetAt: new Date().toISOString(),
+        ...(nextPaymentAt && { nextPaymentAt: nextPaymentAt.toISOString() }),
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
 }
 
 export async function clearPaymentReminder(companyId: string, dismissedByUserId?: string): Promise<void> {
-  const updates: Record<string, unknown> = { paymentReminderActive: false };
+  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const subscription = (data?.subscription as Record<string, unknown>) ?? {};
+  const updates: Record<string, unknown> = { ...subscription, paymentReminderActive: false };
   if (dismissedByUserId) {
-    updates.paymentReminderDismissedAt = serverTimestamp();
+    updates.paymentReminderDismissedAt = new Date().toISOString();
     updates.paymentReminderDismissedBy = dismissedByUserId;
   }
-  await updateDoc(doc(db, 'companies', companyId), updates);
+  await db.core().from('companies').update({ subscription: updates, updated_at: new Date().toISOString() }).eq('id', companyId);
 }
 
 export async function setCompanyNextPayment(companyId: string, nextPaymentAt: Date): Promise<void> {
-  await updateDoc(doc(db, 'companies', companyId), {
-    nextPaymentAt: Timestamp.fromDate(nextPaymentAt),
-  });
+  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const subscription = ((data?.subscription as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+  await db
+    .core()
+    .from('companies')
+    .update({
+      subscription: { ...subscription, nextPaymentAt: nextPaymentAt.toISOString() },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
 }
 
 export async function updateCompany(
@@ -92,15 +136,13 @@ export async function updateCompany(
     customWorkTypes?: string[];
   }
 ): Promise<void> {
-  const ref = doc(db, 'companies', companyId);
-  const updates: Record<string, unknown> = {};
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (data.name !== undefined) updates.name = data.name;
-  if (data.email !== undefined) updates.email = data.email;
   if (data.plan !== undefined) updates.plan = data.plan;
   if (data.status !== undefined) updates.status = data.status;
-  if (data.customWorkTypes !== undefined) updates.customWorkTypes = data.customWorkTypes;
-  if (Object.keys(updates).length === 0) return;
-  await updateDoc(ref, updates);
+  if (data.customWorkTypes !== undefined) updates.custom_work_types = data.customWorkTypes;
+  if (Object.keys(updates).length <= 1) return;
+  await db.core().from('companies').update(updates).eq('id', companyId);
 }
 
 export async function createCompany(
@@ -108,119 +150,112 @@ export async function createCompany(
   companyEmail: string,
   plan: string = 'starter',
 ): Promise<string> {
-  const now = Timestamp.now();
-  const trialEndsAt = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const trialEndsAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const companyPlan = ['starter', 'professional', 'enterprise'].includes(plan) ? plan : 'starter';
+  const id = crypto.randomUUID();
 
-  const ref = await addDoc(collection(db, 'companies'), {
+  await db.core().from('companies').insert({
+    id,
     name,
-    email: companyEmail,
-    createdAt: serverTimestamp(),
     status: 'active',
-    subscriptionPlan: 'trial',
-    plan: ['starter', 'professional', 'enterprise'].includes(plan) ? plan : 'starter',
-    userCount: 1,
-    projectCount: 0,
+    plan: companyPlan,
+    user_count: 1,
+    project_count: 0,
     revenue: 0,
     subscription: {
       plan: 'trial',
       status: 'active',
-      trialStartAt: now,
-      trialEndsAt,
+      trialStartAt: now.toISOString(),
+      trialEndsAt: trialEndsAt.toISOString(),
       paidUntil: null,
-      billingMode: 'monthly' as PaymentMode,
+      billingMode: 'monthly',
       override: {
         enabled: false,
         type: 'custom',
         overrideEndsAt: null,
         reason: null,
         grantedBy: '',
-        grantedAt: now,
+        grantedAt: now.toISOString(),
       },
-    } as CompanySubscription,
+    },
   });
-  return ref.id;
+  return id;
 }
 
 export async function setCompanySubscriptionOverride(
   companyId: string,
   override: CompanySubscriptionOverride | null,
 ): Promise<void> {
-  const ref = doc(db, 'companies', companyId);
-  if (override === null) {
-    await updateDoc(ref, {
-      'subscription.override': {
-        enabled: false,
-        type: 'custom',
-        overrideEndsAt: null,
-        reason: null,
-        grantedBy: null,
-        grantedAt: serverTimestamp(),
-      },
-    });
-    return;
-  }
-
-  await updateDoc(ref, {
-    'subscription.override': {
-      ...override,
-      grantedAt: override.grantedAt ?? serverTimestamp(),
-    },
-  });
+  const { data } = await supabase.from('companies').select('subscription').eq('id', companyId).single();
+  const subscription = ((data?.subscription as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+  const overrideValue = override
+    ? {
+        ...override,
+        grantedAt: override.grantedAt instanceof Date ? override.grantedAt.toISOString() : override.grantedAt ?? new Date().toISOString(),
+      }
+    : { enabled: false, type: 'custom', overrideEndsAt: null, reason: null, grantedBy: null, grantedAt: new Date().toISOString() };
+  await db
+    .core()
+    .from('companies')
+    .update({
+      subscription: { ...subscription, override: overrideValue },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
 }
-
-export type PaymentMode = 'monthly' | 'seasonal' | 'annual';
 
 export async function setCompanyPaidPlan(
   companyId: string,
   plan: Exclude<SubscriptionPlan, 'trial'>,
   mode: PaymentMode,
 ): Promise<void> {
-  const ref = doc(db, 'companies', companyId);
-  const now = Timestamp.now();
-
+  const now = new Date();
   const daysByMode: Record<PaymentMode, number> = {
     monthly: 30,
     seasonal: 120,
     annual: 365,
   };
-
   const durationDays = daysByMode[mode] ?? 30;
-  const paidUntil = Timestamp.fromMillis(now.toMillis() + durationDays * 24 * 60 * 60 * 1000);
+  const paidUntil = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+  const legacyPlan = plan === 'basic' ? 'starter' : plan === 'pro' ? 'professional' : 'enterprise';
 
-  const legacyPlan =
-    plan === 'basic'
-      ? 'starter'
-      : plan === 'pro'
-        ? 'professional'
-        : 'enterprise';
-
-  await updateDoc(ref, {
-    plan: legacyPlan,
-    subscriptionPlan: plan,
-    'subscription.plan': plan,
-    'subscription.status': 'active',
-    'subscription.billingMode': mode,
-    'subscription.paidUntil': paidUntil,
-  });
+  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const subscription = ((data?.subscription as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+  await db
+    .core()
+    .from('companies')
+    .update({
+      plan: legacyPlan,
+      subscription: {
+        ...subscription,
+        plan,
+        status: 'active',
+        billingMode: mode,
+        paidUntil: paidUntil.toISOString(),
+      },
+      updated_at: now.toISOString(),
+    })
+    .eq('id', companyId);
 }
 
-/** Write users/{uid} with role company-admin and companyId. Must use auth uid as doc id. */
+/** Create or ensure profile exists in Supabase. Only upserts id so it works when profiles has no company column. */
 export async function createCompanyUserProfile(params: {
   uid: string;
   companyId: string;
   name: string;
   email: string;
-}) {
-  const { uid, companyId, name, email } = params;
-  const userRef = doc(db, 'users', uid);
-  await setDoc(userRef, {
-    id: uid,
-    companyId,
-    name,
-    email,
-    role: 'company-admin',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+}): Promise<void> {
+  const { uid, companyId } = params;
+  await db
+    .core()
+    .from('profiles')
+    .upsert(
+      {
+        id: uid,
+        clerk_user_id: uid,
+        active_company_id: companyId,
+      },
+      { onConflict: 'clerk_user_id' },
+    );
 }
-

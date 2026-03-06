@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Building2, AlertTriangle, Trash2, Loader2, Lock, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { deleteAllCompanyData } from '@/services/companyDataService';
 import { updateCompany } from '@/services/companyService';

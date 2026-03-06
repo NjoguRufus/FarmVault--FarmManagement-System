@@ -67,14 +67,19 @@ import YieldPerAcreCalculatorPage from "@/pages/seo/calculators/YieldPerAcreCalc
 import BlogIndexPage from "@/pages/seo/BlogIndexPage";
 import BlogPostPage from "@/pages/seo/BlogPostPage";
 import LoginPage from "@/pages/Auth/LoginPage";
+import SignInPage from "@/pages/auth/SignInPage";
+import SignUpPage from "@/pages/auth/SignUpPage";
+import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
+import OnboardingPage from "@/pages/OnboardingPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { RequireOnboarding } from "@/components/auth/RequireOnboarding";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
+import { DevRoute } from "@/components/auth/DevRoute";
 import { RequireManager } from "@/components/auth/RequireManager";
 import { RequireBroker } from "@/components/auth/RequireBroker";
 import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
 import { PermissionRoute } from "@/components/auth/PermissionRoute";
-import SetupCompany from "@/pages/SetupCompany";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminCompaniesPage from "@/pages/admin/AdminCompaniesPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
@@ -101,6 +106,12 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TourProvider } from "@/tour/TourProvider";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
+import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
+import DevSignInPage from "@/pages/dev/DevSignIn";
+import DevSignUpPage from "@/pages/dev/DevSignUp";
+import DevBootstrapPage from "@/pages/dev/DevBootstrap";
+import DevDiagnosticsPage from "@/pages/dev/DevDiagnosticsPage";
+import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 
 const queryClient = new QueryClient();
 
@@ -110,9 +121,8 @@ const queryClient = new QueryClient();
 const CompanyDashboardRoute = () => {
   const { user } = useAuth();
 
-  // Fallback: if somehow not authenticated here, send to login
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/sign-in" replace />;
   }
 
   if (user.role === "company-admin" || user.role === "company_admin") {
@@ -168,17 +178,38 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <Sonner />
-            <BrowserRouter>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <HelmetProvider>
+              <ClerkSupabaseTokenBridge />
               <RoutePersistence />
               <TourProvider>
               <Routes>
-              {/* Public routes */}
+              {/* Public routes – no RequireAuth or onboarding; Clerk handles auth UI */}
               <Route path="/" element={<RootRoute />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/choose-plan" element={<Navigate to="/setup-company" replace />} />
-              <Route path="/setup-company" element={<SetupCompany />} />
-              <Route path="/setup" element={<Navigate to="/setup-company" replace />} />
+              <Route path="/login" element={<Navigate to="/sign-in" replace />} />
+              <Route path="/sign-in" element={<SignInPage />} />
+              <Route path="/sign-in/*" element={<SignInPage />} />
+              <Route path="/sign-up" element={<SignUpPage />} />
+              <Route path="/sign-up/*" element={<SignUpPage />} />
+              <Route path="/dev/sign-in" element={<DevSignInPage />} />
+              <Route path="/dev/sign-in/*" element={<DevSignInPage />} />
+              <Route path="/dev/sign-up" element={<DevSignUpPage />} />
+              <Route path="/dev/sign-up/*" element={<DevSignUpPage />} />
+              {/* Intercept any Clerk organization task routes for dev sign-up and send directly to the dev dashboard. */}
+              <Route path="/dev/sign-up/tasks/*" element={<Navigate to="/dev/dashboard" replace />} />
+              <Route
+                path="/dev/bootstrap"
+                element={
+                  <DevRoute>
+                    <DevBootstrapPage />
+                  </DevRoute>
+                }
+              />
+              <Route path="/auth/callback" element={<AuthCallbackPage />} />
+              <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
+              <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+              <Route path="/setup-company" element={<Navigate to="/onboarding" replace />} />
+              <Route path="/setup" element={<Navigate to="/onboarding" replace />} />
 
               {/* Public SEO pillar pages */}
               <Route path="/farm-management-software-kenya" element={<FarmManagementSoftwareKenyaPage />} />
@@ -211,14 +242,18 @@ const App = () => (
               <Route path="/blog" element={<BlogIndexPage />} />
               <Route path="/blog/:slug" element={<BlogPostPage />} />
 
-              {/* Protected app routes (company-level) */}
+              {/* Protected app routes (auth + onboarding required) */}
               <Route
                 element={
                   <RequireAuth>
-                    <MainLayout />
+                    <RequireOnboarding>
+                      <MainLayout />
+                    </RequireOnboarding>
                   </RequireAuth>
                 }
               >
+                <Route path="/app" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/app/*" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
                 <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><Navigate to="/projects?new=1" replace /></RequireNotBroker></PermissionRoute>} />
@@ -288,7 +323,7 @@ const App = () => (
                 <Route path="/driver" element={<PermissionRoute module="harvest"><DriverDashboard /></PermissionRoute>} />
               </Route>
 
-              {/* Developer-only routes under /admin */}
+              {/* Developer-only routes under /admin and /dev */}
               <Route
                 element={
                   <RequireDeveloper>
@@ -296,8 +331,13 @@ const App = () => (
                   </RequireDeveloper>
                 }
               >
+                {/* Default developer entrypoint – /dev → /dev/dashboard */}
+                <Route path="/dev" element={<Navigate to="/dev/dashboard" replace />} />
                 {/* Backwards-compatible redirect from old /developer path */}
                 <Route path="/developer" element={<Navigate to="/admin" replace />} />
+                {/* Canonical developer dashboard path */}
+                <Route path="/dev/dashboard" element={<AdminDashboard />} />
+                <Route path="/dev/diagnostics" element={<DevDiagnosticsPage />} />
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/companies" element={<AdminCompaniesPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
@@ -320,6 +360,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
               </Routes>
               </TourProvider>
+              {import.meta.env.DEV && <DevAuthDebugPanel />}
               </HelmetProvider>
             </BrowserRouter>
           </TooltipProvider>

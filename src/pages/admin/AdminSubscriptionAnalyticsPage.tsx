@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useSubscriptionAnalytics } from '@/hooks/useSubscriptionAnalytics';
 import type { AnalyticsRangePreset } from '@/services/subscriptionAnalyticsService';
+import { useToast } from '@/components/ui/use-toast';
 
 function formatKES(amount: number): string {
   return `KES ${Number(amount || 0).toLocaleString()}`;
@@ -32,6 +33,16 @@ function formatKES(amount: number): string {
 export default function AdminSubscriptionAnalyticsPage() {
   const [range, setRange] = useState<AnalyticsRangePreset>('30d');
   const { data, isLoading, isError, error } = useSubscriptionAnalytics(range);
+  const { toast } = useToast();
+
+  // Surface RPC errors as toasts in dev/admin view.
+  if (isError && error) {
+    toast({
+      title: 'Subscription analytics failed',
+      description: (error as Error)?.message ?? 'Check Supabase RPC "subscription_analytics".',
+      variant: 'destructive',
+    });
+  }
 
   const revenue = data?.revenue;
   const active = data?.active;
@@ -48,7 +59,7 @@ export default function AdminSubscriptionAnalyticsPage() {
       {isError && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <strong>Could not load analytics.</strong>{' '}
-          {(error as Error)?.message ?? 'Check that you are signed in as a developer and that Firestore indexes are deployed.'}
+          {(error as Error)?.message ?? 'Check that you are signed in as a developer and that Supabase RPC "subscription_analytics" is deployed.'}
         </div>
       )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

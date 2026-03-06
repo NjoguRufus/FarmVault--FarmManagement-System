@@ -1,11 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db, authEmployeeCreate } from '@/lib/firebase';
-import { serverTimestamp, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { serverTimestamp, doc, setDoc, updateDoc } from '@/lib/firestore-stub';
+import { createUserWithEmailAndPassword } from '@/lib/auth-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee, PermissionMap, PermissionPresetKey, User } from '@/types';
+import { employeesProvider } from '@/lib/provider';
+import { listEmployees, inviteEmployee, updateEmployee as updateEmployeeSupabase } from '@/services/employeesSupabaseService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -53,6 +55,8 @@ const ROLE_OPTIONS: Array<{
 ];
 
 const DEFAULT_PERMISSIONS = resolvePermissions(null, getDefaultPermissions());
+
+const isEmployeesSupabase = employeesProvider === 'supabase';
 
 function mapEmployeeRoleToAppRole(role: ManagedEmployeeRole | null): 'manager' | 'broker' | 'employee' {
   if (role === 'operations-manager') return 'manager';
@@ -133,6 +137,26 @@ export default function EmployeesPage() {
   const scope = { companyScoped: true, companyId, isDeveloper };
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees', scope);
   const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users', scope);
+
+  const [employeesSupabase, setEmployeesSupabase] = useState<Employee[]>([]);
+  const [loadingSupabase, setLoadingSupabase] = useState(false);
+  const refetchSupabaseEmployees = useCallback(async () => {
+    if (!companyId || !isEmployeesSupabase) return;
+    setLoadingSupabase(true);
+    try {
+      const list = await listEmployees(companyId);
+      setEmployeesSupabase(list);
+    } catch {
+      setEmployeesSupabase([]);
+    } finally {
+      setLoadingSupabase(false);
+    }
+  }, [companyId]);
+  useEffect(() => {
+    if (isEmployeesSupabase && companyId) {
+      refetchSupabaseEmployees();
+    }
+  }, [isEmployeesSupabase, companyId, refetchSupabaseEmployees]);
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -231,6 +255,28 @@ export default function EmployeesPage() {
     }
     setEditSaving(true);
     try {
+      if (isEmployeesSupabase) {
+        const selectedRole = resolveRoleForSave(editRole, editingEmployee);
+        const resolvedPermissions = resolvePermissions(selectedRole, editPermissions);
+        const resolvedDepartment = editDepartment || getDepartmentFromRole(normalizeEmployeeRole(selectedRole));
+        await updateEmployeeSupabase(editingEmployee.id, {
+          name: editName,
+          role: selectedRole,
+          employee_role: selectedRole,
+          department: resolvedDepartment,
+          phone: editContact || undefined,
+          contact: editContact || undefined,
+          status: editStatus,
+          permissions: resolvedPermissions,
+        });
+        await refetchSupabaseEmployees();
+        toast.success('Employee updated');
+        setEditOpen(false);
+        setEditingEmployee(null);
+        setEditSaving(false);
+        return;
+      }
+
       const selectedRole = resolveRoleForSave(editRole, editingEmployee);
       const normalizedSelectedRole = normalizeEmployeeRole(selectedRole);
       const resolvedPermissions = resolvePermissions(selectedRole, editPermissions);
@@ -281,11 +327,31 @@ export default function EmployeesPage() {
     }
     setSaving(true);
     try {
-      const companyId = user?.companyId ?? null;
-      if (!companyId && user?.role !== 'developer') {
+      const effectiveCompanyId = user?.companyId ?? null;
+      if (!effectiveCompanyId && user?.role !== 'developer') {
         toast.error('Cannot add employee', {
           description: 'Your account is not linked to a company. Please contact support or sign in with a company admin account.',
         });
+        return;
+      }
+
+      if (isEmployeesSupabase) {
+        const selectedRole = role === 'none' ? null : role;
+        const resolvedPermissions = resolvePermissions(selectedRole, addPermissions);
+        await inviteEmployee({
+          email: email.trim(),
+          name: name.trim() || email.trim(),
+          role: selectedRole,
+          department: department.trim() || undefined,
+          phone: contact.trim() || undefined,
+          permissions: resolvedPermissions,
+          company_id: effectiveCompanyId ?? undefined,
+        });
+        await refetchSupabaseEmployees();
+        toast.success('Invite sent');
+        setAddOpen(false);
+        resetAddForm();
+        setSaving(false);
         return;
       }
 
@@ -360,18 +426,23 @@ export default function EmployeesPage() {
 
   // Show only this company's employees (developers see all)
   const companyEmployees = useMemo(() => {
+    if (isEmployeesSupabase) {
+      if (!companyId && !isDeveloper) return [];
+      return employeesSupabase;
+    }
     if (!user?.companyId && user?.role !== 'developer') return [];
     if (user?.role === 'developer') return employees;
     return employees.filter((e) => e.companyId === user?.companyId);
-  }, [employees, user?.companyId, user?.role]);
+  }, [isEmployeesSupabase, employeesSupabase, employees, user?.companyId, user?.role, companyId, isDeveloper]);
 
   const authUserIdToEmail = useMemo(() => {
+    if (isEmployeesSupabase) return new Map<string, string>();
     const map = new Map<string, string>();
     (allUsers as User[]).forEach((u) => {
       if (u.email) map.set(u.id, u.email);
     });
     return map;
-  }, [allUsers]);
+  }, [allUsers, isEmployeesSupabase]);
 
   const getEmployeeEmail = (emp: Employee) => {
     if (emp.email) return emp.email;
@@ -477,7 +548,13 @@ export default function EmployeesPage() {
                   placeholder="employee@farmvault.com"
                   required
                 />
+                {isEmployeesSupabase && (
+                  <span className="block text-xs text-muted-foreground">
+                    An invite link will be sent to this email. The employee will set their password when they accept.
+                  </span>
+                )}
               </div>
+              {!isEmployeesSupabase && (
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">
                   Initial password
@@ -504,6 +581,7 @@ export default function EmployeesPage() {
                   </button>
                 </div>
               </div>
+              )}
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Phone / Contact</label>
                 <input
@@ -535,7 +613,7 @@ export default function EmployeesPage() {
                   disabled={saving}
                   className="fv-btn fv-btn--primary"
                 >
-                  {saving ? 'Saving…' : 'Save Employee'}
+                  {saving ? (isEmployeesSupabase ? 'Sending…' : 'Saving…') : (isEmployeesSupabase ? 'Send Invite' : 'Save Employee')}
                 </button>
               </DialogFooter>
             </form>
@@ -771,7 +849,7 @@ export default function EmployeesPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
+              {(isEmployeesSupabase ? loadingSupabase : isLoading) && (
                 <tr>
                   <td colSpan={6} className="text-sm text-muted-foreground">
                     Loading employees…

@@ -8,7 +8,7 @@ import {
   limit,
   getDocsFromCache,
   type QueryConstraint,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { toast } from '@/hooks/use-toast';
 import { NO_COMPANY } from '@/hooks/useCompanyScope';

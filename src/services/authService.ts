@@ -1,4 +1,4 @@
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword } from '@/lib/auth-stub';
 import { auth } from '@/lib/firebase';
 
 export async function registerCompanyAdmin(email: string, password: string) {

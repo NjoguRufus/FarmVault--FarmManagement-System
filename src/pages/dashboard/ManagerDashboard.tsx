@@ -13,7 +13,7 @@ import { syncTodaysLabourExpenses } from '@/services/workLogService';
 import { useWorkCardsForManager } from '@/hooks/useWorkCards';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { doc, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, writeBatch } from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 

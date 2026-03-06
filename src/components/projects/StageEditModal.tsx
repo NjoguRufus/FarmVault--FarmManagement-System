@@ -3,10 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useQueryClient, useMutation, useInfiniteQuery } from '@tanstack/react-query';
-import { updateDoc, doc, addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { addStageNote, getStageNotes } from '@/services/stageNotesService';
+import { updateStageDates } from '@/services/projectsService';
 import type { CropStage } from '@/types';
 import { toast } from 'sonner';
 
@@ -78,36 +77,17 @@ export function StageEditModal({
       const ae = inputValueToDate(draft.actualEnd);
 
       if (isPlaceholder) {
-        const payload: Record<string, unknown> = {
-          projectId: project.id,
-          companyId: project.companyId,
-          cropType: project.cropType ?? '',
-          stageName: stage.stageName,
-          stageIndex: stage.stageIndex ?? 0,
-          status: 'in-progress',
-          createdAt: serverTimestamp(),
-        };
-        if (as) payload.startDate = Timestamp.fromDate(as);
-        if (ae) payload.endDate = Timestamp.fromDate(ae);
-        if (ps) payload.plannedStartDate = Timestamp.fromDate(ps);
-        if (pe) payload.plannedEndDate = Timestamp.fromDate(pe);
-        if (as) payload.actualStartDate = Timestamp.fromDate(as);
-        if (ae) payload.actualEndDate = Timestamp.fromDate(ae);
-        await addDoc(collection(db, 'projectStages'), payload);
-        toast.success('Stage created. You can add notes by clicking the stage again.');
+        toast.error('Creating new custom stages is not yet supported.');
       } else {
-        const payload: Record<string, unknown> = {};
-        if (ps) payload.plannedStartDate = Timestamp.fromDate(ps);
-        if (pe) payload.plannedEndDate = Timestamp.fromDate(pe);
-        if (as) payload.actualStartDate = Timestamp.fromDate(as);
-        if (ae) payload.actualEndDate = Timestamp.fromDate(ae);
-        if (Object.keys(payload).length > 0) {
-          payload.updatedAt = serverTimestamp();
-          await updateDoc(doc(db, 'projectStages', stage.id), payload);
-        }
+        await updateStageDates(stage.id, {
+          plannedStart: ps ? ps.toISOString().slice(0, 10) : undefined,
+          plannedEnd: pe ? pe.toISOString().slice(0, 10) : undefined,
+          actualStart: as ? as.toISOString().slice(0, 10) : undefined,
+          actualEnd: ae ? ae.toISOString().slice(0, 10) : undefined,
+        });
         toast.success('Stage updated.');
       }
-      queryClient.invalidateQueries({ queryKey: ['projectStages'] });
+      queryClient.invalidateQueries({ queryKey: ['projectStages', project.companyId, project.id] });
       onSaved?.();
       onOpenChange(false);
     } catch (err) {
@@ -228,8 +208,8 @@ function StageNotesBlock({
     queryKey: ['stageNotes', companyId, projectId, stageId],
     queryFn: ({ pageParam }) =>
       getStageNotes(companyId, projectId, stageId, NOTES_PAGE_SIZE, pageParam ?? null),
-    initialPageParam: null as import('firebase/firestore').DocumentSnapshot | null,
-    getNextPageParam: (lastPage) => lastPage.lastDoc,
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.lastCursor,
     enabled: !!companyId && !!projectId && !!stageId,
     staleTime: 60_000,
   });

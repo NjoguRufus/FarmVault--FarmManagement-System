@@ -11,7 +11,7 @@ import {
   orderBy,
   limit,
   Timestamp,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import { getDocWithCache, getDocsWithCache } from '@/lib/firestoreCache';
 

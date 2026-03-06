@@ -68,7 +68,6 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
               <th className={compact ? 'py-2' : ''}>Project</th>
               <th className={compact ? 'py-2' : ''}>Crop</th>
               <th className={compact ? 'py-2' : ''}>Location</th>
-              <th className={compact ? 'py-2' : ''}>Acreage</th>
               <th className={compact ? 'py-2' : ''}>Budget</th>
               <th className={compact ? 'py-2' : ''}>Status</th>
               <th className={compact ? 'py-2' : ''}></th>
@@ -99,7 +98,6 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
                   <span className="capitalize">{project.cropType.replace('-', ' ')}</span>
                 </td>
                 <td className={compact ? 'py-2 text-sm' : ''}>{project.location}</td>
-                <td className={compact ? 'py-2 text-sm' : ''}>{project.acreage} acres</td>
                 <td className={compact ? 'py-2 text-sm' : ''}>{formatCurrency(project.budget)}</td>
                 <td className={compact ? 'py-2' : ''}>
                   <span className={cn('fv-badge capitalize text-xs', getStatusBadge(project.status))}>
@@ -139,12 +137,18 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
             </div>
             <div className={cn('grid grid-cols-2 gap-2', compact ? 'text-xs' : 'text-sm')}>
               <div>
-                <span className="text-muted-foreground">Acreage:</span>
-                <span className="ml-1 font-medium">{project.acreage} acres</span>
+                <span className="text-muted-foreground">Started:</span>
+                <span className="ml-1 font-medium">{formatDate(project.startDate)}</span>
               </div>
               <div>
-                <span className="text-muted-foreground">Budget:</span>
-                <span className="ml-1 font-medium">{formatCurrency(project.budget)}</span>
+                <span className="text-muted-foreground">Expected:</span>
+                {getExpectedHarvestDate(project) ? (
+                  <span className="ml-1 font-medium">
+                    {formatDate(getExpectedHarvestDate(project)!)}
+                  </span>
+                ) : (
+                  <span className="ml-1 font-medium">—</span>
+                )}
               </div>
             </div>
           </div>

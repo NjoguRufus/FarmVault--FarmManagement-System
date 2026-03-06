@@ -6,7 +6,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { auth, db } from '@/lib/firebase';
 import {
   type PaymentMode,

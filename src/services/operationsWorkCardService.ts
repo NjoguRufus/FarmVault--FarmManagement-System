@@ -8,7 +8,7 @@ import {
   where,
   serverTimestamp,
   Timestamp,
-} from 'firebase/firestore';
+} from '@/lib/firestore-stub';
 import { db } from '@/lib/firebase';
 import type {
   OperationsWorkCard,
@@ -83,6 +83,8 @@ function mapDoc(id: string, data: Record<string, unknown>): OperationsWorkCard {
     projectId: String(data.projectId ?? ''),
     stageId: String(data.stageId ?? ''),
     stageName: data.stageName != null ? String(data.stageName) : undefined,
+    blockId: data.blockId != null ? String(data.blockId) : undefined,
+    blockName: data.blockName != null ? String(data.blockName) : undefined,
     workTitle: String(data.workTitle ?? ''),
     workCategory: String(data.workCategory ?? ''),
     planned: {
@@ -147,6 +149,8 @@ export async function createWorkCard(params: {
   projectId: string;
   stageId: string;
   stageName?: string;
+  blockId?: string | null;
+  blockName?: string | null;
   workTitle: string;
   workCategory: string;
   planned: WorkCardPlanned;
@@ -160,6 +164,8 @@ export async function createWorkCard(params: {
     projectId: params.projectId,
     stageId: params.stageId,
     stageName: params.stageName ?? null,
+    blockId: params.blockId ?? null,
+    blockName: params.blockName ?? null,
     workTitle: params.workTitle,
     workCategory: params.workCategory,
     planned: {
@@ -507,10 +513,11 @@ export async function getWorkCardsForProject(
 export async function getWorkCard(
   cardId: string
 ): Promise<OperationsWorkCard | null> {
-  const { getDoc } = await import('firebase/firestore');
+  const { getDoc, doc } = await import('@/lib/firestore-stub');
   const d = await getDoc(doc(db, COLLECTION, cardId));
-  if (!d.exists()) return null;
-  return mapDoc(d.id, d.data() as Record<string, unknown>);
+  if (!d || typeof (d as { exists?: () => boolean }).exists !== 'function' || !(d as { exists: () => boolean }).exists()) return null;
+  const snap = d as { id: string; data: () => Record<string, unknown> };
+  return mapDoc(snap.id, snap.data());
 }
 
 // --- Status guards (for UI and validation) ---

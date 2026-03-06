@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Calendar as CalendarIcon, CheckCircle, ChevronDown, ChevronLeft, ChevronUp, Clock, Package, Users, Activity, Wallet, Wrench as WrenchIcon, ListChecks, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChallengeType, CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
 import { useProject } from '@/contexts/ProjectContext';
 import { toDate, formatDate } from '@/lib/dateUtils';
@@ -17,9 +17,11 @@ import {
   assertCropStagesDev,
   type StageRule,
 } from '@/utils/cropStages';
+import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
-import { deleteProject } from '@/services/companyDataService';
+import { getProject, deleteProject as deleteProjectService } from '@/services/projectsService';
 import { useCollection } from '@/hooks/useCollection';
+import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,16 +57,23 @@ export default function ProjectDetailsPage() {
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper, enabled: !!companyId || isDeveloper };
 
-  const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
-    'project-details-projects',
-    'projects',
-    scope,
-  );
-  const project = useMemo(() => {
-    if (!companyId || !projectId) return null;
-    const found = allProjects.find((p) => p.id === projectId && p.companyId === companyId);
-    return found ?? null;
-  }, [allProjects, companyId, projectId]);
+  const {
+    data: project,
+    isLoading: projectsLoading,
+    error: projectError,
+  } = useQuery({
+    queryKey: ['project', projectId ?? '', companyId ?? ''],
+    queryFn: () => getProject(projectId!, { companyId }),
+    enabled: Boolean(projectId && (companyId || isDeveloper)),
+  });
+  if (import.meta.env.DEV && projectId && !projectsLoading && !project && (projectError != null || project === null)) {
+    console.warn('[ProjectDetailsPage] Project not found', {
+      projectId,
+      companyId,
+      setupIncomplete: !companyId,
+      error: projectError != null ? String(projectError) : 'no row returned',
+    });
+  }
 
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('project-details-worklogs', 'workLogs', {
     ...scope,
@@ -92,11 +101,16 @@ export default function ProjectDetailsPage() {
   const projectStages = useMemo(
     () =>
       companyId && projectId
-        ? [...allStages].filter((s) => s.companyId === companyId && s.projectId === projectId).sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0))
+        ? [...allStages]
+            .filter((s) => s.companyId === companyId && s.projectId === projectId)
+            .sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0))
         : [],
     [allStages, companyId, projectId],
   );
-
+  const { data: projectBlocks = [] } = useProjectBlocks(
+    companyId,
+    projectId ?? null,
+  );
   const [stageEditOpen, setStageEditOpen] = useState(false);
   const [selectedStageForEdit, setSelectedStageForEdit] = useState<CropStage | null>(null);
 
@@ -147,10 +161,10 @@ export default function ProjectDetailsPage() {
   const daysSincePlanting = plantingDate != null ? calculateDaysSince(plantingDate) : null;
 
   const expectedHarvestDate = useMemo(() => {
-    if (!plantingDate || !templateStages.length) return undefined;
-    const last = templateStages[templateStages.length - 1];
-    return getStageEndDate(plantingDate, last.dayEnd);
-  }, [plantingDate, templateStages]);
+    if (!project) return undefined;
+    const date = getExpectedHarvestDate(project, project.useBlocks ? projectBlocks : undefined);
+    return date ?? undefined;
+  }, [project, projectBlocks]);
 
   const currentStageForDay = useMemo(() => {
     if (daysSincePlanting == null || daysSincePlanting < 0 || !templateStages.length) return null;
@@ -279,7 +293,15 @@ export default function ProjectDetailsPage() {
     );
   }
 
-  if (!project) {
+  if (!project || projectError) {
+    if (import.meta.env.DEV && projectId) {
+      console.warn('[ProjectDetailsPage] Project not found – show fallback', {
+        projectId,
+        companyId,
+        setupIncomplete: !companyId,
+        hasError: !!projectError,
+      });
+    }
     return (
       <div className="space-y-6 animate-fade-in">
         <button
@@ -339,6 +361,58 @@ export default function ProjectDetailsPage() {
                   </span>
                 )}
               </div>
+              {project.useBlocks && projectBlocks.length > 0 && (
+                <div className="mt-2 space-y-1 text-xs sm:text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    Blocks ({projectBlocks.length})
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {projectBlocks.slice(0, 4).map((b) => {
+                      const planted = normalizeDate(b.plantingDate as any);
+                      const cropDays = getCropDaysToHarvest(project.cropType);
+                      const expected =
+                        b.expectedEndDate
+                          ? normalizeDate(b.expectedEndDate as any)
+                          : (() => {
+                              if (!planted || cropDays == null) return undefined;
+                              const d = new Date(planted);
+                              d.setDate(d.getDate() + cropDays);
+                              return d;
+                            })();
+                      return (
+                        <span
+                          key={b.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 bg-muted/40"
+                        >
+                          <span className="font-medium text-foreground text-[11px] sm:text-xs">
+                            {b.blockName}
+                          </span>
+                          {typeof b.acreage === 'number' && (
+                            <span className="text-[11px] sm:text-xs">
+                              · {b.acreage} ac
+                            </span>
+                          )}
+                          {planted && (
+                            <span className="text-[11px] sm:text-xs">
+                              · Planted {formatDate(planted)}
+                            </span>
+                          )}
+                          {expected && (
+                            <span className="text-[11px] sm:text-xs">
+                              · Harvest {formatDate(expected)}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                    {projectBlocks.length > 4 && (
+                      <span className="text-[11px] sm:text-xs">
+                        +{projectBlocks.length - 4} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             {project.status === 'active' && (
               <button
@@ -1099,11 +1173,12 @@ export default function ProjectDetailsPage() {
                     if (!companyId || !project?.id) return;
                     setDeletingProject(true);
                     try {
-                      await deleteProject(companyId, project.id);
+                      await deleteProjectService(project.id);
                       if (activeProject?.id === project.id) {
                         setActiveProject(null);
                       }
-                      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+                      await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
+                      await queryClient.invalidateQueries({ queryKey: ['project', project.id, companyId] });
                       navigate('/projects');
                     } catch (err) {
                       console.error('Failed to delete project:', err);
@@ -1126,7 +1201,7 @@ export default function ProjectDetailsPage() {
         stage={selectedStageForEdit}
         project={project ? { id: project.id, companyId: project.companyId, cropType: project.cropType } : null}
         createdBy={user?.id ?? ''}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages', companyId, project?.id] })}
       />
     </div>
   );

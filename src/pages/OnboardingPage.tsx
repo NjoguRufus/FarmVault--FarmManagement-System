@@ -1,0 +1,321 @@
+/**
+ * Onboarding wizard: Step 1 create company + membership + profile, Step 2 trial, Step 3 optional project.
+ * Guard: redirect to /dashboard if user has active_company_id and membership; else show onboarding.
+ */
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { CheckCircle2, ChevronRight, FolderPlus } from 'lucide-react';
+import { useUser, useAuth as useClerkAuth } from '@clerk/react';
+import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
+import { db } from '@/lib/db';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/use-toast';
+
+export default function OnboardingPage() {
+  const navigate = useNavigate();
+  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { user: clerkUser } = useUser();
+  const { toast } = useToast();
+  const [step, setStep] = useState(1);
+  const [companyName, setCompanyName] = useState('');
+  const [companyEmail, setCompanyEmail] = useState('');
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [companyId, setCompanyId] = useState<string | null>(null);
+
+  const [projectName, setProjectName] = useState('');
+  const [createProject, setCreateProject] = useState(false);
+  const [projectCreated, setProjectCreated] = useState(false);
+
+  const clerkId = clerkUser?.id ?? null;
+  const fullName = clerkUser?.fullName ?? companyEmail.split('@')[0] ?? '';
+  const step1Valid = companyName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail.trim());
+
+  // Pre-fill from Clerk user only (no organizations).
+  useEffect(() => {
+    if (!clerkUser) return;
+    setCompanyEmail(clerkUser.primaryEmailAddress?.emailAddress ?? '');
+    setCompanyName(clerkUser.fullName ?? '');
+  }, [clerkUser]);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) {
+      navigate('/sign-in', { replace: true });
+      return;
+    }
+  }, [isLoaded, isSignedIn, navigate]);
+
+  // AuthContext/RequireOnboarding already guard access; we don't need an extra membership check here.
+
+  const handleStep1CreateCompany = async () => {
+    if (!step1Valid || !clerkId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getSupabaseAccessToken();
+      if (!token) {
+        const message =
+          'Session token not available. Sign out and sign in again. If it persists, ensure Clerk is added as a third-party auth provider in Supabase (Authentication → Third-Party).';
+        setError(message);
+        toast({
+          title: 'Session problem',
+          description: message,
+          variant: 'destructive',
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Single RPC: creates core.companies, core.company_members (role=company_admin), core.profiles with active_company_id
+      const { data: cid, error: rpcErr } = await supabase.rpc('create_company_with_admin', {
+        _name: companyName.trim(),
+      });
+
+      if (rpcErr || !cid) {
+        const message = rpcErr?.message ?? 'Failed to create company';
+        setError(message);
+        toast({
+          title: 'Company error',
+          description: message,
+          variant: 'destructive',
+        });
+        setLoading(false);
+        return;
+      }
+
+      setCompanyId(cid as string);
+      setStep(2);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Something went wrong';
+      setError(message);
+      toast({
+        title: 'Onboarding failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStep2Trial = () => {
+    if (!companyId || !clerkId) {
+      goToDashboard();
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const trialEnds = new Date();
+    trialEnds.setDate(trialEnds.getDate() + 7);
+
+    const trialEndsAt = trialEnds.toISOString();
+    const payload = {
+      company_id: companyId,
+      status: 'trialing',
+      trial_ends_at: trialEndsAt,
+    };
+    // eslint-disable-next-line no-console
+    console.log('[SUB WRITE] target=billing.company_subscriptions', payload);
+    supabase
+      .schema('billing')
+      .from('company_subscriptions')
+      .upsert(payload, { onConflict: 'company_id' })
+      .then(({ error: subErr }) => {
+        setLoading(false);
+        if (subErr) {
+          setError(subErr.message);
+          return;
+        }
+        if (createProject && projectName.trim()) {
+          setStep(3);
+        } else {
+          goToDashboard();
+        }
+      });
+  };
+
+  const handleStep3CreateProject = async () => {
+    if (!companyId || !projectName.trim()) {
+      goToDashboard();
+      return;
+    }
+    if (!clerkUser?.id) {
+      setError('User not loaded');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: insertError } = await db
+        .projects()
+        .from('projects')
+        .insert({
+          company_id: companyId,
+          created_by: clerkUser.id,
+          name: projectName.trim(),
+          crop_type: 'Other',
+          environment: 'open_field',
+          status: 'active',
+          planting_date: new Date().toISOString().slice(0, 10),
+        });
+      if (insertError) throw insertError;
+      setProjectCreated(true);
+      setTimeout(goToDashboard, 1200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create project');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  function goToDashboard() {
+    if (typeof window !== 'undefined') {
+      window.location.assign('/dashboard');
+    } else {
+      navigate('/dashboard', { replace: true });
+    }
+  }
+
+  if (!isLoaded || !isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
+      <Card className="w-full max-w-lg rounded-2xl shadow-xl border-primary/10 overflow-hidden">
+        <CardContent className="p-6 sm:p-8">
+          <div className="flex items-center gap-3 mb-8">
+            <img src="/Logo/FarmVault_Logo dark mode.png" alt="FarmVault" className="h-10 w-auto rounded-lg object-contain bg-sidebar-primary/10 p-1" />
+            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Onboarding</span>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">{error}</div>
+          )}
+
+          {step === 1 && (
+            <>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Create your company</h2>
+              <p className="text-sm text-muted-foreground mb-6">You’ll get a 7-day Pro trial in the next step.</p>
+              {orgLogoUrl && (
+                <div className="flex justify-center mb-4">
+                  <img
+                    src={orgLogoUrl}
+                    alt="Organization logo"
+                    className="h-16 w-16 rounded-xl object-cover border border-border"
+                  />
+                </div>
+              )}
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="companyName">Company name</Label>
+                  <Input
+                    id="companyName"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="e.g. Green Valley Farm"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="companyEmail">Company email</Label>
+                  <Input
+                    id="companyEmail"
+                    type="email"
+                    value={companyEmail}
+                    onChange={(e) => setCompanyEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+              <Button className="w-full mt-6" onClick={handleStep1CreateCompany} disabled={!step1Valid || loading}>
+                {loading ? 'Creating…' : 'Create company'}
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            </>
+          )}
+
+          {step === 2 && (
+            <>
+              <div className="flex justify-center mb-6">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary">
+                  <CheckCircle2 className="h-10 w-10" />
+                </div>
+              </div>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Start 7-day Pro trial</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                <strong>{companyName}</strong> is ready. Activate your trial, then optionally create your first project.
+              </p>
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="checkbox"
+                  id="createProject"
+                  checked={createProject}
+                  onChange={(e) => setCreateProject(e.target.checked)}
+                  className="rounded border-input"
+                />
+                <Label htmlFor="createProject">Create first project</Label>
+              </div>
+              {createProject && (
+                <div className="mb-6">
+                  <Label htmlFor="projectName">Project name</Label>
+                  <Input
+                    id="projectName"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    placeholder="e.g. Tomato Season 2025"
+                    className="mt-1"
+                  />
+                </div>
+              )}
+              <Button className="w-full" onClick={handleStep2Trial} disabled={loading}>
+                {loading ? 'Activating…' : createProject && projectName.trim() ? 'Activate trial & continue' : 'Activate trial & go to Dashboard'}
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <h2 className="text-xl font-semibold text-foreground mb-2 flex items-center gap-2">
+                <FolderPlus className="h-5 w-5" />
+                First project
+              </h2>
+              <p className="text-sm text-muted-foreground mb-6">Create a project to start tracking stages and expenses.</p>
+              <div className="mb-6">
+                <Label htmlFor="projectName2">Project name</Label>
+                <Input
+                  id="projectName2"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="e.g. Tomato Season 2025"
+                  className="mt-1"
+                />
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={goToDashboard} disabled={loading}>
+                  Skip
+                </Button>
+                <Button className="flex-1" onClick={handleStep3CreateProject} disabled={!projectName.trim() || loading}>
+                  {loading ? 'Creating…' : 'Create project'}
+                </Button>
+              </div>
+              {projectCreated && (
+                <p className="mt-4 text-sm text-green-600 text-center">Project created. Redirecting to dashboard…</p>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

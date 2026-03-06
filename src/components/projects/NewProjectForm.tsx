@@ -1,16 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
-import { db } from '@/lib/firebase';
 import { generateStageTimeline, getCropStages } from '@/lib/cropStageConfig';
 import { EnvironmentType } from '@/types';
 import { cn } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
-import { createProjectBlock } from '@/services/projectBlockService';
 import { createBudgetPool } from '@/services/budgetPoolService';
 import { getChallengeTemplates } from '@/services/challengeTemplatesService';
+import { createProject } from '@/services/projectsService';
 import type { BudgetPool } from '@/types';
 import {
   cropSupportsEnvironment,
@@ -38,6 +36,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { getCropDaysToHarvest } from '@/utils/expectedHarvest';
+import { toast } from 'sonner';
 
 interface NewProjectFormProps {
   onCancel: () => void;
@@ -246,6 +246,15 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   }, [form.currentStage, stageOptions, stageAutoDetected, manualStageOverride]);
 
   useEffect(() => {
+    if (!enableBlockManagement) return;
+    const totalAcreage = blocks.reduce((sum, b) => sum + (Number(b.acreage) || 0), 0);
+    setForm((prev) => ({
+      ...prev,
+      acreage: totalAcreage > 0 ? String(totalAcreage) : '',
+    }));
+  }, [enableBlockManagement, blocks]);
+
+  useEffect(() => {
     if (step !== 3) {
       setStepTwoReadyToSubmit(false);
       return;
@@ -295,6 +304,10 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     }
     if (!stepTwoReadyToSubmit) return;
     if (!user || saving || !selectedCrop) return;
+    if (!user.companyId) {
+      toast.error('No active company selected. Please select a company before creating a project.');
+      return;
+    }
     if (!enableBlockManagement && !form.plantingDate) return;
 
     const finalStageKey = (form.currentStage || stageAutoDetected).trim();
@@ -317,214 +330,63 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
     setSaving(true);
     try {
-      const projectPayload = {
-        name: form.projectName,
-        companyId: user.companyId,
-        cropType: projectCropType,
-        cropTypeKey: normalizedCropTypeKey,
-        environmentType: effectiveEnvironment,
-        status: 'active',
-        location: form.location,
-        acreage: Number(form.acreage || '0'),
-        budget: budgetType === 'pool' ? 0 : Number(form.budget || '0'),
-        budgetPoolId: budgetType === 'pool' && budgetPoolId ? budgetPoolId : null,
-        createdAt: serverTimestamp(),
-        createdBy: user.id,
-        setupComplete: false,
-      };
+      const isBlockMode = enableBlockManagement && blocks.length > 0;
+      const primaryPlantingDate = isBlockMode
+        ? (() => {
+            const validBlocks = blocks.filter(
+              (b) => b.plantingDate && !Number.isNaN(b.plantingDate.getTime()),
+            );
+            if (validBlocks.length === 0) return null;
+            return validBlocks.reduce<Date | null>((earliest, b) => {
+              if (!earliest) return b.plantingDate;
+              return b.plantingDate.getTime() < earliest.getTime() ? b.plantingDate : earliest;
+            }, null);
+          })()
+        : form.plantingDate;
 
-      if (enableBlockManagement) {
-        const projectRef = await addDoc(collection(db, 'projects'), {
-          ...projectPayload,
-          useBlocks: true,
-          startDate: null,
-          plantingDate: null,
-          startingStageIndex: 0,
-          currentStage: '',
-          stageSelected: '',
-          stageAutoDetected: '',
-          stageWasManuallyOverridden: false,
-          daysSincePlanting: 0,
-        });
-        for (const b of blocks) {
-          const acreageNum = Number(b.acreage) || 0;
-          if (!b.blockName.trim() || acreageNum <= 0 || !b.plantingDate) continue;
-          await createProjectBlock({
-            companyId: user.companyId,
-            projectId: projectRef.id,
-            blockName: b.blockName.trim(),
-            acreage: acreageNum,
-            plantingDate: b.plantingDate,
-          });
-        }
-        await updateDoc(doc(db, 'projects', projectRef.id), { setupComplete: true });
-        queryClient.invalidateQueries({ queryKey: ['projects'] });
-        queryClient.invalidateQueries({ queryKey: ['project-blocks'] });
-        const toCopyBlocks = challengeTemplates.filter((t) => selectedTemplateIds.has(t.id));
-        if (toCopyBlocks.length > 0 && user?.companyId) {
-          try {
-            const batch = writeBatch(db);
-            const projectCropTypeBlocks = toProjectCropTypeKey(normalizeCropTypeKey(selectedCrop!.cropTypeKey));
-            for (const t of toCopyBlocks) {
-              const ref = doc(collection(db, 'seasonChallenges'));
-              batch.set(ref, {
-                projectId: projectRef.id,
-                companyId: user.companyId,
-                cropType: projectCropTypeBlocks,
-                title: t.title,
-                description: t.description ?? '',
-                challengeType: 'other',
-                severity: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
-                status: 'identified',
-                dateIdentified: serverTimestamp(),
-                createdAt: serverTimestamp(),
-                source: 'template',
-                templateId: t.id,
-                createdBy: user.id,
-                createdByName: (user as { name?: string }).name ?? (user as { email?: string }).email ?? 'Unknown',
-                ...((t as { whatWasDone?: string }).whatWasDone && { whatWasDone: (t as { whatWasDone?: string }).whatWasDone }),
-                ...((t as { plan2IfFails?: string }).plan2IfFails && { plan2IfFails: (t as { plan2IfFails?: string }).plan2IfFails }),
-              });
-            }
-            await batch.commit();
-            queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
-          } catch (templateErr) {
-            console.warn('Failed to add suggested challenges:', templateErr);
-            const { toast } = await import('sonner');
-            toast.warning('Project created but some suggested challenges could not be added.');
-          }
-        }
-        onSuccess?.();
+      if (!primaryPlantingDate) {
         setSaving(false);
         return;
       }
 
-      const projectRef = await addDoc(collection(db, 'projects'), {
-        ...projectPayload,
-        startDate: form.plantingDate ? Timestamp.fromDate(form.plantingDate) : null,
-        plantingDate: form.plantingDate ? Timestamp.fromDate(form.plantingDate) : null,
-        startingStageIndex,
-        currentStage: finalStageKey,
-        stageSelected: finalStageKey,
-        stageAutoDetected: stageAutoDetected || finalStageKey,
-        stageWasManuallyOverridden: finalManualOverride,
-        daysSincePlanting,
+      const cropDaysToHarvest = getCropDaysToHarvest(projectCropType);
+      const expectedHarvestDate =
+        cropDaysToHarvest != null
+          ? (() => {
+              const d = new Date(primaryPlantingDate);
+              d.setDate(d.getDate() + cropDaysToHarvest);
+              return d;
+            })()
+          : null;
+
+      const plantingDateStr = primaryPlantingDate.toISOString().slice(0, 10);
+      const expectedHarvestStr = expectedHarvestDate
+        ? expectedHarvestDate.toISOString().slice(0, 10)
+        : null;
+
+      const project = await createProject({
+        companyId: user.companyId,
+        createdBy: user.id,
+        name: form.projectName.trim(),
+        cropType: projectCropType,
+        plantingDate: plantingDateStr,
+        environment: effectiveEnvironment,
+        expectedHarvestDate: expectedHarvestStr ?? null,
+        expectedEndDate: null,
+        fieldSize: Number(form.acreage || '0') || null,
+        fieldUnit: 'acres',
+        notes: form.location || null,
       });
 
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      if (import.meta.env.DEV) {
+        console.log('[Project Created]', project);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['projects', user.companyId] });
       onSuccess?.();
-
-      (async () => {
-        try {
-          const legacyDefs = legacyDefsForCrop;
-          const canUseLegacyConfig = legacyDefs.length > 0;
-
-          if (canUseLegacyConfig) {
-            const timeline = generateStageTimeline(projectCropType, form.plantingDate!, startingStageIndex);
-
-            for (let i = 0; i < legacyDefs.length; i++) {
-              const def = legacyDefs[i];
-              if (i < startingStageIndex) {
-                const completedStartDate = new Date(form.plantingDate!);
-                completedStartDate.setDate(completedStartDate.getDate() - (startingStageIndex - i) * 7);
-                const completedEndDate = new Date(completedStartDate);
-                completedEndDate.setDate(completedEndDate.getDate() + def.expectedDurationDays - 1);
-                await addDoc(collection(db, 'projectStages'), {
-                  projectId: projectRef.id,
-                  companyId: user.companyId,
-                  cropType: projectCropType,
-                  stageName: def.name,
-                  stageIndex: def.order,
-                  startDate: completedStartDate,
-                  endDate: completedEndDate,
-                  expectedDurationDays: def.expectedDurationDays,
-                  status: 'completed',
-                  createdAt: serverTimestamp(),
-                });
-              } else {
-                const timelineStage = timeline.find((t) => t.stageIndex === def.order);
-                if (!timelineStage) continue;
-                await addDoc(collection(db, 'projectStages'), {
-                  projectId: projectRef.id,
-                  companyId: user.companyId,
-                  cropType: projectCropType,
-                  stageName: timelineStage.stageName,
-                  stageIndex: timelineStage.stageIndex,
-                  startDate: timelineStage.startDate,
-                  endDate: timelineStage.endDate,
-                  expectedDurationDays: timelineStage.expectedDurationDays,
-                  createdAt: serverTimestamp(),
-                });
-              }
-            }
-          } else {
-            for (let i = 0; i < stagesForWrite.length; i++) {
-              const stage = stagesForWrite[i];
-              const adjustedStart = Math.max(0, stage.baseDayStart + environmentAdjustment);
-              const adjustedEnd = Math.max(adjustedStart, stage.baseDayEnd + environmentAdjustment);
-              const startDate = new Date(form.plantingDate!);
-              startDate.setDate(startDate.getDate() + adjustedStart);
-              const endDate = new Date(form.plantingDate!);
-              endDate.setDate(endDate.getDate() + adjustedEnd);
-              const expectedDurationDays = Math.max(1, adjustedEnd - adjustedStart + 1);
-
-              await addDoc(collection(db, 'projectStages'), {
-                projectId: projectRef.id,
-                companyId: user.companyId,
-                cropType: projectCropType,
-                stageName: stage.label,
-                stageIndex: i,
-                startDate,
-                endDate,
-                expectedDurationDays,
-                ...(i < stageOrderIndex ? { status: 'completed' } : {}),
-                createdAt: serverTimestamp(),
-              });
-            }
-          }
-
-          await updateDoc(doc(db, 'projects', projectRef.id), { setupComplete: true });
-          queryClient.invalidateQueries({ queryKey: ['projects'] });
-          queryClient.invalidateQueries({ queryKey: ['projectStages'] });
-          queryClient.invalidateQueries({ queryKey: ['project'] });
-
-          const toCopy = challengeTemplates.filter((t) => selectedTemplateIds.has(t.id));
-          if (toCopy.length > 0 && user?.companyId) {
-            try {
-              const batch = writeBatch(db);
-              for (const t of toCopy) {
-                const ref = doc(collection(db, 'seasonChallenges'));
-                batch.set(ref, {
-                  projectId: projectRef.id,
-                  companyId: user.companyId,
-                  cropType: projectCropType,
-                  title: t.title,
-                  description: t.description ?? '',
-                  challengeType: 'other',
-                  severity: (t.priority ?? 'medium') as 'low' | 'medium' | 'high',
-                  status: 'identified',
-                  dateIdentified: serverTimestamp(),
-                  createdAt: serverTimestamp(),
-                  source: 'template',
-                  templateId: t.id,
-                  createdBy: user.id,
-                  createdByName: (user as { name?: string }).name ?? (user as { email?: string }).email ?? 'Unknown',
-                  ...((t as { whatWasDone?: string }).whatWasDone && { whatWasDone: (t as { whatWasDone?: string }).whatWasDone }),
-                  ...((t as { plan2IfFails?: string }).plan2IfFails && { plan2IfFails: (t as { plan2IfFails?: string }).plan2IfFails }),
-                });
-              }
-              await batch.commit();
-              queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
-            } catch (templateErr) {
-              console.warn('Failed to add suggested challenges:', templateErr);
-              const { toast } = await import('sonner');
-              toast.warning('Project created but some suggested challenges could not be added.');
-            }
-          }
-        } catch (err) {
-          console.error('Error creating stages:', err);
-        }
-      })();
+    } catch (e) {
+      console.error('[Project Create Error]', e);
+      toast.error('Failed to create project. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -1017,8 +879,17 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                     type="number"
                     min={0}
                     value={form.acreage}
-                    onChange={(e) => setForm((prev) => ({ ...prev, acreage: e.target.value }))}
+                    onChange={(e) => {
+                      if (enableBlockManagement) return;
+                      setForm((prev) => ({ ...prev, acreage: e.target.value }));
+                    }}
+                    readOnly={enableBlockManagement}
                   />
+                  {enableBlockManagement && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Automatically summed from blocks in step 2.
+                    </p>
+                  )}
                 </div>
                 {budgetType === 'separate' && (
                   <div className="space-y-1">

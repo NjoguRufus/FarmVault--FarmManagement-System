@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { useAuth as useClerkAuth, useUser, useSignIn } from '@clerk/react';
 import { User, UserRole, Employee, PermissionMap } from '@/types';
-import { auth } from '@/lib/firebase';
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs, setDoc, serverTimestamp, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions } from '@/lib/permissions';
 import { getCompany } from '@/services/companyService';
+import { useToast } from '@/components/ui/use-toast';
+import { isDevEmail } from '@/lib/devAccess';
 
 interface AuthContextType {
   user: User | null;
@@ -13,6 +14,7 @@ interface AuthContextType {
   permissions: PermissionMap;
   isAuthenticated: boolean;
   authReady: boolean;
+  isDeveloper: boolean;
   /** True when user is signed in but users/{uid} is missing companyId/role (setup incomplete). */
   setupIncomplete: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -22,6 +24,15 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_USER_CACHE_KEY = 'farmvault:auth:user:v1';
+
+function isCurrentRouteDev(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.location.pathname.startsWith('/dev');
+  } catch {
+    return false;
+  }
+}
 
 function hydrateCachedUser(raw: any): User | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -69,49 +80,44 @@ function writeCachedUser(user: User | null) {
   }
 }
 
-function mapEmployeeDoc(docId: string, raw: any): Employee {
-  const joinDate = raw?.joinDate?.toDate ? raw.joinDate.toDate() : raw?.joinDate;
-  const createdAt = raw?.createdAt?.toDate ? raw.createdAt.toDate() : raw?.createdAt;
-
+function mapEmployeeRow(row: any): Employee {
   return {
-    id: docId,
-    companyId: String(raw?.companyId || ''),
-    name: String(raw?.name || raw?.fullName || 'User'),
-    fullName: raw?.fullName ? String(raw.fullName) : raw?.name ? String(raw.name) : undefined,
-    email: raw?.email ? String(raw.email) : undefined,
-    phone: raw?.phone ? String(raw.phone) : undefined,
-    contact: raw?.contact ? String(raw.contact) : undefined,
-    role: raw?.role ?? null,
-    employeeRole: raw?.employeeRole ?? raw?.role ?? null,
-    department: raw?.department ? String(raw.department) : undefined,
-    status: raw?.status || 'active',
-    permissions: raw?.permissions,
-    joinDate: joinDate ?? undefined,
-    createdAt: createdAt ?? undefined,
-    createdBy: raw?.createdBy ? String(raw.createdBy) : undefined,
-    authUserId: raw?.authUserId ? String(raw.authUserId) : undefined,
+    id: String(row.id ?? ''),
+    companyId: String(row.company_id ?? ''),
+    name: String(row.name ?? row.full_name ?? 'User'),
+    fullName: row.full_name != null ? String(row.full_name) : row.name != null ? String(row.name) : undefined,
+    email: row.email != null ? String(row.email) : undefined,
+    phone: row.phone != null ? String(row.phone) : undefined,
+    contact: row.contact != null ? String(row.contact) : undefined,
+    role: row.role ?? null,
+    employeeRole: row.employee_role ?? row.role ?? null,
+    department: row.department != null ? String(row.department) : undefined,
+    status: (row.status as Employee['status']) ?? 'active',
+    permissions: row.permissions as PermissionMap | undefined,
+    joinDate: row.join_date ?? undefined,
+    createdAt: row.created_at ?? undefined,
+    createdBy: row.created_by != null ? String(row.created_by) : undefined,
+    authUserId: row.auth_user_id != null ? String(row.auth_user_id) : undefined,
   };
 }
 
 async function loadEmployeeProfile(uid: string): Promise<Employee | null> {
-  const employeeRefByUid = doc(db, 'employees', uid);
-  const employeeSnapByUid = await getDoc(employeeRefByUid);
-  if (employeeSnapByUid.exists()) {
-    const byUid = mapEmployeeDoc(employeeSnapByUid.id, employeeSnapByUid.data());
-    if (!byUid.authUserId || byUid.authUserId === uid) {
-      return byUid;
-    }
-  }
+  try {
+    const { data, error } = await db
+      .public()
+      .from('employees')
+      .select('*')
+      .eq('auth_user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-  const employeeQuery = query(
-    collection(db, 'employees'),
-    where('authUserId', '==', uid),
-    limit(1),
-  );
-  const employeeSnap = await getDocs(employeeQuery);
-  const first = employeeSnap.docs[0];
-  if (!first) return null;
-  return mapEmployeeDoc(first.id, first.data());
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+    return mapEmployeeRow(data[0]);
+  } catch {
+    return null;
+  }
 }
 
 function getAppRoleFromEmployeeRole(employeeRole?: string | null): UserRole {
@@ -142,291 +148,342 @@ function buildEffectivePermissions(user: User | null, employeeProfile: Employee 
   return resolvePermissions(permissionRole, permissionOverrides);
 }
 
+/** Maps DB role (core.company_members.role) to app UserRole. company_admin/admin → company-admin; do not default to employee when membership has a role. */
 function normalizeRole(role: string | null | undefined): UserRole {
-  const r = (role || '').toString();
-  if (r === 'company_admin') return 'company-admin';
-  if (r === 'company-admin' || r === 'developer' || r === 'manager' || r === 'broker' || r === 'employee') return r as UserRole;
+  if (!role) return 'employee';
+  const r = role.toString().trim().toLowerCase();
+  if (r === 'company_admin' || r === 'company-admin' || r === 'admin') return 'company-admin';
+  if (r === 'developer' || r === 'manager' || r === 'broker' || r === 'employee') return r as UserRole;
   return 'employee';
 }
 
-function mapUserFromUserDoc(uid: string, email: string, userData: any): User {
+/** Builds a User from a profile-like row. Role must NOT come from profiles (no role column); use RPC current_member_role for session role. */
+function mapUserFromProfileRow(uid: string, row: { id?: string; company_id?: string; name?: string; email?: string; avatar?: string; created_at?: string; permissions?: unknown } | null, fallbackEmail: string, fallbackName: string): User {
+  const createdAt =
+    row?.created_at != null ? new Date(row.created_at) : new Date();
   return {
     id: uid,
-    email: userData?.email || email || '',
-    name: userData?.name || 'User',
-    role: normalizeRole(userData?.role),
-    employeeRole: userData?.employeeRole ?? undefined,
-    companyId: userData?.companyId ?? null,
-    avatar: userData?.avatar,
-    createdAt: userData?.createdAt?.toDate ? userData.createdAt.toDate() : new Date(),
-    ...(userData?.permissions ? { permissions: userData.permissions } : {}),
+    email: row?.email || fallbackEmail || '',
+    name: row?.name || fallbackName || 'User',
+    role: 'employee',
+    employeeRole: undefined,
+    companyId: row?.company_id ?? null,
+    avatar: row?.avatar ?? undefined,
+    createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+    ...(row?.permissions ? { permissions: row.permissions } : {}),
   } as User;
 }
 
-/** User doc is complete when it has role and companyId (or user is developer). */
+/** User doc is complete when it has role and companyId (or user is developer). company-admin with active company is valid. */
 function isUserSetupComplete(data: { role?: string | null; companyId?: string | null } | null): boolean {
   if (!data) return false;
   const role = normalizeRole(data.role);
   if (role === 'developer') return true;
+  if (role === 'company-admin' && data.companyId) return true;
   return Boolean(data.companyId && role);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const clerk = useClerkAuth();
+  const { user: clerkUser } = useUser();
+  const { isLoaded: signInLoaded, signIn, setActive: setActiveSignIn } = useSignIn();
+  const { toast } = useToast();
+
   const [user, setUser] = useState<User | null>(() => readCachedUser());
   const [employeeProfile, setEmployeeProfile] = useState<Employee | null>(null);
   const [permissions, setPermissions] = useState<PermissionMap>(() => getDefaultPermissions());
   const [authReady, setAuthReady] = useState(false);
   const [setupIncomplete, setSetupIncomplete] = useState(false);
+  const [isDeveloper, setIsDeveloper] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('fv:isDeveloper') === '1';
+  });
+
+  const { isLoaded: clerkLoaded, isSignedIn, userId } = clerk;
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+    if (!clerkLoaded) {
+      return;
+    }
+
+    if (!isSignedIn) {
+      setUser(null);
+      setEmployeeProfile(null);
+      setPermissions(getDefaultPermissions());
+      writeCachedUser(null);
       setSetupIncomplete(false);
-      if (!firebaseUser) {
-        setUser(null);
-        setEmployeeProfile(null);
-        setPermissions(getDefaultPermissions());
-        writeCachedUser(null);
-        setAuthReady(true);
-        return;
+      setIsDeveloper(false);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('fv:isDeveloper', '0');
       }
-      const profileRef = doc(db, 'users', firebaseUser.uid);
+      setAuthReady(true);
+      return;
+    }
 
+    if (!userId) {
+      return;
+    }
+
+    let cancelled = false;
+    setAuthReady(false);
+    setSetupIncomplete(false);
+
+    (async () => {
       try {
-        // Retry reading user doc so onboarding has time to write it after sign-up
-        let snap = await getDoc(profileRef);
-        for (const delayMs of [400, 900, 1800]) {
-          if (snap.exists()) break;
-          await new Promise((r) => setTimeout(r, delayMs));
-          snap = await getDoc(profileRef);
+        const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
+        const fallbackName = clerkUser?.fullName ?? clerkUser?.username ?? 'User';
+
+        // 1) Determine developer status as early as possible.
+        const devRoute = isCurrentRouteDev();
+        const email = clerkUser?.primaryEmailAddress?.emailAddress ?? null;
+        let dev = false;
+
+        try {
+          // Allow-listed emails are always treated as developers, regardless of route.
+          if (isDevEmail(email || undefined)) {
+            dev = true;
+            // Ensure developer record exists in admin schema; non-blocking.
+            void (async () => {
+              try {
+                await db
+                  .admin()
+                  .from('developers')
+                  .upsert(
+                    {
+                      clerk_user_id: userId,
+                      email,
+                      role: 'super_admin',
+                    },
+                    { onConflict: 'clerk_user_id' },
+                  );
+              } catch (devUpsertError) {
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Auth] Developer upsert failed:', devUpsertError);
+                }
+              }
+            })();
+          } else if (devRoute) {
+            // Non-allowlisted users can still be developers if present in admin.developers,
+            // but we only check this on /dev routes.
+            const { data: devRow, error: devError } = await db
+              .admin()
+              .from('developers')
+              .select('clerk_user_id')
+              .eq('clerk_user_id', userId)
+              .maybeSingle();
+            if (devError) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn('[Auth] Developer check failed:', devError);
+              }
+            }
+            dev = Boolean(devRow?.clerk_user_id);
+          }
+        } catch (devUnexpectedError) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.error('[Auth] Unexpected developer check error:', devUnexpectedError);
+          }
         }
 
-        const employee = await loadEmployeeProfile(firebaseUser.uid);
-
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          if (!isUserSetupComplete(data)) {
-            setUser({
-              id: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              name: data?.name || 'User',
-              role: 'employee',
-              employeeRole: undefined,
-              companyId: null,
-              avatar: undefined,
-              createdAt: new Date(),
-            });
-            setEmployeeProfile(null);
-            setPermissions(getDefaultPermissions());
-            setSetupIncomplete(true);
-            writeCachedUser(null);
-            setAuthReady(true);
-            return;
-          }
-          const mapped = mapUserFromUserDoc(firebaseUser.uid, firebaseUser.email || '', data);
-          const effectivePermissions = buildEffectivePermissions(mapped, employee);
-          setUser(mapped);
-          setEmployeeProfile(employee);
-          setPermissions(effectivePermissions);
-          writeCachedUser(mapped);
-          setAuthReady(true);
-          if (import.meta.env.DEV && firebaseUser.uid && mapped.companyId) {
-            getCompany(mapped.companyId)
-              .then((company) => {
-                console.log('[Auth] Profile loaded:', {
-                  uid: firebaseUser.uid,
-                  role: mapped.role,
-                  companyId: mapped.companyId,
-                  companyName: company?.name ?? '(none)',
-                });
-              })
-              .catch(() => {
-                console.log('[Auth] Profile loaded:', {
-                  uid: firebaseUser.uid,
-                  role: mapped.role,
-                  companyId: mapped.companyId,
-                  companyName: '(fetch failed)',
-                });
-              });
-          }
-          return;
+        setIsDeveloper(dev);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('fv:isDeveloper', dev ? '1' : '0');
         }
 
-        if (employee?.companyId) {
-          const mappedEmployeeRole = employee.employeeRole ?? employee.role ?? null;
-          const mapped: User = {
-            id: firebaseUser.uid,
-            email: firebaseUser.email || employee.email || '',
-            name: employee.name || employee.fullName || 'User',
-            role: getAppRoleFromEmployeeRole(mappedEmployeeRole),
-            employeeRole: mappedEmployeeRole ?? undefined,
-            companyId: employee.companyId ?? null,
+        // 2) If this is a platform developer, short-circuit tenant onboarding entirely
+        // and treat them as a global developer user (role = 'developer').
+        if (dev) {
+          const devUser: User = {
+            id: userId,
+            email: fallbackEmail,
+            name: fallbackName,
+            role: 'developer',
+            employeeRole: undefined,
+            companyId: null,
             avatar: undefined,
             createdAt: new Date(),
           };
-          await setDoc(
-            profileRef,
-            {
-              id: firebaseUser.uid,
-              email: mapped.email,
-              name: mapped.name,
-              role: mapped.role,
-              employeeRole: mapped.employeeRole ?? null,
-              companyId: mapped.companyId ?? null,
-              permissions: employee.permissions ?? null,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true },
-          );
-          const effectivePermissions = buildEffectivePermissions(mapped, employee);
-          setUser(mapped);
-          setEmployeeProfile(employee);
-          setPermissions(effectivePermissions);
-          writeCachedUser(mapped);
+          setUser(devUser);
+          setEmployeeProfile(null);
+          setPermissions(getFullAccessPermissions());
+          setSetupIncomplete(false);
+          writeCachedUser(devUser);
+
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Developer session', {
+              uid: devUser.id,
+              email: devUser.email,
+              isDeveloper: true,
+              companyId: devUser.companyId,
+            });
+          }
+
           setAuthReady(true);
           return;
         }
 
-        setUser({
-          id: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          name: firebaseUser.displayName || 'User',
-          role: 'employee',
+        // 3) Ensure profiles row exists so current_context can read active_company_id.
+        const { error: upsertError } = await db
+          .core()
+          .from('profiles')
+          .upsert({ clerk_user_id: userId }, { onConflict: 'clerk_user_id' });
+
+        if (upsertError && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] Profile upsert warning:', upsertError);
+        }
+
+        // 4) Single source of truth: current_context() returns { company_id, role } from core.profiles + core.company_members.
+        // Never read role from profiles; set user.companyId and user.role only from this RPC.
+        const { data: contextRows, error: contextError } = await supabase.rpc('current_context');
+
+        if (cancelled) return;
+
+        if (contextError && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] current_context RPC error:', contextError);
+        }
+
+        const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
+        const contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
+        const contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+
+        const normalizedRole = normalizeRole(contextRole) as UserRole;
+        const hasCompanyId = contextCompanyId != null && contextCompanyId !== '';
+        const hasRole = contextRole != null && contextRole !== '';
+        const setupIncompleteFlag = !hasCompanyId || !hasRole;
+
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[Auth] current_context', {
+            uid: userId,
+            company_id: contextCompanyId,
+            role: contextRole,
+            normalizedRole,
+            setupIncomplete: setupIncompleteFlag,
+          });
+        }
+
+        const mapped: User = {
+          id: userId,
+          email: fallbackEmail,
+          name: fallbackName,
+          role: normalizedRole,
           employeeRole: undefined,
-          companyId: null,
+          companyId: hasCompanyId && hasRole ? contextCompanyId : null,
           avatar: undefined,
           createdAt: new Date(),
-        });
-        setEmployeeProfile(null);
-        setPermissions(getDefaultPermissions());
-        setSetupIncomplete(true);
-        writeCachedUser(null);
+        };
+
+        if (setupIncompleteFlag) {
+          setUser({ ...mapped, companyId: null });
+          setEmployeeProfile(null);
+          setPermissions(getDefaultPermissions());
+          setSetupIncomplete(true);
+          writeCachedUser(null);
+          setAuthReady(true);
+          return;
+        }
+
+        const employee = await loadEmployeeProfile(userId);
+        if (cancelled) return;
+        const effectivePermissions = buildEffectivePermissions(mapped, employee);
+        setUser(mapped);
+        setEmployeeProfile(employee);
+        setPermissions(effectivePermissions);
+        writeCachedUser(mapped);
+        setSetupIncomplete(false);
+        setAuthReady(true);
       } catch (error) {
-        const code = (error as { code?: string } | null)?.code;
-        const isPermissionDenied = code === 'permission-denied';
         const cached = readCachedUser();
-        if (!isPermissionDenied && cached && cached.id === firebaseUser.uid && cached.companyId) {
+        if (cached && cached.id === userId && cached.companyId) {
           setUser(cached);
           setEmployeeProfile(null);
           setPermissions(buildEffectivePermissions(cached, null));
           writeCachedUser(cached);
+          setSetupIncomplete(false);
         } else {
-          setUser({
-            id: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            name: firebaseUser.displayName || 'User',
+          const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
+          const fallbackName = clerkUser?.fullName ?? 'User';
+          const fallbackUser: User = {
+            id: userId,
+            email: fallbackEmail,
+            name: fallbackName,
             role: 'employee',
             employeeRole: undefined,
             companyId: null,
             avatar: undefined,
             createdAt: new Date(),
-          });
+          };
+          setUser(fallbackUser);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(true);
           writeCachedUser(null);
         }
-        console.warn('[Auth] Profile load failed:', error);
-      } finally {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] Profile load failed:', error);
+        }
+        toast({
+          title: 'Unable to load account',
+          description:
+            'We could not fully load your FarmVault account. You can continue, but some data may be missing.',
+          variant: 'destructive',
+        });
         setAuthReady(true);
       }
-    });
+    })();
 
-    return () => unsub();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [clerkLoaded, isSignedIn, userId, clerkUser, toast, isDeveloper]);
 
   const login = async (email: string, password: string) => {
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    setSetupIncomplete(false);
-    const profileRef = doc(db, 'users', credential.user.uid);
-    const employee = await loadEmployeeProfile(credential.user.uid);
-    const snap = await getDoc(profileRef);
-
-    if (snap.exists()) {
-      const data = snap.data() as any;
-      if (!isUserSetupComplete(data)) {
-        setUser({
-          id: credential.user.uid,
-          email: credential.user.email || '',
-          name: data?.name || 'User',
-          role: 'employee',
-          employeeRole: undefined,
-          companyId: null,
-          avatar: undefined,
-          createdAt: new Date(),
-        });
-        setEmployeeProfile(null);
-        setPermissions(getDefaultPermissions());
-        setSetupIncomplete(true);
-        writeCachedUser(null);
-        return;
+    if (!signInLoaded || !signIn || !setActiveSignIn) {
+      // Give Clerk a brief moment to finish initializing before failing.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (!signInLoaded || !signIn || !setActiveSignIn) {
+        const err: any = new Error('Sign in is temporarily unavailable. Please refresh the page and try again.');
+        throw err;
       }
-      const mapped = mapUserFromUserDoc(credential.user.uid, credential.user.email || '', data);
-      setUser(mapped);
-      setEmployeeProfile(employee);
-      setPermissions(buildEffectivePermissions(mapped, employee));
-      writeCachedUser(mapped);
-      return;
     }
 
-    if (employee?.companyId) {
-      const mappedEmployeeRole = employee.employeeRole ?? employee.role ?? null;
-      const mapped: User = {
-        id: credential.user.uid,
-        email: credential.user.email || employee.email || '',
-        name: employee.name || employee.fullName || 'User',
-        role: getAppRoleFromEmployeeRole(mappedEmployeeRole),
-        employeeRole: mappedEmployeeRole ?? undefined,
-        companyId: employee.companyId ?? null,
-        avatar: undefined,
-        createdAt: new Date(),
-      };
-      await setDoc(
-        profileRef,
-        {
-          id: credential.user.uid,
-          email: mapped.email,
-          name: mapped.name,
-          role: mapped.role,
-          employeeRole: mapped.employeeRole ?? null,
-          companyId: mapped.companyId ?? null,
-          permissions: employee.permissions ?? null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      setUser(mapped);
-      setEmployeeProfile(employee);
-      setPermissions(buildEffectivePermissions(mapped, employee));
-      writeCachedUser(mapped);
-      return;
-    }
-
-    setUser({
-      id: credential.user.uid,
-      email: credential.user.email || '',
-      name: credential.user.displayName || 'User',
-      role: 'employee',
-      employeeRole: undefined,
-      companyId: null,
-      avatar: undefined,
-      createdAt: new Date(),
+    const result = await signIn.create({
+      identifier: email,
+      password,
     });
-    setEmployeeProfile(null);
-    setPermissions(getDefaultPermissions());
-    setSetupIncomplete(true);
-    writeCachedUser(null);
+
+    if ((result as any)?.status === 'complete') {
+      await setActiveSignIn({ session: (result as any).createdSessionId });
+      setSetupIncomplete(false);
+      return;
+    }
+
+    const firstError = (result as any)?.errors?.[0];
+    const message =
+      firstError?.longMessage ||
+      firstError?.message ||
+      'Unable to sign in. Check your email and password, then try again.';
+    const err: any = new Error(message);
+    throw err;
   };
 
   const logout = () => {
-    // Sign out from Firebase and clear local user
-    signOut(auth).finally(() => {
-      setUser(null);
-      setEmployeeProfile(null);
-      setPermissions(getDefaultPermissions());
-      writeCachedUser(null);
-    });
+    clerk
+      .signOut()
+      .finally(() => {
+        setUser(null);
+        setEmployeeProfile(null);
+        setPermissions(getDefaultPermissions());
+        setSetupIncomplete(false);
+        setIsDeveloper(false);
+        writeCachedUser(null);
+      });
   };
 
   const switchRole = (role: UserRole) => {
@@ -443,6 +500,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         permissions,
         isAuthenticated: !!user,
         authReady,
+        isDeveloper,
         setupIncomplete,
         login,
         logout,

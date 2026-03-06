@@ -4,13 +4,14 @@ import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays,
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, User, Expense, ExpenseCategory, OperationsWorkCard } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getCurrentStageForProject } from '@/services/stageService';
 import { useWorkCardsForCompany, useInvalidateWorkCards } from '@/hooks/useWorkCards';
+import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import {
   createWorkCard,
   updateWorkCard,
@@ -40,12 +41,20 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { format } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
 
 export default function OperationsPage() {
   const navigate = useNavigate();
-  const { activeProject } = useProject();
+  const { activeProject, projects } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
@@ -226,6 +235,18 @@ export default function OperationsPage() {
       setSearchParams((p) => { p.delete('add'); return p; }, { replace: true });
     }
   }, [searchParams, setSearchParams, canCreateWorkCard]);
+
+  useEffect(() => {
+    if (addCardOpen) {
+      const cid = activeProject?.companyId ?? user?.companyId;
+      const companyProjects = cid ? projects.filter((p) => p.companyId === cid) : [];
+      setCardProjectId(activeProject?.id ?? companyProjects[0]?.id ?? '');
+      setCardBlockId('');
+      setCardPlannedDate(new Date());
+      setInventorySearch('');
+      setInventoryComboOpen(false);
+    }
+  }, [addCardOpen, activeProject?.id, activeProject?.companyId, user?.companyId, projects]);
   const [selectedWorkCard, setSelectedWorkCard] = useState<OperationsWorkCard | null>(null);
   const [workCardModalOpen, setWorkCardModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -247,6 +268,14 @@ export default function OperationsPage() {
   const [cardAllocatedManagerId, setCardAllocatedManagerId] = useState('');
   const [cardStageId, setCardStageId] = useState('');
   const [cardStageName, setCardStageName] = useState('');
+  /** Farm (project) and optional block for the work being planned */
+  const [cardProjectId, setCardProjectId] = useState('');
+  const [cardBlockId, setCardBlockId] = useState('');
+  /** Date for the planned work: Today, Tomorrow, or calendar/typed */
+  const [cardPlannedDate, setCardPlannedDate] = useState<Date>(() => new Date());
+  /** Inventory combobox open state and search */
+  const [inventoryComboOpen, setInventoryComboOpen] = useState(false);
+  const [inventorySearch, setInventorySearch] = useState('');
 
   /** Build planned resource string from selected item + quantity for the current work category */
   const buildPlannedResourceString = (): { inputs?: string; fuel?: string; chemicals?: string; fertilizer?: string } => {
@@ -282,28 +311,36 @@ export default function OperationsPage() {
       toast.error('Permission denied', { description: 'You cannot create work cards.' });
       return;
     }
-    if (!activeProject || !user?.companyId || !user?.email) return;
-    const stage = projectStages.find((s) => s.id === cardStageId) ?? projectStages.find((s) => s.stageName === cardStageName);
-    if (!stage) return;
+    if (!selectedProjectForCard || !user?.companyId || !user?.email) {
+      toast.error('Select a farm to plan work for.');
+      return;
+    }
+    const stage = stageForCard;
+    if (!stage) {
+      toast.error('No stage available for this farm. Ensure the farm has stages set up on the Crop Stages page.');
+      return;
+    }
     const resource = buildPlannedResourceString();
+    const block = cardBlockId ? projectBlocksForCard.find((b) => b.id === cardBlockId) : null;
     setSavingCard(true);
     setAddCardOpen(false);
     try {
       await createWorkCard({
-        companyId: activeProject.companyId,
-        projectId: activeProject.id,
+        companyId: selectedProjectForCard.companyId,
+        projectId: selectedProjectForCard.id,
         stageId: stage.id,
         stageName: stage.stageName,
+        blockId: block?.id ?? null,
+        blockName: block?.blockName ?? null,
         workTitle: cardWorkTitle || cardWorkCategory,
         workCategory: cardWorkCategory,
         planned: {
-          date: date,
+          date: cardPlannedDate,
           workers: Number(cardPlannedWorkers || '0'),
           inputs: resource.inputs,
           fuel: resource.fuel,
           chemicals: resource.chemicals,
           fertilizer: resource.fertilizer,
-          estimatedCost: cardEstimatedCost ? Number(cardEstimatedCost) : undefined,
         },
         allocatedManagerId: (cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__') ? cardAllocatedManagerId : null,
         createdByAdminId: user.id,
@@ -321,6 +358,8 @@ export default function OperationsPage() {
       setCardAllocatedManagerId('');
       setCardStageId('');
       setCardStageName('');
+      setCardProjectId('');
+      setCardBlockId('');
     } catch (error) {
       console.error('Failed to create work card:', error);
       alert('Failed to plan work. Please try again.');
@@ -432,7 +471,6 @@ export default function OperationsPage() {
       fuel: resource.fuel ?? selectedWorkCard.planned?.fuel,
       chemicals: resource.chemicals ?? selectedWorkCard.planned?.chemicals,
       fertilizer: resource.fertilizer ?? selectedWorkCard.planned?.fertilizer,
-      estimatedCost: cardEstimatedCost ? Number(cardEstimatedCost) : undefined,
     };
     setSavingCardUpdate(true);
     try {
@@ -520,6 +558,44 @@ export default function OperationsPage() {
       )
       .sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0));
   }, [allStages, activeProject]);
+
+  // For Plan Work dialog: selected farm (project) and its stages / auto-detected stage
+  const selectedProjectForCard = useMemo(() => {
+    if (!cardProjectId) return activeProject ?? null;
+    return projects.find((p) => p.id === cardProjectId) ?? null;
+  }, [cardProjectId, projects, activeProject]);
+
+  const projectStagesForCard = useMemo(() => {
+    if (!selectedProjectForCard) return [];
+    return allStages
+      .filter(
+        (s) =>
+          s.projectId === selectedProjectForCard.id &&
+          s.companyId === selectedProjectForCard.companyId &&
+          s.cropType === selectedProjectForCard.cropType,
+      )
+      .sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0));
+  }, [allStages, selectedProjectForCard]);
+
+  const stageForCard = useMemo(() => {
+    if (projectStagesForCard.length === 0) return null;
+    const inProgress = projectStagesForCard.find((s) => s.status === 'in-progress');
+    if (inProgress) return inProgress;
+    const nonCompleted = projectStagesForCard.find((s) => s.status !== 'completed');
+    if (nonCompleted) return nonCompleted;
+    return projectStagesForCard[0];
+  }, [projectStagesForCard]);
+
+  const companyProjectsForCard = useMemo(() => {
+    const cid = activeProject?.companyId ?? user?.companyId ?? null;
+    if (!cid) return [];
+    return projects.filter((p) => p.companyId === cid);
+  }, [projects, activeProject?.companyId, user?.companyId]);
+
+  const { data: projectBlocksForCard = [] } = useProjectBlocks(
+    selectedProjectForCard?.companyId ?? null,
+    selectedProjectForCard?.useBlocks ? cardProjectId || null : null,
+  );
 
   // Get managers (users with manager or company-admin role, or employees with operations-manager role).
   // Dedupe by auth identity: same person can be both a user (manager) and an employee (operations-manager) — show once.
@@ -1060,33 +1136,68 @@ export default function OperationsPage() {
                 data-tour="operations-plan-work-button"
               >
                 <Plus className="h-4 w-4" />
-                Plan Today&apos;s Work
+                Plan Work
               </button>
             </DialogTrigger>
             <DialogContent className="max-w-lg sm:max-w-2xl md:max-w-4xl max-h-[90vh] overflow-y-auto w-[95vw] md:w-full">
               <DialogHeader>
-                <DialogTitle>Plan Today&apos;s Work</DialogTitle>
+                <DialogTitle>Plan Work</DialogTitle>
               </DialogHeader>
-              {!activeProject ? (
-                <p className="text-sm text-muted-foreground">Select a project first.</p>
+              {companyProjectsForCard.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No farms yet. Create a project first.</p>
               ) : (
                 <form onSubmit={handleCreateWorkCard} className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
                     <div className="col-span-1">
-                      <label className="text-sm font-medium text-foreground">Work title / category</label>
+                      <label className="text-sm font-medium text-foreground">Select the farm being planned for</label>
+                      <Select
+                        value={cardProjectId || undefined}
+                        onValueChange={(v) => {
+                          setCardProjectId(v);
+                          setCardBlockId('');
+                        }}
+                      >
+                        <SelectTrigger className="w-full mt-1">
+                          <SelectValue placeholder="Select farm" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {companyProjectsForCard.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {selectedProjectForCard?.useBlocks && projectBlocksForCard.length > 0 && (
+                      <div className="col-span-1">
+                        <label className="text-sm font-medium text-foreground">Select block</label>
+                        <Select value={cardBlockId || '__none__'} onValueChange={(v) => setCardBlockId(v === '__none__' ? '' : v)}>
+                          <SelectTrigger className="w-full mt-1">
+                            <SelectValue placeholder="Select block" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">None</SelectItem>
+                            {projectBlocksForCard.map((b) => (
+                              <SelectItem key={b.id} value={b.id}>{b.blockName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <div className="col-span-1 sm:col-span-2 md:col-span-1">
+                      <label className="text-sm font-medium text-foreground">Work name</label>
                       <input
                         type="text"
                         className="fv-input w-full mt-1"
                         value={cardWorkTitle}
                         onChange={(e) => setCardWorkTitle(e.target.value)}
-                        placeholder="e.g. Spraying"
+                        placeholder="eg...Coragen- tuta"
                       />
                     </div>
-                    <div className="col-span-1">
+                    <div className="col-span-1 sm:col-span-2 md:col-span-1">
                       <label className="text-sm font-medium text-foreground">Work type</label>
                       <Select value={cardWorkCategory} onValueChange={handleWorkCategoryChange}>
                         <SelectTrigger className="w-full mt-1">
-                          <SelectValue placeholder="Select work type first" />
+                          <SelectValue placeholder="Select work type" />
                         </SelectTrigger>
                         <SelectContent>
                           {workTypesList.map((wt) => (
@@ -1095,29 +1206,51 @@ export default function OperationsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="col-span-1">
-                      <label className="text-sm font-medium text-foreground">Stage</label>
-                      <Select
-                        value={cardStageId || cardStageName}
-                        onValueChange={(val) => {
-                          const s = projectStages.find((st) => st.id === val || st.stageName === val);
-                          if (s) {
-                            setCardStageId(s.id);
-                            setCardStageName(s.stageName);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-full mt-1">
-                          <SelectValue placeholder="Select stage" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {projectStages.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>{s.stageName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="col-span-1 sm:col-span-2 md:col-span-1">
+                      <label className="text-sm font-medium text-foreground w-full">Date</label>
+                      <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Select
+                          value={format(cardPlannedDate, 'yyyy-MM-dd')}
+                          onValueChange={(v) => {
+                            if (v === 'today') {
+                              setCardPlannedDate(new Date());
+                              return;
+                            }
+                            if (v === 'tomorrow') {
+                              const t = new Date();
+                              t.setDate(t.getDate() + 1);
+                              setCardPlannedDate(t);
+                              return;
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="sm:w-40">
+                            <SelectValue placeholder="Select date" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="today">Today</SelectItem>
+                            <SelectItem value="tomorrow">Tomorrow</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto">
+                              <CalendarDays className="h-4 w-4 mr-1" />
+                              Pick date
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={cardPlannedDate}
+                              onSelect={(d) => d && setCardPlannedDate(d)}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
                     </div>
-                    <div className="col-span-1">
+                    <div className="col-span-1 sm:col-span-2 md:col-span-1">
                       <label className="text-sm font-medium text-foreground">Planned workers</label>
                       <input
                         type="number"
@@ -1137,17 +1270,57 @@ export default function OperationsPage() {
                             {cardWorkCategory === 'Tying of crops' && 'Planned inputs (ropes/sacks/materials)'}
                             {!['Fertilizer application', 'Spraying', 'Watering', 'Tying of crops'].includes(cardWorkCategory) && 'Planned resource'}
                           </label>
-                          <Select value={cardPlannedItemId || '__none__'} onValueChange={(v) => { setCardPlannedItemId(v === '__none__' ? '' : v); setCardPlannedQuantity(''); setCardPlannedQuantitySecondary(''); }}>
-                            <SelectTrigger className="w-full mt-1">
-                              <SelectValue placeholder="Select from inventory" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">None</SelectItem>
-                              {plannedResourceItems.map((item) => (
-                                <SelectItem key={item.id} value={item.id}>{item.name} ({item.unit})</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Popover open={inventoryComboOpen} onOpenChange={setInventoryComboOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full mt-1 justify-between font-normal"
+                              >
+                                {selectedPlannedItem ? `${selectedPlannedItem.name} (${selectedPlannedItem.unit})` : 'Select from inventory'}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                              <Command>
+                                <CommandInput
+                                  placeholder="Type to search..."
+                                  value={inventorySearch}
+                                  onValueChange={setInventorySearch}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>No item found.</CommandEmpty>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      onSelect={() => {
+                                        setCardPlannedItemId('');
+                                        setCardPlannedQuantity('');
+                                        setCardPlannedQuantitySecondary('');
+                                        setInventoryComboOpen(false);
+                                      }}
+                                    >
+                                      None
+                                    </CommandItem>
+                                    {plannedResourceItems
+                                      .filter((item) => !inventorySearch.trim() || item.name.toLowerCase().includes(inventorySearch.toLowerCase()))
+                                      .map((item) => (
+                                        <CommandItem
+                                          key={item.id}
+                                          value={`${item.name} ${item.id}`}
+                                          onSelect={() => {
+                                            setCardPlannedItemId(item.id);
+                                            setCardPlannedQuantity('');
+                                            setCardPlannedQuantitySecondary('');
+                                            setInventoryComboOpen(false);
+                                          }}
+                                        >
+                                          {item.name} ({item.unit})
+                                        </CommandItem>
+                                      ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </div>
                         {selectedPlannedItem && (
                           <>
@@ -1186,11 +1359,7 @@ export default function OperationsPage() {
                         )}
                       </>
                     )}
-                    <div className="col-span-1">
-                      <label className="text-sm font-medium text-foreground">Estimated cost (optional)</label>
-                      <input type="number" min={0} className="fv-input w-full mt-1" value={cardEstimatedCost} onChange={(e) => setCardEstimatedCost(e.target.value)} />
-                    </div>
-                    <div className="col-span-1">
+                    <div className="col-span-1 sm:col-span-2 md:col-span-1">
                       <label className="text-sm font-medium text-foreground">Allocate manager</label>
                       <Select
                         value={cardAllocatedManagerId || '__unassigned__'}
@@ -1209,6 +1378,15 @@ export default function OperationsPage() {
                       </Select>
                     </div>
                   </div>
+                  {selectedProjectForCard && stageForCard && (
+                    <p className="text-xs text-muted-foreground">
+                      Stage from crop timeline:{' '}
+                      <span className="font-medium">
+                        {stageForCard.stageName}
+                        {stageForCard.stageIndex != null && ` (Stage ${stageForCard.stageIndex + 1})`}
+                      </span>
+                    </p>
+                  )}
                   <DialogFooter className="border-t pt-4 mt-2">
                     <button type="button" className="fv-btn fv-btn--secondary" onClick={() => setAddCardOpen(false)}>Cancel</button>
                     <button type="submit" disabled={savingCard} className="fv-btn fv-btn--primary">{savingCard ? 'Saving…' : 'Save Work Card'}</button>
@@ -1705,7 +1883,7 @@ export default function OperationsPage() {
             <Wrench className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-2">No work logs or completed cards</h3>
             <p className="text-sm text-muted-foreground">
-              Plan work with &quot;Plan Today&apos;s Work&quot;, or approved/paid work cards will appear here.
+              Plan work with &quot;Plan Work&quot;, or approved/paid work cards will appear here.
             </p>
           </div>
         )}
@@ -1905,13 +2083,29 @@ export default function OperationsPage() {
                   <h4 className="font-semibold text-foreground mb-3">Planned (Admin)</h4>
                   <ul className="space-y-1 text-sm">
                     <li>Workers: {selectedWorkCard.planned?.workers ?? '—'}</li>
-                    {selectedWorkCard.planned?.inputs != null && String(selectedWorkCard.planned.inputs).trim() !== '' && <li>Inputs: {selectedWorkCard.planned.inputs}</li>}
-                    {selectedWorkCard.planned?.fuel != null && String(selectedWorkCard.planned.fuel).trim() !== '' && <li>Fuel: {selectedWorkCard.planned.fuel}</li>}
-                    {selectedWorkCard.planned?.chemicals != null && String(selectedWorkCard.planned.chemicals).trim() !== '' && <li>Chemicals: {selectedWorkCard.planned.chemicals}</li>}
-                    {selectedWorkCard.planned?.fertilizer != null && String(selectedWorkCard.planned.fertilizer).trim() !== '' && <li>Fertilizer: {selectedWorkCard.planned.fertilizer}</li>}
-                    {selectedWorkCard.planned?.estimatedCost != null && (
-                      <li>Est. cost: KES {Number(selectedWorkCard.planned.estimatedCost).toLocaleString()}</li>
-                    )}
+                    {selectedWorkCard.planned?.inputs != null &&
+                      String(selectedWorkCard.planned.inputs).trim() !== '' && (
+                        <li>Inputs: {selectedWorkCard.planned.inputs}</li>
+                      )}
+                    {selectedWorkCard.planned?.fuel != null &&
+                      String(selectedWorkCard.planned.fuel).trim() !== '' && (
+                        <li>Fuel: {selectedWorkCard.planned.fuel}</li>
+                      )}
+                    {selectedWorkCard.planned?.chemicals != null &&
+                      String(selectedWorkCard.planned.chemicals).trim() !== '' && (
+                        <li>Chemicals: {selectedWorkCard.planned.chemicals}</li>
+                      )}
+                    {selectedWorkCard.planned?.fertilizer != null &&
+                      String(selectedWorkCard.planned.fertilizer).trim() !== '' && (
+                        <li>Fertilizer: {selectedWorkCard.planned.fertilizer}</li>
+                      )}
+                    {typeof selectedWorkCard.planned?.estimatedCost === 'number' &&
+                      !Number.isNaN(selectedWorkCard.planned.estimatedCost) && (
+                        <li>
+                          Est. cost: KES{' '}
+                          {Number(selectedWorkCard.planned.estimatedCost).toLocaleString()}
+                        </li>
+                      )}
                   </ul>
                 </div>
                 <div className="p-4 rounded-lg border bg-muted/20">

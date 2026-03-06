@@ -65,16 +65,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
       )}
     >
       <div className="flex h-full items-center justify-between px-4 sm:px-6">
-        {/* Left: Mobile Menu + Logo + Project Selector */}
+        {/* Left: Logo + Project Selector */}
         <div className="flex items-center gap-2 sm:gap-4">
-          {/* Mobile Menu Button - hidden on mobile (bottom nav replaces sidebar) */}
-          <button
-            onClick={onSidebarToggle}
-            className="hidden md:flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
-            aria-label="Toggle sidebar"
-          >
-            <Menu className="h-5 w-5 text-foreground" />
-          </button>
           {/* Mobile Logo */}
           <img
             src="/Logo/FarmVault_Logo dark mode.png"
@@ -147,8 +139,16 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           </div>
         </div>
 
-        {/* Right: Actions */}
+        {/* Right: Actions + Sidebar toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3">
+          {/* Sidebar toggle (hamburger) aligned with badges on the right */}
+          <button
+            onClick={onSidebarToggle}
+            className="hidden md:flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
+            aria-label="Toggle sidebar"
+          >
+            <Menu className="h-5 w-5 text-foreground" />
+          </button>
           <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
 
           {status === 'pending_payment' && (
