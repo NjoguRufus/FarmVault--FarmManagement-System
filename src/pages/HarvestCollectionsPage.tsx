@@ -20,6 +20,7 @@ import {
   Zap,
   CloudUpload,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +35,7 @@ import {
   addHarvestPicker,
   addPickerWeighEntry,
   updatePickerIntakeEntry,
+  deletePickerIntakeEntry,
   markPickerCashPaid,
   markPickersPaidInBatch,
   setBuyerPriceAndMaybeClose,
@@ -551,10 +553,10 @@ export default function HarvestCollectionsPage() {
       const bt = (b.recordedAt != null ? toDate(b.recordedAt)?.getTime() : 0) ?? 0;
       return bt - at;
     });
-    return entries.map((e) => {
+    return entries.map((e, idx) => {
       const picker = pickersForCollection.find((p) => p.id === e.pickerId);
       return {
-        id: e.id ?? `${e.pickerId}-${e.recordedAt}-${e.weightKg}`,
+        id: e.id ?? `intake-${idx}`,
         pickerId: e.pickerId,
         collectionId: e.collectionId,
         pickerNumber: picker?.pickerNumber ?? '?',
@@ -1205,6 +1207,21 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Update failed', description: e?.message ?? 'Could not update entry', variant: 'destructive' });
     } finally {
       setEditIntakeSaving(false);
+    }
+  };
+
+  const handleDeleteIntakeEntry = async (params: { id: string; collectionId: string }) => {
+    if (!canManageIntake || selectedCollection?.status === 'closed') return;
+    if (!window.confirm('Delete this intake entry? Picker and collection totals will update.')) return;
+    try {
+      await deletePickerIntakeEntry({ entryId: params.id, collectionId: params.collectionId });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pickerIntake'] }),
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] }),
+      ]);
+      toast({ title: 'Entry deleted', description: 'Totals recalculated.' });
+    } catch (e: any) {
+      toast({ title: 'Delete failed', description: e?.message ?? 'Could not delete entry', variant: 'destructive' });
     }
   };
 
@@ -2278,7 +2295,7 @@ export default function HarvestCollectionsPage() {
             ) : (
               <>
                 <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
-                  <div className="flex flex-nowrap gap-2 sm:gap-3 overflow-x-auto pb-1 min-w-0 -mx-1 px-1">
+                  <div className="flex flex-nowrap gap-2 sm:gap-3 overflow-x-auto pb-1 min-w-0 -mx-1 px-1 scrollbar-app">
                     {canManageIntake && (
                       <button
                         type="button"
@@ -2448,7 +2465,7 @@ export default function HarvestCollectionsPage() {
                                 Remaining: <strong className="text-foreground">{remainingPickersCount}</strong>
                               </span>
                             </div>
-                            <div className="space-y-1 max-h-[280px] overflow-y-auto overscroll-contain">
+                            <div className="space-y-1 max-h-[280px] overflow-y-auto overscroll-contain scrollbar-app">
                               {quickIntakeEntriesByPicker.length === 0 ? (
                                 <p className="text-sm text-muted-foreground py-3 text-center rounded-md border border-dashed border-border">
                                   No entries yet.
@@ -2475,50 +2492,76 @@ export default function HarvestCollectionsPage() {
                                           <ChevronDown className="h-4 w-4 text-muted-foreground" />
                                         </span>
                                       </button>
-                                      {isExpanded && (
-                                        <div className="border-t border-border bg-muted/20">
-                                          {group.entries.map((entry) => (
-                                            <div
-                                              key={entry.id}
-                                              className="px-2.5 py-1.5 flex items-center gap-2 min-w-0 pl-4"
-                                            >
-                                              <span className="text-sm tabular-nums text-foreground shrink-0 w-10">
-                                                {entry.kg.toFixed(1)} kg
-                                              </span>
-                                              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                                                {entry.recordedAt != null
-                                                  ? format(toDate(entry.recordedAt) ?? new Date(), 'h:mm a')
-                                                  : '—'}
-                                              </span>
-                                              <span className="flex-1 min-w-0" />
-                                              {canManageIntake && selectedCollection?.status !== 'closed' && (
-                                                <Button
-                                                  type="button"
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setEditIntakeEntry({
-                                                      id: entry.id,
-                                                      pickerId: entry.pickerId,
-                                                      pickerNumber: entry.pickerNumber,
-                                                      pickerName: entry.pickerName,
-                                                      kg: entry.kg,
-                                                      collectionId: entry.collectionId,
-                                                    });
-                                                    setEditIntakePickerId(entry.pickerId);
-                                                    setEditIntakeKg(String(entry.kg));
-                                                  }}
-                                                  aria-label="Edit entry"
-                                                >
-                                                  <Pencil className="h-3 w-3" />
-                                                </Button>
-                                              )}
+                                      {isExpanded && (() => {
+                                        const pickerRate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
+                                        return (
+                                          <div className="border-t border-border bg-muted/20">
+                                            <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2.5 py-1.5 text-xs font-medium text-muted-foreground border-b border-border/50">
+                                              <span>Entry</span>
+                                              <span>KG</span>
+                                              <span>Price</span>
+                                              <span>Time</span>
+                                              <span className="w-14" />
                                             </div>
-                                          ))}
-                                        </div>
-                                      )}
+                                            {group.entries.map((entry, idx) => {
+                                              const price = Math.round(entry.kg * pickerRate);
+                                              const timeStr = entry.recordedAt != null ? format(toDate(entry.recordedAt) ?? new Date(), 'h:mm a') : '—';
+                                              return (
+                                                <div
+                                                  key={entry.id}
+                                                  className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2.5 py-1.5 items-center text-sm min-w-0 pl-4 border-b border-border last:border-b-0"
+                                                >
+                                                  <span className="tabular-nums text-muted-foreground">{idx + 1}</span>
+                                                  <span className="tabular-nums text-foreground">{entry.kg.toFixed(1)} kg</span>
+                                                  <span className="tabular-nums text-foreground">KES {price}</span>
+                                                  <span className="text-xs text-muted-foreground tabular-nums">{timeStr}</span>
+                                                  {canManageIntake && selectedCollection?.status !== 'closed' ? (
+                                                    <div className="flex items-center justify-end gap-0.5 w-14">
+                                                      <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                                                        onClick={(ev) => {
+                                                          ev.stopPropagation();
+                                                          setEditIntakeEntry({
+                                                            id: entry.id,
+                                                            pickerId: entry.pickerId,
+                                                            pickerNumber: entry.pickerNumber,
+                                                            pickerName: entry.pickerName,
+                                                            kg: entry.kg,
+                                                            collectionId: entry.collectionId,
+                                                          });
+                                                          setEditIntakePickerId(entry.pickerId);
+                                                          setEditIntakeKg(String(entry.kg));
+                                                        }}
+                                                        aria-label="Edit entry"
+                                                      >
+                                                        <Pencil className="h-3 w-3" />
+                                                      </Button>
+                                                      <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                                                        onClick={(ev) => {
+                                                          ev.stopPropagation();
+                                                          void handleDeleteIntakeEntry({ id: entry.id, collectionId: entry.collectionId });
+                                                        }}
+                                                        aria-label="Delete entry"
+                                                      >
+                                                        <Trash2 className="h-3 w-3" />
+                                                      </Button>
+                                                    </div>
+                                                  ) : (
+                                                    <span className="w-14" />
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   );
                                 })
@@ -2706,14 +2749,19 @@ export default function HarvestCollectionsPage() {
                               const entries = weighEntriesForCollection
                                 .filter((e) => String(e.pickerId ?? '') === quickPayPickerId)
                                 .slice()
-                                .sort((a, b) => toTime(a.recordedAt) - toTime(b.recordedAt))
-                                .map((e) => {
+                                .sort((a, b) => toTime(b.recordedAt) - toTime(a.recordedAt))
+                                .map((e, idx) => {
                                   const kg = Number(e.weightKg ?? 0);
                                   const amt = Math.round(kg * pickerRate);
+                                  const timeStr = e.recordedAt != null ? format(toDate(e.recordedAt) ?? new Date(), 'h:mm a') : '—';
                                   return {
-                                    id: String(e.id ?? `${e.pickerId}-${toTime(e.recordedAt)}-${kg}`),
+                                    rowKey: e.id ?? `qp-${idx}`,
+                                    entryId: e.id ?? '',
+                                    collectionId: e.collectionId,
                                     kg,
                                     amount: amt,
+                                    timeStr,
+                                    pickerId: e.pickerId,
                                   };
                                 })
                                 .filter((x) => Number.isFinite(x.kg) && x.kg > 0);
@@ -2733,7 +2781,7 @@ export default function HarvestCollectionsPage() {
                                     <p className="text-xs text-muted-foreground">Balance</p>
                                     <p className="text-2xl font-extrabold tabular-nums text-foreground">KES {balance.toLocaleString()}</p>
                                     <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
-                                      ({remainingKg.toFixed(1)}kg remaining)
+                                      ({remainingKg.toFixed(1)} kg remaining)
                                     </p>
                                     <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                                       <div className="rounded-md bg-background/60 border border-border p-2">
@@ -2862,18 +2910,57 @@ export default function HarvestCollectionsPage() {
                                       {entries.length === 0 ? (
                                         <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
                                       ) : (
-                                        <div className="max-h-[220px] overflow-y-auto">
-                                          {entries.map((e) => (
+                                        <div className="max-h-[220px] overflow-y-auto scrollbar-app">
+                                          {entries.map((e, idx) => (
                                             <div
-                                              key={e.id}
-                                              className="px-3 py-2 border-b border-border last:border-b-0 flex items-center justify-between gap-3"
+                                              key={e.rowKey}
+                                              className="px-3 py-2 border-b border-border last:border-b-0 flex items-center gap-3 flex-wrap"
                                             >
-                                              <span className="text-sm tabular-nums text-foreground">
-                                                {e.kg.toFixed(1)}kg
+                                              <span className="text-sm tabular-nums text-foreground shrink-0">
+                                                {e.kg.toFixed(1)} kg
                                               </span>
-                                              <span className="text-sm tabular-nums font-semibold text-foreground">
-                                                → {e.amount.toLocaleString()}
+                                              <span className="text-sm tabular-nums font-semibold text-foreground shrink-0">
+                                                {e.amount}
                                               </span>
+                                              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                                                {e.timeStr}
+                                              </span>
+                                              <span className="flex-1 min-w-0" />
+                                              {canManageIntake && selectedCollection?.status !== 'closed' && (
+                                                <>
+                                                  <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                                                    onClick={() => {
+                                                      setEditIntakeEntry({
+                                                        id: e.entryId,
+                                                        pickerId: e.pickerId,
+                                                        pickerNumber: picker?.pickerNumber ?? '?',
+                                                        pickerName: picker?.pickerName ?? '—',
+                                                        kg: e.kg,
+                                                        collectionId: e.collectionId,
+                                                      });
+                                                      setEditIntakePickerId(e.pickerId);
+                                                      setEditIntakeKg(String(e.kg));
+                                                    }}
+                                                    aria-label="Edit entry"
+                                                  >
+                                                    <Pencil className="h-3 w-3" />
+                                                  </Button>
+                                                  <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                                                    onClick={() => void handleDeleteIntakeEntry({ id: e.entryId, collectionId: e.collectionId })}
+                                                    aria-label="Delete entry"
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </Button>
+                                                </>
+                                              )}
                                             </div>
                                           ))}
                                         </div>
@@ -3343,7 +3430,7 @@ export default function HarvestCollectionsPage() {
               <DialogTitle>New collection</DialogTitle>
               <DialogDescription>Name the collection, set date and rate. Totals auto-calculate from weights.</DialogDescription>
             </DialogHeader>
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2 scrollbar-app">
               <div>
                 <Label>Collection name</Label>
                 <Input
@@ -3400,7 +3487,7 @@ export default function HarvestCollectionsPage() {
               <DialogTitle>Add picker</DialogTitle>
               <DialogDescription>Number auto-fills (next in sequence). One number per picker in this collection.</DialogDescription>
             </DialogHeader>
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2 scrollbar-app">
               <div>
                 <Label>Picker number</Label>
                 <Input
@@ -3448,7 +3535,7 @@ export default function HarvestCollectionsPage() {
                   : 'Weight and trip for the picker.'}
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2 scrollbar-app">
               {weighOpenedFromCard && weighPickerId ? (
                 <p className="font-medium text-foreground">
                   #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
@@ -3499,27 +3586,116 @@ export default function HarvestCollectionsPage() {
                   className="mt-1 min-h-11 rounded-xl"
                 />
               </div>
-            </div>
-            <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border gap-2 flex-col">
-              <div className="flex gap-2 w-full flex-col sm:flex-row">
-                <Button variant="outline" onClick={() => setAddWeighOpen(false)} className="min-h-11 flex-1 touch-manipulation">
-                  Cancel
-                </Button>
-                <Button onClick={() => handleAddWeigh('close')} disabled={!weighPickerId || !weighKg.trim()} className="min-h-11 flex-1 font-semibold touch-manipulation">
-                  Save
-                </Button>
-              </div>
-              {weighPickerId && weighKg.trim() && (
+
+              {(weighPickerId && weighKg.trim()) && (
                 <div className="flex gap-2 w-full">
-                  <Button onClick={() => handleAddWeigh('stay')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
+                  <Button onClick={() => handleAddWeigh('stay')} className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation">
                     Save & Stay
                   </Button>
-                  <Button onClick={() => handleAddWeigh('next')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
+                  <Button onClick={() => handleAddWeigh('next')} className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation">
                     Save & Next
                   </Button>
                 </div>
               )}
-            </DialogFooter>
+
+              {weighPickerId && selectedCollectionId && (() => {
+                const pickerEntries = weighEntriesForCollection
+                  .filter((e) => e.pickerId === weighPickerId)
+                  .slice()
+                  .sort((a, b) => {
+                    const at = (a.recordedAt != null ? toDate(a.recordedAt)?.getTime() : 0) ?? 0;
+                    const bt = (b.recordedAt != null ? toDate(b.recordedAt)?.getTime() : 0) ?? 0;
+                    return bt - at;
+                  });
+                const rate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
+                const totalKg = pickerEntries.reduce((s, e) => s + Number(e.weightKg ?? 0), 0);
+                const totalPrice = Math.round(totalKg * rate);
+                return (
+                  <div className="space-y-2 border-t border-border pt-4">
+                    <p className="text-sm font-semibold text-foreground">Entries</p>
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground border-b border-border">
+                        <span>#</span>
+                        <span>KG</span>
+                        <span>Price</span>
+                        <span>Time</span>
+                        <span className="w-14 text-right" />
+                      </div>
+                      <div className="max-h-[180px] overflow-y-auto scrollbar-app">
+                        {pickerEntries.length === 0 ? (
+                          <p className="text-sm text-muted-foreground px-2 py-3">No entries yet.</p>
+                        ) : (
+                          pickerEntries.map((e, idx) => {
+                            const kg = Number(e.weightKg ?? 0);
+                            const price = Math.round(kg * rate);
+                            const timeStr = e.recordedAt != null ? format(toDate(e.recordedAt) ?? new Date(), 'h:mm a') : '—';
+                            const picker = pickersForCollection.find((p) => p.id === e.pickerId);
+                            return (
+                              <div
+                                key={e.id ?? `ledger-${idx}`}
+                                className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2 py-1.5 items-center text-sm border-b border-border last:border-b-0"
+                              >
+                                <span className="tabular-nums text-foreground">{idx + 1}</span>
+                                <span className="tabular-nums text-foreground">{kg.toFixed(1)} kg</span>
+                                <span className="tabular-nums text-foreground">{price}</span>
+                                <span className="text-muted-foreground tabular-nums text-xs">{timeStr}</span>
+                                <div className="flex items-center justify-end gap-0.5 w-14">
+                                  {canManageIntake && selectedCollection?.status !== 'closed' && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                        onClick={() => {
+                                          setEditIntakeEntry({
+                                            id: e.id ?? '',
+                                            pickerId: e.pickerId,
+                                            pickerNumber: picker?.pickerNumber ?? '?',
+                                            pickerName: picker?.pickerName ?? '—',
+                                            kg,
+                                            collectionId: e.collectionId,
+                                          });
+                                          setEditIntakePickerId(e.pickerId);
+                                          setEditIntakeKg(String(kg));
+                                          setAddWeighOpen(false);
+                                        }}
+                                        aria-label="Edit"
+                                      >
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                        onClick={() => void handleDeleteIntakeEntry({ id: e.id ?? '', collectionId: e.collectionId })}
+                                        aria-label="Delete"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                      {pickerEntries.length > 0 && (
+                        <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2 py-2 bg-muted/30 text-sm font-semibold border-t border-border">
+                          <span>Total</span>
+                          <span className="tabular-nums">{totalKg.toFixed(1)} kg</span>
+                          <span className="tabular-nums">{totalPrice}</span>
+                          <span />
+                          <span />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </DialogContent>
         </Dialog>
       </div>
