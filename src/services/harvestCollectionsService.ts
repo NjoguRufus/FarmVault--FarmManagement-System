@@ -512,6 +512,119 @@ export async function listPickerPaymentsByCollectionIds(collectionIds: string[])
   return (data ?? []) as DbPaymentEntry[];
 }
 
+export type RecentPayoutSummary = {
+  collectionId: string;
+  collectionName: string;
+  harvestDate: string;
+  totalPaid: number;
+  pickersPaidCount: number;
+};
+
+/** Recent payouts from harvest.picker_payment_entries grouped by collection. For Expenses page "Recent Payouts" section. */
+export async function getRecentPayoutsSummary(
+  companyId: string,
+  projectId?: string | null
+): Promise<RecentPayoutSummary[]> {
+  const collections = await listHarvestCollections(companyId, projectId);
+  if (collections.length === 0) return [];
+  const collectionIds = collections.map((c) => c.id);
+  const payments = await listPickerPaymentsByCollectionIds(collectionIds);
+  const byCollection = new Map<
+    string,
+    { totalPaid: number; pickerIds: Set<string> }
+  >();
+  payments.forEach((p) => {
+    const cid = p.collection_id;
+    if (!byCollection.has(cid)) {
+      byCollection.set(cid, { totalPaid: 0, pickerIds: new Set() });
+    }
+    const rec = byCollection.get(cid)!;
+    rec.totalPaid += Number(p.amount_paid ?? 0);
+    rec.pickerIds.add(p.picker_id);
+  });
+  return collections
+    .filter((c) => byCollection.has(c.id) && (byCollection.get(c.id)!.totalPaid > 0 || byCollection.get(c.id)!.pickerIds.size > 0))
+    .map((c) => {
+      const rec = byCollection.get(c.id)!;
+      return {
+        collectionId: c.id,
+        collectionName: (c.name ?? '').trim() || String(c.harvestDate ?? c.id),
+        harvestDate: c.harvestDate != null ? String(c.harvestDate) : '',
+        totalPaid: rec.totalPaid,
+        pickersPaidCount: rec.pickerIds.size,
+      };
+    })
+    .sort((a, b) => (b.harvestDate || '').localeCompare(a.harvestDate || ''));
+}
+
+export type CollectionPayoutDetailRow = {
+  pickerNumber: number | string;
+  pickerName: string;
+  totalKg: number;
+  amountPaid: number;
+  lastPaidAt: string | null;
+};
+
+export type CollectionPayoutDetail = {
+  collectionName: string;
+  rows: CollectionPayoutDetailRow[];
+  totalKg: number;
+  totalPaid: number;
+};
+
+/** Picker-level payout detail for a collection. For "Recent Payouts" detail modal. */
+export async function getCollectionPayoutDetail(collectionId: string): Promise<CollectionPayoutDetail | null> {
+  const [collection, intake, payments, pickers] = await Promise.all([
+    getHarvestCollection(collectionId),
+    listPickerIntake(collectionId),
+    listPickerPayments(collectionId),
+    listPickers(collectionId),
+  ]);
+  if (!collection) return null;
+  const kgByPicker = new Map<string, number>();
+  intake.forEach((e) => {
+    const pid = e.pickerId;
+    const kg = Number(e.weightKg ?? 0);
+    kgByPicker.set(pid, (kgByPicker.get(pid) ?? 0) + kg);
+  });
+  const paidByPicker = new Map<string, { total: number; lastAt: string | null }>();
+  payments.forEach((p) => {
+    const pid = p.picker_id;
+    const amt = Number(p.amount_paid ?? 0);
+    const at = p.paid_at ?? null;
+    if (!paidByPicker.has(pid)) {
+      paidByPicker.set(pid, { total: 0, lastAt: null });
+    }
+    const rec = paidByPicker.get(pid)!;
+    rec.total += amt;
+    if (at && (!rec.lastAt || at > rec.lastAt)) rec.lastAt = at;
+  });
+  const pickerMap = new Map(pickers.map((p) => [p.id, p]));
+  const rows: CollectionPayoutDetailRow[] = [];
+  let totalKg = 0;
+  let totalPaid = 0;
+  paidByPicker.forEach((rec, pickerId) => {
+    const p = pickerMap.get(pickerId);
+    const totalKgP = kgByPicker.get(pickerId) ?? 0;
+    totalKg += totalKgP;
+    totalPaid += rec.total;
+    rows.push({
+      pickerNumber: p?.picker_number ?? pickerId.slice(0, 8),
+      pickerName: p?.picker_name ?? '—',
+      totalKg: totalKgP,
+      amountPaid: rec.total,
+      lastPaidAt: rec.lastAt,
+    });
+  });
+  rows.sort((a, b) => Number(a.pickerNumber) - Number(b.pickerNumber));
+  return {
+    collectionName: (collection.name ?? '').trim() || String(collection.harvestDate ?? collectionId),
+    rows,
+    totalKg,
+    totalPaid,
+  };
+}
+
 // ---- Collection financials (DB-backed) ----
 
 export type HarvestCollectionFinancials = {
@@ -745,8 +858,9 @@ export async function recordPickerPayment(params: {
       amount_paid: params.amount,
       note: params.note ?? null,
     };
-    if (clientEntryId) insertPayload.client_entry_id = clientEntryId;
     if (params.paidBy != null) insertPayload.paid_by = params.paidBy;
+
+    console.log('[Payment Insert Payload]', insertPayload);
 
     const { data, error } = await harvest()
       .from('picker_payment_entries')
@@ -757,9 +871,14 @@ export async function recordPickerPayment(params: {
     if (error) throw error;
     if (!data?.id) throw new Error('Record payment failed');
     return data.id;
-  } catch (_) {
-    await queueAndReturn();
-    return clientEntryId;
+  } catch (err) {
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      await queueAndReturn();
+      return clientEntryId;
+    }
+    console.warn('[Harvest] Payment insert failed.', err);
+    throw err;
   }
 }
 
@@ -883,6 +1002,7 @@ export async function markPickerCashPaid(params: {
   amount: number;
   projectId?: string;
   note?: string | null;
+  paidBy?: string | null;
 }): Promise<void> {
   if (params.amount <= 0) return;
   const paymentEntryId = await recordPickerPayment({
@@ -891,6 +1011,7 @@ export async function markPickerCashPaid(params: {
     pickerId: params.pickerId,
     amount: params.amount,
     note: params.note ?? null,
+    paidBy: params.paidBy ?? null,
   });
   if (params.projectId && paymentEntryId) {
     await syncPickerPaymentToExpenseForOffline({

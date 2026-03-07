@@ -45,7 +45,7 @@ import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
 import { applyExpenseDeduction } from '@/services/expenseBudgetService';
-import { getHarvestPickersByIds } from '@/services/harvestCollectionsService';
+import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
@@ -270,7 +270,21 @@ export default function ExpensesPage() {
     return Array.from(byCollection.values()).sort((a, b) => b.latestDate.getTime() - a.latestDate.getTime());
   }, [filteredExpenses]);
 
-  // Recent table rows: picker groups (one per collection) + all other expenses (exclude raw picker labour lines)
+  const { data: recentPayouts = [] } = useQuery({
+    queryKey: ['recentPayouts', companyId ?? '', activeProject?.id ?? ''],
+    queryFn: () => getRecentPayoutsSummary(companyId ?? '', activeProject?.id ?? null),
+    enabled: Boolean(companyId),
+    staleTime: 60000,
+  });
+
+  const [payoutDetailCollectionId, setPayoutDetailCollectionId] = useState<string | null>(null);
+  const { data: payoutDetail, isLoading: payoutDetailLoading } = useQuery({
+    queryKey: ['collectionPayoutDetail', payoutDetailCollectionId],
+    queryFn: () => getCollectionPayoutDetail(payoutDetailCollectionId!),
+    enabled: Boolean(payoutDetailCollectionId),
+  });
+
+  // Recent table rows: harvest payouts (from picker_payment_entries) + picker groups from expenses + other expenses
   const recentTableRows = useMemo(() => {
     const pickerIds = new Set(
       filteredExpenses
@@ -278,22 +292,38 @@ export default function ExpensesPage() {
         .map((e) => e.id)
     );
     const others = filteredExpenses.filter((e) => !pickerIds.has(e.id));
-    const groupRows = pickerPaymentGroups.map((g) => ({
-      type: 'picker_group' as const,
-      key: `picker-${g.collectionId}`,
-      ...g,
+    const payoutCollectionIds = new Set((recentPayouts ?? []).map((p) => p.collectionId));
+    const harvestPayoutRows = (recentPayouts ?? []).map((p) => ({
+      type: 'harvest_payout' as const,
+      key: `payout-${p.collectionId}`,
+      collectionId: p.collectionId,
+      collectionName: p.collectionName,
+      totalPaid: p.totalPaid,
+      harvestDate: p.harvestDate,
+      pickersPaidCount: p.pickersPaidCount,
     }));
+    const groupRows = pickerPaymentGroups
+      .filter((g) => !payoutCollectionIds.has(g.collectionId))
+      .map((g) => ({
+        type: 'picker_group' as const,
+        key: `picker-${g.collectionId}`,
+        ...g,
+      }));
     const expenseRows = others.map((e) => ({ type: 'expense' as const, key: e.id, expense: e }));
-    const combined = [...groupRows, ...expenseRows];
+    const combined = [...harvestPayoutRows, ...groupRows, ...expenseRows];
     combined.sort((a, b) => {
-      const dateA = a.type === 'picker_group' ? a.latestDate : toDate(a.expense.date);
-      const dateB = b.type === 'picker_group' ? b.latestDate : toDate(b.expense.date);
-      const tA = dateA ? dateA.getTime() : 0;
-      const tB = dateB ? dateB.getTime() : 0;
+      let tA = 0;
+      let tB = 0;
+      if (a.type === 'harvest_payout') tA = a.harvestDate ? new Date(a.harvestDate).getTime() : 0;
+      else if (a.type === 'picker_group') tA = a.latestDate ? a.latestDate.getTime() : 0;
+      else tA = toDate(a.expense.date)?.getTime() ?? 0;
+      if (b.type === 'harvest_payout') tB = b.harvestDate ? new Date(b.harvestDate).getTime() : 0;
+      else if (b.type === 'picker_group') tB = b.latestDate ? b.latestDate.getTime() : 0;
+      else tB = toDate(b.expense.date)?.getTime() ?? 0;
       return tB - tA;
     });
     return combined;
-  }, [filteredExpenses, pickerPaymentGroups]);
+  }, [filteredExpenses, pickerPaymentGroups, recentPayouts]);
 
   // Broker expense categories (for admin view)
   const brokerCategoryValues = useMemo(
@@ -741,6 +771,54 @@ export default function ExpensesPage() {
         </div>
       </div>
 
+      <Dialog open={!!payoutDetailCollectionId} onOpenChange={(open) => !open && setPayoutDetailCollectionId(null)}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Payout detail</DialogTitle>
+          </DialogHeader>
+          {payoutDetailLoading ? (
+            <p className="text-sm text-muted-foreground py-4">Loading…</p>
+          ) : payoutDetail ? (
+            <div className="overflow-y-auto flex-1 min-h-0 space-y-3 pr-1">
+              <p className="text-sm font-medium text-foreground">{payoutDetail.collectionName}</p>
+              <div className="rounded-lg border border-border overflow-hidden">
+                <div className="grid grid-cols-4 gap-2 px-2 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground border-b border-border">
+                  <span>Picker</span>
+                  <span>KG</span>
+                  <span>Paid</span>
+                  <span>Time</span>
+                </div>
+                {payoutDetail.rows.map((row, idx) => (
+                  <div
+                    key={idx}
+                    className="grid grid-cols-4 gap-2 px-2 py-1.5 text-sm border-b border-border last:border-b-0"
+                  >
+                    <span className="font-medium tabular-nums">#{row.pickerNumber}</span>
+                    <span className="tabular-nums">{row.totalKg.toFixed(1)} kg</span>
+                    <span className="tabular-nums">KES {row.amountPaid.toLocaleString()}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {row.lastPaidAt && toDate(row.lastPaidAt)
+                        ? toDate(row.lastPaidAt)!.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit', hour12: true })
+                        : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between text-sm font-semibold border-t border-border pt-2">
+                <span>Total KG</span>
+                <span className="tabular-nums">{payoutDetail.totalKg.toFixed(1)} kg</span>
+              </div>
+              <div className="flex justify-between text-sm font-semibold">
+                <span>Total Paid</span>
+                <span className="tabular-nums">KES {payoutDetail.totalPaid.toLocaleString()}</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">No detail.</p>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Summary Cards + Filters */}
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
@@ -842,6 +920,37 @@ export default function ExpensesPage() {
             </thead>
             <tbody>
               {recentTableRows.map((row) => {
+                if (row.type === 'harvest_payout') {
+                  const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
+                  return (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setPayoutDetailCollectionId(row.collectionId)}
+                    >
+                      <td>
+                        <div>
+                          <span className="font-medium text-foreground">Picker Payout</span>
+                          <p className="text-xs text-muted-foreground mt-0.5">{row.collectionName}</p>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
+                      </td>
+                      <td className="font-medium">{formatCurrency(row.totalPaid)}</td>
+                      <td className="text-muted-foreground">{payoutDate ? formatDate(payoutDate) : '—'}</td>
+                      <td onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setPayoutDetailCollectionId(row.collectionId)}
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
                 if (row.type === 'picker_group') {
                   return (
                     <tr
@@ -922,6 +1031,29 @@ export default function ExpensesPage() {
         {/* Mobile Cards: scrollable when 5+ so card stays same size */}
         <div className="md:hidden overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-1">
           {recentTableRows.map((row) => {
+            if (row.type === 'harvest_payout') {
+              const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
+              return (
+                <div
+                  key={row.key}
+                  role="button"
+                  tabIndex={0}
+                  className="p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
+                  onClick={() => setPayoutDetailCollectionId(row.collectionId)}
+                  onKeyDown={(ev) => ev.key === 'Enter' && setPayoutDetailCollectionId(row.collectionId)}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="font-medium text-foreground">Picker Payout</p>
+                      <p className="text-xs text-muted-foreground">{row.collectionName}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{payoutDate ? formatDate(payoutDate) : '—'}</p>
+                    </div>
+                    <span className="font-semibold">{formatCurrency(row.totalPaid)}</span>
+                  </div>
+                  <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
+                </div>
+              );
+            }
             if (row.type === 'picker_group') {
               return (
                 <div
