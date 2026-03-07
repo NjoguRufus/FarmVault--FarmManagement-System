@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -21,6 +21,7 @@ import {
   CloudUpload,
   Pencil,
   Trash2,
+  HelpCircle,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -82,6 +83,17 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { ACTIONS, EVENTS, STATUS, type CallBackProps } from 'react-joyride';
+import {
+  getHarvestCollectionsStarterSteps,
+  filterTourStepsByAvailability,
+  hasCompletedHarvestTour,
+  hasDismissedHarvestTour,
+  setCompletedHarvestTour,
+  setDismissedHarvestTour,
+  type HarvestTourContext,
+} from '@/tours/harvestCollectionsTour';
+import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTour';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 
@@ -140,6 +152,7 @@ export default function HarvestCollectionsPage() {
   const [quickPayPartialBalance, setQuickPayPartialBalance] = useState(0);
   const [quickPayLocalPaidByPickerId, setQuickPayLocalPaidByPickerId] = useState<Record<string, number>>({});
   const [quickPaySummaryExpanded, setQuickPaySummaryExpanded] = useState(false);
+  const [quickPaySearch, setQuickPaySearch] = useState('');
   const skipJustClickedRef = useRef(false);
 
   const [buyerPricePerKg, setBuyerPricePerKg] = useState('');
@@ -157,7 +170,7 @@ export default function HarvestCollectionsPage() {
   const [payingSelected, setPayingSelected] = useState(false);
   const [payingPickerIds, setPayingPickerIds] = useState<Set<string> | null>(null);
   const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
-  const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
+  const [collectionFilter, setCollectionFilter] = useState<'all' | 'pending' | 'closed'>('all');
   const [quickMode, setQuickMode] = useState(false);
   const [quickIntakePickerNumber, setQuickIntakePickerNumber] = useState('');
   const [quickIntakeKg, setQuickIntakeKg] = useState('');
@@ -176,6 +189,11 @@ export default function HarvestCollectionsPage() {
   const [editIntakeKg, setEditIntakeKg] = useState('');
   const [editIntakeSaving, setEditIntakeSaving] = useState(false);
   const [expandedQuickIntakePickerId, setExpandedQuickIntakePickerId] = useState<string | null>(null);
+
+  const [harvestTourRun, setHarvestTourRun] = useState(false);
+  const [harvestTourStepIndex, setHarvestTourStepIndex] = useState(0);
+  const [harvestTourSteps, setHarvestTourSteps] = useState<ReturnType<typeof getHarvestCollectionsStarterSteps>>([]);
+  const harvestTourAutoRunDoneRef = useRef(false);
 
   const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
   const canManageIntake = can('harvest', 'recordIntake') || can('harvest', 'edit') || can('harvest', 'create');
@@ -439,14 +457,25 @@ export default function HarvestCollectionsPage() {
     return [...filtered].sort((a, b) => toTime(b) - toTime(a));
   }, [allCollections, effectiveProject]);
 
-  const activeCollections = useMemo(
+  /** Pending = buyer not yet marked as paid (harvest not completed). */
+  const pendingCollections = useMemo(
     () => collections.filter((c) => c.status !== 'closed'),
     [collections]
   );
+  /** Closed = buyer paid, harvest completed. */
   const closedCollections = useMemo(
     () => collections.filter((c) => c.status === 'closed'),
     [collections]
   );
+
+  const pickersCountByCollectionId = useMemo(() => {
+    const map: Record<string, number> = {};
+    (pickersRaw ?? []).forEach((p) => {
+      const cid = String(p.collection_id ?? '');
+      if (cid) map[cid] = (map[cid] ?? 0) + 1;
+    });
+    return map;
+  }, [pickersRaw]);
 
   const collectionTotalsById = useMemo(() => {
     const priceByCollection = new Map<string, number>();
@@ -645,6 +674,116 @@ export default function HarvestCollectionsPage() {
   
   const showBuyerSale = Boolean(canViewFinancials && isCollectionClosed);
 
+  const harvestTourContext = useMemo<HarvestTourContext>(() => {
+    const visibleTabs: ('intake' | 'pay' | 'buyer')[] = [];
+    if (canManageIntake) visibleTabs.push('intake');
+    if (canPayPickers) visibleTabs.push('pay');
+    if (canViewBuyerSection) visibleTabs.push('buyer');
+    return {
+      hasProject: Boolean(effectiveProject),
+      isFrenchBeansProject: String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans',
+      hasSelectedCollection: Boolean(selectedCollectionId && selectedCollection),
+      hasCollections: collections.length > 0,
+      canCreateCollection,
+      canManageIntake,
+      canPayPickers,
+      canViewBuyerSection,
+      canCloseHarvest,
+      canViewFinancials,
+      quickMode,
+      collectionStatus: selectedCollection
+        ? (isCollectionClosed ? 'closed' : 'open')
+        : null,
+      isOfflineOrHasPendingSync: !isOnline || hasPendingWrites,
+      visibleTabs,
+    };
+  }, [
+    effectiveProject,
+    selectedCollectionId,
+    selectedCollection,
+    collections.length,
+    canCreateCollection,
+    canManageIntake,
+    canPayPickers,
+    canViewBuyerSection,
+    canCloseHarvest,
+    canViewFinancials,
+    quickMode,
+    isCollectionClosed,
+    isOnline,
+    hasPendingWrites,
+  ]);
+
+  const startHarvestTour = useCallback(() => {
+    const raw = getHarvestCollectionsStarterSteps(harvestTourContext);
+    const available = filterTourStepsByAvailability(raw);
+    if (available.length === 0) return;
+    setHarvestTourSteps(available);
+    setHarvestTourStepIndex(0);
+    setHarvestTourRun(true);
+  }, [harvestTourContext]);
+
+  const handleHarvestTourCallback = useCallback(
+    (data: CallBackProps) => {
+      const { action, index = 0, status, type } = data;
+      if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+        setCompletedHarvestTour(user?.id);
+        setDismissedHarvestTour(user?.id);
+        setHarvestTourRun(false);
+        setHarvestTourSteps([]);
+        setHarvestTourStepIndex(0);
+        return;
+      }
+      if (type === EVENTS.STEP_AFTER || type === EVENTS.TARGET_NOT_FOUND) {
+        setHarvestTourSteps((prev) => {
+          const next = filterTourStepsByAvailability(
+            getHarvestCollectionsStarterSteps(harvestTourContext)
+          );
+          if (next.length === 0) {
+            setHarvestTourRun(false);
+            setHarvestTourStepIndex(0);
+            return [];
+          }
+          const delta = action === ACTIONS.PREV ? -1 : 1;
+          const nextIndex = index + delta;
+          if (nextIndex < 0) {
+            setHarvestTourStepIndex(0);
+            return next;
+          }
+          if (nextIndex >= next.length) {
+            setCompletedHarvestTour(user?.id);
+            setDismissedHarvestTour(user?.id);
+            setHarvestTourRun(false);
+            setHarvestTourStepIndex(0);
+            return [];
+          }
+          setHarvestTourStepIndex(nextIndex);
+          return next;
+        });
+      }
+    },
+    [harvestTourContext, user?.id],
+  );
+
+  useEffect(() => {
+    if (!effectiveProject || harvestTourAutoRunDoneRef.current) return;
+    if (hasCompletedHarvestTour(user?.id) || hasDismissedHarvestTour(user?.id)) {
+      harvestTourAutoRunDoneRef.current = true;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      harvestTourAutoRunDoneRef.current = true;
+      const raw = getHarvestCollectionsStarterSteps(harvestTourContext);
+      const available = filterTourStepsByAvailability(raw);
+      if (available.length > 0) {
+        setHarvestTourSteps(available);
+        setHarvestTourStepIndex(0);
+        setHarvestTourRun(true);
+      }
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [effectiveProject, harvestTourContext, user?.id]);
+
   const pickerTotalsById = useMemo(() => {
     const totals: Record<string, { totalKg: number; totalPay: number }> = {};
     const pricePerKgPicker = Number(selectedCollection?.pricePerKgPicker ?? 0);
@@ -717,6 +856,39 @@ export default function HarvestCollectionsPage() {
     return items;
   }, [pickersForCollection, pickerTotalsById, paidByPickerId, quickPayLocalPaidByPickerId]);
 
+  const quickPayQueueFiltered = useMemo(() => {
+    const q = quickPayQueue;
+    const s = (quickPaySearch ?? '').trim().toLowerCase();
+    if (!s) return q;
+    return q.filter(
+      (item) =>
+        String(item.pickerNumber).toLowerCase().includes(s) ||
+        item.pickerName.toLowerCase().includes(s)
+    );
+  }, [quickPayQueue, quickPaySearch]);
+
+  /** Pickers matching search (all pickers in collection, for immediate card display when searching by number/name). */
+  const quickPaySearchMatchingPickers = useMemo(() => {
+    const s = (quickPaySearch ?? '').trim().toLowerCase();
+    if (!s) return [];
+    return pickersForCollection.filter(
+      (p) =>
+        String(p.pickerNumber ?? '').toLowerCase().includes(s) ||
+        String(p.pickerName ?? '').toLowerCase().includes(s)
+    );
+  }, [quickPaySearch, pickersForCollection]);
+
+  /** Picker to show in Quick Pay card: from queue when no search, else first match from all pickers (including paid). */
+  const quickPayDisplayPickerId = useMemo(() => {
+    if (!(quickMode && viewMode === 'pay')) return null;
+    const s = (quickPaySearch ?? '').trim();
+    if (s && quickPaySearchMatchingPickers.length > 0) {
+      return quickPaySearchMatchingPickers[0].id;
+    }
+    const first = quickPayQueueFiltered[0];
+    return first?.pickerId ?? null;
+  }, [quickMode, viewMode, quickPaySearch, quickPaySearchMatchingPickers, quickPayQueueFiltered]);
+
   useEffect(() => {
     if (!(quickMode && viewMode === 'pay')) return;
     console.log('[Quick Pay Queue]', quickPayQueue);
@@ -730,15 +902,11 @@ export default function HarvestCollectionsPage() {
       skipJustClickedRef.current = false;
       return;
     }
-    const first = quickPayQueue[0];
-    if (!first) {
-      setQuickPayPickerId(null);
-      return;
+    const displayId = quickPayDisplayPickerId;
+    if (quickPayPickerId !== displayId) {
+      setQuickPayPickerId(displayId);
     }
-    if (quickPayPickerId == null || !quickPayQueue.some((q) => q.pickerId === quickPayPickerId)) {
-      setQuickPayPickerId(first.pickerId);
-    }
-  }, [quickMode, viewMode, quickPayQueue, quickPayPickerId, quickPayPartialOpen, selectedCollection?.status]);
+  }, [quickMode, viewMode, quickPayDisplayPickerId, quickPayPickerId, quickPayPartialOpen, selectedCollection?.status]);
 
   useEffect(() => {
     if (!(quickMode && viewMode === 'pay') || !quickPayPickerId) return;
@@ -1114,11 +1282,14 @@ export default function HarvestCollectionsPage() {
       ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
     })
       .then(() => {
+        if (import.meta.env.DEV) console.log('[Harvest] Intake save success', { pickerId: savedPickerId, kg, collectionId: selectedCollectionId });
         queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
         queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
       })
       .catch((e: any) => {
-        toast({ title: 'Save failed', description: e?.message ?? 'Could not save weight', variant: 'destructive' });
+        const msg = e?.message ?? 'Could not save weight';
+        toast({ title: 'Save failed', description: msg, variant: 'destructive' });
+        if (import.meta.env.DEV) console.warn('[Harvest] Intake save failed', msg);
       });
   };
 
@@ -1318,7 +1489,9 @@ export default function HarvestCollectionsPage() {
           const refreshWallet = () =>
             getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
               .then(setWalletLedgerEntries)
-              .catch(() => {});
+              .catch((err) => {
+                if (import.meta.env.DEV) console.warn('[Harvest] Wallet ledger refresh after payment failed:', err?.message ?? err);
+              });
           refreshWallet();
           if (isOffline) setTimeout(refreshWallet, 200);
         }
@@ -1359,9 +1532,10 @@ export default function HarvestCollectionsPage() {
     currentPickerNumber: number;
     removeCurrent: boolean;
   }): string | null => {
+    const queue = quickPayQueueFiltered;
     const remaining = params.removeCurrent
-      ? quickPayQueue.filter((q) => q.pickerId !== params.currentPickerId)
-      : quickPayQueue;
+      ? queue.filter((q) => q.pickerId !== params.currentPickerId)
+      : queue;
     if (remaining.length === 0) return null;
 
     const currentIndex = remaining.findIndex((q) => q.pickerId === params.currentPickerId);
@@ -1411,13 +1585,18 @@ export default function HarvestCollectionsPage() {
         amount: amountClamped,
         projectId: effectiveProject?.id,
         note: undefined,
+        paidBy: user?.id ?? undefined,
       });
       setQuickPayLocalPaidByPickerId((prev) => ({
         ...prev,
         [quickPayPickerId]: (prev[quickPayPickerId] ?? 0) + amountClamped,
       }));
-      queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
-      queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pickerPayments'] }),
+        queryClient.invalidateQueries({ queryKey: ['harvestPickers'] }),
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] }),
+        queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] }),
+      ]);
       queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
       queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
@@ -1426,14 +1605,13 @@ export default function HarvestCollectionsPage() {
         queryClient.invalidateQueries({ queryKey: ['projectWalletTotals', companyId, effectiveProject.id] });
         queryClient.invalidateQueries({ queryKey: ['projectWalletLedger', companyId, effectiveProject.id] });
       }
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
-      queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
       const remainingBalance = Math.max(0, balance - amountClamped);
       console.log('[Quick Pay Save]', {
         pickerId: quickPayPickerId,
         amountPaid: amountClamped,
         remainingBalance,
       });
+      if (import.meta.env.DEV) console.log('[Harvest] Payment save success', { pickerId: quickPayPickerId, amount: amountClamped, collectionId: selectedCollectionId });
       toast({ title: 'Paid' });
       setQuickPayAmount('');
       const nextId = getNextQuickPayPickerId({
@@ -1449,7 +1627,9 @@ export default function HarvestCollectionsPage() {
         setQuickPayPickerId(null);
       }
     } catch (e: any) {
-      toast({ title: 'Payment failed', description: e?.message ?? 'Could not save payment', variant: 'destructive' });
+      const msg = e?.message ?? 'Could not save payment';
+      toast({ title: 'Payment failed', description: msg, variant: 'destructive' });
+      if (import.meta.env.DEV) console.warn('[Harvest] Quick Pay save failed', msg);
     } finally {
       setQuickPaySaving(false);
     }
@@ -1584,7 +1764,9 @@ export default function HarvestCollectionsPage() {
           const refreshWallet = () =>
             getWalletLedgerEntries(effectiveProject.id!, companyId, { forceFromCache: isOffline })
               .then(setWalletLedgerEntries)
-              .catch(() => {});
+              .catch((err) => {
+                if (import.meta.env.DEV) console.warn('[Harvest] Wallet ledger refresh after batch payment failed:', err?.message ?? err);
+              });
           refreshWallet();
           if (isOffline) setTimeout(refreshWallet, 200);
         }
@@ -1721,6 +1903,7 @@ export default function HarvestCollectionsPage() {
                   setSelectedCollectionId(null);
                   setViewMode('list');
                 }}
+                data-tour="harvest-back"
               >
                 <ChevronLeft className="h-5 w-5" />
                 Back
@@ -1736,9 +1919,20 @@ export default function HarvestCollectionsPage() {
                 Back
               </Button>
             )}
-            <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate">
+            <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate" data-tour="harvest-collections-title">
               {selectedCollectionId ? (selectedCollection?.name ?? 'Collection') : 'Harvest Collections'}
             </h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground hover:text-foreground"
+              onClick={startHarvestTour}
+              data-tour="harvest-take-tour"
+              title="Take a Tour"
+              aria-label="Take a Tour"
+            >
+              <HelpCircle className="h-5 w-5" />
+            </Button>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {(hasPendingWrites || !isOnline) && (
@@ -1746,6 +1940,7 @@ export default function HarvestCollectionsPage() {
                 size="sm"
                 variant="outline"
                 className="text-sm min-h-9 px-3 rounded-lg gap-1.5"
+                data-tour="harvest-sync-offline"
                 onClick={async () => {
                   const { synced, failed } = await triggerSync();
                   if (synced > 0 || failed > 0) {
@@ -1768,6 +1963,7 @@ export default function HarvestCollectionsPage() {
                   <Button
                     size="sm"
                     className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
+                    data-tour="harvest-new-collection"
                     onClick={() => setNewCollectionOpen(true)}
                   >
                     <Plus className="h-4 w-4 mr-1.5" />
@@ -1947,20 +2143,22 @@ export default function HarvestCollectionsPage() {
                     All
                   </Button>
                   <Button
-                    variant={collectionFilter === 'active' ? 'default' : 'outline'}
+                    variant={collectionFilter === 'pending' ? 'default' : 'outline'}
                     size="sm"
                     className="h-8 text-xs"
-                    onClick={() => setCollectionFilter('active')}
+                    onClick={() => setCollectionFilter('pending')}
+                    title="Buyer not yet marked as paid"
                   >
-                    Active
+                    Pending
                   </Button>
                   <Button
                     variant={collectionFilter === 'closed' ? 'default' : 'outline'}
                     size="sm"
                     className="h-8 text-xs"
                     onClick={() => setCollectionFilter('closed')}
+                    title="Buyer paid, harvest completed"
                   >
-                    Closed
+                    Completed
                   </Button>
                 </div>
               )}
@@ -1976,21 +2174,23 @@ export default function HarvestCollectionsPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-6">
-                {(collectionFilter === 'all' || collectionFilter === 'active') && (
+              <div className="space-y-6" data-tour="harvest-collection-cards">
+                {(collectionFilter === 'all' || collectionFilter === 'pending') && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-foreground">
-                      Active collections {collectionFilter === 'all' && activeCollections.length > 0 && `(${activeCollections.length})`}
+                      Pending — buyer not yet paid {collectionFilter === 'all' && pendingCollections.length > 0 && `(${pendingCollections.length})`}
                     </h3>
-                    {activeCollections.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No active collections.</p>
+                    {pendingCollections.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No pending collections. Mark buyer paid to complete a harvest.</p>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
-                        {activeCollections.map((c, index) => {
+                        {pendingCollections.map((c, index) => {
                           const displayName = c.name?.trim() || formatDate(c.harvestDate);
                           const derivedTotals = collectionTotalsById[c.id];
                           const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
                           const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
+                          const pickersCount = pickersCountByCollectionId[c.id] ?? 0;
+                          const harvestDateStr = c.harvestDate != null ? formatDate(c.harvestDate) : (c as { createdAt?: unknown }).createdAt != null ? formatDate((c as { createdAt: unknown }).createdAt) : '—';
                           const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
                           return (
                             <Card
@@ -2021,17 +2221,11 @@ export default function HarvestCollectionsPage() {
                                   </span>
                                 </div>
                                 <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                  {canViewPaymentAmounts ? (
-                                    <>
-                                      <div className="text-sm font-bold text-foreground tabular-nums">
-                                        KES {totalPay.toLocaleString()}
-                                      </div>
-                                      <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
-                                    </>
-                                  ) : (
-                                    <div className="text-sm font-bold text-foreground tabular-nums">
-                                      {(totalWeight).toFixed(1)} kg
-                                    </div>
+                                  <div className="text-[10px] text-muted-foreground tabular-nums">{harvestDateStr}</div>
+                                  <div className="text-sm font-bold text-foreground tabular-nums">Total: {totalWeight.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg</div>
+                                  <div className="text-[10px] text-muted-foreground tabular-nums">Pickers: {pickersCount}</div>
+                                  {canViewPaymentAmounts && (
+                                    <div className="text-[10px] text-muted-foreground tabular-nums">KES {totalPay.toLocaleString()}</div>
                                   )}
                                 </div>
                               </CardContent>
@@ -2045,10 +2239,10 @@ export default function HarvestCollectionsPage() {
                 {(collectionFilter === 'all' || collectionFilter === 'closed') && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-foreground">
-                      Closed collections {collectionFilter === 'all' && closedCollections.length > 0 && `(${closedCollections.length})`}
+                      Completed — buyer paid {collectionFilter === 'all' && closedCollections.length > 0 && `(${closedCollections.length})`}
                     </h3>
                     {closedCollections.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No closed collections.</p>
+                      <p className="text-sm text-muted-foreground">No completed collections yet.</p>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
                         {closedCollections.map((c, index) => {
@@ -2056,7 +2250,9 @@ export default function HarvestCollectionsPage() {
                           const derivedTotals = collectionTotalsById[c.id];
                           const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
                           const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
-                          const Icon = COLLECTION_ICONS[(activeCollections.length + index) % COLLECTION_ICONS.length];
+                          const pickersCount = pickersCountByCollectionId[c.id] ?? 0;
+                          const harvestDateStr = c.harvestDate != null ? formatDate(c.harvestDate) : (c as { createdAt?: unknown }).createdAt != null ? formatDate((c as { createdAt: unknown }).createdAt) : '—';
+                          const Icon = COLLECTION_ICONS[(pendingCollections.length + index) % COLLECTION_ICONS.length];
                           return (
                             <Card
                               key={c.id}
@@ -2090,17 +2286,11 @@ export default function HarvestCollectionsPage() {
                                   </span>
                                 </div>
                                 <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                  {canViewPaymentAmounts ? (
-                                    <>
-                                      <div className="text-sm font-bold text-foreground tabular-nums">
-                                        KES {totalPay.toLocaleString()}
-                                      </div>
-                                      <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
-                                    </>
-                                  ) : (
-                                    <div className="text-sm font-bold text-foreground tabular-nums">
-                                      {(totalWeight).toFixed(1)} kg
-                                    </div>
+                                  <div className="text-[10px] text-muted-foreground tabular-nums">{harvestDateStr}</div>
+                                  <div className="text-sm font-bold text-foreground tabular-nums">Total: {totalWeight.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg</div>
+                                  <div className="text-[10px] text-muted-foreground tabular-nums">Pickers: {pickersCount}</div>
+                                  {canViewPaymentAmounts && (
+                                    <div className="text-[10px] text-muted-foreground tabular-nums">KES {totalPay.toLocaleString()}</div>
                                   )}
                                 </div>
                               </CardContent>
@@ -2121,7 +2311,7 @@ export default function HarvestCollectionsPage() {
           <div className="space-y-3">
             <div className="space-y-2">
               {statsExpanded && (
-                <div className="min-w-0 space-y-2">
+                <div className="min-w-0 space-y-2" data-tour="harvest-stats">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3 py-2 px-2 sm:px-3 rounded-xl bg-muted/40">
                     <span className="font-semibold text-foreground text-sm sm:text-base">
                       {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
@@ -2141,26 +2331,30 @@ export default function HarvestCollectionsPage() {
                       })()
                     )}
                   >
-                    <SimpleStatCard
-                      layout="mobile-compact"
-                      title="Total kg"
-                      value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
-                      icon={Scale}
-                      iconVariant="primary"
-                      className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
-                    />
-                    {canViewPaymentAmounts && (
+                    <div data-tour="harvest-total-kg">
                       <SimpleStatCard
                         layout="mobile-compact"
-                        title="Total picker due"
-                        value={`KES ${(collectionFinancials.totalPickerDue ?? 0).toLocaleString()}`}
-                        icon={Banknote}
+                        title="Total kg"
+                        value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
+                        icon={Scale}
                         iconVariant="primary"
                         className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
                       />
+                    </div>
+                    {canViewPaymentAmounts && (
+                      <div data-tour="harvest-total-picker-due">
+                        <SimpleStatCard
+                          layout="mobile-compact"
+                          title="Total picker due"
+                          value={`KES ${(collectionFinancials.totalPickerDue ?? 0).toLocaleString()}`}
+                          icon={Banknote}
+                          iconVariant="primary"
+                          className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+                        />
+                      </div>
                     )}
                     {showBuyerSale && (
-                      <div className="rounded-xl border border-border bg-card py-3 px-3 sm:py-2 sm:px-2 flex flex-col justify-center gap-2 min-h-[3.25rem] col-span-2 sm:col-span-1 shadow-sm">
+                      <div className="rounded-xl border border-border bg-card py-3 px-3 sm:py-2 sm:px-2 flex flex-col justify-center gap-2 min-h-[3.25rem] col-span-2 sm:col-span-1 shadow-sm" data-tour="harvest-buyer-sale-card">
                         <div className="flex items-center justify-between gap-1">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" />
@@ -2222,6 +2416,7 @@ export default function HarvestCollectionsPage() {
                     )}
                     title={quickMode ? 'Quick Mode on' : 'Quick Mode off'}
                     aria-pressed={quickMode}
+                    data-tour="harvest-quick-mode"
                   >
                     <Zap className="h-3.5 w-3.5 shrink-0" />
                     Quick Mode
@@ -2232,6 +2427,7 @@ export default function HarvestCollectionsPage() {
                         <button
                           type="button"
                           className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                          data-tour="harvest-wallet-btn"
                           onClick={() => {
                             setCashDialogCollection(selectedCollection as any);
                             setCashAmount('');
@@ -2306,6 +2502,7 @@ export default function HarvestCollectionsPage() {
                             ? 'bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-400/50'
                             : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800'
                         )}
+                        data-tour="harvest-tab-intake"
                       >
                         <Scale className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
                         Intake
@@ -2321,6 +2518,7 @@ export default function HarvestCollectionsPage() {
                             ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-400/50'
                             : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800'
                         )}
+                        data-tour="harvest-tab-pay"
                       >
                         <Banknote className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
                         Pay
@@ -2336,6 +2534,7 @@ export default function HarvestCollectionsPage() {
                             ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
                             : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
                         )}
+                        data-tour="harvest-tab-buyer"
                       >
                         <ShoppingCart className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
                         Buyer
@@ -2576,6 +2775,7 @@ export default function HarvestCollectionsPage() {
                               size="sm"
                               className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs"
                               disabled={selectedCollection?.status === 'closed'}
+                              data-tour="harvest-add-picker"
                               onClick={() => {
                                 setNewPickerNumber(String(nextPickerNumber));
                                 setAddPickerOpen(true);
@@ -2615,15 +2815,16 @@ export default function HarvestCollectionsPage() {
                               </div>
                             )}
                           </div>
-                          {pickersForCollection.length === 0 ? (
-                            <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
-                          ) : (
-                            <>
-                              <div className="grid grid-cols-2 gap-2">
-                                {filteredPickers.length === 0 ? (
-                                  <p className="col-span-2 text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
-                                ) : (
-                                  filteredPickers.map((p) => {
+                          <div data-tour="harvest-picker-cards" className="min-h-[80px]">
+                            {pickersForCollection.length === 0 ? (
+                              <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
+                            ) : (
+                              <>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {filteredPickers.length === 0 ? (
+                                    <p className="col-span-2 text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
+                                  ) : (
+                                    filteredPickers.map((p) => {
                                     const tripCount = tripCountForPicker[p.id] ?? 0;
                                     const nextTrip = nextTripForPicker[p.id] ?? 1;
                                     const isPaid = p.isPaid;
@@ -2631,13 +2832,8 @@ export default function HarvestCollectionsPage() {
                                     return (
                                       <Card
                                         key={p.id}
-                                        className={cn(
-                                          'relative transition-all min-h-[132px] flex flex-col overflow-hidden touch-manipulation rounded-xl',
-                                          isPaid
-                                            ? 'opacity-75 cursor-not-allowed bg-muted/50'
-                                            : 'cursor-pointer hover:bg-muted/50 active:scale-[0.98]'
-                                        )}
-                                        onClick={isPaid ? undefined : () => {
+                                        className="relative transition-all min-h-[132px] flex flex-col overflow-hidden touch-manipulation rounded-xl cursor-pointer hover:bg-muted/50 active:scale-[0.98]"
+                                        onClick={() => {
                                           setWeighPickerId(p.id);
                                           setWeighTrip(String(nextTrip));
                                           setWeighKg('');
@@ -2665,11 +2861,18 @@ export default function HarvestCollectionsPage() {
                                             {pickerTotals.totalKg.toFixed(1)} kg
                                             {canViewPaymentAmounts ? ` - KES ${pickerTotals.totalPay.toLocaleString()}` : ''}
                                           </div>
-                                          <div className={cn(
-                                            'text-[10px] border-t border-border pt-1.5 mt-1',
-                                            isPaid ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'
-                                          )}>
-                                            {isPaid ? 'Paid' : '+ add'}
+                                          <div className="flex flex-col items-center gap-0.5">
+                                            {isPaid && (
+                                              <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                                PAID
+                                              </span>
+                                            )}
+                                            <div className={cn(
+                                              'text-[10px] border-t border-border pt-1.5 mt-1',
+                                              isPaid ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'
+                                            )}>
+                                              {isPaid ? 'View' : '+ add'}
+                                            </div>
                                           </div>
                                           {tripOverrideMessageForPicker[p.id] && (
                                             <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
@@ -2684,6 +2887,7 @@ export default function HarvestCollectionsPage() {
                               </div>
                             </>
                           )}
+                          </div>
                         </>
                       )}
                     </TabsContent>
@@ -2728,11 +2932,24 @@ export default function HarvestCollectionsPage() {
                             )}
                           </div>
 
-                          <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-4">
-                            {quickPayQueue.length > 0 && quickPayPickerId && (() => {
+                          {pickersForCollection.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <Input
+                                type="text"
+                                placeholder="Search by picker number or name..."
+                                value={quickPaySearch}
+                                onChange={(e) => setQuickPaySearch(e.target.value)}
+                                className="min-h-10 rounded-lg border-border bg-background"
+                              />
+                            </div>
+                          )}
+
+                          <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-4 relative">
+                            {quickPayPickerId && pickersForCollection.some((p) => p.id === quickPayPickerId) && (() => {
                               const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
                               if (!picker) return null;
-                              const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
+                              const queueRow = quickPayQueueFiltered.find((q) => q.pickerId === quickPayPickerId);
                               const pickerRate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
                               const due = queueRow?.totalDue ?? getPickerTotals(quickPayPickerId).totalPay;
                               const paid = queueRow?.totalPaid ?? ((paidByPickerId[quickPayPickerId] ?? 0) + (quickPayLocalPaidByPickerId[quickPayPickerId] ?? 0));
@@ -2766,9 +2983,18 @@ export default function HarvestCollectionsPage() {
                                 })
                                 .filter((x) => Number.isFinite(x.kg) && x.kg > 0);
 
+                              const isPaid = balance <= 0;
+
                               return (
                                 <>
-                                  <div className="flex flex-col items-center text-center gap-2">
+                                  {isPaid && (
+                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10 rounded-lg overflow-hidden">
+                                      <span className="text-6xl font-black text-muted-foreground/25 rotate-[-18deg] select-none">
+                                        PAID
+                                      </span>
+                                    </div>
+                                  )}
+                                  <div className={cn('flex flex-col items-center text-center gap-2', isPaid && 'opacity-90')}>
                                     <div className="h-14 w-14 rounded-full bg-emerald-600 text-emerald-50 flex items-center justify-center text-2xl font-extrabold tabular-nums shadow">
                                       {picker.pickerNumber}
                                     </div>
@@ -2777,7 +3003,7 @@ export default function HarvestCollectionsPage() {
                                     </p>
                                   </div>
 
-                                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                  <div className={cn('rounded-lg border border-border bg-muted/30 p-3', isPaid && 'opacity-90')}>
                                     <p className="text-xs text-muted-foreground">Balance</p>
                                     <p className="text-2xl font-extrabold tabular-nums text-foreground">KES {balance.toLocaleString()}</p>
                                     <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
@@ -2795,11 +3021,11 @@ export default function HarvestCollectionsPage() {
                                     </div>
                                   </div>
 
-                                  <div className="space-y-2">
+                                  <div className={cn('space-y-2', isPaid && 'opacity-90')}>
                                     <div className="grid grid-cols-2 gap-2">
                                       <Button
                                         onClick={() => handleQuickPaySubmit(balance)}
-                                        disabled={quickPaySaving || balance <= 0}
+                                        disabled={quickPaySaving || isPaid}
                                         className="min-h-12 w-full font-semibold touch-manipulation"
                                       >
                                         {quickPaySaving ? (
@@ -2818,7 +3044,7 @@ export default function HarvestCollectionsPage() {
                                           setQuickPayAmount('');
                                           setQuickPayPartialOpen(true);
                                         }}
-                                        disabled={quickPaySaving || balance <= 0}
+                                        disabled={quickPaySaving || isPaid}
                                         className="min-h-12 w-full font-semibold touch-manipulation"
                                       >
                                         Pay Partial
@@ -2827,7 +3053,7 @@ export default function HarvestCollectionsPage() {
                                     <Button
                                       variant="outline"
                                       onClick={handleQuickPaySkip}
-                                      disabled={quickPaySaving}
+                                      disabled={quickPaySaving || isPaid}
                                       className="min-h-12 w-full touch-manipulation"
                                     >
                                       Skip
@@ -2970,14 +3196,16 @@ export default function HarvestCollectionsPage() {
                                 </>
                               );
                             })()}
-                            {!(quickPayQueue.length > 0 && quickPayPickerId) && (
+                            {!(quickPayPickerId && pickersForCollection.some((p) => p.id === quickPayPickerId)) && (
                               <>
                                 <div className="flex flex-col items-center text-center gap-2 opacity-70">
                                   <div className="h-14 w-14 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl font-extrabold tabular-nums shadow-inner">
                                     –
                                   </div>
                                   <p className="text-base font-semibold text-muted-foreground leading-tight">
-                                    No unpaid pickers in queue
+                                    {(quickPaySearch ?? '').trim()
+                                      ? 'No pickers match your search'
+                                      : 'No unpaid pickers in queue'}
                                   </p>
                                 </div>
 
@@ -3699,6 +3927,12 @@ export default function HarvestCollectionsPage() {
           </DialogContent>
         </Dialog>
       </div>
+      <HarvestCollectionsTour
+        run={harvestTourRun}
+        steps={harvestTourSteps}
+        stepIndex={harvestTourStepIndex}
+        onCallback={handleHarvestTourCallback}
+      />
     </>
   );
 }
