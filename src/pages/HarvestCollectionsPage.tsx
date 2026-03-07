@@ -18,9 +18,12 @@ import {
   Loader2,
   CircleDollarSign,
   Zap,
+  CloudUpload,
+  Pencil,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useConnectivityStatus } from '@/contexts/ConnectivityContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
@@ -30,6 +33,7 @@ import {
   createHarvestCollection,
   addHarvestPicker,
   addPickerWeighEntry,
+  updatePickerIntakeEntry,
   markPickerCashPaid,
   markPickersPaidInBatch,
   setBuyerPriceAndMaybeClose,
@@ -87,9 +91,9 @@ export default function HarvestCollectionsPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const { activeProject, projects, setActiveProject } = useProject();
+  const { hasPendingWrites, isSyncing, isOnline, triggerSync } = useConnectivityStatus();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  // Master wallet is now updated via Firestore transaction helpers (no Cloud Functions).
 
   const effectiveProject = useMemo(() => {
     if (routeProjectId) {
@@ -124,23 +128,16 @@ export default function HarvestCollectionsPage() {
   const [weighKg, setWeighKg] = useState('');
   const [weighTrip, setWeighTrip] = useState('1');
   const [weighOpenedFromCard, setWeighOpenedFromCard] = useState(false);
-  /** Recent picker ids for ultra-fast intake (last 10 used). */
   const [recentPickerIds, setRecentPickerIds] = useState<string[]>([]);
-  /** Last picker we saved intake for (for "Repeat last picker"). */
   const [lastWeighPickerId, setLastWeighPickerId] = useState<string | null>(null);
-  /** Quick Pay panel (ultra-fast payment) */
   const [quickPayOpen, setQuickPayOpen] = useState(false);
   const [quickPayPickerId, setQuickPayPickerId] = useState<string | null>(null);
   const [quickPayAmount, setQuickPayAmount] = useState('');
   const [quickPaySaving, setQuickPaySaving] = useState(false);
   const [quickPayPartialOpen, setQuickPayPartialOpen] = useState(false);
-  /** Max amount for Pay Partial (current picker balance when partial was opened). */
   const [quickPayPartialBalance, setQuickPayPartialBalance] = useState(0);
-  /** Local overlay to keep queue/balances responsive until refetch completes. */
   const [quickPayLocalPaidByPickerId, setQuickPayLocalPaidByPickerId] = useState<Record<string, number>>({});
-  /** Quick Pay summary (description + queue count) collapsed by default; chevron toggles. */
   const [quickPaySummaryExpanded, setQuickPaySummaryExpanded] = useState(false);
-  /** When true, auto-select effect should not re-select first picker (user just clicked Skip). */
   const skipJustClickedRef = useRef(false);
 
   const [buyerPricePerKg, setBuyerPricePerKg] = useState('');
@@ -159,14 +156,25 @@ export default function HarvestCollectionsPage() {
   const [payingPickerIds, setPayingPickerIds] = useState<Set<string> | null>(null);
   const [showPaidAndProfit, setShowPaidAndProfit] = useState(false);
   const [collectionFilter, setCollectionFilter] = useState<'all' | 'active' | 'closed'>('all');
-  /** Quick Mode toggle: when ON and mode is Intake, show Quick Intake UI. Pay/Buyer unchanged for now. */
   const [quickMode, setQuickMode] = useState(false);
-  /** Quick Intake form (number-driven): picker number + kg. */
   const [quickIntakePickerNumber, setQuickIntakePickerNumber] = useState('');
   const [quickIntakeKg, setQuickIntakeKg] = useState('');
   const quickIntakePickerNumberRef = useRef<HTMLInputElement>(null);
   const quickIntakeKgRef = useRef<HTMLInputElement>(null);
   const quickIntakeContainerRef = useRef<HTMLDivElement>(null);
+  const [editIntakeEntry, setEditIntakeEntry] = useState<{
+    id: string;
+    pickerId: string;
+    pickerNumber: number | string;
+    pickerName: string;
+    kg: number;
+    collectionId: string;
+  } | null>(null);
+  const [editIntakePickerId, setEditIntakePickerId] = useState('');
+  const [editIntakeKg, setEditIntakeKg] = useState('');
+  const [editIntakeSaving, setEditIntakeSaving] = useState(false);
+  const [expandedQuickIntakePickerId, setExpandedQuickIntakePickerId] = useState<string | null>(null);
+
   const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
   const canManageIntake = can('harvest', 'recordIntake') || can('harvest', 'edit') || can('harvest', 'create');
   const canPayPickers = can('harvest', 'payPickers');
@@ -174,6 +182,7 @@ export default function HarvestCollectionsPage() {
   const canCloseHarvest = can('harvest', 'close');
   const canViewFinancials = can('harvest', 'viewFinancials');
   const canViewPaymentAmounts = canPayPickers || canViewFinancials;
+  
   const detailModes = useMemo<ViewMode[]>(() => {
     const modes: ViewMode[] = [];
     if (canManageIntake) modes.push('intake');
@@ -181,24 +190,22 @@ export default function HarvestCollectionsPage() {
     if (canViewBuyerSection) modes.push('buyer');
     return modes;
   }, [canManageIntake, canPayPickers, canViewBuyerSection]);
+  
   const defaultDetailMode: ViewMode = detailModes[0] ?? 'list';
 
   const companyId = user?.companyId ?? null;
   const effectiveProjectId = effectiveProject?.id ?? null;
 
-  // Mount/unmount debug: if unmount/mount keeps firing, something up the tree is remounting this page.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
     console.log('[Reload Debug] mount');
     return () => {
-      // eslint-disable-next-line no-console
       console.log('[Reload Debug] unmount');
     };
   }, []);
 
-  // Log only when meaningful deps change (not on every parent rerender).
   const reloadDebugPrevRef = useRef<{ viewMode: ViewMode; quickMode: boolean; selectedCollectionId: string | null; companyId: string | null; effectiveProjectId: string | null } | null>(null);
+  
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const next = {
@@ -212,7 +219,6 @@ export default function HarvestCollectionsPage() {
     const changed = !prev || prev.viewMode !== next.viewMode || prev.quickMode !== next.quickMode || prev.selectedCollectionId !== next.selectedCollectionId || prev.companyId !== next.companyId || prev.effectiveProjectId !== next.effectiveProjectId;
     reloadDebugPrevRef.current = next;
     if (changed) {
-      // eslint-disable-next-line no-console
       console.log('[Reload Debug] state changed', next);
     }
   }, [viewMode, quickMode, selectedCollectionId, companyId, effectiveProjectId]);
@@ -380,7 +386,6 @@ export default function HarvestCollectionsPage() {
 
   const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
 
-  /** Finance schema wallet totals (source of truth for Harvest Cash when French Beans). */
   const { data: financeWalletTotals } = useQuery({
     queryKey: ['projectWalletTotals', companyId ?? '', effectiveProjectId ?? ''],
     queryFn: () => getFinanceWalletTotals(effectiveProjectId!, companyId!),
@@ -391,7 +396,6 @@ export default function HarvestCollectionsPage() {
     refetchOnMount: false,
   });
 
-  /** French Beans: ledger from Supabase (no Firebase). Other projects: Firestore subscription. */
   const { data: supabaseLedgerEntries } = useQuery({
     queryKey: ['projectWalletLedger', companyId ?? '', effectiveProjectId ?? ''],
     queryFn: () => getWalletLedgerEntriesSupabase(effectiveProjectId!, companyId!),
@@ -411,7 +415,6 @@ export default function HarvestCollectionsPage() {
     });
   }, [companyId, effectiveProject?.id, isFrenchBeansProject]);
 
-  /** French Beans: use finance.project_wallet_ledger totals; else Firestore subscription. */
   const walletSummary = useMemo(() => {
     if (isFrenchBeansProject && financeWalletTotals) {
       return {
@@ -474,8 +477,8 @@ export default function HarvestCollectionsPage() {
     return totals;
   }, [allCollections, allWeighEntries]);
 
-  // Backfill: sync already-closed French beans collections (without harvestId) to Harvest & Sales so they appear and are counted
   const backfillSyncedRef = React.useRef<Set<string>>(new Set());
+  
   useEffect(() => {
     const toSync = collections.filter(
       (c) =>
@@ -512,7 +515,6 @@ export default function HarvestCollectionsPage() {
     [allCollections, selectedCollectionId]
   );
 
-  /** Sync buyer price input from DB when selecting a collection that has buyer_price_per_unit set. */
   useEffect(() => {
     if (!selectedCollection) return;
     const fromDb = selectedCollection.pricePerKgBuyer;
@@ -543,7 +545,6 @@ export default function HarvestCollectionsPage() {
     return allWeighEntries.filter((e) => e.collectionId === selectedCollectionId);
   }, [allWeighEntries, selectedCollectionId]);
 
-  /** Quick Intake: recent entries for current collection, newest first, with picker number/name. */
   const quickIntakeRecentEntries = useMemo(() => {
     const entries = [...weighEntriesForCollection].sort((a, b) => {
       const at = (a.recordedAt != null ? toDate(a.recordedAt)?.getTime() : 0) ?? 0;
@@ -554,6 +555,8 @@ export default function HarvestCollectionsPage() {
       const picker = pickersForCollection.find((p) => p.id === e.pickerId);
       return {
         id: e.id ?? `${e.pickerId}-${e.recordedAt}-${e.weightKg}`,
+        pickerId: e.pickerId,
+        collectionId: e.collectionId,
         pickerNumber: picker?.pickerNumber ?? '?',
         pickerName: picker?.pickerName ?? '—',
         tripNumber: e.tripNumber ?? 0,
@@ -563,13 +566,49 @@ export default function HarvestCollectionsPage() {
     });
   }, [weighEntriesForCollection, pickersForCollection]);
 
-  /** Payments for selected collection only (harvest.picker_payment_entries). */
+  /** Quick Intake: recent entries grouped by picker (picker_id). One row per picker when collapsed; expand to see child entries. */
+  const quickIntakeEntriesByPicker = useMemo(() => {
+    const byPicker = new Map<string, { pickerId: string; pickerNumber: string | number; pickerName: string; entries: typeof quickIntakeRecentEntries }>();
+    for (const entry of quickIntakeRecentEntries) {
+      const key = entry.pickerId;
+      if (!byPicker.has(key)) {
+        byPicker.set(key, {
+          pickerId: entry.pickerId,
+          pickerNumber: entry.pickerNumber,
+          pickerName: entry.pickerName,
+          entries: [],
+        });
+      }
+      byPicker.get(key)!.entries.push(entry);
+    }
+    const groups = Array.from(byPicker.values()).map((g) => {
+      const entriesSorted = [...g.entries].sort((a, b) => {
+        const at = (a.recordedAt != null ? toDate(a.recordedAt)?.getTime() : 0) ?? 0;
+        const bt = (b.recordedAt != null ? toDate(b.recordedAt)?.getTime() : 0) ?? 0;
+        return bt - at;
+      });
+      const totalKg = entriesSorted.reduce((sum, e) => sum + e.kg, 0);
+      const latestAt = entriesSorted[0]?.recordedAt != null ? toDate(entriesSorted[0].recordedAt)?.getTime() ?? 0 : 0;
+      return { ...g, entries: entriesSorted, totalKg, latestAt };
+    });
+    groups.sort((a, b) => b.latestAt - a.latestAt);
+    return groups;
+  }, [quickIntakeRecentEntries]);
+
+  const uniqueEnteredPickersCount = useMemo(() => {
+    const ids = new Set(weighEntriesForCollection.map((e) => e.pickerId));
+    return ids.size;
+  }, [weighEntriesForCollection]);
+
+  const remainingPickersCount = useMemo(() => {
+    return Math.max(0, pickersForCollection.length - uniqueEnteredPickersCount);
+  }, [pickersForCollection.length, uniqueEnteredPickersCount]);
+
   const paymentsForCollection = useMemo(() => {
     if (!selectedCollectionId) return [];
     return (paymentsRaw ?? []).filter((p) => p.collection_id === selectedCollectionId);
   }, [paymentsRaw, selectedCollectionId]);
 
-  /** DB-backed financials for selected collection (intake + payments + collection prices). */
   const collectionFinancials = useMemo(() => {
     if (!selectedCollection || !selectedCollectionId) {
       return {
@@ -595,17 +634,14 @@ export default function HarvestCollectionsPage() {
     });
   }, [selectedCollection, selectedCollectionId, weighEntriesForCollection, paymentsForCollection]);
 
-
-  /** Buyer Sale card only after sale is complete (buyer marked paid / collection closed). */
   const isCollectionClosed = useMemo(
     () =>
       selectedCollection?.status === 'closed' ||
       (selectedCollection as { is_closed?: boolean } | undefined)?.is_closed === true,
     [selectedCollection]
   );
+  
   const showBuyerSale = Boolean(canViewFinancials && isCollectionClosed);
-
-
 
   const pickerTotalsById = useMemo(() => {
     const totals: Record<string, { totalKg: number; totalPay: number }> = {};
@@ -633,7 +669,6 @@ export default function HarvestCollectionsPage() {
     return pickerTotalsById[pickerId] ?? { totalKg: 0, totalPay: 0 };
   };
 
-  /** Total amount paid per picker (for Pay mode cards). */
   const paidByPickerId = useMemo(() => {
     const map: Record<string, number> = {};
     paymentsForCollection.forEach((entry) => {
@@ -644,11 +679,9 @@ export default function HarvestCollectionsPage() {
     return map;
   }, [paymentsForCollection]);
 
-  // When payments refetch updates, drop local overlays to avoid double-counting.
   useEffect(() => {
     if (Object.keys(quickPayLocalPaidByPickerId).length === 0) return;
     setQuickPayLocalPaidByPickerId({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentsForCollection]);
 
   type QuickPayQueueItem = {
@@ -684,13 +717,10 @@ export default function HarvestCollectionsPage() {
 
   useEffect(() => {
     if (!(quickMode && viewMode === 'pay')) return;
-    // Required debug log for queue-based Quick Pay mode.
-    // eslint-disable-next-line no-console
     console.log('[Quick Pay Queue]', quickPayQueue);
   }, [quickPayQueue, quickMode, viewMode]);
 
   useEffect(() => {
-    // Auto-select first unpaid picker in queue when Quick Pay is active.
     if (!(quickMode && viewMode === 'pay')) return;
     if (quickPayPartialOpen) return;
     if (selectedCollection?.status === 'closed') return;
@@ -712,11 +742,9 @@ export default function HarvestCollectionsPage() {
     if (!(quickMode && viewMode === 'pay') || !quickPayPickerId) return;
     const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
     const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
-    // eslint-disable-next-line no-console
     console.log('[Quick Pay Current Picker]', picker ? { id: picker.id, pickerNumber: picker.pickerNumber, pickerName: picker.pickerName, balance: queueRow?.balance } : null);
   }, [quickMode, viewMode, quickPayPickerId, pickersForCollection, quickPayQueue]);
 
-  /** Amount paid out for the selected collection: sum(amount_paid) from harvest.picker_payment_entries. */
   const amountPaidOutThisCollection = useMemo(
     () => collectionFinancials.totalPaidOut,
     [collectionFinancials.totalPaidOut]
@@ -732,12 +760,10 @@ export default function HarvestCollectionsPage() {
     );
   }, [pickersForCollection, pickerSearch]);
 
-  /** Pay tab: same as filteredPickers but unpaid first, paid at the bottom */
   const filteredPickersForPay = useMemo(() => {
     return [...filteredPickers].sort((a, b) => (a.isPaid === b.isPaid ? 0 : a.isPaid ? 1 : -1));
   }, [filteredPickers]);
 
-  /** Pay tab: unpaid list + paid groups (Group A, B, C...) by paymentBatchId, ordered by paidAt */
   const payUnpaidAndGroups = useMemo(() => {
     const unpaid = filteredPickersForPay.filter((p) => !p.isPaid);
     const paid = filteredPickersForPay.filter((p) => p.isPaid);
@@ -775,10 +801,8 @@ export default function HarvestCollectionsPage() {
 
       let label: string;
       if (isLegacy) {
-        // Legacy/older payments keep a generic label
         label = isIndividual ? 'Individual (earlier)' : 'Paid (earlier)';
       } else {
-        // Newer batches: Individual A/B/... when only one, otherwise Group A/B/...
         label = isIndividual ? `Individual ${letter}` : `Group ${letter}`;
       }
 
@@ -790,7 +814,6 @@ export default function HarvestCollectionsPage() {
     return { unpaid, groups, individuals };
   }, [filteredPickersForPay]);
 
-  /** Unpaid pickers sorted by remaining balance descending (highest first) for ultra-fast payment. */
   const unpaidPickersByBalance = useMemo(() => {
     const unpaid = payUnpaidAndGroups.unpaid;
     return [...unpaid].sort((a, b) => {
@@ -800,7 +823,6 @@ export default function HarvestCollectionsPage() {
     });
   }, [payUnpaidAndGroups.unpaid, pickerTotalsById, paidByPickerId]);
 
-  /** Recent pickers for intake (from recentPickerIds, order preserved, max 10). */
   const recentPickersForIntake = useMemo(() => {
     const ids = recentPickerIds.slice(0, 10);
     return ids
@@ -808,8 +830,6 @@ export default function HarvestCollectionsPage() {
       .filter((p): p is HarvestPicker => p != null);
   }, [recentPickerIds, pickersForCollection]);
 
-
-  /** Total amount to pay for currently selected pickers (Pay tab) */
   const selectedTotalPay = useMemo(() => {
     let sum = 0;
     paySelectedIds.forEach((id) => {
@@ -835,7 +855,6 @@ export default function HarvestCollectionsPage() {
     return map;
   }, [pickersForCollection, weighEntriesForCollection]);
 
-  /** Quick Intake: live picker lookup from typed number (current collection only). */
   const quickIntakePickerLookup = useMemo(() => {
     const typed = (quickIntakePickerNumber || '').trim();
     if (!typed) return { matchedPicker: null as HarvestPicker | null, nextTripNumber: 1 };
@@ -847,7 +866,6 @@ export default function HarvestCollectionsPage() {
     return { matchedPicker: picker, nextTripNumber };
   }, [quickIntakePickerNumber, pickersForCollection, nextTripForPicker]);
 
-  // Sync trip number when add-weight dialog opens or when weigh data updates (e.g. after fast successive saves)
   useEffect(() => {
     if (addWeighOpen && weighOpenedFromCard && weighPickerId) {
       const next = nextTripForPicker[weighPickerId] ?? 1;
@@ -855,7 +873,6 @@ export default function HarvestCollectionsPage() {
     }
   }, [addWeighOpen, weighOpenedFromCard, weighPickerId, nextTripForPicker]);
 
-  // Precompute trip counts per picker so card rendering is cheap and fast when typing
   const tripCountForPicker = useMemo(() => {
     const counts: Record<string, number> = {};
     weighEntriesForCollection.forEach((e) => {
@@ -865,7 +882,6 @@ export default function HarvestCollectionsPage() {
     return counts;
   }, [weighEntriesForCollection]);
 
-  // Latest "Trip no X changed to Y" per picker when user overrode the auto trip number
   const tripOverrideMessageForPicker = useMemo(() => {
     const overrides = weighEntriesForCollection.filter(
       (e) => e.suggestedTripNumber != null && Number(e.suggestedTripNumber) !== Number(e.tripNumber)
@@ -900,7 +916,6 @@ export default function HarvestCollectionsPage() {
     [pickersForCollection]
   );
 
-  /** Revenue = totalHarvestQty * buyerPrice. Uses DB buyer_price_per_unit when set, else form input (preview). */
   const totalRevenue = useMemo(() => {
     const buyerPrice =
       selectedCollection?.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0
@@ -909,7 +924,6 @@ export default function HarvestCollectionsPage() {
     return (collectionFinancials.totalHarvestQty || 0) * buyerPrice;
   }, [collectionFinancials.totalHarvestQty, selectedCollection?.pricePerKgBuyer, buyerPricePerKg]);
 
-  /** Profit = revenue - totalPaidOut (DB-backed). */
   const profit = useMemo(
     () => (totalRevenue || 0) - (collectionFinancials.totalPaidOut || 0),
     [totalRevenue, collectionFinancials.totalPaidOut]
@@ -943,7 +957,6 @@ export default function HarvestCollectionsPage() {
     setCreating(true);
     setNewCollectionOpen(false);
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.log('[HC auth check]', { clerkUserId: user?.id, companyId: user?.companyId, role: user?.role });
     }
     try {
@@ -1012,7 +1025,6 @@ export default function HarvestCollectionsPage() {
         pickerName: name,
       });
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
       }
       queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
@@ -1020,7 +1032,6 @@ export default function HarvestCollectionsPage() {
         title: isOffline ? 'Picker saved offline' : 'Picker added',
         description: isOffline ? 'It will sync when online.' : undefined,
       });
-      // Fast entry UX: keep dialog open, reset for next picker.
       const nextNum = num + 1;
       setNewPickerNumber(String(nextNum));
       setNewPickerName('');
@@ -1109,7 +1120,6 @@ export default function HarvestCollectionsPage() {
       });
   };
 
-  /** Scroll Quick Intake container into view so it stays above keyboard and bottom nav when inputs are focused (mobile). */
   const scrollQuickIntakeIntoView = () => {
     quickIntakeContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -1145,6 +1155,8 @@ export default function HarvestCollectionsPage() {
       collectionId: selectedCollectionId,
       pickerId: picker.id,
       weightKg: kg,
+      recordedBy: user?.id ?? undefined,
+      pricePerKg: selectedCollection?.pricePerKgPicker,
     })
       .then(() => {
         queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
@@ -1164,6 +1176,38 @@ export default function HarvestCollectionsPage() {
       });
   };
 
+  const handleSaveEditIntake = async () => {
+    if (!editIntakeEntry || !companyId || !editIntakePickerId || !editIntakeKg.trim()) return;
+    const kg = Number(editIntakeKg.replace(',', '.'));
+    if (!Number.isFinite(kg) || kg <= 0) {
+      toast({ title: 'Invalid weight', description: 'Enter a valid kg (e.g. 5.2)', variant: 'destructive' });
+      return;
+    }
+    setEditIntakeSaving(true);
+    try {
+      await updatePickerIntakeEntry({
+        entryId: editIntakeEntry.id,
+        collectionId: editIntakeEntry.collectionId,
+        companyId,
+        pickerId: editIntakePickerId,
+        quantity: kg,
+        unit: 'kg',
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['pickerIntake'] }),
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] }),
+      ]);
+      toast({ title: 'Entry updated', description: 'Picker total and collection totals recalculated.' });
+      setEditIntakeEntry(null);
+      setEditIntakePickerId('');
+      setEditIntakeKg('');
+    } catch (e: any) {
+      toast({ title: 'Update failed', description: e?.message ?? 'Could not update entry', variant: 'destructive' });
+    } finally {
+      setEditIntakeSaving(false);
+    }
+  };
+
   const handleMarkPickerPaid = async (pickerId: string) => {
     if (!canPayPickers) {
       toast({
@@ -1176,7 +1220,6 @@ export default function HarvestCollectionsPage() {
     const picker = allPickers.find((p) => p.id === pickerId);
     if (!picker) return;
 
-    // Prevent double-marking an already paid picker
     if (picker.isPaid) {
       toast({
         title: 'Already paid',
@@ -1286,7 +1329,6 @@ export default function HarvestCollectionsPage() {
     });
   };
 
-  /** Open Quick Pay panel for one picker (ultra-fast payment). */
   const openQuickPay = (pickerId: string) => {
     const picker = pickersForCollection.find((p) => p.id === pickerId);
     if (!picker || picker.isPaid) return;
@@ -1315,7 +1357,6 @@ export default function HarvestCollectionsPage() {
       return remaining[nextIndex].pickerId;
     }
 
-    // Wrap around to the first in queue.
     return remaining[0]?.pickerId ?? null;
   };
 
@@ -1371,7 +1412,6 @@ export default function HarvestCollectionsPage() {
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments', companyId, collectionIds] });
       const remainingBalance = Math.max(0, balance - amountClamped);
-      // eslint-disable-next-line no-console
       console.log('[Quick Pay Save]', {
         pickerId: quickPayPickerId,
         amountPaid: amountClamped,
@@ -1405,7 +1445,6 @@ export default function HarvestCollectionsPage() {
       currentPickerNumber: 0,
       removeCurrent: false,
     });
-    // If "next" is the same picker (e.g. only one in queue), clear selection so Skip has visible effect.
     if (nextId === quickPayPickerId || !nextId) {
       skipJustClickedRef.current = true;
       setQuickPayPickerId(null);
@@ -1426,8 +1465,6 @@ export default function HarvestCollectionsPage() {
     if (pickerIds.length === 0 || !selectedCollectionId || !companyId || !effectiveProject) return;
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    // Only operate on pickers that are not yet paid to avoid
-    // duplicate payment batches and "document already exists" errors.
     const unpaidPickers = pickerIds
       .map((id) => allPickers.find((x) => x.id === id))
       .filter((p): p is HarvestPicker => Boolean(p && !p.isPaid));
@@ -1469,9 +1506,9 @@ export default function HarvestCollectionsPage() {
     }
 
     setPayingSelected(true);
-      setPaySelectedIds(new Set());
-      setPayingPickerIds(new Set(payableIds));
-      toast({ title: `Paying ${payableIds.length} pickers…`, description: 'Please wait.' });
+    setPaySelectedIds(new Set());
+    setPayingPickerIds(new Set(payableIds));
+    toast({ title: `Paying ${payableIds.length} pickers…`, description: 'Please wait.' });
 
     const pendingDebitId = isOffline && isFrenchBeansCollection && effectiveProject?.id && companyId
       ? `pending-debit-${Date.now()}`
@@ -1653,1686 +1690,1839 @@ export default function HarvestCollectionsPage() {
   }
 
   return (
+    <>
       <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0">
-      {/* Header */}
+        {/* Header */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0">
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          {selectedCollectionId ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 rounded-lg gap-1 text-sm"
-              onClick={() => {
-                setSelectedCollectionId(null);
-                setViewMode('list');
-              }}
-            >
-              <ChevronLeft className="h-5 w-5" />
-              Back
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 rounded-lg gap-1 text-sm"
-              onClick={() => navigate('/harvest-sales')}
-            >
-              <ChevronLeft className="h-5 w-5" />
-              Back
-            </Button>
-          )}
-          <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate">
-            {selectedCollectionId ? (selectedCollection?.name ?? 'Collection') : 'Harvest Collections'}
-          </h1>
-        </div>
-        {!selectedCollectionId && (
-          <div className="flex items-center gap-2">
-            {canCreateCollection && (
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+            {selectedCollectionId ? (
               <Button
+                variant="ghost"
                 size="sm"
-                className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => setNewCollectionOpen(true)}
+                className="h-9 rounded-lg gap-1 text-sm"
+                onClick={() => {
+                  setSelectedCollectionId(null);
+                  setViewMode('list');
+                }}
               >
-                <Plus className="h-4 w-4 mr-1.5" />
-                New collection
+                <ChevronLeft className="h-5 w-5" />
+                Back
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 rounded-lg gap-1 text-sm"
+                onClick={() => navigate('/harvest-sales')}
+              >
+                <ChevronLeft className="h-5 w-5" />
+                Back
               </Button>
             )}
-            {canViewFinancials && hasFrenchBeansCollections && (() => {
-              const fb = collections.find(
-                (c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'
-              );
-              if (!fb) return null;
-              const totalPaidOut = walletSummary.cashPaidOutTotal;
-              const remaining = walletSummary.currentBalance;
-              const cashReceived = walletSummary.cashReceivedTotal;
-              return (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs min-h-8 px-3 rounded-lg inline-flex items-center gap-1"
-                      onClick={() => {
-                        setCashDialogCollection(fb as any);
-                        // For top-up UX, start with empty input so user types the new amount to add
-                        setCashAmount('');
-                        setCashSource('bank');
-                        setCashDialogVisible(false);
-                      }}
-                    >
-                      <Banknote className="h-3 w-3" />
-                      <span>Wallet</span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50" align="center" side="bottom">
-                    <div className="space-y-4 text-center relative">
-                      <button
-                        type="button"
-                        className="absolute right-1.5 top-1.5 h-5 w-5 rounded-full bg-emerald-800 text-emerald-50 flex items-center justify-center text-xs"
-                        onClick={() => setCashDialogVisible(false)}
-                      >
-                        ×
-                      </button>
-                      <div className="flex flex-col items-center gap-2 pt-4">
-                        <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
-                        {/* Current balance big & blur-able with eye icon */}
-                        <div className="flex items-center gap-2">
-                          <div>
-                            <p className="text-[11px] text-emerald-100">Current balance</p>
-                            <p
-                              className={cn(
-                                'text-xl font-extrabold tabular-nums text-emerald-50',
-                                !cashDialogVisible && 'blur-sm select-none'
-                              )}
-                            >
-                              KES {remaining.toLocaleString()}
-                            </p>
-                          </div>
+            <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate">
+              {selectedCollectionId ? (selectedCollection?.name ?? 'Collection') : 'Harvest Collections'}
+            </h1>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {(hasPendingWrites || !isOnline) && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-sm min-h-9 px-3 rounded-lg gap-1.5"
+                onClick={async () => {
+                  const { synced, failed } = await triggerSync();
+                  if (synced > 0 || failed > 0) {
+                    queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
+                    queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
+                    queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+                    if (synced > 0) toast({ title: 'Synced', description: `${synced} offline entries synced.` });
+                    if (failed > 0) toast({ title: 'Sync partial', description: `${failed} entries could not be synced.`, variant: 'destructive' });
+                  }
+                }}
+                disabled={isSyncing}
+              >
+                {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+                Sync Offline Data
+              </Button>
+            )}
+            {!selectedCollectionId ? (
+              <>
+                {canCreateCollection && (
+                  <Button
+                    size="sm"
+                    className="text-sm min-h-9 px-4 rounded-lg shadow bg-primary text-primary-foreground hover:bg-primary/90"
+                    onClick={() => setNewCollectionOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1.5" />
+                    New collection
+                  </Button>
+                )}
+                {canViewFinancials && hasFrenchBeansCollections && (() => {
+                  const fb = collections.find(
+                    (c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'
+                  );
+                  if (!fb) return null;
+                  const totalPaidOut = walletSummary.cashPaidOutTotal;
+                  const remaining = walletSummary.currentBalance;
+                  const cashReceived = walletSummary.cashReceivedTotal;
+                  return (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs min-h-8 px-3 rounded-lg inline-flex items-center gap-1"
+                          onClick={() => {
+                            setCashDialogCollection(fb as any);
+                            setCashAmount('');
+                            setCashSource('bank');
+                            setCashDialogVisible(false);
+                          }}
+                        >
+                          <Banknote className="h-3 w-3" />
+                          <span>Wallet</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50" align="center" side="bottom">
+                        <div className="space-y-4 text-center relative">
                           <button
                             type="button"
-                            className="mt-3 inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
-                            onClick={() => setCashDialogVisible((v) => !v)}
+                            className="absolute right-1.5 top-1.5 h-5 w-5 rounded-full bg-emerald-800 text-emerald-50 flex items-center justify-center text-xs"
+                            onClick={() => setCashDialogVisible(false)}
                           >
-                            {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            ×
                           </button>
-                        </div>
-                        {/* Paid out + Cash received */}
-                        <div className="flex items-center justify-center gap-4 mt-1">
-                          <div>
-                            <p className="text-[11px] text-emerald-100">Paid out</p>
-                            <p
-                              className={cn(
-                                'font-semibold tabular-nums text-emerald-50',
-                                !cashDialogVisible && 'blur-sm select-none'
-                              )}
-                            >
-                              KES {totalPaidOut.toLocaleString()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[11px] text-emerald-100">Cash received</p>
-                            <p
-                              className={cn(
-                                'font-semibold tabular-nums text-emerald-50',
-                                !cashDialogVisible && 'blur-sm select-none'
-                              )}
-                            >
-                              KES {cashReceived.toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      {/* Edit cash area */}
-                      <div className="pt-3 border-t border-emerald-500/70 space-y-3 mt-2 text-left">
-                        <div className="space-y-1">
-                          <p className="text-[11px] text-emerald-100">Current cash received</p>
-                          <p
-                            className={cn(
-                              'text-sm font-semibold text-emerald-50 tabular-nums',
-                              !cashDialogVisible && 'blur-sm select-none'
-                            )}
-                          >
-                            KES {cashReceived.toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-emerald-100">Set cash received (KES)</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={cashAmount}
-                            onChange={(e) => setCashAmount(e.target.value)}
-                            className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300"
-                            placeholder="e.g. 150000"
-                          />
-                          <Label className="mt-2 text-xs text-emerald-100">Source</Label>
-                          <UiSelect
-                            value={cashSource}
-                            onValueChange={(val) => setCashSource(val as 'bank' | 'custom')}
-                          >
-                            <SelectTrigger className="w-full min-h-9 rounded-xl border border-emerald-400/80 bg-emerald-900/60 px-3 py-1.5 text-xs text-emerald-50">
-                              <SelectValue placeholder="Select source" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="bank">Bank</SelectItem>
-                              <SelectItem value="custom">Custom…</SelectItem>
-                            </SelectContent>
-                          </UiSelect>
-                          {cashSource === 'custom' && (
-                            <Input
-                              value={cashSourceCustom}
-                              onChange={(e) => setCashSourceCustom(e.target.value)}
-                              className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300 mt-2"
-                              placeholder="Enter custom source (e.g. Mpesa float)"
-                            />
-                          )}
-                          <Button
-                            size="sm"
-                            className="mt-3 rounded-full bg-amber-100 text-emerald-900 border border-emerald-500 hover:bg-amber-200 hover:text-emerald-950 font-semibold shadow-sm"
-                            disabled={cashDialogSaving}
-                            onClick={() => {
-                              setCashDialogCollection(fb as any);
-                              handleSaveCash();
-                            }}
-                          >
-                            {cashDialogSaving ? (
-                              <>
-                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                Saving...
-                              </>
-                            ) : (
-                              'Add / Update Cash'
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-
-      {/* List of collections */}
-      {!selectedCollectionId && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-muted-foreground text-sm mr-2">
-              Project: <span className="font-medium text-foreground">{effectiveProject.name}</span>
-            </p>
-            {collections.length > 0 && (
-              <div className="flex gap-1.5">
-                <Button
-                  variant={collectionFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => setCollectionFilter('all')}
-                >
-                  All
-                </Button>
-                <Button
-                  variant={collectionFilter === 'active' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => setCollectionFilter('active')}
-                >
-                  Active
-                </Button>
-                <Button
-                  variant={collectionFilter === 'closed' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => setCollectionFilter('closed')}
-                >
-                  Closed
-                </Button>
-              </div>
-            )}
-          </div>
-          {loadingCollections ? (
-            <p className="text-muted-foreground">Loading…</p>
-          ) : collections.length === 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-muted-foreground text-center py-4">
-                  No collections yet. Start a day session with &quot;New collection&quot;.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-6">
-              {(collectionFilter === 'all' || collectionFilter === 'active') && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Active collections {collectionFilter === 'all' && activeCollections.length > 0 && `(${activeCollections.length})`}
-                  </h3>
-                  {activeCollections.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No active collections.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
-                      {activeCollections.map((c, index) => {
-                        const displayName = c.name?.trim() || formatDate(c.harvestDate);
-                        const derivedTotals = collectionTotalsById[c.id];
-                        const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
-                        const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
-                        const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
-                        return (
-                          <Card
-                            key={c.id}
-                            className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
-                            onClick={() => {
-                              setSelectedCollectionId(c.id);
-                              setViewMode(defaultDetailMode);
-                            }}
-                          >
-                            <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
-                              <span
-                                className={cn(
-                                  'absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded',
-                                  c.status === 'collecting' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                                  c.status === 'payout_complete' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                                  c.status === 'sold' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/30 dark:text-slate-300'
-                                )}
+                          <div className="flex flex-col items-center gap-2 pt-4">
+                            <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <p className="text-[11px] text-emerald-100">Current balance</p>
+                                <p
+                                  className={cn(
+                                    'text-xl font-extrabold tabular-nums text-emerald-50',
+                                    !cashDialogVisible && 'blur-sm select-none'
+                                  )}
+                                >
+                                  KES {remaining.toLocaleString()}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="mt-3 inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
+                                onClick={() => setCashDialogVisible((v) => !v)}
                               >
-                                {c.status}
-                              </span>
-                              <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
-                                <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
-                              </div>
-                              <div className="w-full flex-1 flex flex-col justify-center min-h-0">
-                                <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
-                                  {displayName}
-                                </span>
-                              </div>
-                              <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                {canViewPaymentAmounts ? (
-                                  <>
-                                    <div className="text-sm font-bold text-foreground tabular-nums">
-                                      KES {totalPay.toLocaleString()}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
-                                  </>
-                                ) : (
-                                  <div className="text-sm font-bold text-foreground tabular-nums">
-                                    {(totalWeight).toFixed(1)} kg
-                                  </div>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-              {(collectionFilter === 'all' || collectionFilter === 'closed') && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Closed collections {collectionFilter === 'all' && closedCollections.length > 0 && `(${closedCollections.length})`}
-                  </h3>
-                  {closedCollections.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No closed collections.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
-                      {closedCollections.map((c, index) => {
-                        const displayName = c.name?.trim() || formatDate(c.harvestDate);
-                        const derivedTotals = collectionTotalsById[c.id];
-                        const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
-                        const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
-                        const Icon = COLLECTION_ICONS[(activeCollections.length + index) % COLLECTION_ICONS.length];
-                        return (
-                          <Card
-                            key={c.id}
-                            className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
-                            onClick={() => {
-                              setSelectedCollectionId(c.id);
-                              setViewMode(defaultDetailMode);
-                            }}
-                          >
-                            <div
-                              className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-2xl overflow-hidden"
-                              aria-hidden
-                            >
-                              <span
-                                className="text-2xl sm:text-xl font-bold text-red-500/35 dark:text-red-400/30 select-none whitespace-nowrap"
-                                style={{ transform: 'rotate(-22deg)' }}
-                              >
-                                CLOSED
-                              </span>
+                                {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
                             </div>
-                            <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
-                              <span className="absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                closed
-                              </span>
-                              <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
-                                <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
+                            <div className="flex items-center justify-center gap-4 mt-1">
+                              <div>
+                                <p className="text-[11px] text-emerald-100">Paid out</p>
+                                <p
+                                  className={cn(
+                                    'font-semibold tabular-nums text-emerald-50',
+                                    !cashDialogVisible && 'blur-sm select-none'
+                                  )}
+                                >
+                                  KES {totalPaidOut.toLocaleString()}
+                                </p>
                               </div>
-                              <div className="w-full flex-1 flex flex-col justify-center min-h-0">
-                                <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
-                                  {displayName}
-                                </span>
+                              <div>
+                                <p className="text-[11px] text-emerald-100">Cash received</p>
+                                <p
+                                  className={cn(
+                                    'font-semibold tabular-nums text-emerald-50',
+                                    !cashDialogVisible && 'blur-sm select-none'
+                                  )}
+                                >
+                                  KES {cashReceived.toLocaleString()}
+                                </p>
                               </div>
-                              <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
-                                {canViewPaymentAmounts ? (
+                            </div>
+                          </div>
+                          <div className="pt-3 border-t border-emerald-500/70 space-y-3 mt-2 text-left">
+                            <div className="space-y-1">
+                              <p className="text-[11px] text-emerald-100">Current cash received</p>
+                              <p
+                                className={cn(
+                                  'text-sm font-semibold text-emerald-50 tabular-nums',
+                                  !cashDialogVisible && 'blur-sm select-none'
+                                )}
+                              >
+                                KES {cashReceived.toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-emerald-100">Set cash received (KES)</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={cashAmount}
+                                onChange={(e) => setCashAmount(e.target.value)}
+                                className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300"
+                                placeholder="e.g. 150000"
+                              />
+                              <Label className="mt-2 text-xs text-emerald-100">Source</Label>
+                              <UiSelect
+                                value={cashSource}
+                                onValueChange={(val) => setCashSource(val as 'bank' | 'custom')}
+                              >
+                                <SelectTrigger className="w-full min-h-9 rounded-xl border border-emerald-400/80 bg-emerald-900/60 px-3 py-1.5 text-xs text-emerald-50">
+                                  <SelectValue placeholder="Select source" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="bank">Bank</SelectItem>
+                                  <SelectItem value="custom">Custom…</SelectItem>
+                                </SelectContent>
+                              </UiSelect>
+                              {cashSource === 'custom' && (
+                                <Input
+                                  value={cashSourceCustom}
+                                  onChange={(e) => setCashSourceCustom(e.target.value)}
+                                  className="min-h-9 rounded-xl bg-emerald-900/60 border-emerald-400/80 text-emerald-50 placeholder:text-emerald-300 mt-2"
+                                  placeholder="Enter custom source (e.g. Mpesa float)"
+                                />
+                              )}
+                              <Button
+                                size="sm"
+                                className="mt-3 rounded-full bg-amber-100 text-emerald-900 border border-emerald-500 hover:bg-amber-200 hover:text-emerald-950 font-semibold shadow-sm"
+                                disabled={cashDialogSaving}
+                                onClick={() => {
+                                  setCashDialogCollection(fb as any);
+                                  handleSaveCash();
+                                }}
+                              >
+                                {cashDialogSaving ? (
                                   <>
-                                    <div className="text-sm font-bold text-foreground tabular-nums">
-                                      KES {totalPay.toLocaleString()}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                    Saving...
                                   </>
                                 ) : (
-                                  <div className="text-sm font-bold text-foreground tabular-nums">
-                                    {(totalWeight).toFixed(1)} kg
-                                  </div>
+                                  'Add / Update Cash'
                                 )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  )}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  );
+                })()}
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {/* List of collections */}
+        {!selectedCollectionId && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-muted-foreground text-sm mr-2">
+                Project: <span className="font-medium text-foreground">{effectiveProject.name}</span>
+              </p>
+              {collections.length > 0 && (
+                <div className="flex gap-1.5">
+                  <Button
+                    variant={collectionFilter === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setCollectionFilter('all')}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    variant={collectionFilter === 'active' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setCollectionFilter('active')}
+                  >
+                    Active
+                  </Button>
+                  <Button
+                    variant={collectionFilter === 'closed' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setCollectionFilter('closed')}
+                  >
+                    Closed
+                  </Button>
                 </div>
               )}
             </div>
-          )}
-        </div>
-      )}
+            {loadingCollections ? (
+              <p className="text-muted-foreground">Loading…</p>
+            ) : collections.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-muted-foreground text-center py-4">
+                    No collections yet. Start a day session with &quot;New collection&quot;.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-6">
+                {(collectionFilter === 'all' || collectionFilter === 'active') && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Active collections {collectionFilter === 'all' && activeCollections.length > 0 && `(${activeCollections.length})`}
+                    </h3>
+                    {activeCollections.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No active collections.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
+                        {activeCollections.map((c, index) => {
+                          const displayName = c.name?.trim() || formatDate(c.harvestDate);
+                          const derivedTotals = collectionTotalsById[c.id];
+                          const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
+                          const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
+                          const Icon = COLLECTION_ICONS[index % COLLECTION_ICONS.length];
+                          return (
+                            <Card
+                              key={c.id}
+                              className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
+                              onClick={() => {
+                                setSelectedCollectionId(c.id);
+                                setViewMode(defaultDetailMode);
+                              }}
+                            >
+                              <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
+                                <span
+                                  className={cn(
+                                    'absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded',
+                                    c.status === 'collecting' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+                                    c.status === 'payout_complete' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                                    c.status === 'sold' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/30 dark:text-slate-300'
+                                  )}
+                                >
+                                  {c.status}
+                                </span>
+                                <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
+                                  <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
+                                </div>
+                                <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                                  <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
+                                    {displayName}
+                                  </span>
+                                </div>
+                                <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
+                                  {canViewPaymentAmounts ? (
+                                    <>
+                                      <div className="text-sm font-bold text-foreground tabular-nums">
+                                        KES {totalPay.toLocaleString()}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                    </>
+                                  ) : (
+                                    <div className="text-sm font-bold text-foreground tabular-nums">
+                                      {(totalWeight).toFixed(1)} kg
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(collectionFilter === 'all' || collectionFilter === 'closed') && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Closed collections {collectionFilter === 'all' && closedCollections.length > 0 && `(${closedCollections.length})`}
+                    </h3>
+                    {closedCollections.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No closed collections.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 md:gap-3">
+                        {closedCollections.map((c, index) => {
+                          const displayName = c.name?.trim() || formatDate(c.harvestDate);
+                          const derivedTotals = collectionTotalsById[c.id];
+                          const totalPay = derivedTotals?.totalPickerCost ?? (c.totalPickerCost ?? 0);
+                          const totalWeight = derivedTotals?.totalHarvestKg ?? (c.totalHarvestKg ?? 0);
+                          const Icon = COLLECTION_ICONS[(activeCollections.length + index) % COLLECTION_ICONS.length];
+                          return (
+                            <Card
+                              key={c.id}
+                              className="cursor-pointer hover:bg-muted/50 active:scale-[0.98] transition-all rounded-2xl flex flex-col overflow-hidden min-h-[160px] sm:min-h-[150px] md:min-h-[140px] relative"
+                              onClick={() => {
+                                setSelectedCollectionId(c.id);
+                                setViewMode(defaultDetailMode);
+                              }}
+                            >
+                              <div
+                                className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-2xl overflow-hidden"
+                                aria-hidden
+                              >
+                                <span
+                                  className="text-2xl sm:text-xl font-bold text-red-500/35 dark:text-red-400/30 select-none whitespace-nowrap"
+                                  style={{ transform: 'rotate(-22deg)' }}
+                                >
+                                  CLOSED
+                                </span>
+                              </div>
+                              <CardContent className="p-4 sm:p-3 md:p-3 flex flex-col flex-1 justify-center items-center text-center min-h-0 relative">
+                                <span className="absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                  closed
+                                </span>
+                                <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
+                                  <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
+                                </div>
+                                <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                                  <span className="font-bold text-foreground text-base sm:text-sm leading-tight line-clamp-2 block">
+                                    {displayName}
+                                  </span>
+                                </div>
+                                <div className="w-full space-y-0.5 text-center mt-auto pt-1.5 border-t border-border">
+                                  {canViewPaymentAmounts ? (
+                                    <>
+                                      <div className="text-sm font-bold text-foreground tabular-nums">
+                                        KES {totalPay.toLocaleString()}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground tabular-nums">{(totalWeight).toFixed(1)} kg</div>
+                                    </>
+                                  ) : (
+                                    <div className="text-sm font-bold text-foreground tabular-nums">
+                                      {(totalWeight).toFixed(1)} kg
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Collection detail: Intake / Pay / Buyer */}
-      {selectedCollection && selectedCollectionId && (
-        <>
-          <div className="space-y-2">
-            {statsExpanded && (
-              <div className="min-w-0 space-y-2">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3 py-2 px-2 sm:px-3 rounded-xl bg-muted/40">
-                  <span className="font-semibold text-foreground text-sm sm:text-base">
-                    {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
-                  </span>
-                  {canViewPaymentAmounts && selectedCollection.pricePerKgPicker != null && (
-                    <span className="text-xs text-muted-foreground">@{selectedCollection.pricePerKgPicker}/kg</span>
-                  )}
-                </div>
-                <div
-                  className={cn(
-                    'grid gap-2 sm:gap-3',
-                    (() => {
-                      const statCount = 1 + (canViewPaymentAmounts ? 1 : 0) + (showBuyerSale ? 1 : 0);
-                      if (statCount <= 1) return 'grid-cols-1';
-                      if (statCount === 2) return 'grid-cols-2';
-                      return 'grid-cols-2 sm:grid-cols-3';
-                    })()
-                  )}
-                >
-                  <SimpleStatCard
-                    layout="mobile-compact"
-                    title="Total kg"
-                    value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
-                    icon={Scale}
-                    iconVariant="primary"
-                    className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
-                  />
-                  {canViewPaymentAmounts && (
+        {/* Collection detail: Intake / Pay / Buyer */}
+        {selectedCollection && selectedCollectionId ? (
+          <div className="space-y-3">
+            <div className="space-y-2">
+              {statsExpanded && (
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 py-2 px-2 sm:px-3 rounded-xl bg-muted/40">
+                    <span className="font-semibold text-foreground text-sm sm:text-base">
+                      {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
+                    </span>
+                    {canViewPaymentAmounts && selectedCollection.pricePerKgPicker != null && (
+                      <span className="text-xs text-muted-foreground">@{selectedCollection.pricePerKgPicker}/kg</span>
+                    )}
+                  </div>
+                  <div
+                    className={cn(
+                      'grid gap-2 sm:gap-3',
+                      (() => {
+                        const statCount = 1 + (canViewPaymentAmounts ? 1 : 0) + (showBuyerSale ? 1 : 0);
+                        if (statCount <= 1) return 'grid-cols-1';
+                        if (statCount === 2) return 'grid-cols-2';
+                        return 'grid-cols-2 sm:grid-cols-3';
+                      })()
+                    )}
+                  >
                     <SimpleStatCard
                       layout="mobile-compact"
-                      title="Total picker due"
-                      value={`KES ${(collectionFinancials.totalPickerDue ?? 0).toLocaleString()}`}
-                      icon={Banknote}
+                      title="Total kg"
+                      value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
+                      icon={Scale}
                       iconVariant="primary"
                       className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
                     />
-                  )}
-                  {showBuyerSale && (
-                    <div className="rounded-xl border border-border bg-card py-3 px-3 sm:py-2 sm:px-2 flex flex-col justify-center gap-2 min-h-[3.25rem] col-span-2 sm:col-span-1 shadow-sm">
-                      <div className="flex items-center justify-between gap-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" />
-                          <span className="text-xs font-medium text-muted-foreground">
-                            Buyer sale · {(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)} kg
-                            {(selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0) && (
-                              <> @ {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} Ksh</>
-                            )}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowPaidAndProfit((v) => !v)}
-                          className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:bg-muted touch-manipulation"
-                          title={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
-                          aria-label={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
-                        >
-                          {showPaidAndProfit ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-border pt-2 mt-0.5">
-                        <div>
-                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Revenue</p>
-                          <p className={cn('text-base sm:text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm')}>
-                            {showPaidAndProfit ? `KES ${Number(totalRevenue ?? 0).toLocaleString()}` : '•••'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Profit</p>
-                          <p className={cn('text-base sm:text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm', Number(profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                            {showPaidAndProfit ? `KES ${Number(profit ?? 0).toLocaleString()}` : '•••'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setStatsExpanded((e) => !e)}
-                className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:bg-muted touch-manipulation"
-                aria-expanded={statsExpanded}
-                title={statsExpanded ? 'Hide totals' : 'Show totals'}
-              >
-                {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </button>
-              <div className="flex items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setQuickMode((q) => !q)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full font-semibold shadow-md border-2 transition-all touch-manipulation',
-                    quickMode
-                      ? 'bg-sky-500 text-white border-sky-600 ring-1 ring-sky-400/60'
-                      : 'bg-muted/80 text-muted-foreground border-border hover:bg-muted'
-                  )}
-                  title={quickMode ? 'Quick Mode on' : 'Quick Mode off'}
-                  aria-pressed={quickMode}
-                >
-                  <Zap className="h-3.5 w-3.5 shrink-0" />
-                  Quick Mode
-                </button>
-                {canViewFinancials && isFrenchBeansCollection && selectedCollection && (
-                  <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
-                      onClick={() => {
-                        setCashDialogCollection(selectedCollection as any);
-                        // For top-up UX, keep input empty so user types the new amount to add
-                        setCashAmount('');
-                        setCashSource('bank');
-                        setCashDialogVisible(false);
-                      }}
-                    >
-                      <Banknote className="h-3 w-3" />
-                      <span>Wallet</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-80 md:w-[420px] text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50"
-                    align="center"
-                    side="bottom"
-                  >
-                  <div className="space-y-4 text-center py-3">
-                    <div className="flex flex-col items-center gap-3">
-                      <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <p className="text-[11px] text-emerald-100">Amount paid out (this collection)</p>
-                        <div className="flex items-center justify-center gap-2">
-                          <p
-                            className={cn(
-                              'text-xl font-extrabold tabular-nums text-emerald-50',
-                              !cashDialogVisible && 'blur-sm select-none'
-                            )}
-                          >
-                            KES {(Number(amountPaidOutThisCollection) || 0).toLocaleString()}
-                          </p>
-                          <button
-                            type="button"
-                            className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
-                            onClick={() => setCashDialogVisible((v) => !v)}
-                          >
-                            {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-emerald-100">Remaining picker balance</p>
-                        <p className={cn('text-sm font-semibold tabular-nums text-emerald-50', !cashDialogVisible && 'blur-sm select-none')}>
-                          KES {(Number(collectionFinancials.pickerBalance) || 0).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  </PopoverContent>
-                </Popover>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {detailModes.length === 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">
-                  Access restricted. Your account can view collections but cannot access intake, payout, or buyer actions.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
-            <div className="flex flex-nowrap gap-2 sm:gap-3 overflow-x-auto pb-1 min-w-0 -mx-1 px-1">
-              {canManageIntake && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode('intake')}
-                  className={cn(
-                    'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
-                    viewMode === 'intake'
-                      ? 'bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-400/50'
-                      : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800'
-                  )}
-                >
-                  <Scale className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
-                  Intake
-                </button>
-              )}
-              {canPayPickers && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode('pay')}
-                  className={cn(
-                    'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
-                    viewMode === 'pay'
-                      ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-400/50'
-                      : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800'
-                  )}
-                >
-                  <Banknote className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
-                  Pay
-                </button>
-              )}
-              {canViewBuyerSection && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode('buyer')}
-                  className={cn(
-                    'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
-                    viewMode === 'buyer'
-                      ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
-                      : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
-                  )}
-                >
-                  <ShoppingCart className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
-                  Buyer
-                </button>
-              )}
-            </div>
-
-            {canManageIntake && (
-            <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
-              {quickMode ? (
-                <>
-                  {/* Quick Intake container: scroll-margin keeps it above keyboard + bottom nav when inputs focused (mobile) */}
-                  <div
-                    ref={quickIntakeContainerRef}
-                    style={{ scrollMarginBottom: 'min(20rem, 50vh)' }}
-                  >
-                    {/* A) Quick Intake header — compact */}
-                    <div className="space-y-0.5">
-                      <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-                        <Zap className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
-                        Quick Intake
-                      </h3>
-                      <p className="text-xs text-muted-foreground max-w-sm">
-                        Enter picker number and kg, then move to the next picker.
-                      </p>
-                    </div>
-
-                    {/* B) Main input card — compact, professional */}
-                    <div className="rounded-md border border-sky-200/80 dark:border-sky-800/80 bg-card shadow-sm p-3 space-y-3 mt-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label htmlFor="quick-intake-picker-num" className="text-sm font-medium text-foreground">
-                            Picker number
-                          </Label>
-                          <Input
-                            id="quick-intake-picker-num"
-                            ref={quickIntakePickerNumberRef}
-                            type="text"
-                            inputMode="numeric"
-                            value={quickIntakePickerNumber}
-                            onChange={(e) => setQuickIntakePickerNumber(e.target.value)}
-                            onFocus={scrollQuickIntakeIntoView}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') quickIntakeKgRef.current?.focus();
-                            }}
-                            placeholder="e.g. 5"
-                            className="min-h-12 text-lg font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 transition-colors"
-                            autoFocus
-                          />
-                        {quickIntakePickerNumber.trim() !== '' && (
-                          <div className="mt-1.5">
-                            {quickIntakePickerLookup.matchedPicker ? (
-                              <div className="rounded-md border border-sky-200 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-950/40 px-2.5 py-1.5">
-                                <p className="text-sm font-semibold text-sky-900 dark:text-sky-100 truncate">
-                                  #{quickIntakePickerLookup.matchedPicker.pickerNumber} {quickIntakePickerLookup.matchedPicker.pickerName}
-                                </p>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                  Trip #{quickIntakePickerLookup.nextTripNumber}
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/40 px-2.5 py-1.5">
-                                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                                  Picker not found
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="quick-intake-kg" className="text-sm font-medium text-foreground">
-                          KG
-                        </Label>
-                        <Input
-                          id="quick-intake-kg"
-                          ref={quickIntakeKgRef}
-                          type="number"
-                          inputMode="decimal"
-                          min="0.1"
-                          step="0.1"
-                          value={quickIntakeKg}
-                          onChange={(e) => setQuickIntakeKg(e.target.value)}
-                          onFocus={scrollQuickIntakeIntoView}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleQuickIntakeNextPicker(false);
-                          }}
-                          placeholder="e.g. 4.5"
-                          className="min-h-12 text-xl font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 bg-sky-50/50 dark:bg-sky-950/20 transition-colors"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Button
-                        onClick={() => handleQuickIntakeNextPicker(false)}
-                        disabled={
-                          !quickIntakePickerNumber.trim() ||
-                          !quickIntakeKg.trim() ||
-                          selectedCollection?.status === 'closed' ||
-                          (quickIntakePickerNumber.trim() !== '' && !quickIntakePickerLookup.matchedPicker)
-                        }
-                        className="min-h-12 w-full font-bold text-sm bg-sky-600 hover:bg-sky-700 active:scale-[0.99] rounded-md shadow-sm touch-manipulation"
-                      >
-                        Next Picker
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleQuickIntakeNextPicker(true)}
-                        disabled={
-                          !quickIntakePickerNumber.trim() ||
-                          !quickIntakeKg.trim() ||
-                          selectedCollection?.status === 'closed' ||
-                          (quickIntakePickerNumber.trim() !== '' && !quickIntakePickerLookup.matchedPicker)
-                        }
-                        className="min-h-10 sm:min-h-12 sm:flex-shrink-0 font-medium rounded-md border-sky-300 text-sky-800 dark:border-sky-700 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-950/30 touch-manipulation"
-                      >
-                        Save & Stay
-                      </Button>
-                    </div>
-                  </div>
-                  </div>
-
-                  {/* C) Recent entries — single-row compact */}
-                  <div className="space-y-1.5">
-                    <h4 className="text-sm font-semibold text-foreground">Recent entries</h4>
-                    <div className="space-y-1 max-h-[280px] overflow-y-auto overscroll-contain">
-                      {quickIntakeRecentEntries.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-3 text-center rounded-md border border-dashed border-border">
-                          No entries yet.
-                        </p>
-                      ) : (
-                        quickIntakeRecentEntries.map((entry) => (
-                          <div
-                            key={entry.id}
-                            className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2 min-w-0"
-                          >
-                            <span className="text-sm font-bold tabular-nums text-foreground shrink-0">#{entry.pickerNumber}</span>
-                            <span className="text-sm text-foreground truncate min-w-0 flex-1">{entry.pickerName}</span>
-                            <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">{entry.kg.toFixed(1)} kg</span>
-                            <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                              {entry.recordedAt != null ? format(toDate(entry.recordedAt) ?? new Date(), 'HH:mm') : '—'}
+                    {canViewPaymentAmounts && (
+                      <SimpleStatCard
+                        layout="mobile-compact"
+                        title="Total picker due"
+                        value={`KES ${(collectionFinancials.totalPickerDue ?? 0).toLocaleString()}`}
+                        icon={Banknote}
+                        iconVariant="primary"
+                        className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+                      />
+                    )}
+                    {showBuyerSale && (
+                      <div className="rounded-xl border border-border bg-card py-3 px-3 sm:py-2 sm:px-2 flex flex-col justify-center gap-2 min-h-[3.25rem] col-span-2 sm:col-span-1 shadow-sm">
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" />
+                            <span className="text-xs font-medium text-muted-foreground">
+                              Buyer sale · {(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)} kg
+                              {(selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0) && (
+                                <> @ {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} Ksh</>
+                              )}
                             </span>
                           </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-              <div className="flex flex-wrap gap-2 items-stretch">
-                <Button
-                  size="sm"
-                  className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs"
-                  disabled={selectedCollection?.status === 'closed'}
-                  onClick={() => {
-                    setNewPickerNumber(String(nextPickerNumber));
-                    setAddPickerOpen(true);
-                  }}
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1.5" />
-                  Add picker
-                </Button>
-                {lastWeighPickerId && pickersForCollection.some((x) => x.id === lastWeighPickerId) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-700"
-                    disabled={selectedCollection?.status === 'closed'}
-                    onClick={() => {
-                      const p = pickersForCollection.find((x) => x.id === lastWeighPickerId);
-                      if (!p) return;
-                      setWeighPickerId(p.id);
-                      setWeighTrip(String(nextTripForPicker[p.id] ?? 1));
-                      setWeighKg('');
-                      setWeighOpenedFromCard(true);
-                      setAddWeighOpen(true);
-                    }}
-                  >
-                    Repeat last
-                  </Button>
-                )}
-                {pickersForCollection.length > 0 && (
-                  <div className="relative max-w-xs flex-1 min-w-[180px]">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    <Input
-                      placeholder="Search name or number..."
-                      value={pickerSearch}
-                      onChange={(e) => setPickerSearch(e.target.value)}
-                      className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20 w-full"
-                    />
-                  </div>
-                )}
-              </div>
-              {pickersForCollection.length === 0 ? (
-                <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    {filteredPickers.length === 0 ? (
-                      <p className="col-span-2 text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
-                    ) : (
-                      filteredPickers.map((p) => {
-                        const tripCount = tripCountForPicker[p.id] ?? 0;
-                        const nextTrip = nextTripForPicker[p.id] ?? 1;
-                        const isPaid = p.isPaid;
-                        const pickerTotals = getPickerTotals(p.id);
-                        return (
-                          <Card
-                            key={p.id}
-                            className={cn(
-                              'relative transition-all min-h-[132px] flex flex-col overflow-hidden touch-manipulation rounded-xl',
-                              isPaid
-                                ? 'opacity-75 cursor-not-allowed bg-muted/50'
-                                : 'cursor-pointer hover:bg-muted/50 active:scale-[0.98]'
-                            )}
-                            onClick={isPaid ? undefined : () => {
-                              setWeighPickerId(p.id);
-                              setWeighTrip(String(nextTrip));
-                              setWeighKg('');
-                              setWeighOpenedFromCard(true);
-                              setAddWeighOpen(true);
-                              setRecentPickerIds((prev) => {
-                                const next = [p.id, ...prev.filter((id) => id !== p.id)].slice(0, 10);
-                                return next;
-                              });
-                            }}
+                          <button
+                            type="button"
+                            onClick={() => setShowPaidAndProfit((v) => !v)}
+                            className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:bg-muted touch-manipulation"
+                            title={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
+                            aria-label={showPaidAndProfit ? 'Hide amounts' : 'Show amounts'}
                           >
-                            <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                              <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                {tripCount}
-                              </div>
-                              <div className="flex justify-center flex-shrink-0 pt-1">
-                                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
-                                  {p.pickerNumber}
-                                </div>
-                              </div>
-                              <div className="font-semibold text-foreground text-xs sm:text-sm leading-tight line-clamp-2 mt-1">
-                                {p.pickerName}
-                              </div>
-                              <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
-                                {pickerTotals.totalKg.toFixed(1)} kg
-                                {canViewPaymentAmounts ? ` - KES ${pickerTotals.totalPay.toLocaleString()}` : ''}
-                              </div>
-                              <div className={cn(
-                                'text-[10px] border-t border-border pt-1.5 mt-1',
-                                isPaid ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'
-                              )}>
-                                {isPaid ? 'Paid' : '+ add'}
-                              </div>
-                              {tripOverrideMessageForPicker[p.id] && (
-                                <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
-                                  {tripOverrideMessageForPicker[p.id]}
-                                </p>
-                              )}
-                            </CardContent>
-                          </Card>
-                        );
-                      })
+                            {showPaidAndProfit ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-border pt-2 mt-0.5">
+                          <div>
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Revenue</p>
+                            <p className={cn('text-base sm:text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm')}>
+                              {showPaidAndProfit ? `KES ${Number(totalRevenue ?? 0).toLocaleString()}` : '•••'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Profit</p>
+                            <p className={cn('text-base sm:text-sm font-semibold tabular-nums', !showPaidAndProfit && 'select-none blur-sm', Number(profit ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
+                              {showPaidAndProfit ? `KES ${Number(profit ?? 0).toLocaleString()}` : '•••'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
-                </>
-              )}
-                </>
-              )}
-            </TabsContent>
-            )}
-
-            {canPayPickers && (
-            <TabsContent value="pay" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
-              {quickMode ? (
-                <>
-                  {/* Quick Pay mode: inline, queue-based fast payments; summary collapsed by default */}
-                  <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => setQuickPaySummaryExpanded((e) => !e)}
-                      className="w-full flex items-center justify-between gap-2 text-left rounded-md hover:bg-amber-100/50 dark:hover:bg-amber-900/20 -mx-1 px-1 py-0.5 transition-colors"
-                      aria-expanded={quickPaySummaryExpanded}
-                      title={quickPaySummaryExpanded ? 'Hide summary' : 'Show summary'}
-                    >
-                      <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-                        <Banknote className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                        Quick Pay
-                      </h3>
-                      {quickPaySummaryExpanded ? (
-                        <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                      )}
-                    </button>
-                    {quickPaySummaryExpanded && (
-                      <>
-                        <p className="text-sm text-muted-foreground">
-                          Pay pickers in number order. Use Pay Full or Pay Partial, then move to the next unpaid picker.
-                        </p>
-                        {quickPayQueue.length === 0 ? (
-                          <p className="text-sm font-medium text-foreground">No unpaid pickers — queue is empty.</p>
-                        ) : (
-                          <p className="text-sm font-medium text-foreground tabular-nums">
-                            {quickPayQueue.length} picker{quickPayQueue.length !== 1 ? 's' : ''} in queue · KES{' '}
-                            {(collectionFinancials.pickerBalance ?? 0).toLocaleString()} remaining
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  {/* Quick Pay card: always visible (like Quick Intake); content or empty state */}
-                  <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-4">
-                  {quickPayQueue.length > 0 && quickPayPickerId && (() => {
-                    const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
-                    if (!picker) return null;
-                    const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
-                    const pickerRate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
-                    const due = queueRow?.totalDue ?? getPickerTotals(quickPayPickerId).totalPay;
-                    const paid = queueRow?.totalPaid ?? ((paidByPickerId[quickPayPickerId] ?? 0) + (quickPayLocalPaidByPickerId[quickPayPickerId] ?? 0));
-                    const balance = Math.max(0, queueRow?.balance ?? (due - paid));
-                    const remainingKg = pickerRate > 0 ? balance / pickerRate : 0;
-
-                    const toTime = (t: any): number => {
-                      if (t == null) return 0;
-                      if (typeof t === 'object' && 'toMillis' in t) return (t as { toMillis: () => number }).toMillis();
-                      if (t instanceof Date) return t.getTime();
-                      return Number(t) || 0;
-                    };
-
-                    const entries = weighEntriesForCollection
-                      .filter((e) => String(e.pickerId ?? '') === quickPayPickerId)
-                      .slice()
-                      .sort((a, b) => toTime(a.recordedAt) - toTime(b.recordedAt))
-                      .map((e) => {
-                        const kg = Number(e.weightKg ?? 0);
-                        const amt = Math.round(kg * pickerRate);
-                        return {
-                          id: String(e.id ?? `${e.pickerId}-${toTime(e.recordedAt)}-${kg}`),
-                          kg,
-                          amount: amt,
-                        };
-                      })
-                      .filter((x) => Number.isFinite(x.kg) && x.kg > 0);
-
-                    return (
-                      <>
-                        <div className="flex flex-col items-center text-center gap-2">
-                          <div className="h-14 w-14 rounded-full bg-emerald-600 text-emerald-50 flex items-center justify-center text-2xl font-extrabold tabular-nums shadow">
-                            {picker.pickerNumber}
-                          </div>
-                          <p className="text-base font-semibold text-foreground leading-tight truncate w-full">
-                            #{picker.pickerNumber} {picker.pickerName}
-                          </p>
-                        </div>
-
-                        <div className="rounded-lg border border-border bg-muted/30 p-3">
-                          <p className="text-xs text-muted-foreground">Balance</p>
-                          <p className="text-2xl font-extrabold tabular-nums text-foreground">KES {balance.toLocaleString()}</p>
-                          <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
-                            ({remainingKg.toFixed(1)}kg remaining)
-                          </p>
-                          <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                            <div className="rounded-md bg-background/60 border border-border p-2">
-                              <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
-                              <p className="font-semibold tabular-nums">KES {due.toLocaleString()}</p>
-                            </div>
-                            <div className="rounded-md bg-background/60 border border-border p-2">
-                              <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
-                              <p className="font-semibold tabular-nums">KES {paid.toLocaleString()}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button
-                              onClick={() => handleQuickPaySubmit(balance)}
-                              disabled={quickPaySaving || balance <= 0}
-                              className="min-h-12 w-full font-semibold touch-manipulation"
-                            >
-                              {quickPaySaving ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                  Paying…
-                                </>
-                              ) : (
-                                'Pay Full'
-                              )}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setQuickPayPartialBalance(balance);
-                                setQuickPayAmount('');
-                                setQuickPayPartialOpen(true);
-                              }}
-                              disabled={quickPaySaving || balance <= 0}
-                              className="min-h-12 w-full font-semibold touch-manipulation"
-                            >
-                              Pay Partial
-                            </Button>
-                          </div>
-                          <Button
-                            variant="outline"
-                            onClick={handleQuickPaySkip}
-                            disabled={quickPaySaving}
-                            className="min-h-12 w-full touch-manipulation"
-                          >
-                            Skip
-                          </Button>
-                        </div>
-
-                        {quickPayPartialOpen && (
-                          <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
-                            <Label htmlFor="quick-pay-partial-amount-inline">Enter amount (KES)</Label>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Max: KES {quickPayPartialBalance.toLocaleString()}
-                            </p>
-                            <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
-                              Remaining after pay: KES{' '}
-                              {Math.max(0, quickPayPartialBalance - Math.round(Number(quickPayAmount || '0'))).toLocaleString()}
-                            </p>
-                            <Input
-                              id="quick-pay-partial-amount-inline"
-                              type="number"
-                              inputMode="numeric"
-                              min={0}
-                              max={quickPayPartialBalance}
-                              value={quickPayAmount}
-                              onChange={(e) => setQuickPayAmount(e.target.value)}
-                              className="mt-1 min-h-11 text-base font-semibold tabular-nums touch-manipulation"
-                              autoFocus
-                            />
-                            <div className="flex gap-2 mt-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  setQuickPayPartialOpen(false);
-                                  setQuickPayAmount('');
-                                  setQuickPayPartialBalance(0);
-                                }}
-                                disabled={quickPaySaving}
-                                className="min-h-10 flex-1 touch-manipulation"
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                type="button"
-                                onClick={async () => {
-                                  const raw = Math.round(Number(quickPayAmount || '0'));
-                                  const amt =
-                                    quickPayPartialBalance > 0 ? Math.min(raw, quickPayPartialBalance) : raw;
-                                  if (amt <= 0) {
-                                    toast({
-                                      title: 'Invalid amount',
-                                      description: 'Enter an amount greater than 0.',
-                                      variant: 'destructive',
-                                    });
-                                    return;
-                                  }
-                                  await handleQuickPaySubmit(amt);
-                                  setQuickPayPartialOpen(false);
-                                  setQuickPayAmount('');
-                                  setQuickPayPartialBalance(0);
-                                }}
-                                disabled={quickPaySaving || !quickPayAmount || Number(quickPayAmount) <= 0}
-                                className="min-h-10 flex-1 font-semibold touch-manipulation"
-                              >
-                                {quickPaySaving ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                    Paying…
-                                  </>
-                                ) : (
-                                  'Confirm'
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="space-y-2">
-                          <p className="text-sm font-semibold text-foreground">Entries</p>
-                          <div className="rounded-lg border border-border bg-card overflow-hidden">
-                            {entries.length === 0 ? (
-                              <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
-                            ) : (
-                              <div className="max-h-[220px] overflow-y-auto">
-                                {entries.map((e) => (
-                                  <div
-                                    key={e.id}
-                                    className="px-3 py-2 border-b border-border last:border-b-0 flex items-center justify-between gap-3"
-                                  >
-                                    <span className="text-sm tabular-nums text-foreground">
-                                      {e.kg.toFixed(1)}kg
-                                    </span>
-                                    <span className="text-sm tabular-nums font-semibold text-foreground">
-                                      → {e.amount.toLocaleString()}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                  {!(quickPayQueue.length > 0 && quickPayPickerId) && (
-                    <>
-                      <div className="flex flex-col items-center text-center gap-2 opacity-70">
-                        <div className="h-14 w-14 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl font-extrabold tabular-nums shadow-inner">
-                          –
-                        </div>
-                        <p className="text-base font-semibold text-muted-foreground leading-tight">
-                          No unpaid pickers in queue
-                        </p>
-                      </div>
-
-                      <div className="rounded-lg border border-border bg-muted/30 p-3 opacity-70">
-                        <p className="text-xs text-muted-foreground">Balance</p>
-                        <p className="text-2xl font-extrabold tabular-nums text-muted-foreground">KES 0</p>
-                        <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
-                          (0.0kg remaining)
-                        </p>
-                        <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                          <div className="rounded-md bg-background/60 border border-border p-2">
-                            <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
-                            <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
-                          </div>
-                          <div className="rounded-md bg-background/60 border border-border p-2">
-                            <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
-                            <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 opacity-70">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            disabled
-                            className="min-h-12 w-full font-semibold touch-manipulation"
-                          >
-                            Pay Full
-                          </Button>
-                          <Button
-                            variant="outline"
-                            disabled
-                            className="min-h-12 w-full font-semibold touch-manipulation"
-                          >
-                            Pay Partial
-                          </Button>
-                        </div>
-                        <Button
-                          variant="outline"
-                          disabled
-                          className="min-h-12 w-full touch-manipulation"
-                        >
-                          Skip
-                        </Button>
-                      </div>
-
-                      <div className="space-y-2 opacity-70">
-                        <p className="text-sm font-semibold text-muted-foreground">Entries</p>
-                        <div className="rounded-lg border border-border bg-card overflow-hidden">
-                          <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  </div>
-                </>
-              ) : (
-                <>
-              {payUnpaidAndGroups.unpaid.length > 0 && (
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span className="font-medium text-muted-foreground">
-                    Unpaid: {payUnpaidAndGroups.unpaid.length} picker{payUnpaidAndGroups.unpaid.length !== 1 ? 's' : ''}
-                  </span>
-                  <span className="tabular-nums font-semibold text-foreground">
-                    KES {(collectionFinancials.pickerBalance ?? 0).toLocaleString()} remaining
-                  </span>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    Paid out: KES {(collectionFinancials.totalPaidOut ?? 0).toLocaleString()}
-                  </span>
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2">
-                {pickersForCollection.length > 0 && (
-                  <div className="relative max-w-xs">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    <Input
-                      placeholder="Search name or number..."
-                      value={pickerSearch}
-                      onChange={(e) => setPickerSearch(e.target.value)}
-                      className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20"
-                    />
-                  </div>
-                )}
-                {paySelectedIds.size > 0 && (
-                  <Button
-                    size="sm"
-                    className="min-h-9 rounded-lg font-semibold"
-                    onClick={() => handleMarkMultiplePaid(Array.from(paySelectedIds))}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setStatsExpanded((e) => !e)}
+                  className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:bg-muted touch-manipulation"
+                  aria-expanded={statsExpanded}
+                  title={statsExpanded ? 'Hide totals' : 'Show totals'}
+                >
+                  {statsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setQuickMode((q) => !q)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full font-semibold shadow-md border-2 transition-all touch-manipulation',
+                      quickMode
+                        ? 'bg-sky-500 text-white border-sky-600 ring-1 ring-sky-400/60'
+                        : 'bg-muted/80 text-muted-foreground border-border hover:bg-muted'
+                    )}
+                    title={quickMode ? 'Quick Mode on' : 'Quick Mode off'}
+                    aria-pressed={quickMode}
                   >
-                    Pay selected ({paySelectedIds.size}) — KES {selectedTotalPay.toLocaleString()}
-                  </Button>
-                )}
-              </div>
-              <div className="space-y-4">
-                {pickersForCollection.length === 0 ? (
-                  <p className="w-full text-muted-foreground text-sm">Add pickers in Intake first.</p>
-                ) : filteredPickersForPay.length === 0 ? (
-                  <p className="w-full text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
-                ) : (
-                  <>
-                    {unpaidPickersByBalance.length > 0 && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1.5">Unpaid (tap to pay)</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {unpaidPickersByBalance.map((p) => {
-                            const isPaying = payingPickerIds?.has(p.id);
-                            const selected = paySelectedIds.has(p.id);
-                            const tripCount = tripCountForPicker[p.id] ?? 0;
-                            const pickerTotals = getPickerTotals(p.id);
-                            const paid = paidByPickerId[p.id] ?? 0;
-                            const balance = Math.max(0, pickerTotals.totalPay - paid);
-                            return (
-                              <Card
-                                key={p.id}
-                                className={cn(
-                                  'relative min-h-[132px] flex flex-col overflow-hidden transition-all active:scale-[0.98] cursor-pointer hover:bg-muted/50 bg-card touch-manipulation rounded-xl',
-                                  selected && 'ring-2 ring-primary ring-offset-2',
-                                  quickPayOpen && quickPayPickerId === p.id && 'ring-2 ring-amber-500 ring-offset-2',
-                                  isPaying && 'ring-2 ring-amber-500 ring-offset-2 bg-amber-50/50 dark:bg-amber-950/20'
-                                )}
-                                onClick={() => !isPaying && openQuickPay(p.id)}
-                              >
-                                <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                                  <div className="absolute top-1 right-1 flex items-center gap-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={selected}
-                                      onChange={(e) => { e.stopPropagation(); togglePaySelection(p.id); }}
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="rounded border-input h-4 w-4"
-                                      aria-label={`Select ${p.pickerName} for batch pay`}
-                                    />
-                                    <span className="px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                      {tripCount}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-center flex-shrink-0 pt-1">
-                                    <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
-                                      {p.pickerNumber}
-                                    </div>
-                                  </div>
-                                  <div className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-1">
-                                    {p.pickerName}
-                                  </div>
-                                  <div className="border-t border-border pt-1.5 mt-1 space-y-0.5">
-                                    <div className="text-[10px] text-muted-foreground tabular-nums">
-                                      {pickerTotals.totalKg.toFixed(1)} kg · KES {pickerTotals.totalPay.toLocaleString()} due
-                                    </div>
-                                    {paid > 0 && (
-                                      <div className="text-[10px] text-muted-foreground tabular-nums">
-                                        Paid KES {paid.toLocaleString()} · balance KES {balance.toLocaleString()}
-                                      </div>
-                                    )}
-                                    {paid === 0 && (
-                                      <div className="text-base font-bold text-foreground tabular-nums">
-                                        KES {balance.toLocaleString()}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="min-h-8 flex items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 font-medium text-[10px] pt-1 touch-manipulation">
-                                    {isPaying ? (
-                                      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
-                                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                                        Paying…
-                                      </span>
-                                    ) : `Tap to pay · KES ${balance.toLocaleString()}`}
-                                  </div>
-                                  {tripOverrideMessageForPicker[p.id] && (
-                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
-                                      {tripOverrideMessageForPicker[p.id]}
-                                    </p>
+                    <Zap className="h-3.5 w-3.5 shrink-0" />
+                    Quick Mode
+                  </button>
+                  {canViewFinancials && isFrenchBeansCollection && selectedCollection && (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                          onClick={() => {
+                            setCashDialogCollection(selectedCollection as any);
+                            setCashAmount('');
+                            setCashSource('bank');
+                            setCashDialogVisible(false);
+                          }}
+                        >
+                          <Banknote className="h-3 w-3" />
+                          <span>Wallet</span>
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="w-80 md:w-[420px] text-sm bg-emerald-950/70 backdrop-blur-lg border-emerald-400/80 shadow-lg rounded-2xl text-emerald-50"
+                        align="center"
+                        side="bottom"
+                      >
+                        <div className="space-y-4 text-center py-3">
+                          <div className="flex flex-col items-center gap-3">
+                            <p className="text-xs font-semibold text-emerald-50">Harvest Cash Wallet</p>
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <p className="text-[11px] text-emerald-100">Amount paid out (this collection)</p>
+                              <div className="flex items-center justify-center gap-2">
+                                <p
+                                  className={cn(
+                                    'text-xl font-extrabold tabular-nums text-emerald-50',
+                                    !cashDialogVisible && 'blur-sm select-none'
                                   )}
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Individuals section — square cards */}
-                    {payUnpaidAndGroups.individuals.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">Individuals</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
-                            const p = pickers[0];
-                            const tripCount = tripCountForPicker[p.id] ?? 0;
-                            const pickerTotals = getPickerTotals(p.id);
-                            return (
-                              <Card
-                                key={p.id}
-                                className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
-                              >
-                                <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
-                                  <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
-                                    {tripCount}
-                                  </div>
-                                  <div className="flex justify-center flex-shrink-0 pt-1">
-                                    <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
-                                      {p.pickerNumber}
-                                    </div>
-                                  </div>
-                                  <p className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-0.5">{p.pickerName}</p>
-                                  <div className="border-t border-border pt-1 mt-1 space-y-0.5">
-                                    <div className="text-sm font-bold text-foreground tabular-nums leading-none">
-                                      KES {pickerTotals.totalPay.toLocaleString()}
-                                    </div>
-                                    <div className="inline-flex items-center justify-center gap-0.5 text-[10px] text-green-700 dark:text-green-400 font-medium">
-                                      <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                      <span>PAID</span>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Group section — compact square cards */}
-                    {payUnpaidAndGroups.groups.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">Groups</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
-                            <div
-                              key={label}
-                              className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-2 min-w-0"
-                            >
-                              <p className="text-xs font-semibold text-foreground mb-2 text-center">{label}</p>
-                              <div className="grid grid-cols-2 gap-2">
-                                {pickers.map((p) => {
-                                  const tripCount = tripCountForPicker[p.id] ?? 0;
-                                  const pickerTotals = getPickerTotals(p.id);
-                                  return (
-                                    <Card
-                                      key={p.id}
-                                      className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
-                                    >
-                                      <CardContent className="p-1.5 flex flex-col flex-1 justify-between min-h-0 text-center">
-                                        <div className="absolute top-0.5 right-0.5 px-1 h-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground">
-                                          {tripCount}
-                                        </div>
-                                        <div className="flex justify-center flex-shrink-0">
-                                          <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold tabular-nums shadow ring-2 ring-background">
-                                            {p.pickerNumber}
-                                          </div>
-                                        </div>
-                                        <p className="font-medium text-foreground text-[10px] leading-tight line-clamp-2">{p.pickerName}</p>
-                                        <div className="text-[10px] font-bold tabular-nums text-foreground">
-                                          KES {pickerTotals.totalPay.toLocaleString()}
-                                        </div>
-                                        <div className="inline-flex items-center justify-center gap-0.5 text-[9px] text-green-700 dark:text-green-400 font-medium">
-                                          <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
-                                          <span>PAID</span>
-                                        </div>
-                                      </CardContent>
-                                    </Card>
-                                  );
-                                })}
+                                >
+                                  KES {(Number(amountPaidOutThisCollection) || 0).toLocaleString()}
+                                </p>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-emerald-800 text-emerald-50"
+                                  onClick={() => setCashDialogVisible((v) => !v)}
+                                >
+                                  {cashDialogVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
                               </div>
+                              <p className="text-[11px] text-emerald-100">Remaining picker balance</p>
+                              <p className={cn('text-sm font-semibold tabular-nums text-emerald-50', !cashDialogVisible && 'blur-sm select-none')}>
+                                KES {(Number(collectionFinancials.pickerBalance) || 0).toLocaleString()}
+                              </p>
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </>
-                )}
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                </div>
               </div>
-                </>
-              )}
-            </TabsContent>
-            )}
+            </div>
 
-            {canViewBuyerSection && (
-            <TabsContent value="buyer" className="mt-4 space-y-4">
+            {detailModes.length === 0 ? (
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Buyer sale</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {selectedCollection.status === 'closed' && (
-                    <div className="space-y-1 text-sm text-muted-foreground">
-                      {selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0 && (
-                        <p>Price they bought with: <strong className="text-foreground">KES {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} per kg</strong></p>
-                      )}
-                      {canViewFinancials ? (
-                        <p>Revenue and profit are in the Buyer sale card when the sale is complete. Paid out is in the Wallet button above.</p>
-                      ) : (
-                        <p>Buyer pricing is shown here. Financial totals are restricted for your account.</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label>Price per kg (buyer) — KES</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="e.g. 180"
-                      value={buyerPricePerKg}
-                      onChange={(e) => setBuyerPricePerKg(e.target.value)}
-                      className="text-lg min-h-12 rounded-xl"
-                      disabled={selectedCollection.status === 'closed'}
-                    />
-                  </div>
-                  {selectedCollection.status !== 'closed' && Number(buyerPricePerKg || 0) > 0 && (
-                    <div className="space-y-1 text-sm">
-                      <p>
-                        Total revenue: <strong>KES {(Number(totalRevenue) || 0).toLocaleString()}</strong>
-                      </p>
-                      <p>
-                        Total paid out: <strong>KES {(Number(collectionFinancials.totalPaidOut) || 0).toLocaleString()}</strong>
-                      </p>
-                      <p>
-                        Profit: <strong className={(Number(profit) || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                          KES {(Number(profit) || 0).toLocaleString()}
-                        </strong>
-                      </p>
-                    </div>
-                  )}
-                  {selectedCollection.status !== 'closed' && (
-                    <>
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <Button
-                          size="lg"
-                          variant="outline"
-                          className="min-h-12 rounded-xl flex-1"
-                          disabled={!buyerPricePerKg || markingBuyerPaid}
-                          onClick={() => handleSetBuyerPrice(false)}
-                        >
-                          Save buyer price
-                        </Button>
-                        <Button
-                          size="lg"
-                          className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
-                          disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid || !canCloseHarvest}
-                          onClick={() => handleSetBuyerPrice(true)}
-                        >
-                          MARK BUYER PAID
-                        </Button>
-                      </div>
-                      {!allPickersPaid && pickersForCollection.length > 0 && (
-                        <p className="text-amber-600 dark:text-amber-400 text-sm">
-                          All pickers must be marked cash paid before closing.
-                        </p>
-                      )}
-                      {!canCloseHarvest && (
-                        <p className="text-muted-foreground text-sm">
-                          You can save buyer pricing, but only users with close access can mark buyer paid.
-                        </p>
-                      )}
-                    </>
-                  )}
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    Access restricted. Your account can view collections but cannot access intake, payout, or buyer actions.
+                  </p>
                 </CardContent>
               </Card>
-            </TabsContent>
-            )}
-          </Tabs>
-          )}
-        </>
-      )}
-
-      {/* New collection dialog */}
-      <Dialog open={newCollectionOpen} onOpenChange={setNewCollectionOpen}>
-        <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
-          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
-            <DialogTitle>New collection</DialogTitle>
-            <DialogDescription>Name the collection, set date and rate. Totals auto-calculate from weights.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
-            <div>
-              <Label>Collection name</Label>
-              <Input
-                value={newCollectionName}
-                onChange={(e) => setNewCollectionName(e.target.value)}
-                placeholder="e.g. Morning shift, Block A"
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-            <div>
-              <Label>Date</Label>
-              <Input
-                type="date"
-                value={newHarvestDate}
-                onChange={(e) => setNewHarvestDate(e.target.value)}
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-            <div>
-              <Label>Price per kg (picker) — KES</Label>
-              <Input
-                type="number"
-                min="1"
-                value={newPricePerKgPicker}
-                onChange={(e) => setNewPricePerKgPicker(e.target.value)}
-                placeholder="20"
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-          </div>
-          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
-            <Button variant="outline" onClick={() => setNewCollectionOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreateCollection} disabled={creating}>
-              {creating ? 'Creating…' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Harvest cash wallet now uses popovers attached to Wallet buttons (no full-screen modal). */}
-
-      {/* Add picker dialog — reset form and adding state when closed so reopening shows a blank form */}
-      <Dialog
-        open={addPickerOpen}
-        onOpenChange={(open) => {
-          setAddPickerOpen(open);
-          if (!open) {
-            setNewPickerNumber('');
-            setNewPickerName('');
-            setAddingPicker(false);
-          }
-        }}
-      >
-        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
-          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
-            <DialogTitle>Add picker</DialogTitle>
-            <DialogDescription>Number auto-fills (next in sequence). One number per picker in this collection.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
-            <div>
-              <Label>Picker number</Label>
-              <Input
-                ref={newPickerNumberRef}
-                type="number"
-                min="1"
-                value={newPickerNumber}
-                onChange={(e) => setNewPickerNumber(e.target.value)}
-                placeholder={String(nextPickerNumber)}
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-            <div>
-              <Label>Picker name</Label>
-              <Input
-                value={newPickerName}
-                onChange={(e) => setNewPickerName(e.target.value)}
-                placeholder="e.g. John"
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-          </div>
-          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
-            <Button onClick={handleAddPicker} disabled={addingPicker} className="min-h-11 w-full font-semibold touch-manipulation">
-              {addingPicker ? 'Saving…' : 'Next'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add weigh entry dialog — opened from card (picker set) or standalone */}
-      <Dialog
-        open={addWeighOpen}
-        onOpenChange={(open) => {
-          setAddWeighOpen(open);
-          if (!open) setWeighOpenedFromCard(false);
-        }}
-      >
-        <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
-          <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
-            <DialogTitle>Add weight</DialogTitle>
-            <DialogDescription>
-              {weighOpenedFromCard && weighPickerId
-                ? `Trip #${nextTripForPicker[weighPickerId] ?? weighTrip}. Totals update when you save.`
-                : 'Weight and trip for the picker.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
-            {weighOpenedFromCard && weighPickerId ? (
-              <p className="font-medium text-foreground">
-                #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
-                {pickersForCollection.find((x) => x.id === weighPickerId)?.pickerName}
-              </p>
             ) : (
-              <div>
-                <Label>Picker</Label>
-                <select
-                  value={weighPickerId}
-                  onChange={(e) => {
-                    setWeighPickerId(e.target.value);
-                    const pid = e.target.value;
-                    setWeighTrip(String(nextTripForPicker[pid] ?? 1));
-                  }}
-                  className="w-full mt-1 min-h-11 rounded-xl border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">Select picker</option>
-                  {pickersForCollection.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      #{p.pickerNumber} {p.pickerName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div>
-              <Label>Weight (kg)</Label>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min="0.1"
-                step="0.1"
-                value={weighKg}
-                onChange={(e) => setWeighKg(e.target.value)}
-                placeholder="e.g. 5.2"
-                className="mt-1 min-h-14 rounded-xl text-lg font-semibold tabular-nums touch-manipulation"
-                autoFocus
-              />
-            </div>
-            <div>
-              <Label>Trip number</Label>
-              <Input
-                type="number"
-                min="1"
-                value={weighTrip}
-                onChange={(e) => setWeighTrip(e.target.value)}
-                className="mt-1 min-h-11 rounded-xl"
-              />
-            </div>
-          </div>
-          <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border gap-2 flex-col">
-            <div className="flex gap-2 w-full flex-col sm:flex-row">
-              <Button variant="outline" onClick={() => setAddWeighOpen(false)} className="min-h-11 flex-1 touch-manipulation">
-                Cancel
-              </Button>
-              <Button onClick={() => handleAddWeigh('close')} disabled={!weighPickerId || !weighKg.trim()} className="min-h-11 flex-1 font-semibold touch-manipulation">
-                Save
-              </Button>
-            </div>
-            {weighPickerId && weighKg.trim() && (
-              <div className="flex gap-2 w-full">
-                <Button onClick={() => handleAddWeigh('stay')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
-                  Save & Stay
-                </Button>
-                <Button onClick={() => handleAddWeigh('next')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
-                  Save & Next
-                </Button>
-              </div>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <>
+                <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
+                  <div className="flex flex-nowrap gap-2 sm:gap-3 overflow-x-auto pb-1 min-w-0 -mx-1 px-1">
+                    {canManageIntake && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('intake')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'intake'
+                            ? 'bg-emerald-500 text-white border-emerald-600 ring-2 ring-emerald-400/50'
+                            : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800'
+                        )}
+                      >
+                        <Scale className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        Intake
+                      </button>
+                    )}
+                    {canPayPickers && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('pay')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'pay'
+                            ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-400/50'
+                            : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800'
+                        )}
+                      >
+                        <Banknote className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        Pay
+                      </button>
+                    )}
+                    {canViewBuyerSection && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('buyer')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'buyer'
+                            ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
+                            : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
+                        )}
+                      >
+                        <ShoppingCart className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        Buyer
+                      </button>
+                    )}
+                  </div>
 
-    </div>
+                  {canManageIntake && (
+                    <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
+                      {quickMode ? (
+                        <>
+                          <div
+                            ref={quickIntakeContainerRef}
+                            style={{ scrollMarginBottom: 'min(20rem, 50vh)' }}
+                          >
+                            <div className="space-y-0.5">
+                              <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                                <Zap className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+                                Quick Intake
+                              </h3>
+                              <p className="text-xs text-muted-foreground max-w-sm">
+                                Enter picker number and kg, then move to the next picker.
+                              </p>
+                            </div>
+
+                            <div className="rounded-md border border-sky-200/80 dark:border-sky-800/80 bg-card shadow-sm p-3 space-y-3 mt-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <Label htmlFor="quick-intake-picker-num" className="text-sm font-medium text-foreground">
+                                    Picker number
+                                  </Label>
+                                  <Input
+                                    id="quick-intake-picker-num"
+                                    ref={quickIntakePickerNumberRef}
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={quickIntakePickerNumber}
+                                    onChange={(e) => setQuickIntakePickerNumber(e.target.value)}
+                                    onFocus={scrollQuickIntakeIntoView}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') quickIntakeKgRef.current?.focus();
+                                    }}
+                                    placeholder="e.g. 5"
+                                    className="min-h-12 text-lg font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 transition-colors"
+                                    autoFocus
+                                  />
+                                  {quickIntakePickerNumber.trim() !== '' && (
+                                    <div className="mt-1.5">
+                                      {quickIntakePickerLookup.matchedPicker ? (
+                                        <div className="rounded-md border border-sky-200 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-950/40 px-2.5 py-1.5">
+                                          <p className="text-sm font-semibold text-sky-900 dark:text-sky-100 truncate">
+                                            #{quickIntakePickerLookup.matchedPicker.pickerNumber} {quickIntakePickerLookup.matchedPicker.pickerName}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground mt-0.5">
+                                            Trip #{quickIntakePickerLookup.nextTripNumber}
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/40 px-2.5 py-1.5">
+                                          <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                                            Picker not found
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="quick-intake-kg" className="text-sm font-medium text-foreground">
+                                    KG
+                                  </Label>
+                                  <Input
+                                    id="quick-intake-kg"
+                                    ref={quickIntakeKgRef}
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0.1"
+                                    step="0.1"
+                                    value={quickIntakeKg}
+                                    onChange={(e) => setQuickIntakeKg(e.target.value)}
+                                    onFocus={scrollQuickIntakeIntoView}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleQuickIntakeNextPicker(false);
+                                    }}
+                                    placeholder="e.g. 4.5"
+                                    className="min-h-12 text-xl font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 bg-sky-50/50 dark:bg-sky-950/20 transition-colors"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <Button
+                                  onClick={() => handleQuickIntakeNextPicker(false)}
+                                  disabled={
+                                    !quickIntakePickerNumber.trim() ||
+                                    !quickIntakeKg.trim() ||
+                                    selectedCollection?.status === 'closed' ||
+                                    (quickIntakePickerNumber.trim() !== '' && !quickIntakePickerLookup.matchedPicker)
+                                  }
+                                  className="min-h-12 w-full font-bold text-sm bg-sky-600 hover:bg-sky-700 active:scale-[0.99] rounded-md shadow-sm touch-manipulation"
+                                >
+                                  Next Picker
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => handleQuickIntakeNextPicker(true)}
+                                  disabled={
+                                    !quickIntakePickerNumber.trim() ||
+                                    !quickIntakeKg.trim() ||
+                                    selectedCollection?.status === 'closed' ||
+                                    (quickIntakePickerNumber.trim() !== '' && !quickIntakePickerLookup.matchedPicker)
+                                  }
+                                  className="min-h-10 sm:min-h-12 sm:flex-shrink-0 font-medium rounded-md border-sky-300 text-sky-800 dark:border-sky-700 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-950/30 touch-manipulation"
+                                >
+                                  Save & Stay
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <h4 className="text-sm font-semibold text-foreground">Entries</h4>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                Entered: <strong className="text-foreground">{uniqueEnteredPickersCount}</strong>
+                              </span>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                Remaining: <strong className="text-foreground">{remainingPickersCount}</strong>
+                              </span>
+                            </div>
+                            <div className="space-y-1 max-h-[280px] overflow-y-auto overscroll-contain">
+                              {quickIntakeEntriesByPicker.length === 0 ? (
+                                <p className="text-sm text-muted-foreground py-3 text-center rounded-md border border-dashed border-border">
+                                  No entries yet.
+                                </p>
+                              ) : (
+                                quickIntakeEntriesByPicker.map((group) => {
+                                  const isExpanded = expandedQuickIntakePickerId === group.pickerId;
+                                  return (
+                                    <div key={group.pickerId} className="rounded-md border border-border bg-card overflow-hidden">
+                                      <button
+                                        type="button"
+                                        className="w-full px-2.5 py-2 flex items-center gap-2 min-w-0 text-left hover:bg-muted/50 active:bg-muted/70 transition-colors"
+                                        onClick={() => setExpandedQuickIntakePickerId((id) => (id === group.pickerId ? null : group.pickerId))}
+                                      >
+                                        <span className="text-sm font-bold tabular-nums text-foreground shrink-0">#{group.pickerNumber}</span>
+                                        <span className="text-sm text-foreground truncate min-w-0 flex-1">{group.pickerName}</span>
+                                        <span className="text-sm font-semibold tabular-nums text-foreground shrink-0">
+                                          {group.totalKg.toFixed(1)} kg
+                                        </span>
+                                        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                                          {group.entries.length} {group.entries.length === 1 ? 'entry' : 'entries'}
+                                        </span>
+                                        <span className={cn('shrink-0 transition-transform', isExpanded && 'rotate-180')}>
+                                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                        </span>
+                                      </button>
+                                      {isExpanded && (
+                                        <div className="border-t border-border bg-muted/20">
+                                          {group.entries.map((entry) => (
+                                            <div
+                                              key={entry.id}
+                                              className="px-2.5 py-1.5 flex items-center gap-2 min-w-0 pl-4"
+                                            >
+                                              <span className="text-sm tabular-nums text-foreground shrink-0 w-10">
+                                                {entry.kg.toFixed(1)} kg
+                                              </span>
+                                              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                                                {entry.recordedAt != null
+                                                  ? format(toDate(entry.recordedAt) ?? new Date(), 'h:mm a')
+                                                  : '—'}
+                                              </span>
+                                              <span className="flex-1 min-w-0" />
+                                              {canManageIntake && selectedCollection?.status !== 'closed' && (
+                                                <Button
+                                                  type="button"
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditIntakeEntry({
+                                                      id: entry.id,
+                                                      pickerId: entry.pickerId,
+                                                      pickerNumber: entry.pickerNumber,
+                                                      pickerName: entry.pickerName,
+                                                      kg: entry.kg,
+                                                      collectionId: entry.collectionId,
+                                                    });
+                                                    setEditIntakePickerId(entry.pickerId);
+                                                    setEditIntakeKg(String(entry.kg));
+                                                  }}
+                                                  aria-label="Edit entry"
+                                                >
+                                                  <Pencil className="h-3 w-3" />
+                                                </Button>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-2 items-stretch">
+                            <Button
+                              size="sm"
+                              className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs"
+                              disabled={selectedCollection?.status === 'closed'}
+                              onClick={() => {
+                                setNewPickerNumber(String(nextPickerNumber));
+                                setAddPickerOpen(true);
+                              }}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1.5" />
+                              Add picker
+                            </Button>
+                            {lastWeighPickerId && pickersForCollection.some((x) => x.id === lastWeighPickerId) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="min-h-9 rounded-lg touch-manipulation flex-shrink-0 text-xs border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-700"
+                                disabled={selectedCollection?.status === 'closed'}
+                                onClick={() => {
+                                  const p = pickersForCollection.find((x) => x.id === lastWeighPickerId);
+                                  if (!p) return;
+                                  setWeighPickerId(p.id);
+                                  setWeighTrip(String(nextTripForPicker[p.id] ?? 1));
+                                  setWeighKg('');
+                                  setWeighOpenedFromCard(true);
+                                  setAddWeighOpen(true);
+                                }}
+                              >
+                                Repeat last
+                              </Button>
+                            )}
+                            {pickersForCollection.length > 0 && (
+                              <div className="relative max-w-xs flex-1 min-w-[180px]">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                                <Input
+                                  placeholder="Search name or number..."
+                                  value={pickerSearch}
+                                  onChange={(e) => setPickerSearch(e.target.value)}
+                                  className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20 w-full"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          {pickersForCollection.length === 0 ? (
+                            <p className="text-muted-foreground text-sm">Add pickers, then tap a card to add weight.</p>
+                          ) : (
+                            <>
+                              <div className="grid grid-cols-2 gap-2">
+                                {filteredPickers.length === 0 ? (
+                                  <p className="col-span-2 text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
+                                ) : (
+                                  filteredPickers.map((p) => {
+                                    const tripCount = tripCountForPicker[p.id] ?? 0;
+                                    const nextTrip = nextTripForPicker[p.id] ?? 1;
+                                    const isPaid = p.isPaid;
+                                    const pickerTotals = getPickerTotals(p.id);
+                                    return (
+                                      <Card
+                                        key={p.id}
+                                        className={cn(
+                                          'relative transition-all min-h-[132px] flex flex-col overflow-hidden touch-manipulation rounded-xl',
+                                          isPaid
+                                            ? 'opacity-75 cursor-not-allowed bg-muted/50'
+                                            : 'cursor-pointer hover:bg-muted/50 active:scale-[0.98]'
+                                        )}
+                                        onClick={isPaid ? undefined : () => {
+                                          setWeighPickerId(p.id);
+                                          setWeighTrip(String(nextTrip));
+                                          setWeighKg('');
+                                          setWeighOpenedFromCard(true);
+                                          setAddWeighOpen(true);
+                                          setRecentPickerIds((prev) => {
+                                            const next = [p.id, ...prev.filter((id) => id !== p.id)].slice(0, 10);
+                                            return next;
+                                          });
+                                        }}
+                                      >
+                                        <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                          <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                            {tripCount}
+                                          </div>
+                                          <div className="flex justify-center flex-shrink-0 pt-1">
+                                            <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
+                                              {p.pickerNumber}
+                                            </div>
+                                          </div>
+                                          <div className="font-semibold text-foreground text-xs sm:text-sm leading-tight line-clamp-2 mt-1">
+                                            {p.pickerName}
+                                          </div>
+                                          <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
+                                            {pickerTotals.totalKg.toFixed(1)} kg
+                                            {canViewPaymentAmounts ? ` - KES ${pickerTotals.totalPay.toLocaleString()}` : ''}
+                                          </div>
+                                          <div className={cn(
+                                            'text-[10px] border-t border-border pt-1.5 mt-1',
+                                            isPaid ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'
+                                          )}>
+                                            {isPaid ? 'Paid' : '+ add'}
+                                          </div>
+                                          {tripOverrideMessageForPicker[p.id] && (
+                                            <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
+                                              {tripOverrideMessageForPicker[p.id]}
+                                            </p>
+                                          )}
+                                        </CardContent>
+                                      </Card>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </TabsContent>
+                  )}
+
+                  {canPayPickers && (
+                    <TabsContent value="pay" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
+                      {quickMode ? (
+                        <>
+                          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setQuickPaySummaryExpanded((e) => !e)}
+                              className="w-full flex items-center justify-between gap-2 text-left rounded-md hover:bg-amber-100/50 dark:hover:bg-amber-900/20 -mx-1 px-1 py-0.5 transition-colors"
+                              aria-expanded={quickPaySummaryExpanded}
+                              title={quickPaySummaryExpanded ? 'Hide summary' : 'Show summary'}
+                            >
+                              <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                                <Banknote className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                                Quick Pay
+                              </h3>
+                              {quickPaySummaryExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                              )}
+                            </button>
+                            {quickPaySummaryExpanded && (
+                              <>
+                                <p className="text-sm text-muted-foreground">
+                                  Pay pickers in number order. Use Pay Full or Pay Partial, then move to the next unpaid picker.
+                                </p>
+                                {quickPayQueue.length === 0 ? (
+                                  <p className="text-sm font-medium text-foreground">No unpaid pickers — queue is empty.</p>
+                                ) : (
+                                  <p className="text-sm font-medium text-foreground tabular-nums">
+                                    {quickPayQueue.length} picker{quickPayQueue.length !== 1 ? 's' : ''} in queue · KES{' '}
+                                    {(collectionFinancials.pickerBalance ?? 0).toLocaleString()} remaining
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-4">
+                            {quickPayQueue.length > 0 && quickPayPickerId && (() => {
+                              const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
+                              if (!picker) return null;
+                              const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
+                              const pickerRate = Number(selectedCollection?.pricePerKgPicker ?? 0) || 20;
+                              const due = queueRow?.totalDue ?? getPickerTotals(quickPayPickerId).totalPay;
+                              const paid = queueRow?.totalPaid ?? ((paidByPickerId[quickPayPickerId] ?? 0) + (quickPayLocalPaidByPickerId[quickPayPickerId] ?? 0));
+                              const balance = Math.max(0, queueRow?.balance ?? (due - paid));
+                              const remainingKg = pickerRate > 0 ? balance / pickerRate : 0;
+
+                              const toTime = (t: any): number => {
+                                if (t == null) return 0;
+                                if (typeof t === 'object' && 'toMillis' in t) return (t as { toMillis: () => number }).toMillis();
+                                if (t instanceof Date) return t.getTime();
+                                return Number(t) || 0;
+                              };
+
+                              const entries = weighEntriesForCollection
+                                .filter((e) => String(e.pickerId ?? '') === quickPayPickerId)
+                                .slice()
+                                .sort((a, b) => toTime(a.recordedAt) - toTime(b.recordedAt))
+                                .map((e) => {
+                                  const kg = Number(e.weightKg ?? 0);
+                                  const amt = Math.round(kg * pickerRate);
+                                  return {
+                                    id: String(e.id ?? `${e.pickerId}-${toTime(e.recordedAt)}-${kg}`),
+                                    kg,
+                                    amount: amt,
+                                  };
+                                })
+                                .filter((x) => Number.isFinite(x.kg) && x.kg > 0);
+
+                              return (
+                                <>
+                                  <div className="flex flex-col items-center text-center gap-2">
+                                    <div className="h-14 w-14 rounded-full bg-emerald-600 text-emerald-50 flex items-center justify-center text-2xl font-extrabold tabular-nums shadow">
+                                      {picker.pickerNumber}
+                                    </div>
+                                    <p className="text-base font-semibold text-foreground leading-tight truncate w-full">
+                                      #{picker.pickerNumber} {picker.pickerName}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                    <p className="text-xs text-muted-foreground">Balance</p>
+                                    <p className="text-2xl font-extrabold tabular-nums text-foreground">KES {balance.toLocaleString()}</p>
+                                    <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                                      ({remainingKg.toFixed(1)}kg remaining)
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                                      <div className="rounded-md bg-background/60 border border-border p-2">
+                                        <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
+                                        <p className="font-semibold tabular-nums">KES {due.toLocaleString()}</p>
+                                      </div>
+                                      <div className="rounded-md bg-background/60 border border-border p-2">
+                                        <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
+                                        <p className="font-semibold tabular-nums">KES {paid.toLocaleString()}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <Button
+                                        onClick={() => handleQuickPaySubmit(balance)}
+                                        disabled={quickPaySaving || balance <= 0}
+                                        className="min-h-12 w-full font-semibold touch-manipulation"
+                                      >
+                                        {quickPaySaving ? (
+                                          <>
+                                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                            Paying…
+                                          </>
+                                        ) : (
+                                          'Pay Full'
+                                        )}
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => {
+                                          setQuickPayPartialBalance(balance);
+                                          setQuickPayAmount('');
+                                          setQuickPayPartialOpen(true);
+                                        }}
+                                        disabled={quickPaySaving || balance <= 0}
+                                        className="min-h-12 w-full font-semibold touch-manipulation"
+                                      >
+                                        Pay Partial
+                                      </Button>
+                                    </div>
+                                    <Button
+                                      variant="outline"
+                                      onClick={handleQuickPaySkip}
+                                      disabled={quickPaySaving}
+                                      className="min-h-12 w-full touch-manipulation"
+                                    >
+                                      Skip
+                                    </Button>
+                                  </div>
+
+                                  {quickPayPartialOpen && (
+                                    <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                                      <Label htmlFor="quick-pay-partial-amount-inline">Enter amount (KES)</Label>
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        Max: KES {quickPayPartialBalance.toLocaleString()}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                                        Remaining after pay: KES{' '}
+                                        {Math.max(0, quickPayPartialBalance - Math.round(Number(quickPayAmount || '0'))).toLocaleString()}
+                                      </p>
+                                      <Input
+                                        id="quick-pay-partial-amount-inline"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={0}
+                                        max={quickPayPartialBalance}
+                                        value={quickPayAmount}
+                                        onChange={(e) => setQuickPayAmount(e.target.value)}
+                                        className="mt-1 min-h-11 text-base font-semibold tabular-nums touch-manipulation"
+                                        autoFocus
+                                      />
+                                      <div className="flex gap-2 mt-2">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          onClick={() => {
+                                            setQuickPayPartialOpen(false);
+                                            setQuickPayAmount('');
+                                            setQuickPayPartialBalance(0);
+                                          }}
+                                          disabled={quickPaySaving}
+                                          className="min-h-10 flex-1 touch-manipulation"
+                                        >
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          onClick={async () => {
+                                            const raw = Math.round(Number(quickPayAmount || '0'));
+                                            const amt =
+                                              quickPayPartialBalance > 0 ? Math.min(raw, quickPayPartialBalance) : raw;
+                                            if (amt <= 0) {
+                                              toast({
+                                                title: 'Invalid amount',
+                                                description: 'Enter an amount greater than 0.',
+                                                variant: 'destructive',
+                                              });
+                                              return;
+                                            }
+                                            await handleQuickPaySubmit(amt);
+                                            setQuickPayPartialOpen(false);
+                                            setQuickPayAmount('');
+                                            setQuickPayPartialBalance(0);
+                                          }}
+                                          disabled={quickPaySaving || !quickPayAmount || Number(quickPayAmount) <= 0}
+                                          className="min-h-10 flex-1 font-semibold touch-manipulation"
+                                        >
+                                          {quickPaySaving ? (
+                                            <>
+                                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                              Paying…
+                                            </>
+                                          ) : (
+                                            'Confirm'
+                                          )}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="space-y-2">
+                                    <p className="text-sm font-semibold text-foreground">Entries</p>
+                                    <div className="rounded-lg border border-border bg-card overflow-hidden">
+                                      {entries.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
+                                      ) : (
+                                        <div className="max-h-[220px] overflow-y-auto">
+                                          {entries.map((e) => (
+                                            <div
+                                              key={e.id}
+                                              className="px-3 py-2 border-b border-border last:border-b-0 flex items-center justify-between gap-3"
+                                            >
+                                              <span className="text-sm tabular-nums text-foreground">
+                                                {e.kg.toFixed(1)}kg
+                                              </span>
+                                              <span className="text-sm tabular-nums font-semibold text-foreground">
+                                                → {e.amount.toLocaleString()}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                            {!(quickPayQueue.length > 0 && quickPayPickerId) && (
+                              <>
+                                <div className="flex flex-col items-center text-center gap-2 opacity-70">
+                                  <div className="h-14 w-14 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl font-extrabold tabular-nums shadow-inner">
+                                    –
+                                  </div>
+                                  <p className="text-base font-semibold text-muted-foreground leading-tight">
+                                    No unpaid pickers in queue
+                                  </p>
+                                </div>
+
+                                <div className="rounded-lg border border-border bg-muted/30 p-3 opacity-70">
+                                  <p className="text-xs text-muted-foreground">Balance</p>
+                                  <p className="text-2xl font-extrabold tabular-nums text-muted-foreground">KES 0</p>
+                                  <p className="text-xs text-muted-foreground tabular-nums mt-0.5">
+                                    (0.0kg remaining)
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                                    <div className="rounded-md bg-background/60 border border-border p-2">
+                                      <p className="text-[10px] text-muted-foreground uppercase">Total due</p>
+                                      <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
+                                    </div>
+                                    <div className="rounded-md bg-background/60 border border-border p-2">
+                                      <p className="text-[10px] text-muted-foreground uppercase">Paid</p>
+                                      <p className="font-semibold tabular-nums text-muted-foreground">KES 0</p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2 opacity-70">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <Button
+                                      disabled
+                                      className="min-h-12 w-full font-semibold touch-manipulation"
+                                    >
+                                      Pay Full
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      disabled
+                                      className="min-h-12 w-full font-semibold touch-manipulation"
+                                    >
+                                      Pay Partial
+                                    </Button>
+                                  </div>
+                                  <Button
+                                    variant="outline"
+                                    disabled
+                                    className="min-h-12 w-full touch-manipulation"
+                                  >
+                                    Skip
+                                  </Button>
+                                </div>
+
+                                <div className="space-y-2 opacity-70">
+                                  <p className="text-sm font-semibold text-muted-foreground">Entries</p>
+                                  <div className="rounded-lg border border-border bg-card overflow-hidden">
+                                    <p className="text-sm text-muted-foreground px-3 py-3">No intake entries yet.</p>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {payUnpaidAndGroups.unpaid.length > 0 && (
+                            <div className="rounded-xl border border-border bg-muted/30 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                              <span className="font-medium text-muted-foreground">
+                                Unpaid: {payUnpaidAndGroups.unpaid.length} picker{payUnpaidAndGroups.unpaid.length !== 1 ? 's' : ''}
+                              </span>
+                              <span className="tabular-nums font-semibold text-foreground">
+                                KES {(collectionFinancials.pickerBalance ?? 0).toLocaleString()} remaining
+                              </span>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                Paid out: KES {(collectionFinancials.totalPaidOut ?? 0).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            {pickersForCollection.length > 0 && (
+                              <div className="relative max-w-xs">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                                <Input
+                                  placeholder="Search name or number..."
+                                  value={pickerSearch}
+                                  onChange={(e) => setPickerSearch(e.target.value)}
+                                  className="pl-7 min-h-9 rounded-lg text-sm bg-muted/50 border-muted-foreground/20"
+                                />
+                              </div>
+                            )}
+                            {paySelectedIds.size > 0 && (
+                              <Button
+                                size="sm"
+                                className="min-h-9 rounded-lg font-semibold"
+                                onClick={() => handleMarkMultiplePaid(Array.from(paySelectedIds))}
+                              >
+                                Pay selected ({paySelectedIds.size}) — KES {selectedTotalPay.toLocaleString()}
+                              </Button>
+                            )}
+                          </div>
+                          <div className="space-y-4">
+                            {pickersForCollection.length === 0 ? (
+                              <p className="w-full text-muted-foreground text-sm">Add pickers in Intake first.</p>
+                            ) : filteredPickersForPay.length === 0 ? (
+                              <p className="w-full text-muted-foreground text-sm">No picker matches &quot;{pickerSearch}&quot;</p>
+                            ) : (
+                              <>
+                                {unpaidPickersByBalance.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1.5">Unpaid (tap to pay)</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {unpaidPickersByBalance.map((p) => {
+                                        const isPaying = payingPickerIds?.has(p.id);
+                                        const selected = paySelectedIds.has(p.id);
+                                        const tripCount = tripCountForPicker[p.id] ?? 0;
+                                        const pickerTotals = getPickerTotals(p.id);
+                                        const paid = paidByPickerId[p.id] ?? 0;
+                                        const balance = Math.max(0, pickerTotals.totalPay - paid);
+                                        return (
+                                          <Card
+                                            key={p.id}
+                                            className={cn(
+                                              'relative min-h-[132px] flex flex-col overflow-hidden transition-all active:scale-[0.98] cursor-pointer hover:bg-muted/50 bg-card touch-manipulation rounded-xl',
+                                              selected && 'ring-2 ring-primary ring-offset-2',
+                                              quickPayOpen && quickPayPickerId === p.id && 'ring-2 ring-amber-500 ring-offset-2',
+                                              isPaying && 'ring-2 ring-amber-500 ring-offset-2 bg-amber-50/50 dark:bg-amber-950/20'
+                                            )}
+                                            onClick={() => !isPaying && openQuickPay(p.id)}
+                                          >
+                                            <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                              <div className="absolute top-1 right-1 flex items-center gap-1">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={selected}
+                                                  onChange={(e) => { e.stopPropagation(); togglePaySelection(p.id); }}
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className="rounded border-input h-4 w-4"
+                                                  aria-label={`Select ${p.pickerName} for batch pay`}
+                                                />
+                                                <span className="px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                                  {tripCount}
+                                                </span>
+                                              </div>
+                                              <div className="flex justify-center flex-shrink-0 pt-1">
+                                                <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
+                                                  {p.pickerNumber}
+                                                </div>
+                                              </div>
+                                              <div className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-1">
+                                                {p.pickerName}
+                                              </div>
+                                              <div className="border-t border-border pt-1.5 mt-1 space-y-0.5">
+                                                <div className="text-[10px] text-muted-foreground tabular-nums">
+                                                  {pickerTotals.totalKg.toFixed(1)} kg · KES {pickerTotals.totalPay.toLocaleString()} due
+                                                </div>
+                                                {paid > 0 && (
+                                                  <div className="text-[10px] text-muted-foreground tabular-nums">
+                                                    Paid KES {paid.toLocaleString()} · balance KES {balance.toLocaleString()}
+                                                  </div>
+                                                )}
+                                                {paid === 0 && (
+                                                  <div className="text-base font-bold text-foreground tabular-nums">
+                                                    KES {balance.toLocaleString()}
+                                                  </div>
+                                                )}
+                                              </div>
+                                              <div className="min-h-8 flex items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 font-medium text-[10px] pt-1 touch-manipulation">
+                                                {isPaying ? (
+                                                  <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                                                    <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                                                    Paying…
+                                                  </span>
+                                                ) : `Tap to pay · KES ${balance.toLocaleString()}`}
+                                              </div>
+                                              {tripOverrideMessageForPicker[p.id] && (
+                                                <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5 text-center leading-tight">
+                                                  {tripOverrideMessageForPicker[p.id]}
+                                                </p>
+                                              )}
+                                            </CardContent>
+                                          </Card>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {payUnpaidAndGroups.individuals.length > 0 && (
+                                  <div className="space-y-2">
+                                    <p className="text-xs font-medium text-muted-foreground">Individuals</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {payUnpaidAndGroups.individuals.map(({ label, pickers }) => {
+                                        const p = pickers[0];
+                                        const tripCount = tripCountForPicker[p.id] ?? 0;
+                                        const pickerTotals = getPickerTotals(p.id);
+                                        return (
+                                          <Card
+                                            key={p.id}
+                                            className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                                          >
+                                            <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                              <div className="absolute top-1 right-1 px-1.5 h-5 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground">
+                                                {tripCount}
+                                              </div>
+                                              <div className="flex justify-center flex-shrink-0 pt-1">
+                                                <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-base font-bold tabular-nums shadow ring-2 ring-background">
+                                                  {p.pickerNumber}
+                                                </div>
+                                              </div>
+                                              <p className="font-medium text-foreground text-xs leading-tight line-clamp-2 mt-0.5">{p.pickerName}</p>
+                                              <div className="border-t border-border pt-1 mt-1 space-y-0.5">
+                                                <div className="text-sm font-bold text-foreground tabular-nums leading-none">
+                                                  KES {pickerTotals.totalPay.toLocaleString()}
+                                                </div>
+                                                <div className="inline-flex items-center justify-center gap-0.5 text-[10px] text-green-700 dark:text-green-400 font-medium">
+                                                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                                  <span>PAID</span>
+                                                </div>
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {payUnpaidAndGroups.groups.length > 0 && (
+                                  <div className="space-y-2">
+                                    <p className="text-xs font-medium text-muted-foreground">Groups</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                      {payUnpaidAndGroups.groups.map(({ label, pickers }) => (
+                                        <div
+                                          key={label}
+                                          className="rounded-xl border bg-muted/30 dark:bg-muted/20 p-2 min-w-0"
+                                        >
+                                          <p className="text-xs font-semibold text-foreground mb-2 text-center">{label}</p>
+                                          <div className="grid grid-cols-2 gap-2">
+                                            {pickers.map((p) => {
+                                              const tripCount = tripCountForPicker[p.id] ?? 0;
+                                              const pickerTotals = getPickerTotals(p.id);
+                                              return (
+                                                <Card
+                                                  key={p.id}
+                                                  className="relative aspect-square flex flex-col overflow-hidden bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                                                >
+                                                  <CardContent className="p-1.5 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                                    <div className="absolute top-0.5 right-0.5 px-1 h-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold tabular-nums text-foreground">
+                                                      {tripCount}
+                                                    </div>
+                                                    <div className="flex justify-center flex-shrink-0">
+                                                      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold tabular-nums shadow ring-2 ring-background">
+                                                        {p.pickerNumber}
+                                                      </div>
+                                                    </div>
+                                                    <p className="font-medium text-foreground text-[10px] leading-tight line-clamp-2">{p.pickerName}</p>
+                                                    <div className="text-[10px] font-bold tabular-nums text-foreground">
+                                                      KES {pickerTotals.totalPay.toLocaleString()}
+                                                    </div>
+                                                    <div className="inline-flex items-center justify-center gap-0.5 text-[9px] text-green-700 dark:text-green-400 font-medium">
+                                                      <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
+                                                      <span>PAID</span>
+                                                    </div>
+                                                  </CardContent>
+                                                </Card>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </TabsContent>
+                  )}
+
+                  {canViewBuyerSection && (
+                    <TabsContent value="buyer" className="mt-4 space-y-4">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Buyer sale</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {selectedCollection.status === 'closed' && (
+                            <div className="space-y-1 text-sm text-muted-foreground">
+                              {selectedCollection.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0 && (
+                                <p>Price they bought with: <strong className="text-foreground">KES {Number(selectedCollection.pricePerKgBuyer).toLocaleString()} per kg</strong></p>
+                              )}
+                              {canViewFinancials ? (
+                                <p>Revenue and profit are in the Buyer sale card when the sale is complete. Paid out is in the Wallet button above.</p>
+                              ) : (
+                                <p>Buyer pricing is shown here. Financial totals are restricted for your account.</p>
+                              )}
+                            </div>
+                          )}
+                          <div className="space-y-2">
+                            <Label>Price per kg (buyer) — KES</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="e.g. 180"
+                              value={buyerPricePerKg}
+                              onChange={(e) => setBuyerPricePerKg(e.target.value)}
+                              className="text-lg min-h-12 rounded-xl"
+                              disabled={selectedCollection.status === 'closed'}
+                            />
+                          </div>
+                          {selectedCollection.status !== 'closed' && Number(buyerPricePerKg || 0) > 0 && (
+                            <div className="space-y-1 text-sm">
+                              <p>
+                                Total revenue: <strong>KES {(Number(totalRevenue) || 0).toLocaleString()}</strong>
+                              </p>
+                              <p>
+                                Total paid out: <strong>KES {(Number(collectionFinancials.totalPaidOut) || 0).toLocaleString()}</strong>
+                              </p>
+                              <p>
+                                Profit: <strong className={(Number(profit) || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                                  KES {(Number(profit) || 0).toLocaleString()}
+                                </strong>
+                              </p>
+                            </div>
+                          )}
+                          {selectedCollection.status !== 'closed' && (
+                            <>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <Button
+                                  size="lg"
+                                  variant="outline"
+                                  className="min-h-12 rounded-xl flex-1"
+                                  disabled={!buyerPricePerKg || markingBuyerPaid}
+                                  onClick={() => handleSetBuyerPrice(false)}
+                                >
+                                  Save buyer price
+                                </Button>
+                                <Button
+                                  size="lg"
+                                  className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
+                                  disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid || !canCloseHarvest}
+                                  onClick={() => handleSetBuyerPrice(true)}
+                                >
+                                  MARK BUYER PAID
+                                </Button>
+                              </div>
+                              {!allPickersPaid && pickersForCollection.length > 0 && (
+                                <p className="text-amber-600 dark:text-amber-400 text-sm">
+                                  All pickers must be marked cash paid before closing.
+                                </p>
+                              )}
+                              {!canCloseHarvest && (
+                                <p className="text-muted-foreground text-sm">
+                                  You can save buyer pricing, but only users with close access can mark buyer paid.
+                                </p>
+                              )}
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  )}
+                </Tabs>
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {/* Edit recent intake entry dialog */}
+        <Dialog
+          open={!!editIntakeEntry}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditIntakeEntry(null);
+              setEditIntakePickerId('');
+              setEditIntakeKg('');
+            }
+          }}
+        >
+          <DialogContent className="w-full max-w-sm rounded-2xl mx-2">
+            <DialogHeader>
+              <DialogTitle>Edit entry</DialogTitle>
+              <DialogDescription>Change picker or weight. Totals will update after save.</DialogDescription>
+            </DialogHeader>
+            {editIntakeEntry && (
+              <div className="space-y-4 py-2">
+                <div>
+                  <Label>Picker</Label>
+                  <UiSelect
+                    value={editIntakePickerId}
+                    onValueChange={setEditIntakePickerId}
+                  >
+                    <SelectTrigger className="mt-1 min-h-11 rounded-xl">
+                      <SelectValue placeholder="Select picker" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pickersForCollection.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          #{p.pickerNumber} {p.pickerName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </UiSelect>
+                </div>
+                <div>
+                  <Label>Weight (kg)</Label>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    min="0.1"
+                    step="0.1"
+                    value={editIntakeKg}
+                    onChange={(e) => setEditIntakeKg(e.target.value)}
+                    placeholder="e.g. 5.2"
+                    className="mt-1 min-h-11 rounded-xl"
+                  />
+                </div>
+                <DialogFooter className="gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditIntakeEntry(null);
+                      setEditIntakePickerId('');
+                      setEditIntakeKg('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleSaveEditIntake()}
+                    disabled={editIntakeSaving || !editIntakePickerId || !editIntakeKg.trim()}
+                  >
+                    {editIntakeSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0 mr-2" />
+                        Saving…
+                      </>
+                    ) : (
+                      'Save'
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* New collection dialog */}
+        <Dialog open={newCollectionOpen} onOpenChange={setNewCollectionOpen}>
+          <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+            <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
+              <DialogTitle>New collection</DialogTitle>
+              <DialogDescription>Name the collection, set date and rate. Totals auto-calculate from weights.</DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+              <div>
+                <Label>Collection name</Label>
+                <Input
+                  value={newCollectionName}
+                  onChange={(e) => setNewCollectionName(e.target.value)}
+                  placeholder="e.g. Morning shift, Block A"
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label>Date</Label>
+                <Input
+                  type="date"
+                  value={newHarvestDate}
+                  onChange={(e) => setNewHarvestDate(e.target.value)}
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label>Price per kg (picker) — KES</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={newPricePerKgPicker}
+                  onChange={(e) => setNewPricePerKgPicker(e.target.value)}
+                  placeholder="20"
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+            </div>
+            <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
+              <Button variant="outline" onClick={() => setNewCollectionOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreateCollection} disabled={creating}>
+                {creating ? 'Creating…' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add picker dialog */}
+        <Dialog
+          open={addPickerOpen}
+          onOpenChange={(open) => {
+            setAddPickerOpen(open);
+            if (!open) {
+              setNewPickerNumber('');
+              setNewPickerName('');
+              setAddingPicker(false);
+            }
+          }}
+        >
+          <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+            <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
+              <DialogTitle>Add picker</DialogTitle>
+              <DialogDescription>Number auto-fills (next in sequence). One number per picker in this collection.</DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+              <div>
+                <Label>Picker number</Label>
+                <Input
+                  ref={newPickerNumberRef}
+                  type="number"
+                  min="1"
+                  value={newPickerNumber}
+                  onChange={(e) => setNewPickerNumber(e.target.value)}
+                  placeholder={String(nextPickerNumber)}
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+              <div>
+                <Label>Picker name</Label>
+                <Input
+                  value={newPickerName}
+                  onChange={(e) => setNewPickerName(e.target.value)}
+                  placeholder="e.g. John"
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+            </div>
+            <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
+              <Button onClick={handleAddPicker} disabled={addingPicker} className="min-h-11 w-full font-semibold touch-manipulation">
+                {addingPicker ? 'Saving…' : 'Next'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add weigh entry dialog */}
+        <Dialog
+          open={addWeighOpen}
+          onOpenChange={(open) => {
+            setAddWeighOpen(open);
+            if (!open) setWeighOpenedFromCard(false);
+          }}
+        >
+          <DialogContent className="w-[88vw] max-w-xs sm:max-w-md rounded-2xl mx-auto max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+            <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
+              <DialogTitle>Add weight</DialogTitle>
+              <DialogDescription>
+                {weighOpenedFromCard && weighPickerId
+                  ? `Trip #${nextTripForPicker[weighPickerId] ?? weighTrip}. Totals update when you save.`
+                  : 'Weight and trip for the picker.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2">
+              {weighOpenedFromCard && weighPickerId ? (
+                <p className="font-medium text-foreground">
+                  #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
+                  {pickersForCollection.find((x) => x.id === weighPickerId)?.pickerName}
+                </p>
+              ) : (
+                <div>
+                  <Label>Picker</Label>
+                  <select
+                    value={weighPickerId}
+                    onChange={(e) => {
+                      setWeighPickerId(e.target.value);
+                      const pid = e.target.value;
+                      setWeighTrip(String(nextTripForPicker[pid] ?? 1));
+                    }}
+                    className="w-full mt-1 min-h-11 rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select picker</option>
+                    {pickersForCollection.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        #{p.pickerNumber} {p.pickerName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <Label>Weight (kg)</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.1"
+                  step="0.1"
+                  value={weighKg}
+                  onChange={(e) => setWeighKg(e.target.value)}
+                  placeholder="e.g. 5.2"
+                  className="mt-1 min-h-14 rounded-xl text-lg font-semibold tabular-nums touch-manipulation"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label>Trip number</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={weighTrip}
+                  onChange={(e) => setWeighTrip(e.target.value)}
+                  className="mt-1 min-h-11 rounded-xl"
+                />
+              </div>
+            </div>
+            <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border gap-2 flex-col">
+              <div className="flex gap-2 w-full flex-col sm:flex-row">
+                <Button variant="outline" onClick={() => setAddWeighOpen(false)} className="min-h-11 flex-1 touch-manipulation">
+                  Cancel
+                </Button>
+                <Button onClick={() => handleAddWeigh('close')} disabled={!weighPickerId || !weighKg.trim()} className="min-h-11 flex-1 font-semibold touch-manipulation">
+                  Save
+                </Button>
+              </div>
+              {weighPickerId && weighKg.trim() && (
+                <div className="flex gap-2 w-full">
+                  <Button onClick={() => handleAddWeigh('stay')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
+                    Save & Stay
+                  </Button>
+                  <Button onClick={() => handleAddWeigh('next')} className="min-h-12 flex-1 font-semibold text-base bg-emerald-600 hover:bg-emerald-700 touch-manipulation">
+                    Save & Next
+                  </Button>
+                </div>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </>
   );
 }
-
-

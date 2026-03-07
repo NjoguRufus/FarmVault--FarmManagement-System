@@ -140,6 +140,8 @@ export type PermissionPresetKey =
 export type EmployeeStatus = 'active' | 'inactive' | 'on-leave';
 
 export interface User {
+  displayName: string;
+  displayName: string;
   id: string;
   email: string;
   name: string;

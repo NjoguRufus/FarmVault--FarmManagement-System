@@ -1,6 +1,13 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { SignIn } from "@clerk/react";
+import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
+import { isEmergencyAccessEnabled } from "@/config/emergencyAccess";
 
+/**
+ * Sign-in UI depends only on Clerk. No AuthContext or employee/company lookup runs here;
+ * data fetching runs only after a Clerk user exists (in AuthContext).
+ */
 export default function SignInPage() {
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -40,13 +47,26 @@ export default function SignInPage() {
           </div>
 
           <div className="bg-[#F5F1EB] rounded-3xl shadow-2xl p-4 md:p-6 border border-white/20">
-            <SignIn
-              routing="path"
-              path="/sign-in"
-              signUpUrl="/sign-up"
-              afterSignInUrl="/app"
-            />
+            <ClerkLoadErrorBoundary>
+              <SignIn
+                routing="path"
+                path="/sign-in"
+                signUpUrl="/sign-up"
+                afterSignInUrl="/app"
+              />
+            </ClerkLoadErrorBoundary>
           </div>
+
+          {isEmergencyAccessEnabled() && (
+            <p className="mt-4 text-center">
+              <Link
+                to="/emergency-access"
+                className="text-sm text-white/80 hover:text-white underline"
+              >
+                Sign-in not loading? Use emergency access
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -8,11 +8,15 @@ interface RequireDeveloperProps {
 }
 
 export function RequireDeveloper({ children }: RequireDeveloperProps) {
-  const { isAuthenticated, authReady, isDeveloper, user } = useAuth();
+  const { isAuthenticated, authReady, isDeveloper, user, isEmergencySession } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
     return <AuthLoadingScreen />;
+  }
+
+  if (isEmergencySession) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (!isAuthenticated) {
