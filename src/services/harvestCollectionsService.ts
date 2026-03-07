@@ -423,7 +423,10 @@ export async function addPickerIntake(params: {
   }
 }
 
-/** Update an existing intake entry (picker and/or quantity). Used when editing a recent Quick Intake entry. */
+/**
+ * Update an existing intake entry (picker and/or quantity). Used when editing a recent Quick Intake entry.
+ * Entry identity is by database row id only; do not use picker, kg, or timestamp to identify entries.
+ */
 export async function updatePickerIntakeEntry(params: {
   entryId: string;
   collectionId: string;
@@ -444,6 +447,21 @@ export async function updatePickerIntakeEntry(params: {
     .update(updatePayload)
     .eq('id', entryId)
     .eq('collection_id', params.collectionId);
+
+  if (error) throw error;
+}
+
+/**
+ * Delete an intake entry by its database row id. Recalculates picker/collection totals after invalidation.
+ * Entry identity is by id only; identical-looking entries (same picker, kg, time) remain separate records.
+ */
+export async function deletePickerIntakeEntry(params: { entryId: string; collectionId: string }): Promise<void> {
+  const { entryId, collectionId } = params;
+  const { error } = await harvest()
+    .from('picker_intake_entries')
+    .delete()
+    .eq('id', entryId)
+    .eq('collection_id', collectionId);
 
   if (error) throw error;
 }
