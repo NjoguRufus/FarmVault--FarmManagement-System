@@ -1,12 +1,22 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { useAuth as useClerkAuth, useUser, useSignIn } from '@clerk/react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { User, UserRole, Employee, PermissionMap } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions } from '@/lib/permissions';
-import { getCompany } from '@/services/companyService';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
+
+/** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
+export interface ClerkStateSnapshot {
+  isLoaded: boolean;
+  isSignedIn: boolean;
+  userId: string | null;
+  clerkUser: { primaryEmailAddress?: { emailAddress?: string }; fullName?: string; username?: string; imageUrl?: string } | null;
+  signInLoaded: boolean;
+  signIn: { create: (opts: { identifier: string; password: string }) => Promise<{ status?: string; createdSessionId?: string; errors?: Array<{ message?: string; longMessage?: string }> }> } | null;
+  setActiveSignIn: ((opts: { session: string }) => Promise<void>) | null;
+  signOut: () => Promise<void>;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -17,6 +27,8 @@ interface AuthContextType {
   isDeveloper: boolean;
   /** True when user is signed in but users/{uid} is missing companyId/role (setup incomplete). */
   setupIncomplete: boolean;
+  /** True when session is from emergency access (bypasses Clerk). Operational routes only. */
+  isEmergencySession: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   switchRole: (role: UserRole) => void;
@@ -26,6 +38,89 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_USER_CACHE_KEY = 'farmvault:auth:user:v1';
+const EMERGENCY_SESSION_KEY = 'farmvault:emergency-session:v1';
+const CLERK_LOAD_TIMEOUT_MS = 4000;
+
+function isEmergencyAccessEnabled(): boolean {
+  return import.meta.env.VITE_EMERGENCY_ACCESS === 'true' || import.meta.env.VITE_EMERGENCY_ACCESS === '1';
+}
+
+function getEmergencyConfig(): { email: string; userId: string; companyId: string; role: string } | null {
+  if (!isEmergencyAccessEnabled()) return null;
+  const email = import.meta.env.VITE_EMERGENCY_EMAIL;
+  const userId = import.meta.env.VITE_EMERGENCY_USER_ID;
+  const companyId = import.meta.env.VITE_EMERGENCY_COMPANY_ID;
+  const role = import.meta.env.VITE_EMERGENCY_ROLE || 'company_admin';
+  if (!email || !userId || !companyId) return null;
+  return { email: String(email).trim().toLowerCase(), userId: String(userId), companyId: String(companyId), role: String(role) };
+}
+
+function readEmergencySession(): User | null {
+  if (typeof window === 'undefined') return null;
+  const config = getEmergencyConfig();
+  if (!config) return null;
+  try {
+    const raw = window.localStorage.getItem(EMERGENCY_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as { email?: string; userId?: string; companyId?: string; role?: string };
+    if (data.email?.toLowerCase() !== config.email || data.userId !== config.userId) return null;
+    return {
+      id: config.userId,
+      email: config.email,
+      name: data.name ?? 'Emergency Access',
+      role: (config.role === 'company_admin' || config.role === 'company-admin' ? 'company-admin' : config.role) as UserRole,
+      employeeRole: undefined,
+      companyId: config.companyId,
+      avatar: undefined,
+      createdAt: new Date(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeEmergencySession(user: User | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!user) {
+      window.localStorage.removeItem(EMERGENCY_SESSION_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      EMERGENCY_SESSION_KEY,
+      JSON.stringify({ email: user.email, userId: user.id, companyId: user.companyId, role: user.role, name: user.name }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Called from Emergency Access page to create a local session. Only works when VITE_EMERGENCY_ACCESS is true
+ * and email matches VITE_EMERGENCY_EMAIL. Returns true if session was created.
+ */
+export function createEmergencySession(email: string): boolean {
+  const config = getEmergencyConfig();
+  if (!config) return false;
+  const normalized = String(email || '').trim().toLowerCase();
+  if (normalized !== config.email) return false;
+  const role = (config.role === 'company_admin' || config.role === 'company-admin' ? 'company-admin' : config.role) as UserRole;
+  const user: User = {
+    id: config.userId,
+    email: config.email,
+    name: 'Emergency Access',
+    role,
+    employeeRole: undefined,
+    companyId: config.companyId,
+    avatar: undefined,
+    createdAt: new Date(),
+  };
+  writeEmergencySession(user);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('farmvault:emergency-session-created'));
+  }
+  return true;
+}
 
 function isCurrentRouteDev(): boolean {
   if (typeof window === 'undefined') return false;
@@ -185,36 +280,127 @@ function isUserSetupComplete(data: { role?: string | null; companyId?: string | 
   return Boolean(data.companyId && role);
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const clerk = useClerkAuth();
-  const { user: clerkUser } = useUser();
-  const { isLoaded: signInLoaded, signIn, setActive: setActiveSignIn } = useSignIn();
-  const { toast } = useToast();
+export function AuthProvider({
+  children,
+  clerkState = undefined,
+}: {
+  children: ReactNode;
+  /** When null, emergency-only mode (no Clerk). When undefined, caller must be ClerkAuthBridge which passes state. */
+  clerkState?: ClerkStateSnapshot | null;
+}) {
+  const toast = useToast();
+  const clerkLoaded = clerkState === null ? true : clerkState?.isLoaded ?? false;
+  const isSignedIn = clerkState === null ? false : clerkState?.isSignedIn ?? false;
+  const userId = clerkState === null ? null : clerkState?.userId ?? null;
+  const clerkUser = clerkState === null ? null : clerkState?.clerkUser ?? null;
+  const signInLoaded = clerkState === null ? false : clerkState?.signInLoaded ?? false;
+  const signIn = clerkState === null ? null : clerkState?.signIn ?? null;
+  const setActiveSignIn = clerkState === null ? null : clerkState?.setActiveSignIn ?? null;
+  const clerkSignOut = clerkState === null ? null : clerkState?.signOut ?? null;
 
-  const [user, setUser] = useState<User | null>(() => readCachedUser());
+  const [user, setUser] = useState<User | null>(() => {
+    if (clerkState === null) return readEmergencySession();
+    return readCachedUser();
+  });
   const [employeeProfile, setEmployeeProfile] = useState<Employee | null>(null);
   const [permissions, setPermissions] = useState<PermissionMap>(() => getDefaultPermissions());
-  const [authReady, setAuthReady] = useState(false);
+  const [authReady, setAuthReady] = useState(() => {
+    if (clerkState === null) return true;
+    return false;
+  });
   const [setupIncomplete, setSetupIncomplete] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
+    if (typeof window === 'undefined' || clerkState === null) return false;
     return window.localStorage.getItem('fv:isDeveloper') === '1';
   });
+  const [isEmergencySession, setIsEmergencySession] = useState<boolean>(() => clerkState === null && !!readEmergencySession());
+  const clerkLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { isLoaded: clerkLoaded, isSignedIn, userId } = clerk;
+  // When emergency session is created from the Emergency Access page, pick it up so RequireAuth sees the user.
+  useEffect(() => {
+    const onEmergencySessionCreated = () => {
+      const emergencyUser = readEmergencySession();
+      if (emergencyUser) {
+        setUser(emergencyUser);
+        setEmployeeProfile(null);
+        setPermissions(buildEffectivePermissions(emergencyUser, null));
+        setSetupIncomplete(false);
+        setIsEmergencySession(true);
+      }
+    };
+    window.addEventListener('farmvault:emergency-session-created', onEmergencySessionCreated);
+    return () => window.removeEventListener('farmvault:emergency-session-created', onEmergencySessionCreated);
+  }, []);
+
+  // When Clerk is present but not loaded yet, set authReady true after timeout so sign-in page and redirects are not blocked forever.
+  useEffect(() => {
+    if (clerkState === null) return;
+    if (clerkLoaded) {
+      if (clerkLoadTimeoutRef.current) {
+        clearTimeout(clerkLoadTimeoutRef.current);
+        clerkLoadTimeoutRef.current = null;
+      }
+      return;
+    }
+    if (import.meta.env.DEV) {
+      console.warn("[AuthContext] Clerk still loading; will allow UI to proceed after timeout");
+    }
+    clerkLoadTimeoutRef.current = setTimeout(() => {
+      clerkLoadTimeoutRef.current = null;
+      if (import.meta.env.DEV) {
+        console.warn("[AuthContext] Clerk load timeout reached; setting authReady true so sign-in does not freeze");
+      }
+      setAuthReady(true);
+    }, CLERK_LOAD_TIMEOUT_MS);
+    return () => {
+      if (clerkLoadTimeoutRef.current) {
+        clearTimeout(clerkLoadTimeoutRef.current);
+      }
+    };
+  }, [clerkState === null, clerkLoaded]);
 
   useEffect(() => {
+    if (clerkState === null) {
+      const emergencyUser = readEmergencySession();
+      setUser(emergencyUser);
+      if (emergencyUser) {
+        setPermissions(buildEffectivePermissions(emergencyUser, null));
+        setSetupIncomplete(false);
+        setIsEmergencySession(true);
+      } else {
+        setEmployeeProfile(null);
+        setPermissions(getDefaultPermissions());
+        setIsEmergencySession(false);
+      }
+      return;
+    }
+
     if (!clerkLoaded) {
+      if (import.meta.env.DEV) {
+        console.warn("[AuthContext] Clerk still loading; skipping profile fetch until loaded");
+      }
       return;
     }
 
     if (!isSignedIn) {
+      const emergencyUser = readEmergencySession();
+      if (emergencyUser) {
+        setUser(emergencyUser);
+        setEmployeeProfile(null);
+        setPermissions(buildEffectivePermissions(emergencyUser, null));
+        setSetupIncomplete(false);
+        setIsEmergencySession(true);
+        setAuthReady(true);
+        return;
+      }
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
       writeCachedUser(null);
+      writeEmergencySession(null);
       setSetupIncomplete(false);
       setIsDeveloper(false);
+      setIsEmergencySession(false);
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('fv:isDeveloper', '0');
       }
@@ -462,8 +648,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSetupIncomplete(true);
           writeCachedUser(null);
         }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
+        const errMsg = (error as Error)?.message ?? String(error);
+        if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
+          console.error('[AuthContext] Clerk failed:', error);
+        } else if (import.meta.env.DEV) {
           console.warn('[Auth] Profile load failed:', error);
         }
         toast({
@@ -479,11 +667,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [clerkLoaded, isSignedIn, userId, clerkUser, toast, isDeveloper]);
+  }, [clerkLoaded, isSignedIn, userId]);
 
   const login = async (email: string, password: string) => {
+    if (clerkState === null) {
+      const err: any = new Error('Sign in is not available in emergency-only mode. Use the emergency access page.');
+      throw err;
+    }
     if (!signInLoaded || !signIn || !setActiveSignIn) {
-      // Give Clerk a brief moment to finish initializing before failing.
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (!signInLoaded || !signIn || !setActiveSignIn) {
         const err: any = new Error('Sign in is temporarily unavailable. Please refresh the page and try again.');
@@ -512,9 +703,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    clerk
-      .signOut()
-      .finally(() => {
+    if (isEmergencySession) {
+      writeEmergencySession(null);
+      setUser(null);
+      setEmployeeProfile(null);
+      setPermissions(getDefaultPermissions());
+      setSetupIncomplete(false);
+      setIsEmergencySession(false);
+      return;
+    }
+    if (clerkSignOut) {
+      clerkSignOut().finally(() => {
         setUser(null);
         setEmployeeProfile(null);
         setPermissions(getDefaultPermissions());
@@ -522,6 +721,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsDeveloper(false);
         writeCachedUser(null);
       });
+    } else {
+      setUser(null);
+      setEmployeeProfile(null);
+      setPermissions(getDefaultPermissions());
+      setSetupIncomplete(false);
+      setIsDeveloper(false);
+      writeCachedUser(null);
+    }
   };
 
   const switchRole = (role: UserRole) => {
@@ -531,7 +738,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshUserAvatar = async () => {
-    if (!userId || !user) return;
+    if (isEmergencySession || !userId || !user) return;
     try {
       const { data: profileRow } = await db
         .core()
@@ -560,6 +767,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authReady,
         isDeveloper,
         setupIncomplete,
+        isEmergencySession: !!isEmergencySession,
         login,
         logout,
         switchRole,

@@ -5,11 +5,13 @@
  * Wallet: finance.project_wallets + finance.project_wallet_ledger (source of truth).
  * Prefers RPCs (harvest.record_intake, harvest.record_payment) when recording intake/payment by picker_id.
  * No Firebase/Firestore.
+ * Offline: intake/payment are queued via lib/offlineQueue and synced later with client_entry_id for dedup.
  */
 
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import type { HarvestCollectionStatus } from '@/types';
+import { addToOfflineQueue } from '@/lib/offlineQueue';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
@@ -28,6 +30,36 @@ async function ensureProjectWallet(companyId: string, projectId: string): Promis
     .finance()
     .from('project_wallets')
     .insert({ company_id: companyId, project_id: projectId, currency: 'KES' });
+  if (error) throw error;
+}
+
+/** Exported for offline queue sync: ensure wallet exists before inserting ledger. */
+export async function ensureProjectWalletForSync(companyId: string, projectId: string): Promise<void> {
+  return ensureProjectWallet(companyId, projectId);
+}
+
+/** Exported for offline queue sync: insert one wallet ledger entry (credit or debit). */
+export async function insertWalletLedgerEntry(params: {
+  company_id: string;
+  project_id: string;
+  entry_type: 'credit' | 'debit';
+  amount: number;
+  note: string;
+  ref_type: string;
+  ref_id: string | null;
+}): Promise<void> {
+  const { error } = await db
+    .finance()
+    .from('project_wallet_ledger')
+    .insert({
+      company_id: params.company_id,
+      project_id: params.project_id,
+      entry_type: params.entry_type,
+      amount: params.amount,
+      note: params.note,
+      ref_type: params.ref_type,
+      ref_id: params.ref_id,
+    });
   if (error) throw error;
 }
 
@@ -328,38 +360,92 @@ export async function addPickerIntake(params: {
   kg: number;
   crates?: number | null;
   unit?: string;
+  recordedBy?: string | null;
+  pricePerKg?: number;
+  clientEntryId?: string;
 }): Promise<string> {
-  // Prefer RPC so server sets recorded_by and enforces membership; avoids RLS issues.
-  const { error: rpcError } = await supabase
-    .schema('harvest')
-    .rpc('record_intake', {
-      p_collection_id: params.collectionId,
-      p_picker_id: params.pickerId,
-      p_quantity: params.kg,
-      p_unit: params.unit ?? 'kg',
-    });
+  const clientEntryId = params.clientEntryId ?? crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const queuePayload = {
+    client_entry_id: clientEntryId,
+    collection_id: params.collectionId,
+    picker_id: params.pickerId,
+    kg: params.kg,
+    price: params.pricePerKg ?? null,
+    timestamp,
+    recorded_by: params.recordedBy ?? null,
+    company_id: params.companyId,
+    unit: params.unit ?? 'kg',
+  };
 
-  if (!rpcError) {
-    // RPC returns void; return a placeholder (UI typically refetches list).
-    return 'rpc-ok';
+  const queueAndReturn = async () => {
+    await addToOfflineQueue('intake', queuePayload, { createdBy: params.recordedBy ?? undefined });
+    return clientEntryId;
+  };
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return queueAndReturn();
   }
 
-  // Fallback: direct insert (e.g. if RPC not available). Do NOT send recorded_by — DB default applies.
-  const { data, error } = await harvest()
-    .from('picker_intake_entries')
-    .insert({
+  try {
+    const { error: rpcError } = await supabase
+      .schema('harvest')
+      .rpc('record_intake', {
+        p_collection_id: params.collectionId,
+        p_picker_id: params.pickerId,
+        p_quantity: params.kg,
+        p_unit: params.unit ?? 'kg',
+      });
+
+    if (!rpcError) return 'rpc-ok';
+
+    const insertPayload: Record<string, unknown> = {
       company_id: params.companyId,
       collection_id: params.collectionId,
       picker_id: params.pickerId,
       quantity: params.kg,
       unit: params.unit ?? 'kg',
-    })
-    .select('id')
-    .single();
+    };
+    if (clientEntryId) insertPayload.client_entry_id = clientEntryId;
+
+    const { data, error } = await harvest()
+      .from('picker_intake_entries')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    if (!data?.id) throw new Error('Add picker intake failed');
+    return data.id;
+  } catch (_) {
+    await queueAndReturn();
+    return clientEntryId;
+  }
+}
+
+/** Update an existing intake entry (picker and/or quantity). Used when editing a recent Quick Intake entry. */
+export async function updatePickerIntakeEntry(params: {
+  entryId: string;
+  collectionId: string;
+  companyId: string;
+  pickerId: string;
+  quantity: number;
+  unit?: string;
+}): Promise<void> {
+  const { entryId, pickerId, quantity, unit } = params;
+  const updatePayload: Record<string, unknown> = {
+    picker_id: pickerId,
+    quantity: Number(quantity),
+  };
+  if (unit) updatePayload.unit = unit;
+
+  const { error } = await harvest()
+    .from('picker_intake_entries')
+    .update(updatePayload)
+    .eq('id', entryId)
+    .eq('collection_id', params.collectionId);
 
   if (error) throw error;
-  if (!data?.id) throw new Error('Add picker intake failed');
-  return data.id;
 }
 
 export async function listPickerIntake(collectionId: string): Promise<ReturnType<typeof mapIntakeEntry>[]> {
@@ -599,29 +685,64 @@ export async function getCompanyCollectionFinancialsAggregate(
   };
 }
 
-/** Record a single picker payment (marks as paid in DB). Uses direct insert so we get id for expense sync. */
+/** Record a single picker payment (marks as paid in DB). Uses direct insert so we get id for expense sync. Offline or on failure: queues and returns local id. */
 export async function recordPickerPayment(params: {
   collectionId: string;
   companyId: string;
   pickerId: string;
   amount: number;
   note?: string | null;
+  paidBy?: string | null;
+  projectId?: string | null;
+  clientEntryId?: string;
 }): Promise<string> {
-  const { data, error } = await harvest()
-    .from('picker_payment_entries')
-    .insert({
+  const clientEntryId = params.clientEntryId ?? crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const queuePayload = {
+    client_entry_id: clientEntryId,
+    collection_id: params.collectionId,
+    picker_id: params.pickerId,
+    amount: params.amount,
+    note: params.note ?? null,
+    timestamp,
+    paid_by: params.paidBy ?? null,
+    company_id: params.companyId,
+    project_id: params.projectId ?? null,
+  };
+
+  const queueAndReturn = async () => {
+    await addToOfflineQueue('payment', queuePayload, { createdBy: params.paidBy ?? undefined });
+    return clientEntryId;
+  };
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return queueAndReturn();
+  }
+
+  try {
+    const insertPayload: Record<string, unknown> = {
       company_id: params.companyId,
       collection_id: params.collectionId,
       picker_id: params.pickerId,
       amount_paid: params.amount,
       note: params.note ?? null,
-    })
-    .select('id')
-    .single();
+    };
+    if (clientEntryId) insertPayload.client_entry_id = clientEntryId;
+    if (params.paidBy != null) insertPayload.paid_by = params.paidBy;
 
-  if (error) throw error;
-  if (!data?.id) throw new Error('Record payment failed');
-  return data.id;
+    const { data, error } = await harvest()
+      .from('picker_payment_entries')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    if (!data?.id) throw new Error('Record payment failed');
+    return data.id;
+  } catch (_) {
+    await queueAndReturn();
+    return clientEntryId;
+  }
 }
 
 /** Close collection via RPC (status = closed, closed_at = now). Use when not setting buyer price. */
@@ -678,17 +799,21 @@ export async function addPickerWeighEntry(params: {
   weightKg: number;
   tripNumber?: number;
   suggestedTripNumber?: number;
+  recordedBy?: string | null;
+  pricePerKg?: number;
 }): Promise<string> {
   return addPickerIntake({
     companyId: params.companyId,
     collectionId: params.collectionId,
     pickerId: params.pickerId,
     kg: params.weightKg,
+    recordedBy: params.recordedBy,
+    pricePerKg: params.pricePerKg,
   });
 }
 
-/** Ensure one expense row in finance.expenses for this picker payment (no duplicates). Uses real schema: category, amount, currency, expense_date, note. */
-async function syncPickerPaymentToExpense(params: {
+/** Ensure one expense row in finance.expenses for this picker payment (no duplicates). Exported for offline queue sync. */
+export async function syncPickerPaymentToExpenseForOffline(params: {
   companyId: string;
   projectId: string;
   collectionId: string;
@@ -750,7 +875,7 @@ export async function markPickerCashPaid(params: {
     note: params.note ?? null,
   });
   if (params.projectId && paymentEntryId) {
-    await syncPickerPaymentToExpense({
+    await syncPickerPaymentToExpenseForOffline({
       companyId: params.companyId,
       projectId: params.projectId,
       collectionId: params.collectionId,
@@ -780,7 +905,7 @@ export async function markPickersPaidInBatch(params: {
     if (amount > 0) {
       const paymentEntryId = await recordPickerPayment({ companyId, collectionId, pickerId, amount });
       if (projectId && paymentEntryId) {
-        await syncPickerPaymentToExpense({
+        await syncPickerPaymentToExpenseForOffline({
           companyId,
           projectId,
           collectionId,
@@ -838,7 +963,7 @@ export async function getHarvestPickersByIds(
 
 /**
  * Register harvest cash: ensure wallet exists, then insert a CREDIT into finance.project_wallet_ledger.
- * Balance is derived from ledger (credits - debits). No success unless DB write succeeds.
+ * Offline or on failure: queues as wallet_entry and returns (no throw) so field workflow continues.
  */
 export async function registerHarvestCash(params: {
   collectionId: string;
@@ -853,9 +978,9 @@ export async function registerHarvestCash(params: {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Cash received must be greater than 0.');
   }
-  await ensureProjectWallet(params.companyId, params.projectId);
   const note = `Harvest cash: ${params.source} (${params.receivedBy})`;
-  const payload = {
+  const walletPayload = {
+    client_entry_id: crypto.randomUUID(),
     company_id: params.companyId,
     project_id: params.projectId,
     entry_type: 'credit' as const,
@@ -863,21 +988,39 @@ export async function registerHarvestCash(params: {
     note,
     ref_type: 'harvest_cash' as const,
     ref_id: params.collectionId || null,
+    created_by: params.receivedBy,
   };
-  if (import.meta.env.DEV) {
-    console.log('[Harvest Cash Register payload]', payload);
-  }
-  const { data, error } = await db
-    .finance()
-    .from('project_wallet_ledger')
-    .insert(payload)
-    .select('id')
-    .single();
 
-  if (import.meta.env.DEV) {
-    console.log('[Harvest Cash Register result]', { data, error });
+  const queueAndReturn = async () => {
+    await addToOfflineQueue('wallet_entry', walletPayload, { createdBy: params.receivedBy });
+  };
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    await queueAndReturn();
+    return;
   }
-  if (error) throw error;
+
+  try {
+    await ensureProjectWallet(params.companyId, params.projectId);
+    if (import.meta.env.DEV) console.log('[Harvest Cash Register payload]', walletPayload);
+    const { error } = await db
+      .finance()
+      .from('project_wallet_ledger')
+      .insert({
+        company_id: params.companyId,
+        project_id: params.projectId,
+        entry_type: 'credit',
+        amount,
+        note,
+        ref_type: 'harvest_cash',
+        ref_id: params.collectionId || null,
+      })
+      .select('id')
+      .single();
+    if (error) throw error;
+  } catch (_) {
+    await queueAndReturn();
+  }
 }
 
 /**
@@ -932,7 +1075,7 @@ export async function payPickersFromWalletBatchFirestore(params: {
         amount,
       });
       if (paymentEntryId) {
-        await syncPickerPaymentToExpense({
+        await syncPickerPaymentToExpenseForOffline({
           companyId: params.companyId,
           projectId: params.projectId,
           collectionId: params.collectionId,

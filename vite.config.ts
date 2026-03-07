@@ -7,7 +7,7 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
-    port: 8080,
+    port: 8080, // Fixed port for local dev; avoids Clerk origin mismatch (localhost:8080).
     hmr: { overlay: false },
   },
 

@@ -8,13 +8,24 @@ import { AIChatButton } from '@/components/ai/AIChatButton';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { user } = useAuth();
+  const { user, isEmergencySession } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);
+
+  // Emergency access: only allow operational routes; redirect rest to dashboard
+  const emergencyRedirectTarget = useMemo(() => {
+    if (!isEmergencySession) return null;
+    const path = location.pathname;
+    const allowed = EMERGENCY_ALLOWED_PREFIXES.some(
+      (prefix) => path === prefix || path.startsWith(prefix + '/'),
+    );
+    return allowed ? null : '/dashboard';
+  }, [isEmergencySession, location.pathname]);
 
   // Memoize broker check to prevent infinite loops
   // Extract employeeRole from user object to ensure stable reference
@@ -31,6 +42,7 @@ export function MainLayout() {
   // Enforce role-based access to main app sections.
   // Only redirect if we're NOT already on a role-specific route (to avoid loops)
   const redirectTarget = useMemo(() => {
+    if (emergencyRedirectTarget) return emergencyRedirectTarget;
     if (!user) return null;
     const path = location.pathname;
 
@@ -51,7 +63,7 @@ export function MainLayout() {
     }
 
     return null;
-  }, [user?.role, location.pathname, isBroker]);
+  }, [user?.role, location.pathname, isBroker, emergencyRedirectTarget]);
 
   // Use useEffect to handle navigation instead of conditional rendering
   // This prevents infinite loops by only redirecting when the target actually changes
@@ -72,6 +84,15 @@ export function MainLayout() {
 
   return (
     <div className="min-h-screen bg-background">
+      {isEmergencySession && (
+        <div
+          className="bg-amber-600 text-white text-center py-2 px-4 text-sm font-medium"
+          role="status"
+          aria-live="polite"
+        >
+          Emergency Access Mode Active — limited to dashboard, projects, harvest collections, and expenses.
+        </div>
+      )}
       <AppSidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}

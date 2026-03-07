@@ -4,7 +4,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
-import { AuthProvider } from "@/contexts/AuthContext";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ConnectivityProvider } from "@/contexts/ConnectivityContext";
@@ -70,6 +69,7 @@ import LoginPage from "@/pages/Auth/LoginPage";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
 import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
+import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireOnboarding } from "@/components/auth/RequireOnboarding";
@@ -171,7 +171,6 @@ const CompanyDashboardRoute = () => {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
-      <AuthProvider>
         <ProjectProvider>
           <NotificationProvider>
           <ConnectivityProvider>
@@ -180,15 +179,15 @@ const App = () => (
             <Sonner />
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <HelmetProvider>
-              <ClerkSupabaseTokenBridge />
+              {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
               <RoutePersistence />
               <TourProvider>
               <Routes>
               {/* Public routes – no RequireAuth or onboarding; Clerk handles auth UI */}
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<Navigate to="/sign-in" replace />} />
-              <Route path="/sign-in" element={<SignInPage />} />
-              <Route path="/sign-in/*" element={<SignInPage />} />
+              <Route path="/sign-in" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
+              <Route path="/sign-in/*" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
               <Route path="/sign-up" element={<SignUpPage />} />
               <Route path="/sign-up/*" element={<SignUpPage />} />
               <Route path="/dev/sign-in" element={<DevSignInPage />} />
@@ -206,6 +205,7 @@ const App = () => (
                 }
               />
               <Route path="/auth/callback" element={<AuthCallbackPage />} />
+              <Route path="/emergency-access" element={<EmergencyAccessPage />} />
               <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
               <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
               <Route path="/setup-company" element={<Navigate to="/onboarding" replace />} />
@@ -367,7 +367,6 @@ const App = () => (
           </ConnectivityProvider>
           </NotificationProvider>
         </ProjectProvider>
-      </AuthProvider>
     </ErrorBoundary>
   </QueryClientProvider>
 );
