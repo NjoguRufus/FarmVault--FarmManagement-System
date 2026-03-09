@@ -740,6 +740,7 @@ export interface Employee {
   createdAt?: Date | unknown;
   createdBy?: string;
   authUserId?: string;
+  avatarUrl?: string;
 }
 
 export interface Delivery {

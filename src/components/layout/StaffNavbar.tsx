@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useStaffTour } from '@/tour/StaffTourProvider';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -23,15 +24,29 @@ interface StaffNavbarProps {
 
 export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarProps) {
   const { user, logout } = useAuth();
-  const { activeProject } = useProject();
-  const { fullName, roleLabel, companyName: staffCompanyName } = useStaff();
+  const { projects, activeProject, setActiveProject } = useProject();
+  const { fullName, roleLabel, companyName: staffCompanyName, avatarUrl, companyId } = useStaff();
+  const { startTour: startStaffTour } = useStaffTour();
   const location = useLocation();
   const navigate = useNavigate();
   const companyName = staffCompanyName || activeProject?.companyId || 'FarmVault';
 
   const displayName = fullName ?? user?.email ?? 'User';
-
   const displayRole = roleLabel ?? 'Staff';
+
+  const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
+
+  const getCropEmoji = (cropType: string) => {
+    const emojis: Record<string, string> = {
+      tomatoes: '🍅',
+      'french-beans': '🫛',
+      capsicum: '🌶️',
+      maize: '🌽',
+      watermelons: '🍉',
+      rice: '🌾',
+    };
+    return emojis[cropType] || '🌱';
+  };
 
   const path = location.pathname || '';
   let pageTitle = 'Staff Workspace';
@@ -47,13 +62,20 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[Nav] staff navbar identity', {
+    console.log('[StaffNavbar] employee identity loaded', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,
       companyName,
       pageTitle,
     });
+    // eslint-disable-next-line no-console
+    console.log('[StaffProfileMenu] visible menu items', [
+      'My Profile',
+      'Take a Tour',
+      'Support',
+      'Logout',
+    ]);
   }
 
   return (
@@ -65,12 +87,12 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
       )}
     >
       <div className="flex h-full items-center justify-between px-4 sm:px-6">
-        {/* Left: hamburger + workspace title */}
+        {/* Left: hamburger + workspace title + (optional) project selector */}
         <div className="flex items-center gap-2 sm:gap-3">
           {onSidebarToggle && (
             <button
               onClick={onSidebarToggle}
-              className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
+              className="hidden md:flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted transition-colors"
               aria-label="Toggle sidebar"
             >
               <Menu className="h-5 w-5 text-foreground" />
@@ -87,6 +109,51 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
               Staff Workspace · {companyName}
             </span>
           </div>
+          {/* Project selector (same semantics as admin navbar, scoped to staff company) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              data-tour="project-selector"
+              className="hidden sm:flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1.5 text-xs sm:text-sm hover:bg-muted transition-colors"
+            >
+              {activeProject ? (
+                <>
+                  <span className="text-base sm:text-lg">{getCropEmoji(activeProject.cropType)}</span>
+                  <span className="font-medium hidden md:inline max-w-[140px] truncate">
+                    {activeProject.name}
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted-foreground text-xs sm:text-sm">Select project</span>
+              )}
+              <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-72">
+              <DropdownMenuLabel>Switch Project</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {companyProjects.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>
+              ) : (
+                companyProjects.map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    onClick={() => setActiveProject(project)}
+                    className={cn(
+                      'flex items-center gap-3 cursor-pointer',
+                      activeProject?.id === project.id && 'bg-muted'
+                    )}
+                  >
+                    <span className="text-lg">{getCropEmoji(project.cropType)}</span>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{project.name}</span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {project.cropType.replace('-', ' ')} • {project.location}
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Right: status + user menu */}
@@ -96,7 +163,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted transition-colors">
               <UserAvatar
-                avatarUrl={user?.avatar}
+                avatarUrl={avatarUrl ?? user?.avatar}
                 name={displayName}
                 size="sm"
                 className="h-8 w-8"
@@ -115,11 +182,18 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                 onClick={() => navigate('/staff/profile')}
               >
                 <UserIcon className="mr-2 h-4 w-4" />
-                Profile
+                My Profile
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="cursor-pointer"
-                onClick={() => navigate('/support')}
+                onClick={() => startStaffTour()}
+              >
+                <HelpCircle className="mr-2 h-4 w-4" />
+                Take a Tour
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => navigate('/staff/support')}
               >
                 <HelpCircle className="mr-2 h-4 w-4" />
                 Support

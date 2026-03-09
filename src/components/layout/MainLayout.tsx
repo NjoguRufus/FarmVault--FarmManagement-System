@@ -62,8 +62,43 @@ export function MainLayout() {
       }
     }
 
+    // Staff (non-admin, non-developer, non-manager/broker/driver) should use staff shell only.
+    const isAdminLikeRole =
+      user.role === 'company-admin' ||
+      (user as any).role === 'company_admin' ||
+      user.role === 'developer' ||
+      user.role === 'manager' ||
+      user.role === 'broker' ||
+      user.role === 'driver';
+
+    const isStaffShellUser = !isAdminLikeRole;
+
+    if (isStaffShellUser && !path.startsWith('/staff')) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Shell] staff user → /staff redirect', {
+          uid: user.id,
+          role: user.role,
+          employeeRole: (user as any).employeeRole,
+          from: path,
+          to: '/staff',
+        });
+      }
+      return '/staff';
+    }
+
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Shell] using admin shell', {
+        uid: user.id,
+        role: user.role,
+        employeeRole: (user as any).employeeRole,
+        path,
+      });
+    }
+
     return null;
-  }, [user?.role, location.pathname, isBroker, emergencyRedirectTarget]);
+  }, [user, location.pathname, isBroker, emergencyRedirectTarget]);
 
   // Use useEffect to handle navigation instead of conditional rendering
   // This prevents infinite loops by only redirecting when the target actually changes
@@ -81,6 +116,17 @@ export function MainLayout() {
       hasRedirectedRef.current = null;
     }
   }, [redirectTarget, location.pathname, navigate]);
+
+  if (import.meta.env.DEV) {
+    const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
+    const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
+    // eslint-disable-next-line no-console
+    console.log('[Responsive] main layout breakpoint', {
+      width,
+      isDesktop,
+      path: location.pathname,
+    });
+  }
 
   return (
     <div className="min-h-screen bg-background">

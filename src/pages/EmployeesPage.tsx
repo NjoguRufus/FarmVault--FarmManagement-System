@@ -40,20 +40,40 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { PermissionEditor } from '@/components/permissions/PermissionEditor';
-import { getDefaultPermissions, getPresetPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
+import { getDefaultPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
+import { getPresetPermissions as getEmployeePresetPermissions } from '@/lib/employees/permissionPresets';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { EMPLOYEE_ROLE_LABELS, EMPLOYEE_ROLES, type EmployeeRoleKey } from '@/config/accessControl';
 import { logActivity } from '@/services/employeeAccessService';
+import { UserAvatar } from '@/components/UserAvatar';
 
 type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
 type PermissionEditorPreset = PermissionPresetKey | 'custom';
+
+const BASIC_PERMISSION_MODULES: Array<{
+  id: string;
+  label: string;
+  permissionKey: string;
+}> = [
+  { id: 'dashboard', label: 'Dashboard', permissionKey: 'dashboard.view' },
+  { id: 'projects', label: 'Projects', permissionKey: 'projects.view' },
+  { id: 'planning', label: 'Planning', permissionKey: 'planning.view' },
+  { id: 'inventory', label: 'Inventory', permissionKey: 'inventory.view' },
+  { id: 'expenses', label: 'Expenses', permissionKey: 'expenses.view' },
+  { id: 'operations', label: 'Operations', permissionKey: 'operations.view' },
+  { id: 'harvest', label: 'Harvest', permissionKey: 'harvest.view' },
+  { id: 'reports', label: 'Reports', permissionKey: 'reports.view' },
+  { id: 'employees', label: 'Employees', permissionKey: 'employees.view' },
+  { id: 'settings', label: 'Settings', permissionKey: 'settings.view' },
+];
 
 const ROLE_OPTIONS: Array<{
   value: ManagedEmployeeRole;
@@ -152,6 +172,9 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [addPermissions, setAddPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
   const [addPreset, setAddPreset] = useState<PermissionEditorPreset>('custom');
+  const [addStep, setAddStep] = useState<1 | 2>(1);
+  const [permissionPreset, setPermissionPreset] = useState<EmployeeRoleKey>('custom');
+  const [permissionsFlat, setPermissionsFlat] = useState<Record<string, boolean>>({});
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
@@ -277,14 +300,30 @@ export default function EmployeesPage() {
     setShowPassword(false);
     setAddPermissions(DEFAULT_PERMISSIONS);
     setAddPreset('custom');
+    setAddStep(1);
+    setPermissionPreset('custom');
+    setPermissionsFlat({});
   };
 
   const handleRoleChange = (value: string) => {
     const normalized = value === 'none' ? null : normalizeEmployeeRole(value);
     setRole((normalized ?? 'none') as EmployeeRoleSelection);
     setDepartment(getDepartmentFromRole(normalized));
-    setAddPermissions(resolvePermissions(normalized, getDefaultPermissions()));
-    setAddPreset('custom');
+    if (isEmployeesSupabase) {
+      if (!normalized) {
+        setPermissionPreset('custom');
+        setPermissionsFlat({});
+        return;
+      }
+      const asRoleKey = EMPLOYEE_ROLES.includes(normalized as EmployeeRoleKey)
+        ? (normalized as EmployeeRoleKey)
+        : 'viewer';
+      setPermissionPreset(asRoleKey);
+      setPermissionsFlat(getEmployeePresetPermissions(asRoleKey));
+    } else {
+      setAddPermissions(resolvePermissions(normalized, getDefaultPermissions()));
+      setAddPreset('custom');
+    }
   };
 
   const handleEditRoleChange = (value: string) => {
@@ -426,6 +465,9 @@ export default function EmployeesPage() {
 
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEmployeesSupabase && addStep !== 2) {
+      return;
+    }
     if (!canCreateEmployees) {
       toast.error('Permission denied', { description: 'You cannot create employees.' });
       return;
@@ -446,7 +488,12 @@ export default function EmployeesPage() {
 
       if (isEmployeesSupabase) {
         const selectedRole = role === 'none' ? null : role;
-        const permissionPreset = (selectedRole ?? 'viewer') as string;
+        const effectivePermissionPreset: EmployeeRoleKey =
+          permissionPreset !== 'custom'
+            ? permissionPreset
+            : selectedRole && EMPLOYEE_ROLES.includes(selectedRole as EmployeeRoleKey)
+            ? (selectedRole as EmployeeRoleKey)
+            : 'viewer';
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.log('[EmployeesPage] inviteEmployee payload', {
@@ -456,7 +503,8 @@ export default function EmployeesPage() {
             phone: contact.trim() || undefined,
             role: selectedRole ?? undefined,
             department: department.trim() || undefined,
-            permissionPreset,
+            permissionPreset: effectivePermissionPreset,
+            permissionOverrides: permissionsFlat,
             actorEmployeeId: employeeProfile?.id ?? undefined,
           });
         }
@@ -467,8 +515,8 @@ export default function EmployeesPage() {
           phone: contact.trim() || undefined,
           role: selectedRole ?? undefined,
           department: department.trim() || undefined,
-          permissionPreset,
-          permissionOverrides: null,
+          permissionPreset: effectivePermissionPreset,
+          permissionOverrides: permissionsFlat,
           assignedProjectIds: [],
           actorEmployeeId: employeeProfile?.id ?? undefined,
         });
@@ -725,9 +773,14 @@ export default function EmployeesPage() {
         phone: contact.trim() || undefined,
         role: role === 'none' ? null : role,
         department: department.trim() || undefined,
-        // Use viewer as default; permissions will be recomputed on invite.
-        permissionPreset: 'viewer',
-        permissions: addPermissions,
+        permissionPreset,
+        permissions: (() => {
+          const base =
+            permissionPreset === 'custom'
+              ? {}
+              : getEmployeePresetPermissions(permissionPreset);
+          return { ...base, ...permissionsFlat };
+        })() as unknown as PermissionMap,
       });
       toast.success('Draft saved');
       await refetchSupabaseEmployees();
@@ -758,118 +811,180 @@ export default function EmployeesPage() {
               Add Employee
             </button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add Employee</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleAddEmployee} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Full name</label>
-                <input
-                  className="fv-input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Role (optional)</label>
-                  <Select value={role} onValueChange={handleRoleChange}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="No role (custom permissions)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No role (custom permissions)</SelectItem>
-                      {ROLE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Department</label>
-                  <input
-                    className="fv-input"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="General"
-                  />
+          {isEmployeesSupabase ? (
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{addStep === 1 ? 'Add Employee' : 'Access & Permissions'}</DialogTitle>
+              </DialogHeader>
+              <div className="mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={cn(
+                        'flex h-6 w-6 items-center justify-center rounded-full border text-xs font-medium',
+                        addStep === 1 ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border',
+                      )}
+                    >
+                      1
+                    </div>
+                    <span className={cn('text-xs font-medium', addStep === 1 ? 'text-foreground' : 'text-muted-foreground')}>
+                      Employee Info
+                    </span>
+                  </div>
+                  <div className="h-px flex-1 bg-border" />
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={cn(
+                        'flex h-6 w-6 items-center justify-center rounded-full border text-xs font-medium',
+                        addStep === 2 ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border',
+                      )}
+                    >
+                      2
+                    </div>
+                    <span className={cn('text-xs font-medium', addStep === 2 ? 'text-foreground' : 'text-muted-foreground')}>
+                      Access & Permissions
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Email (for login)</label>
-                <input
-                  type="email"
-                  className="fv-input"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="employee@farmvault.com"
-                  required
-                />
-                {isEmployeesSupabase && (
-                  <span className="block text-xs text-muted-foreground">
-                    An invite link will be sent to this email. The employee will set their password when they accept.
-                  </span>
+              <form onSubmit={handleAddEmployee} className="space-y-4">
+                {addStep === 1 && (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Full name</label>
+                      <input
+                        className="fv-input"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Role (optional)</label>
+                        <Select value={role} onValueChange={handleRoleChange}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="No role (custom permissions)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No role (custom permissions)</SelectItem>
+                            {ROLE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-foreground">Department</label>
+                        <input
+                          className="fv-input"
+                          value={department}
+                          onChange={(e) => setDepartment(e.target.value)}
+                          placeholder="General"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Email (for login)</label>
+                      <input
+                        type="email"
+                        className="fv-input"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="employee@farmvault.com"
+                      />
+                      <span className="block text-xs text-muted-foreground">
+                        An invite link will be sent to this email. The employee will set their password when they accept.
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Phone / Contact</label>
+                      <input
+                        className="fv-input"
+                        value={contact}
+                        onChange={(e) => setContact(e.target.value)}
+                        placeholder="+254 700 000 000"
+                      />
+                    </div>
+                  </>
                 )}
-              </div>
-              {!isEmployeesSupabase && (
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">
-                  Initial password
-                  <span className="block text-xs text-muted-foreground">
-                    Set a password for this employee to use when logging in. It won&apos;t be visible after saving, so share it securely now.
-                  </span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    className="fv-input pr-10"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    minLength={6}
-                    required
-                  />
+                {addStep === 2 && (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Permission preset</label>
+                      <Select
+                        value={permissionPreset}
+                        onValueChange={(val) => {
+                          const next = val as EmployeeRoleKey;
+                          setPermissionPreset(next);
+                          if (next === 'custom') return;
+                          setPermissionsFlat(getEmployeePresetPermissions(next));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Custom" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="custom">Custom</SelectItem>
+                          {EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((r) => (
+                            <SelectItem key={r} value={r}>
+                              {EMPLOYEE_ROLE_LABELS[r]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {BASIC_PERMISSION_MODULES.map((mod) => {
+                        const checked = Boolean(permissionsFlat[mod.permissionKey]);
+                        return (
+                          <div
+                            key={mod.id}
+                            className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5"
+                          >
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{mod.label}</p>
+                              <p className="text-xs text-muted-foreground">View</p>
+                            </div>
+                            <Switch
+                              checked={checked}
+                              onCheckedChange={(next) =>
+                                setPermissionsFlat((prev) => ({
+                                  ...prev,
+                                  [mod.permissionKey]: Boolean(next),
+                                }))
+                              }
+                              aria-label={`${mod.label} view permission`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                <DialogFooter>
+                  {addStep === 2 && (
+                    <button
+                      type="button"
+                      className="fv-btn fv-btn--ghost mr-auto"
+                      onClick={() => setAddStep(1)}
+                    >
+                      Back
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setShowPassword((p) => !p)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="fv-btn fv-btn--secondary"
+                    onClick={() => {
+                      setAddOpen(false);
+                      resetAddForm();
+                      setCurrentDraftEmployeeId(null);
+                    }}
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    Cancel
                   </button>
-                </div>
-              </div>
-              )}
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Phone / Contact</label>
-                <input
-                  className="fv-input"
-                  value={contact}
-                  onChange={(e) => setContact(e.target.value)}
-                  placeholder="+254 700 000 000"
-                />
-              </div>
-              <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
-                <PermissionEditor
-                  value={addPermissions}
-                  onChange={handleAddPermissionChange}
-                  preset={addPreset}
-                  onPresetChange={handleAddPresetChange}
-                  lockedRole={role === 'none' ? null : role}
-                />
-              </div>
-              <DialogFooter>
-                <button
-                  type="button"
-                  className="fv-btn fv-btn--secondary"
-                  onClick={() => setAddOpen(false)}
-                >
-                  Cancel
-                </button>
-                {isEmployeesSupabase && (
                   <button
                     type="button"
                     disabled={saving}
@@ -882,7 +997,9 @@ export default function EmployeesPage() {
                         return;
                       }
                       if (!hasMeaningfulAddFormData()) {
-                        toast.error('Nothing to save', { description: 'Add some details before saving a draft.' });
+                        toast.error('Nothing to save', {
+                          description: 'Add some details before saving a draft.',
+                        });
                         return;
                       }
                       setSaving(true);
@@ -893,10 +1010,19 @@ export default function EmployeesPage() {
                           fullName: name.trim() || email.trim(),
                           email: email.trim().toLowerCase() || undefined,
                           phone: contact.trim() || undefined,
-                          role: role === 'none' ? null : role,
+                          role:
+                            role === 'none' || !EMPLOYEE_ROLES.includes(role as EmployeeRoleKey)
+                              ? null
+                              : (role as EmployeeRoleKey),
                           department: department.trim() || undefined,
-                          permissionPreset: 'viewer',
-                          permissions: addPermissions,
+                          permissionPreset,
+                          permissions: (() => {
+                            const base =
+                              permissionPreset === 'custom'
+                                ? {}
+                                : getEmployeePresetPermissions(permissionPreset);
+                            return { ...base, ...permissionsFlat };
+                          })() as unknown as PermissionMap,
                         });
                         await refetchSupabaseEmployees();
                         toast.success('Draft saved');
@@ -913,17 +1039,151 @@ export default function EmployeesPage() {
                   >
                     Save Draft
                   </button>
-                )}
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="fv-btn fv-btn--primary"
-                >
-                  {saving ? (isEmployeesSupabase ? 'Sending…' : 'Saving…') : (isEmployeesSupabase ? 'Send Invite' : 'Save Employee')}
-                </button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
+                  {addStep === 1 ? (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      className="fv-btn fv-btn--primary"
+                      onClick={() => {
+                        if (!email.trim()) {
+                          toast.error('Email required', {
+                            description: 'Add an email so we can send the invite.',
+                          });
+                          return;
+                        }
+                        setAddStep(2);
+                      }}
+                    >
+                      Continue
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="fv-btn fv-btn--primary"
+                    >
+                      {saving ? 'Sending…' : 'Send Invite'}
+                    </button>
+                  )}
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          ) : (
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add Employee</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleAddEmployee} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Full name</label>
+                  <input
+                    className="fv-input"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Role (optional)</label>
+                    <Select value={role} onValueChange={handleRoleChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="No role (custom permissions)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No role (custom permissions)</SelectItem>
+                        {ROLE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Department</label>
+                    <input
+                      className="fv-input"
+                      value={department}
+                      onChange={(e) => setDepartment(e.target.value)}
+                      placeholder="General"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Email (for login)</label>
+                  <input
+                    type="email"
+                    className="fv-input"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="employee@farmvault.com"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">
+                    Initial password
+                    <span className="block text-xs text-muted-foreground">
+                      Set a password for this employee to use when logging in. It won&apos;t be visible after saving, so share it securely now.
+                    </span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      className="fv-input pr-10"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      minLength={6}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((p) => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Phone / Contact</label>
+                  <input
+                    className="fv-input"
+                    value={contact}
+                    onChange={(e) => setContact(e.target.value)}
+                    placeholder="+254 700 000 000"
+                  />
+                </div>
+                <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                  <PermissionEditor
+                    value={addPermissions}
+                    onChange={handleAddPermissionChange}
+                    preset={addPreset}
+                    onPresetChange={handleAddPresetChange}
+                    lockedRole={role === 'none' ? null : role}
+                  />
+                </div>
+                <DialogFooter>
+                  <button
+                    type="button"
+                    className="fv-btn fv-btn--secondary"
+                    onClick={() => setAddOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="fv-btn fv-btn--primary"
+                  >
+                    {saving ? 'Saving…' : 'Save Employee'}
+                  </button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          )}
         </Dialog>
         )}
 
@@ -1254,9 +1514,12 @@ export default function EmployeesPage() {
                   <tr key={employee.id}>
                     <td>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                          {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
-                        </div>
+                        <UserAvatar
+                          avatarUrl={employee.avatarUrl}
+                          name={getEmployeeName(employee)}
+                          size="md"
+                          className="h-10 w-10 bg-primary/10 text-primary"
+                        />
                         <div>
                           <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
                           <p className="text-xs text-muted-foreground">
@@ -1653,9 +1916,12 @@ export default function EmployeesPage() {
               <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
-                    </div>
+                    <UserAvatar
+                      avatarUrl={employee.avatarUrl}
+                      name={getEmployeeName(employee)}
+                      size="md"
+                      className="h-10 w-10 bg-primary/10 text-primary"
+                    />
                     <div>
                       <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
                       <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
@@ -1713,13 +1979,16 @@ export default function EmployeesPage() {
                   )}
                 </div>
               </div>
-            ) : section === 'invited' ? (
+              ) : section === 'invited' ? (
               <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
-                    </div>
+                    <UserAvatar
+                      avatarUrl={employee.avatarUrl}
+                      name={getEmployeeName(employee)}
+                      size="md"
+                      className="h-10 w-10 bg-primary/10 text-primary"
+                    />
                     <div>
                       <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
                       <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
@@ -1812,9 +2081,12 @@ export default function EmployeesPage() {
               <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
-                    </div>
+                    <UserAvatar
+                      avatarUrl={employee.avatarUrl}
+                      name={getEmployeeName(employee)}
+                      size="md"
+                      className="h-10 w-10 bg-primary/10 text-primary"
+                    />
                     <div>
                       <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
                       <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
@@ -1946,9 +2218,12 @@ export default function EmployeesPage() {
               <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
-                    </div>
+                    <UserAvatar
+                      avatarUrl={employee.avatarUrl}
+                      name={getEmployeeName(employee)}
+                      size="md"
+                      className="h-10 w-10 bg-primary/10 text-primary"
+                    />
                     <div>
                       <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
                       <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>

@@ -8,7 +8,7 @@ export { CropProgressCard } from './CropProgressCard';
 export { CropStageProgressCard } from './CropStageProgressCard';
 
 // Dashboard Widgets
-export { CropStageProgress, InventoryOverview, SalesOverview } from './DashboardWidgets';
+export { CropStageProgress, InventoryOverview } from './DashboardWidgets';
 
 // Other Dashboard Components
 export { ActivityChart } from './ActivityChart';

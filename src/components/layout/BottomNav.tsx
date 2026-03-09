@@ -53,18 +53,23 @@ export function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isWide, setIsWide] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Treat mobile screens wider than ~380px (up to below lg) as \"wide mobile\" for nav layout.
+  // Treat mobile screens wider than ~380px (up to below lg) as "wide mobile" for nav layout.
   useEffect(() => {
     const update = () => {
       if (typeof window === 'undefined') return;
       const width = window.innerWidth;
-      // Below lg (handled by lg:hidden on the nav), but wide enough to comfortably show Harvest.
       setIsWide(width >= 380 && width < 1024);
+      setIsDesktop(width >= 1024);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Responsive] bottom nav viewport', { width, isDesktop: width >= 1024 });
+      }
     };
     update();
     window.addEventListener('resize', update);
@@ -142,6 +147,10 @@ export function BottomNav() {
       return path === mp || (mp !== '/' && path.startsWith(mp + '/'));
     });
   }, [drawerItems, location.pathname]);
+
+  if (!user || isDesktop) {
+    return null;
+  }
 
   const navNode = (
     <div

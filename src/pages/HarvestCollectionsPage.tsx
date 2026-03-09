@@ -112,6 +112,11 @@ export default function HarvestCollectionsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const companyProjects = useMemo(
+    () => (user ? projects.filter((p) => p.companyId === user.companyId) : projects),
+    [projects, user?.companyId]
+  );
+
   const effectiveProject = useMemo(() => {
     if (routeProjectId) {
       const fromRoute = projects.find((p) => p.id === routeProjectId) ?? null;
@@ -1918,14 +1923,39 @@ export default function HarvestCollectionsPage() {
 
   if (!effectiveProject) {
     return (
-      <div className="p-4 md:p-6 space-y-4">
-        <h1 className="text-2xl font-bold text-foreground">Harvest Collections</h1>
+      <div className="p-4 md:p-6 space-y-4" data-tour="staff-harvest-root">
+        <h1 className="text-2xl font-bold text-foreground" data-tour="staff-harvest-header">
+          Harvest Collections
+        </h1>
+        <div className="mt-2 max-w-xs md:hidden">
+          <p className="text-xs text-muted-foreground mb-1.5">Select project</p>
+          <UiSelect
+            value={activeProject?.id ?? undefined}
+            onValueChange={(projectId) => {
+              const next = companyProjects.find((p) => p.id === projectId) ?? null;
+              if (next) {
+                setActiveProject(next);
+              }
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Choose a project" />
+            </SelectTrigger>
+            <SelectContent>
+              {companyProjects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </UiSelect>
+        </div>
         <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
           <CardContent className="pt-6">
             <p className="text-foreground">
               {routeProjectId
-                ? 'Project not found or you don’t have access. Select a project from the navbar or open Harvest Collections from the Harvest page for a French Beans project.'
-                : 'Select a project from the navbar to manage field harvest collections (pickers, weigh-in, cash payouts, buyer settlement).'}
+                ? 'Project not found or you don’t have access. Select a project above or open Harvest Collections from the Harvest page for a French Beans project.'
+                : 'Select a project above to manage field harvest collections (pickers, weigh-in, cash payouts, buyer settlement).'}
             </p>
           </CardContent>
         </Card>
@@ -1935,9 +1965,15 @@ export default function HarvestCollectionsPage() {
 
   return (
     <>
-      <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0">
+      <div
+        className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0"
+        data-tour="staff-harvest-root"
+      >
         {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0">
+        <div
+          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0"
+          data-tour="staff-harvest-header"
+        >
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
             {selectedCollectionId ? (
               <Button
@@ -1978,6 +2014,30 @@ export default function HarvestCollectionsPage() {
             >
               <HelpCircle className="h-5 w-5" />
             </Button>
+          </div>
+          {/* Mobile project selector inside page */}
+          <div className="mt-2 w-full max-w-xs sm:max-w-sm md:hidden">
+            <p className="text-xs text-muted-foreground mb-1.5">Project</p>
+            <UiSelect
+              value={effectiveProject?.id ?? undefined}
+              onValueChange={(projectId) => {
+                const next = companyProjects.find((p) => p.id === projectId) ?? null;
+                if (next) {
+                  setActiveProject(next);
+                }
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {companyProjects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </UiSelect>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {(hasPendingWrites || !isOnline) && (

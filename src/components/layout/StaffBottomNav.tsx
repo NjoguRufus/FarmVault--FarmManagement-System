@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Scale, Package, Receipt, Wrench } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,8 +14,24 @@ export function StaffBottomNav() {
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const location = useLocation();
+  const [isDesktop, setIsDesktop] = useState(false);
 
-  if (!user) return null;
+  useEffect(() => {
+    const update = () => {
+      if (typeof window === 'undefined') return;
+      const width = window.innerWidth;
+      setIsDesktop(width >= 1024);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[StaffBottomNav] viewport', { width, isDesktop: width >= 1024 });
+      }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  if (!user || isDesktop) return null;
 
   const items: Array<{ label: string; path: string; icon: React.ComponentType<{ className?: string }> }> = [
     { label: 'Dashboard', path: '/staff', icon: LayoutDashboard },
@@ -44,10 +60,21 @@ export function StaffBottomNav() {
 
   if (items.length === 0) return null;
 
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[StaffBottomNav] visible nav items', {
+      uid: user.id,
+      items: items.map((i) => i.path),
+    });
+  }
+
   const normalizedPath = location.pathname.replace(/\/+/g, '/');
 
   return (
-    <div className="fixed inset-x-0 bottom-3.5 z-[60] lg:hidden flex justify-center pointer-events-none">
+    <div
+      className="fixed inset-x-0 bottom-3.5 z-[60] lg:hidden flex justify-center pointer-events-none"
+      data-tour="staff-bottom-nav"
+    >
       <nav
         className="pointer-events-auto w-[92%] max-w-[480px] rounded-2xl min-h-[56px] flex items-center justify-around px-1 py-1.5 gap-1 relative overflow-hidden bg-fv-cream dark:bg-card border border-primary/10 dark:border-emerald-200/10 border-t-primary/20 dark:border-t-emerald-200/15 shadow-[0_10px_24px_-16px_rgba(27,67,50,0.38),0_4px_10px_-6px_rgba(27,67,50,0.2)] dark:shadow-[0_12px_26px_-16px_rgba(0,0,0,0.65),0_4px_10px_-6px_rgba(0,0,0,0.5)]"
         aria-label="Staff bottom navigation"
