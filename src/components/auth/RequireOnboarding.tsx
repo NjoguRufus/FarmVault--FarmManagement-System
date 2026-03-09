@@ -15,7 +15,7 @@ interface RequireOnboardingProps {
  * - Redirect to /onboarding ONLY when setupIncomplete === true (never based on subscription/trial).
  */
 export function RequireOnboarding({ children }: RequireOnboardingProps) {
-  const { user, authReady, isDeveloper, setupIncomplete } = useAuth();
+  const { user, authReady, isDeveloper, setupIncomplete, employeeProfile } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -39,18 +39,39 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
     return <Navigate to="/admin" replace />;
   }
 
-  // Redirect ONLY when setupIncomplete is true (missing company_id or role from current_context).
-  // Do NOT redirect based on subscription/trial state.
-  if (setupIncomplete) {
+  // If this session has an employee profile (from RPC activation or existing membership),
+  // skip owner onboarding and go straight to app. No client-side employees lookup here.
+  if (employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Redirect to /onboarding (setupIncomplete)', {
+      console.log('[Auth] Redirecting employee to /dashboard');
+    }
+    return children;
+  }
+
+  // Redirect ONLY when setupIncomplete is true AND there is no employee profile
+  // (no invite match). This is the company-owner onboarding path.
+  if (setupIncomplete && !employeeProfile) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[RequireOnboarding] Owner onboarding path → /onboarding', {
         companyId: user.companyId,
         role: user.role,
         setupIncomplete,
       });
     }
     return <Navigate to="/onboarding" replace state={{ from: location }} />;
+  }
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[RequireOnboarding] Normal app path (no onboarding)', {
+      uid: user.id,
+      companyId: user.companyId,
+      role: user.role,
+      hasEmployeeProfile: !!employeeProfile,
+      setupIncomplete,
+    });
   }
 
   return children;

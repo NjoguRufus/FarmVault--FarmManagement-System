@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff, User as UserIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db, authEmployeeCreate } from '@/lib/firebase';
 import { serverTimestamp, doc, setDoc, updateDoc } from '@/lib/firestore-stub';
@@ -7,7 +8,15 @@ import { createUserWithEmailAndPassword } from '@/lib/auth-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee, PermissionMap, PermissionPresetKey, User } from '@/types';
 import { employeesProvider } from '@/lib/provider';
-import { listEmployees, inviteEmployee, updateEmployee as updateEmployeeSupabase } from '@/services/employeesSupabaseService';
+import {
+  listEmployees,
+  inviteEmployee,
+  updateEmployee as updateEmployeeSupabase,
+  saveEmployeeDraft,
+  setEmployeeStatus,
+  deleteEmployee as deleteEmployeeSupabase,
+  revokeEmployeeInvite,
+} from '@/services/employeesSupabaseService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -36,11 +45,13 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { PermissionEditor } from '@/components/permissions/PermissionEditor';
-import { getDefaultPermissions, getPresetPermissions, resolvePermissions } from '@/lib/permissions';
+import { getDefaultPermissions, getPresetPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { EMPLOYEE_ROLE_LABELS, EMPLOYEE_ROLES, type EmployeeRoleKey } from '@/config/accessControl';
+import { logActivity } from '@/services/employeeAccessService';
 
-type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker';
+type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
 type PermissionEditorPreset = PermissionPresetKey | 'custom';
 
@@ -49,6 +60,11 @@ const ROLE_OPTIONS: Array<{
   label: string;
   department: string;
 }> = [
+  ...EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((value) => ({
+    value: value as ManagedEmployeeRole,
+    label: EMPLOYEE_ROLE_LABELS[value],
+    department: value === 'admin' ? 'Admin' : value === 'farm_manager' ? 'Management' : value === 'finance_officer' ? 'Finance' : value === 'inventory_officer' ? 'Inventory' : 'General',
+  })),
   { value: 'operations-manager', label: 'Operations (Manager)', department: 'Operations' },
   { value: 'logistics-driver', label: 'Logistics (Driver)', department: 'Logistics' },
   { value: 'sales-broker', label: 'Sales (Broker)', department: 'Sales' },
@@ -66,6 +82,7 @@ function mapEmployeeRoleToAppRole(role: ManagedEmployeeRole | null): 'manager' |
 
 function normalizeEmployeeRole(role: string | null | undefined): ManagedEmployeeRole | null {
   if (!role) return null;
+  if (EMPLOYEE_ROLES.includes(role as EmployeeRoleKey)) return role as ManagedEmployeeRole;
   if (role === 'operations-manager' || role === 'manager') return 'operations-manager';
   if (role === 'logistics-driver' || role === 'driver') return 'logistics-driver';
   if (role === 'sales-broker' || role === 'broker') return 'sales-broker';
@@ -107,16 +124,19 @@ function getDepartmentFromRole(role: ManagedEmployeeRole | null): string {
 }
 
 export default function EmployeesPage() {
-  const { user } = useAuth();
+  const { user, employeeProfile } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canCreateEmployees = can('employees', 'create');
   const canEditEmployees = can('employees', 'edit');
+  const navigate = useNavigate();
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       active: 'fv-badge--active',
       'on-leave': 'fv-badge--warning',
       inactive: 'bg-muted text-muted-foreground',
+      suspended: 'fv-badge--warning',
+      archived: 'bg-muted text-muted-foreground',
     };
     return styles[status] || 'bg-muted text-muted-foreground';
   };
@@ -146,7 +166,22 @@ export default function EmployeesPage() {
     try {
       const list = await listEmployees(companyId);
       setEmployeesSupabase(list);
-    } catch {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[EmployeesPage] refetchSupabaseEmployees', {
+          companyId,
+          total: list.length,
+          byStatus: list.reduce<Record<string, number>>((acc, e) => {
+            acc[e.status] = (acc[e.status] || 0) + 1;
+            return acc;
+          }, {}),
+        });
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('[EmployeesPage] refetchSupabaseEmployees error', err);
+      }
       setEmployeesSupabase([]);
     } finally {
       setLoadingSupabase(false);
@@ -168,22 +203,66 @@ export default function EmployeesPage() {
   const [editRole, setEditRole] = useState<EmployeeRoleSelection>('none');
   const [editDepartment, setEditDepartment] = useState('');
   const [editContact, setEditContact] = useState('');
-  const [editStatus, setEditStatus] = useState<'active' | 'on-leave' | 'inactive'>('active');
+  const [editStatus, setEditStatus] = useState<'active' | 'on-leave' | 'inactive' | 'suspended' | 'archived'>('active');
   const [editSaving, setEditSaving] = useState(false);
   const [editPermissions, setEditPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
   const [editPreset, setEditPreset] = useState<PermissionEditorPreset>('custom');
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
+  type EmployeeSection = 'active' | 'invited' | 'draft' | 'archived';
+  const [section, setSection] = useState<EmployeeSection>('active');
+
+  const [currentDraftEmployeeId, setCurrentDraftEmployeeId] = useState<string | null>(null);
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[EmployeesPage] auth', {
+      clerkUserId: user?.id,
+      activeCompanyId: companyId,
+      provider: employeesProvider,
+    });
+  }
+
   const openEdit = (employee: Employee) => {
-    const employeeRole = getEmployeeRole(employee);
-    setEditingEmployee(employee);
-    setEditName(getEmployeeName(employee));
-    setEditRole(employeeRole || 'none');
-    setEditDepartment(employee.department || getDepartmentFromRole(employeeRole));
-    setEditContact(getEmployeePhone(employee));
-    setEditStatus((employee.status as typeof editStatus) || 'active');
-    setEditPermissions(resolvePermissions(employeeRole, employee.permissions ?? getDefaultPermissions()));
+  const employeeRole = getEmployeeRole(employee);
+  setEditingEmployee(employee);
+  setEditName(getEmployeeName(employee));
+  setEditRole(employeeRole || 'none');
+  setEditDepartment(employee.department || getDepartmentFromRole(employeeRole));
+  setEditContact(getEmployeePhone(employee));
+  setEditStatus((employee.status as typeof editStatus) || 'active');
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[Employee Edit] loaded employee row', {
+      id: employee.id,
+      fullName: employee.fullName,
+      role: employee.role,
+      employeeRole: employee.employeeRole,
+      permission_preset: (employee as any).permission_preset ?? null,
+      permissions: employee.permissions ?? null,
+    });
+  }
+  let overrides = employee.permissions ?? getDefaultPermissions();
+  const raw = employee.permissions as any;
+  if (raw && typeof raw === 'object' && Object.keys(raw).some((k) => k.includes('.'))) {
+    const expanded = expandFlatPermissions(raw as Record<string, boolean>);
+    if (expanded) {
+      overrides = expanded;
+    }
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Employee Edit] initialized permissions source = employees.permissions', {
+        employeeId: employee.id,
+      });
+    }
+  } else if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[Employee Edit] initialized permissions source = preset', {
+      employeeId: employee.id,
+    });
+  }
+  setEditPermissions(resolvePermissions(employeeRole, overrides));
     setEditPreset('custom');
     setEditOpen(true);
   };
@@ -259,17 +338,47 @@ export default function EmployeesPage() {
         const selectedRole = resolveRoleForSave(editRole, editingEmployee);
         const resolvedPermissions = resolvePermissions(selectedRole, editPermissions);
         const resolvedDepartment = editDepartment || getDepartmentFromRole(normalizeEmployeeRole(selectedRole));
+
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[Employee Edit] save payload', {
+            employeeId: editingEmployee.id,
+            full_name: editName,
+            role: selectedRole,
+            department: resolvedDepartment,
+            phone: editContact || undefined,
+            status: editStatus,
+            permission_preset: editPreset === 'custom' ? null : editPreset,
+            permissions: resolvedPermissions,
+          });
+        }
+
         await updateEmployeeSupabase(editingEmployee.id, {
-          name: editName,
+          full_name: editName,
           role: selectedRole,
-          employee_role: selectedRole,
           department: resolvedDepartment,
           phone: editContact || undefined,
-          contact: editContact || undefined,
           status: editStatus,
           permissions: resolvedPermissions,
+          permission_preset: editPreset === 'custom' ? null : editPreset,
         });
+        if (companyId) {
+          await logActivity({
+            companyId,
+            employeeId: editingEmployee.id,
+            action: 'Employee updated (role, permissions, or status)',
+            module: 'employees',
+            metadata: { updated_by: user?.id, role: selectedRole, status: editStatus },
+          });
+        }
         await refetchSupabaseEmployees();
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[Employee Edit] save response', {
+            employeeId: editingEmployee.id,
+            ok: true,
+          });
+        }
         toast.success('Employee updated');
         setEditOpen(false);
         setEditingEmployee(null);
@@ -337,18 +446,34 @@ export default function EmployeesPage() {
 
       if (isEmployeesSupabase) {
         const selectedRole = role === 'none' ? null : role;
-        const resolvedPermissions = resolvePermissions(selectedRole, addPermissions);
-        await inviteEmployee({
-          email: email.trim(),
-          name: name.trim() || email.trim(),
-          role: selectedRole,
-          department: department.trim() || undefined,
+        const permissionPreset = (selectedRole ?? 'viewer') as string;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[EmployeesPage] inviteEmployee payload', {
+            companyId: effectiveCompanyId,
+            fullName: name.trim() || email.trim(),
+            email: email.trim().toLowerCase(),
+            phone: contact.trim() || undefined,
+            role: selectedRole ?? undefined,
+            department: department.trim() || undefined,
+            permissionPreset,
+            actorEmployeeId: employeeProfile?.id ?? undefined,
+          });
+        }
+        const result = await inviteEmployee({
+          companyId: effectiveCompanyId!,
+          fullName: name.trim() || email.trim(),
+          email: email.trim().toLowerCase(),
           phone: contact.trim() || undefined,
-          permissions: resolvedPermissions,
-          company_id: effectiveCompanyId ?? undefined,
+          role: selectedRole ?? undefined,
+          department: department.trim() || undefined,
+          permissionPreset,
+          permissionOverrides: null,
+          assignedProjectIds: [],
+          actorEmployeeId: employeeProfile?.id ?? undefined,
         });
         await refetchSupabaseEmployees();
-        toast.success('Invite sent');
+        toast.success(result?.message ?? 'Employee invited successfully. An invitation email has been sent.');
         setAddOpen(false);
         resetAddForm();
         setSaving(false);
@@ -400,6 +525,28 @@ export default function EmployeesPage() {
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
       const message = (err as { message?: string })?.message ?? '';
+      const detail = (err as { detail?: string })?.detail;
+      const details = (err as { details?: unknown })?.details;
+      const description =
+        detail ??
+        (typeof details === 'string' ? details : details && typeof details === 'object' && 'message' in details ? String((details as { message: unknown }).message) : null) ??
+        message;
+      if (isEmployeesSupabase) {
+        if (code === 'ALREADY_INVITED') {
+          toast.error('Invitation already sent', { description: description || 'An invitation has already been sent to this email.' });
+          return;
+        }
+        if (code === 'EMPLOYEE_ALREADY_ACTIVE') {
+          toast.error('Employee already exists', { description: description || 'This email is already an active user. Use a different email or edit the existing employee.' });
+          return;
+        }
+        if (code === 'CLERK_INVITE_FAILED') {
+          toast.error('Invitation failed', { description: description || 'Could not send invitation email. Check Clerk configuration.' });
+          return;
+        }
+        toast.error('Invite failed', { description: description || 'Could not invite employee. Please try again.' });
+        return;
+      }
       if (code === 'auth/email-already-in-use') {
         toast.error('Email already in use', {
           description: 'This email is already registered. Use a different email or invite the existing user.',
@@ -435,6 +582,40 @@ export default function EmployeesPage() {
     return employees.filter((e) => e.companyId === user?.companyId);
   }, [isEmployeesSupabase, employeesSupabase, employees, user?.companyId, user?.role, companyId, isDeveloper]);
 
+  if (import.meta.env.DEV) {
+    const all = isEmployeesSupabase ? employeesSupabase : employees;
+    // eslint-disable-next-line no-console
+    console.log('[EmployeesPage] companyEmployees snapshot', {
+      provider: employeesProvider,
+      total: companyEmployees.length,
+      rawTotal: all.length,
+      byStatus: companyEmployees.reduce<Record<string, number>>((acc, e) => {
+        acc[e.status] = (acc[e.status] || 0) + 1;
+        return acc;
+      }, {}),
+    });
+  }
+
+  const activeEmployees = useMemo(
+    () => companyEmployees.filter((e) => e.status === 'active'),
+    [companyEmployees],
+  );
+
+  const invitedEmployees = useMemo(
+    () => companyEmployees.filter((e) => e.status === 'invited'),
+    [companyEmployees],
+  );
+
+  const draftEmployees = useMemo(
+    () => companyEmployees.filter((e) => e.status === 'draft'),
+    [companyEmployees],
+  );
+
+  const archivedEmployees = useMemo(
+    () => companyEmployees.filter((e) => e.status === 'archived'),
+    [companyEmployees],
+  );
+
   const authUserIdToEmail = useMemo(() => {
     if (isEmployeesSupabase) return new Map<string, string>();
     const map = new Map<string, string>();
@@ -451,8 +632,26 @@ export default function EmployeesPage() {
   };
 
   const filteredEmployees = useMemo(
-    () =>
-      companyEmployees.filter((e) => {
+    () => {
+      let sectionEmployees: Employee[];
+      switch (section) {
+        case 'active':
+          sectionEmployees = activeEmployees;
+          break;
+        case 'invited':
+          sectionEmployees = invitedEmployees;
+          break;
+        case 'draft':
+          sectionEmployees = draftEmployees;
+          break;
+        case 'archived':
+          sectionEmployees = archivedEmployees;
+          break;
+        default:
+          sectionEmployees = activeEmployees;
+      }
+
+      return sectionEmployees.filter((e) => {
         const employeeName = getEmployeeName(e).toLowerCase();
         const employeePhone = getEmployeePhone(e).toLowerCase();
         const employeeEmail = (getEmployeeEmail(e) || '').toLowerCase();
@@ -469,9 +668,77 @@ export default function EmployeesPage() {
             ? !employeeRole
             : employeeRole === roleFilter;
         return matchesSearch && matchesRole;
-      }),
-    [companyEmployees, search, roleFilter, authUserIdToEmail],
+      });
+    },
+    [section, activeEmployees, invitedEmployees, draftEmployees, archivedEmployees, search, roleFilter, authUserIdToEmail],
   );
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[EmployeesPage] filteredEmployees', {
+      section,
+      count: filteredEmployees.length,
+      byStatus: filteredEmployees.reduce<Record<string, number>>((acc, e) => {
+        acc[e.status] = (acc[e.status] || 0) + 1;
+        return acc;
+      }, {}),
+    });
+  }
+
+  const hasMeaningfulAddFormData = () => {
+    return (
+      name.trim() !== '' ||
+      email.trim() !== '' ||
+      contact.trim() !== '' ||
+      department.trim() !== '' ||
+      role !== 'none'
+    );
+  };
+
+  const handleAddDialogOpenChange = async (open: boolean) => {
+    if (open) {
+      setCurrentDraftEmployeeId(null);
+      setAddOpen(true);
+      return;
+    }
+
+    setAddOpen(false);
+
+    if (!isEmployeesSupabase || !companyId) {
+      resetAddForm();
+      return;
+    }
+
+    // If there is no meaningful data, do not create a draft.
+    if (!hasMeaningfulAddFormData()) {
+      resetAddForm();
+      setCurrentDraftEmployeeId(null);
+      return;
+    }
+
+    try {
+      await saveEmployeeDraft({
+        id: currentDraftEmployeeId || undefined,
+        companyId,
+        fullName: name.trim() || email.trim(),
+        email: email.trim().toLowerCase() || undefined,
+        phone: contact.trim() || undefined,
+        role: role === 'none' ? null : role,
+        department: department.trim() || undefined,
+        // Use viewer as default; permissions will be recomputed on invite.
+        permissionPreset: 'viewer',
+        permissions: addPermissions,
+      });
+      toast.success('Draft saved');
+      await refetchSupabaseEmployees();
+    } catch (err: unknown) {
+      const message = (err as { message?: string })?.message ?? 'Failed to save draft';
+      toast.error('Draft not saved', { description: message });
+    } finally {
+      resetAddForm();
+      setCurrentDraftEmployeeId(null);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -484,13 +751,7 @@ export default function EmployeesPage() {
           </p>
         </div>
         {canCreateEmployees && (
-        <Dialog
-          open={addOpen}
-          onOpenChange={(open) => {
-            setAddOpen(open);
-            if (!open) resetAddForm();
-          }}
-        >
+        <Dialog open={addOpen} onOpenChange={handleAddDialogOpenChange}>
           <DialogTrigger asChild>
             <button className="fv-btn fv-btn--primary">
               <Plus className="h-4 w-4" />
@@ -608,6 +869,51 @@ export default function EmployeesPage() {
                 >
                   Cancel
                 </button>
+                {isEmployeesSupabase && (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    className="fv-btn fv-btn--ghost"
+                    onClick={async () => {
+                      if (!companyId) {
+                        toast.error('No company selected', {
+                          description: 'Cannot save draft without an active company.',
+                        });
+                        return;
+                      }
+                      if (!hasMeaningfulAddFormData()) {
+                        toast.error('Nothing to save', { description: 'Add some details before saving a draft.' });
+                        return;
+                      }
+                      setSaving(true);
+                      try {
+                        await saveEmployeeDraft({
+                          id: currentDraftEmployeeId || undefined,
+                          companyId,
+                          fullName: name.trim() || email.trim(),
+                          email: email.trim().toLowerCase() || undefined,
+                          phone: contact.trim() || undefined,
+                          role: role === 'none' ? null : role,
+                          department: department.trim() || undefined,
+                          permissionPreset: 'viewer',
+                          permissions: addPermissions,
+                        });
+                        await refetchSupabaseEmployees();
+                        toast.success('Draft saved');
+                        setAddOpen(false);
+                        resetAddForm();
+                        setCurrentDraftEmployeeId(null);
+                      } catch (err: unknown) {
+                        const message = (err as { message?: string })?.message ?? 'Failed to save draft';
+                        toast.error('Draft not saved', { description: message });
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                  >
+                    Save Draft
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={saving}
@@ -761,6 +1067,8 @@ export default function EmployeesPage() {
                     <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="on-leave">On leave</SelectItem>
                     <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                    <SelectItem value="archived">Archived</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -794,20 +1102,72 @@ export default function EmployeesPage() {
         />
         <SimpleStatCard
           title="Active"
-          value={companyEmployees.filter(e => e.status === 'active').length}
+          value={activeEmployees.length}
           valueVariant="success"
           layout="vertical"
         />
         <SimpleStatCard
-          title="On Leave"
-          value={companyEmployees.filter(e => e.status === 'on-leave').length}
+          title="Pending Invites"
+          value={invitedEmployees.length}
           valueVariant="warning"
           layout="vertical"
         />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      {/* Section Tabs */}
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <button
+          type="button"
+          onClick={() => setSection('active')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-sm border transition-colors',
+            section === 'active'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-background text-muted-foreground border-border hover:text-foreground',
+          )}
+        >
+          Active Employees ({activeEmployees.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setSection('invited')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-sm border transition-colors',
+            section === 'invited'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-background text-muted-foreground border-border hover:text-foreground',
+          )}
+        >
+          Sent Invites ({invitedEmployees.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setSection('draft')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-sm border transition-colors',
+            section === 'draft'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-background text-muted-foreground border-border hover:text-foreground',
+          )}
+        >
+          Drafts ({draftEmployees.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setSection('archived')}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-sm border transition-colors',
+            section === 'archived'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-background text-muted-foreground border-border hover:text-foreground',
+          )}
+        >
+          Archived ({archivedEmployees.length})
+        </button>
+      </div>
+
+      {/* Filters (applied within selected section) */}
+      <div className="flex flex-col sm:flex-row gap-4 mt-2">
           <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
@@ -839,14 +1199,47 @@ export default function EmployeesPage() {
         <div className="hidden md:block overflow-x-auto">
           <table className="fv-table">
             <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Role</th>
-                <th>Department</th>
-                <th>Contact / Email</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
+              {section === 'active' && (
+                <tr>
+                  <th>Employee</th>
+                  <th>Role</th>
+                  <th>Department</th>
+                  <th>Contact / Email</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              )}
+              {section === 'invited' && (
+                <tr>
+                  <th>Invitee</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Department</th>
+                  <th>Invited</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              )}
+              {section === 'draft' && (
+                <tr>
+                  <th>Draft</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Department</th>
+                  <th>Last Saved</th>
+                  <th></th>
+                </tr>
+              )}
+              {section === 'archived' && (
+                <tr>
+                  <th>Employee</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Department</th>
+                  <th>Archived At</th>
+                  <th></th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {(isEmployeesSupabase ? loadingSupabase : isLoading) && (
@@ -856,53 +1249,436 @@ export default function EmployeesPage() {
                   </td>
                 </tr>
               )}
-              {filteredEmployees.map((employee) => (
-                <tr key={employee.id}>
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                        {getEmployeeName(employee).split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
-                        <p className="text-xs text-muted-foreground">
-                          Joined {formatDate(employee.joinDate, { month: 'short', year: 'numeric' })}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{getRoleLabel(getEmployeeRole(employee))}</td>
-                  <td>{employee.department || 'General'}</td>
-                  <td>
-                    <div className="flex flex-col gap-0.5">
-                      {getEmployeeEmail(employee) && (
-                        <div className="flex items-center gap-2">
-                          <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-sm">{getEmployeeEmail(employee)}</span>
+              {filteredEmployees.map((employee) =>
+                section === 'active' ? (
+                  <tr key={employee.id}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                          {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
                         </div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-sm">{getEmployeePhone(employee) || '—'}</span>
+                        <div>
+                          <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
+                          <p className="text-xs text-muted-foreground">
+                            Joined {formatDate(employee.joinDate, { month: 'short', year: 'numeric' })}
+                          </p>
+                        </div>
                       </div>
+                    </td>
+                    <td>{getRoleLabel(getEmployeeRole(employee))}</td>
+                    <td>{employee.department || 'General'}</td>
+                    <td>
+                      <div className="flex flex-col gap-0.5">
+                        {getEmployeeEmail(employee) && (
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-sm">{getEmployeeEmail(employee)}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-sm">{getEmployeePhone(employee) || '—'}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
+                        {employee.status.replace('-', ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => navigate(`/employees/${employee.id}`)}
+                          >
+                            <UserIcon className="h-3.5 w-3.5 mr-2" />
+                            View profile
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => {
+                              setSelectedEmployee(employee);
+                              setDetailsOpen(true);
+                            }}
+                          >
+                            View details
+                          </DropdownMenuItem>
+                          {canEditEmployees && (
+                            <>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={() => openEdit(employee)}
+                              >
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={async () => {
+                                  if (!companyId || !isEmployeesSupabase) return;
+                                  try {
+                                    await setEmployeeStatus(employee.id, 'archived');
+                                    await logActivity({
+                                      companyId,
+                                      employeeId: employee.id,
+                                      action: 'Employee archived',
+                                      module: 'employees',
+                                      metadata: { updated_by: user?.id },
+                                    });
+                                    await refetchSupabaseEmployees();
+                                    toast.success('Employee archived');
+                                  } catch (err: unknown) {
+                                    const message = (err as { message?: string })?.message ?? 'Failed to archive employee';
+                                    toast.error('Archive failed', { description: message });
+                                  }
+                                }}
+                              >
+                                Archive
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ) : section === 'invited' ? (
+                  <tr key={employee.id}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                          {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                        </div>
+                        <div>
+                          <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{getEmployeeEmail(employee) || '—'}</td>
+                    <td>{getRoleLabel(getEmployeeRole(employee))}</td>
+                    <td>{employee.department || 'General'}</td>
+                    <td>
+                      {employee.createdAt
+                        ? formatDate(employee.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })
+                        : '—'}
+                    </td>
+                    <td>
+                      <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
+                        {employee.status.replace('-', ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem disabled className="opacity-60">
+                            Resend invite (coming soon)
+                          </DropdownMenuItem>
+                          {canEditEmployees && (
+                            <>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={async () => {
+                                  if (!companyId || !isEmployeesSupabase) return;
+                                  const email = (getEmployeeEmail(employee) || '').toLowerCase();
+                                  if (!email) {
+                                    toast.error('Cannot revoke invite', { description: 'Invite has no email address.' });
+                                    return;
+                                  }
+                                  try {
+                                    if (import.meta.env.DEV) {
+                                      // eslint-disable-next-line no-console
+                                      console.log('[EmployeesPage] revokeEmployeeInvite', {
+                                        companyId,
+                                        email,
+                                        employeeId: employee.id,
+                                      });
+                                    }
+                                    await revokeEmployeeInvite(companyId, email);
+                                    await logActivity({
+                                      companyId,
+                                      employeeId: employee.id,
+                                      action: 'Invite revoked',
+                                      module: 'employees',
+                                      metadata: { updated_by: user?.id, email },
+                                    });
+                                    await refetchSupabaseEmployees();
+                                    toast.success('Invite revoked');
+                                  } catch (err: unknown) {
+                                    const message = (err as { message?: string })?.message ?? 'Failed to revoke invite';
+                                    toast.error('Revoke failed', { description: message });
+                                  }
+                                }}
+                              >
+                                Revoke invite
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={async () => {
+                                  if (!companyId || !isEmployeesSupabase) return;
+                                  try {
+                                    await setEmployeeStatus(employee.id, 'archived');
+                                    await logActivity({
+                                      companyId,
+                                      employeeId: employee.id,
+                                      action: 'Invite archived',
+                                      module: 'employees',
+                                      metadata: { updated_by: user?.id },
+                                    });
+                                    await refetchSupabaseEmployees();
+                                    toast.success('Invite archived');
+                                  } catch (err: unknown) {
+                                    const message = (err as { message?: string })?.message ?? 'Failed to archive invite';
+                                    toast.error('Archive failed', { description: message });
+                                  }
+                                }}
+                              >
+                                Archive
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ) : section === 'draft' ? (
+                  <tr key={employee.id}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                          {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                        </div>
+                        <div>
+                          <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{getEmployeeEmail(employee) || '—'}</td>
+                    <td>{getRoleLabel(getEmployeeRole(employee))}</td>
+                    <td>{employee.department || 'General'}</td>
+                    <td>
+                      {employee.createdAt
+                        ? formatDate(employee.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })
+                        : '—'}
+                    </td>
+                    <td>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => {
+                              // Continue editing: open Add modal prefilled from this draft.
+                              setCurrentDraftEmployeeId(employee.id);
+                              setName(getEmployeeName(employee));
+                              setDepartment(employee.department || '');
+                              setContact(getEmployeePhone(employee));
+                              setEmail(getEmployeeEmail(employee) || '');
+                              const draftRole = getEmployeeRole(employee);
+                              setRole((draftRole ?? 'none') as EmployeeRoleSelection);
+                              setAddPermissions(resolvePermissions(draftRole, employee.permissions ?? getDefaultPermissions()));
+                              setAddPreset('custom');
+                              setAddOpen(true);
+                            }}
+                          >
+                            Continue editing
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={async () => {
+                              if (!companyId || !isEmployeesSupabase) return;
+                              try {
+                                const selectedRole = getEmployeeRole(employee);
+                                const permissionPreset = (selectedRole ?? 'viewer') as string;
+                                await inviteEmployee({
+                                  companyId,
+                                  fullName: getEmployeeName(employee),
+                                  email: (getEmployeeEmail(employee) || '').toLowerCase(),
+                                  phone: getEmployeePhone(employee) || undefined,
+                                  role: selectedRole ?? undefined,
+                                  department: employee.department || undefined,
+                                  permissionPreset,
+                                  permissionOverrides: employee.permissions ?? null,
+                                  assignedProjectIds: [],
+                                  actorEmployeeId: employeeProfile?.id ?? undefined,
+                                });
+                                await refetchSupabaseEmployees();
+                                toast.success('Invite sent');
+                              } catch (err: unknown) {
+                                const message = (err as { message?: string })?.message ?? 'Failed to send invite';
+                                toast.error('Invite failed', { description: message });
+                              }
+                            }}
+                          >
+                            Send invite
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="cursor-pointer text-red-600"
+                            onClick={async () => {
+                              if (!isEmployeesSupabase) return;
+                              try {
+                                await deleteEmployeeSupabase(employee.id);
+                                await refetchSupabaseEmployees();
+                                toast.success('Draft deleted');
+                              } catch (err: unknown) {
+                                const message = (err as { message?: string })?.message ?? 'Failed to delete draft';
+                                toast.error('Delete failed', { description: message });
+                              }
+                            }}
+                          >
+                            Delete draft
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={async () => {
+                              if (!companyId || !isEmployeesSupabase) return;
+                              try {
+                                await setEmployeeStatus(employee.id, 'archived');
+                                await logActivity({
+                                  companyId,
+                                  employeeId: employee.id,
+                                  action: 'Draft archived',
+                                  module: 'employees',
+                                  metadata: { updated_by: user?.id },
+                                });
+                                await refetchSupabaseEmployees();
+                                toast.success('Draft archived');
+                              } catch (err: unknown) {
+                                const message = (err as { message?: string })?.message ?? 'Failed to archive draft';
+                                toast.error('Archive failed', { description: message });
+                              }
+                            }}
+                          >
+                            Archive
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ) : (
+                  // archived
+                  <tr key={employee.id}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                          {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                        </div>
+                        <div>
+                          <span className="font-medium text-foreground">{getEmployeeName(employee)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{getEmployeeEmail(employee) || '—'}</td>
+                    <td>{getRoleLabel(getEmployeeRole(employee))}</td>
+                    <td>{employee.department || 'General'}</td>
+                    <td>
+                      {employee.createdAt
+                        ? formatDate(employee.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })
+                        : '—'}
+                    </td>
+                    <td>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {canEditEmployees && (
+                            <>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={async () => {
+                                  if (!companyId || !isEmployeesSupabase) return;
+                                  try {
+                                    await setEmployeeStatus(employee.id, 'active');
+                                    await logActivity({
+                                      companyId,
+                                      employeeId: employee.id,
+                                      action: 'Employee restored from archived',
+                                      module: 'employees',
+                                      metadata: { updated_by: user?.id },
+                                    });
+                                    await refetchSupabaseEmployees();
+                                    toast.success('Employee restored');
+                                  } catch (err: unknown) {
+                                    const message = (err as { message?: string })?.message ?? 'Failed to restore employee';
+                                    toast.error('Restore failed', { description: message });
+                                  }
+                                }}
+                              >
+                                Restore
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile Cards */}
+        <div className="md:hidden space-y-3">
+          {filteredEmployees.map((employee) =>
+            section === 'active' ? (
+              <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
                     </div>
-                  </td>
-                  <td>
+                    <div>
+                      <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
+                      <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
                     <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
                       {employee.status.replace('-', ' ')}
                     </span>
-                  </td>
-                  <td>
-                    <DropdownMenu>
+                      <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="p-2 hover:bg-muted rounded-lg transition-colors"
-                        >
+                        <button type="button" className="p-2 hover:bg-muted rounded-lg">
                           <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={() => navigate(`/employees/${employee.id}`)}
+                        >
+                          <UserIcon className="h-3.5 w-3.5 mr-2" />
+                          View profile
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                           className="cursor-pointer"
                           onClick={() => {
@@ -913,76 +1689,332 @@ export default function EmployeesPage() {
                           View details
                         </DropdownMenuItem>
                         {canEditEmployees && (
-                        <DropdownMenuItem
-                          className="cursor-pointer"
-                          onClick={() => openEdit(employee)}
+                          <DropdownMenuItem className="cursor-pointer" onClick={() => openEdit(employee)}>
+                            Edit
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                      </DropdownMenu>
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>{employee.department || 'General'}</div>
+                  {getEmployeeEmail(employee) && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0" />
+                      <span>{getEmployeeEmail(employee)}</span>
+                    </div>
+                  )}
+                  {getEmployeePhone(employee) && (
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 shrink-0" />
+                      <span>{getEmployeePhone(employee)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : section === 'invited' ? (
+              <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
+                      <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
+                      {employee.status.replace('-', ' ')}
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-2 hover:bg-muted rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Edit
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem disabled className="opacity-60">
+                          Resend invite (coming soon)
                         </DropdownMenuItem>
+                        {canEditEmployees && (
+                          <>
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={async () => {
+                                if (!companyId || !isEmployeesSupabase) return;
+                                const emailAddr = (getEmployeeEmail(employee) || '').toLowerCase();
+                                if (!emailAddr) {
+                                  toast.error('Cannot revoke invite', { description: 'Invite has no email address.' });
+                                  return;
+                                }
+                                try {
+                                  if (import.meta.env.DEV) {
+                                    // eslint-disable-next-line no-console
+                                    console.log('[EmployeesPage] revokeEmployeeInvite (mobile)', {
+                                      companyId,
+                                      email: emailAddr,
+                                      employeeId: employee.id,
+                                    });
+                                  }
+                                  await revokeEmployeeInvite(companyId, emailAddr);
+                                  await logActivity({
+                                    companyId,
+                                    employeeId: employee.id,
+                                    action: 'Invite revoked',
+                                    module: 'employees',
+                                    metadata: { updated_by: user?.id, email: emailAddr },
+                                  });
+                                  await refetchSupabaseEmployees();
+                                  toast.success('Invite revoked');
+                                } catch (err: unknown) {
+                                  const message = (err as { message?: string })?.message ?? 'Failed to revoke invite';
+                                  toast.error('Revoke failed', { description: message });
+                                }
+                              }}
+                            >
+                              Revoke invite
+                            </DropdownMenuItem>
+                          </>
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Cards */}
-        <div className="md:hidden space-y-3">
-          {filteredEmployees.map((employee) => (
-            <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
-                    {getEmployeeName(employee).split(' ').map(n => n[0]).join('')}
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
-                    <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
-                    {employee.status.replace('-', ' ')}
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button type="button" className="p-2 hover:bg-muted rounded-lg">
-                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem className="cursor-pointer" onClick={() => { setSelectedEmployee(employee); setDetailsOpen(true); }}>
-                        View details
-                      </DropdownMenuItem>
-                      {canEditEmployees && (
-                      <DropdownMenuItem className="cursor-pointer" onClick={() => openEdit(employee)}>
-                        Edit
-                      </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>{employee.department || 'General'}</div>
+                  {getEmployeeEmail(employee) && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0" />
+                      <span>{getEmployeeEmail(employee)}</span>
+                    </div>
+                  )}
+                  {employee.createdAt && (
+                    <div className="flex items-center gap-2">
+                      <span>Invited:</span>
+                      <span>
+                        {formatDate(employee.createdAt, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="text-sm text-muted-foreground space-y-1">
-                <div>{employee.department || 'General'}</div>
-                {getEmployeeEmail(employee) && (
-                  <div className="flex items-center gap-2">
-                    <Mail className="h-4 w-4 shrink-0" />
-                    <span>{getEmployeeEmail(employee)}</span>
+            ) : section === 'draft' ? (
+              <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
+                      <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
+                    </div>
                   </div>
-                )}
-                {getEmployeePhone(employee) && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 shrink-0" />
-                    <span>{getEmployeePhone(employee)}</span>
+                  <div className="flex items-center gap-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-2 hover:bg-muted rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={() => {
+                            setCurrentDraftEmployeeId(employee.id);
+                            setName(getEmployeeName(employee));
+                            setDepartment(employee.department || '');
+                            setContact(getEmployeePhone(employee));
+                            setEmail(getEmployeeEmail(employee) || '');
+                            const draftRole = getEmployeeRole(employee);
+                            setRole((draftRole ?? 'none') as EmployeeRoleSelection);
+                            setAddPermissions(resolvePermissions(draftRole, employee.permissions ?? getDefaultPermissions()));
+                            setAddPreset('custom');
+                            setAddOpen(true);
+                          }}
+                        >
+                          Continue editing
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={async () => {
+                            if (!companyId || !isEmployeesSupabase) return;
+                            try {
+                              const selectedRole = getEmployeeRole(employee);
+                              const permissionPreset = (selectedRole ?? 'viewer') as string;
+                              await inviteEmployee({
+                                companyId,
+                                fullName: getEmployeeName(employee),
+                                email: (getEmployeeEmail(employee) || '').toLowerCase(),
+                                phone: getEmployeePhone(employee) || undefined,
+                                role: selectedRole ?? undefined,
+                                department: employee.department || undefined,
+                                permissionPreset,
+                                permissionOverrides: employee.permissions ?? null,
+                                assignedProjectIds: [],
+                                actorEmployeeId: employeeProfile?.id ?? undefined,
+                              });
+                              await refetchSupabaseEmployees();
+                              toast.success('Invite sent');
+                            } catch (err: unknown) {
+                              const message = (err as { message?: string })?.message ?? 'Failed to send invite';
+                              toast.error('Invite failed', { description: message });
+                            }
+                          }}
+                        >
+                          Send invite
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer text-red-600"
+                          onClick={async () => {
+                            if (!isEmployeesSupabase) return;
+                            try {
+                              await deleteEmployeeSupabase(employee.id);
+                              await refetchSupabaseEmployees();
+                              toast.success('Draft deleted');
+                            } catch (err: unknown) {
+                              const message = (err as { message?: string })?.message ?? 'Failed to delete draft';
+                              toast.error('Delete failed', { description: message });
+                            }
+                          }}
+                        >
+                          Delete draft
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={async () => {
+                            if (!companyId || !isEmployeesSupabase) return;
+                            try {
+                              await setEmployeeStatus(employee.id, 'archived');
+                              await logActivity({
+                                companyId,
+                                employeeId: employee.id,
+                                action: 'Draft archived',
+                                module: 'employees',
+                                metadata: { updated_by: user?.id },
+                              });
+                              await refetchSupabaseEmployees();
+                              toast.success('Draft archived');
+                            } catch (err: unknown) {
+                              const message = (err as { message?: string })?.message ?? 'Failed to archive draft';
+                              toast.error('Archive failed', { description: message });
+                            }
+                          }}
+                        >
+                          Archive
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                )}
+                </div>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>{employee.department || 'General'}</div>
+                  {getEmployeeEmail(employee) && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0" />
+                      <span>{getEmployeeEmail(employee)}</span>
+                    </div>
+                  )}
+                  {employee.createdAt && (
+                    <div className="flex items-center gap-2">
+                      <span>Last saved:</span>
+                      <span>
+                        {formatDate(employee.createdAt, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={employee.id} className="p-4 bg-muted/30 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-medium">
+                      {getEmployeeName(employee).split(' ').map((n) => n[0]).join('')}
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{getEmployeeName(employee)}</p>
+                      <p className="text-xs text-muted-foreground">{getRoleLabel(getEmployeeRole(employee))}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="p-2 hover:bg-muted rounded-lg">
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {canEditEmployees && (
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={async () => {
+                              if (!companyId || !isEmployeesSupabase) return;
+                              try {
+                                await setEmployeeStatus(employee.id, 'active');
+                                await logActivity({
+                                  companyId,
+                                  employeeId: employee.id,
+                                  action: 'Employee restored from archived',
+                                  module: 'employees',
+                                  metadata: { updated_by: user?.id },
+                                });
+                                await refetchSupabaseEmployees();
+                                toast.success('Employee restored');
+                              } catch (err: unknown) {
+                                const message = (err as { message?: string })?.message ?? 'Failed to restore employee';
+                                toast.error('Restore failed', { description: message });
+                              }
+                            }}
+                          >
+                            Restore
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <div>{employee.department || 'General'}</div>
+                  {getEmployeeEmail(employee) && (
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0" />
+                      <span>{getEmployeeEmail(employee)}</span>
+                    </div>
+                  )}
+                  {employee.createdAt && (
+                    <div className="flex items-center gap-2">
+                      <span>Archived:</span>
+                      <span>
+                        {formatDate(employee.createdAt, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          )}
         </div>
       </div>
       <UpgradeModal

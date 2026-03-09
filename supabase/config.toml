@@ -25,3 +25,7 @@ site_url = "http://127.0.0.1:3000"
 
 [analytics]
 enabled = false
+
+# invite-employee uses Clerk JWT only; do not verify Supabase Auth JWT (deploy with --no-verify-jwt).
+[functions.invite-employee]
+verify_jwt = false

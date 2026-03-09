@@ -16,7 +16,18 @@ export function PermissionRoute({ module, actionPath, children }: PermissionRout
     return children;
   }
 
-  if (!can(module, actionPath || 'view')) {
+  const allowed = can(module, actionPath || 'view');
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[Route Guard] permission check', {
+      module,
+      action: actionPath || 'view',
+      allowed,
+    });
+  }
+
+  if (!allowed) {
     return <AccessRestrictedPage />;
   }
 

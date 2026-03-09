@@ -143,6 +143,66 @@ export function normalizePermissions(input?: PermissionMapInput): PermissionMap 
   return deepMerge(clonePermissionMap(DEFAULT_MINIMAL_PERMISSIONS), input as Record<string, unknown>);
 }
 
+/**
+ * Flatten a nested PermissionMap into flat \"module.path\" keys.
+ * Example: permissions.dashboard.view -> \"dashboard.view\".
+ * This is used when persisting employee permissions JSON so we have a single flat format.
+ */
+export function flattenPermissionMap(map: PermissionMap): Record<string, boolean> {
+  const flat: Record<string, boolean> = {};
+
+  const walk = (prefix: string, value: unknown) => {
+    if (typeof value === 'boolean') {
+      flat[prefix] = value;
+      return;
+    }
+    if (!isPlainObject(value)) {
+      return;
+    }
+    Object.entries(value).forEach(([key, v]) => {
+      const nextPrefix = prefix ? `${prefix}.${key}` : key;
+      walk(nextPrefix, v);
+    });
+  };
+
+  walk('', map as unknown as Record<string, unknown>);
+  return flat;
+}
+
+/**
+ * Expand a flat permissions object (\"module.path\" => boolean) back into a PermissionMap.
+ * This allows legacy nested PermissionMap consumers to keep working while employees.permissions
+ * is stored in flat-key format only.
+ */
+export function expandFlatPermissions(flat: Record<string, boolean> | null | undefined): PermissionMap | null {
+  if (!flat || typeof flat !== 'object') return null;
+  const base = clonePermissionMap(DEFAULT_MINIMAL_PERMISSIONS);
+
+  Object.entries(flat).forEach(([key, value]) => {
+    if (typeof value !== 'boolean') return;
+    const parts = key.split('.');
+    if (parts.length === 0) return;
+
+    let cursor: any = base;
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      if (i === parts.length - 1) {
+        // Only override when the existing value is boolean or undefined.
+        if (typeof cursor[part] === 'boolean' || cursor[part] === undefined) {
+          cursor[part] = value;
+        }
+      } else {
+        if (!isPlainObject(cursor[part])) {
+          cursor[part] = {};
+        }
+        cursor = cursor[part];
+      }
+    }
+  });
+
+  return base;
+}
+
 const FULL_ACCESS_PERMISSIONS: PermissionMap = {
   dashboard: {
     view: true,
@@ -541,6 +601,10 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/manager/operations', module: 'operations' },
   { prefix: '/harvest-sales', module: 'harvest' },
   { prefix: '/harvest-collections', module: 'harvest' },
+  { prefix: '/staff/harvest-collections', module: 'harvest' },
+  { prefix: '/staff/inventory', module: 'inventory' },
+  { prefix: '/staff/expenses', module: 'expenses' },
+  { prefix: '/staff/operations', module: 'operations' },
   { prefix: '/broker/harvest-sales', module: 'harvest' },
   { prefix: '/broker/harvest', module: 'harvest' },
   { prefix: '/broker/expenses', module: 'expenses' },
@@ -550,6 +614,7 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/billing', module: 'settings' },
   { prefix: '/settings', module: 'settings' },
   { prefix: '/dashboard', module: 'dashboard' },
+  { prefix: '/staff', module: 'dashboard' },
   { prefix: '/broker', module: 'dashboard' },
 ];
 

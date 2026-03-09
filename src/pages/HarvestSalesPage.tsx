@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { Harvest, Sale, Employee, User, InventoryItem } from '@/types';
 import { deductInventoryForHarvest } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
@@ -46,10 +47,12 @@ export default function HarvestSalesPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const { can: canKey } = useEmployeeAccess();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const canViewHarvestFinancials = can('harvest', 'viewFinancials');
+  const canViewHarvestFinancials =
+    canKey('harvest_collections.financials') || can('harvest', 'viewFinancials');
   const canViewBuyerSection = can('harvest', 'viewBuyerSection');
   const canSeeSalesRecords = canViewHarvestFinancials || canViewBuyerSection;
   const canCreateHarvest = can('harvest', 'create') || can('harvest', 'recordIntake');
@@ -1577,10 +1580,10 @@ export default function HarvestSalesPage() {
                   <tr>
                     <th>Date</th>
                     <th>Total kg</th>
-                    <th>Buyer price/kg</th>
-                    <th>Revenue</th>
-                    <th>Paid out</th>
-                    <th>Profit</th>
+                    {canViewHarvestFinancials && <th>Buyer price/kg</th>}
+                    {canViewHarvestFinancials && <th>Revenue</th>}
+                    {canViewHarvestFinancials && <th>Paid out</th>}
+                    {canViewHarvestFinancials && <th>Profit</th>}
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -1596,12 +1599,24 @@ export default function HarvestSalesPage() {
                       >
                         <td>{formatDate(row.collectionDate)}</td>
                         <td className="font-medium">{row.totalHarvestQty.toLocaleString()}</td>
-                        <td>{row.buyerPricePerUnit > 0 ? formatCurrency(row.buyerPricePerUnit) : '—'}</td>
-                        <td>{formatCurrency(row.revenue)}</td>
-                        <td>{formatCurrency(row.totalPaidOut)}</td>
-                        <td className={row.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                          {formatCurrency(row.profit)}
-                        </td>
+                        {canViewHarvestFinancials && (
+                          <td>
+                            {row.buyerPricePerUnit > 0 ? formatCurrency(row.buyerPricePerUnit) : '—'}
+                          </td>
+                        )}
+                        {canViewHarvestFinancials && <td>{formatCurrency(row.revenue)}</td>}
+                        {canViewHarvestFinancials && <td>{formatCurrency(row.totalPaidOut)}</td>}
+                        {canViewHarvestFinancials && (
+                          <td
+                            className={
+                              row.profit >= 0
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-red-600 dark:text-red-400'
+                            }
+                          >
+                            {formatCurrency(row.profit)}
+                          </td>
+                        )}
                         <td>
                           <span className={cn('fv-badge', row.isClosed ? 'fv-badge--active' : 'fv-badge--warning')}>
                             {row.status === 'closed' ? 'Closed' : 'Open'}

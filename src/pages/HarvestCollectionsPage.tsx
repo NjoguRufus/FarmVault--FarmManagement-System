@@ -27,6 +27,8 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useConnectivityStatus } from '@/contexts/ConnectivityContext';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
+import AccessRestrictedPage from '@/pages/AccessRestrictedPage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
@@ -104,6 +106,7 @@ export default function HarvestCollectionsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const { can: canKey, projectAccessIds } = useEmployeeAccess();
   const { activeProject, projects, setActiveProject } = useProject();
   const { hasPendingWrites, isSyncing, isOnline, triggerSync } = useConnectivityStatus();
   const queryClient = useQueryClient();
@@ -195,13 +198,19 @@ export default function HarvestCollectionsPage() {
   const [harvestTourSteps, setHarvestTourSteps] = useState<ReturnType<typeof getHarvestCollectionsStarterSteps>>([]);
   const harvestTourAutoRunDoneRef = useRef(false);
 
-  const canCreateCollection = can('harvest', 'create') || can('harvest', 'recordIntake');
-  const canManageIntake = can('harvest', 'recordIntake') || can('harvest', 'edit') || can('harvest', 'create');
-  const canPayPickers = can('harvest', 'payPickers');
+  const canViewCollections = canKey('harvest_collections.view') || can('harvest', 'view');
+  const canCreateCollection =
+    canKey('harvest_collections.create') || can('harvest', 'create') || can('harvest', 'recordIntake');
+  const canManageIntake =
+    canKey('harvest_collections.edit') ||
+    can('harvest', 'recordIntake') ||
+    can('harvest', 'edit') ||
+    can('harvest', 'create');
+  const canPayPickers = canKey('harvest_collections.pay') || can('harvest', 'payPickers');
   const canViewBuyerSection = can('harvest', 'viewBuyerSection');
   const canCloseHarvest = can('harvest', 'close');
-  const canViewFinancials = can('harvest', 'viewFinancials');
-  const canViewPaymentAmounts = canPayPickers || canViewFinancials;
+  const canViewFinancials = canKey('harvest_collections.financials') || can('harvest', 'viewFinancials');
+  const canViewPaymentAmounts = canViewFinancials;
   
   const detailModes = useMemo<ViewMode[]>(() => {
     const modes: ViewMode[] = [];
@@ -215,6 +224,42 @@ export default function HarvestCollectionsPage() {
 
   const companyId = user?.companyId ?? null;
   const effectiveProjectId = effectiveProject?.id ?? null;
+
+  if (import.meta.env.DEV && user) {
+    // eslint-disable-next-line no-console
+    console.log('[HarvestCollections] staff permissions', {
+      uid: user.id,
+      canViewCollections,
+      canCreateCollection,
+      canManageIntake,
+      canPayPickers,
+      canViewBuyerSection,
+      canViewFinancials,
+      projectAccessIds,
+      collectionCardFields: {
+        date: true,
+        totalKg: true,
+        pickers: true,
+        totalPay: canViewPaymentAmounts,
+      },
+      detailSections: {
+        statsTotalsCard: true,
+        statsFinancialCards: canViewPaymentAmounts,
+        buyerSaleCard: canViewFinancials,
+        walletSection: canViewFinancials,
+      },
+      pickerEntryFields: {
+        weights: true,
+        trips: true,
+        perEntryAmount: canViewFinancials,
+        balances: canViewFinancials,
+      },
+    });
+  }
+
+  if (!canViewCollections) {
+    return <AccessRestrictedPage title="Harvest collections restricted" />;
+  }
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -2698,7 +2743,7 @@ export default function HarvestCollectionsPage() {
                                             <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2.5 py-1.5 text-xs font-medium text-muted-foreground border-b border-border/50">
                                               <span>Entry</span>
                                               <span>KG</span>
-                                              <span>Price</span>
+                                              {canViewFinancials && <span>Price</span>}
                                               <span>Time</span>
                                               <span className="w-14" />
                                             </div>
@@ -2712,7 +2757,9 @@ export default function HarvestCollectionsPage() {
                                                 >
                                                   <span className="tabular-nums text-muted-foreground">{idx + 1}</span>
                                                   <span className="tabular-nums text-foreground">{entry.kg.toFixed(1)} kg</span>
-                                                  <span className="tabular-nums text-foreground">KES {price}</span>
+                                                  {canViewFinancials && (
+                                                    <span className="tabular-nums text-foreground">KES {price}</span>
+                                                  )}
                                                   <span className="text-xs text-muted-foreground tabular-nums">{timeStr}</span>
                                                   {canManageIntake && selectedCollection?.status !== 'closed' ? (
                                                     <div className="flex items-center justify-end gap-0.5 w-14">
@@ -3845,7 +3892,7 @@ export default function HarvestCollectionsPage() {
                       <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-2 px-2 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground border-b border-border">
                         <span>#</span>
                         <span>KG</span>
-                        <span>Price</span>
+                        {canViewFinancials && <span>Price</span>}
                         <span>Time</span>
                         <span className="w-14 text-right" />
                       </div>
@@ -3865,7 +3912,9 @@ export default function HarvestCollectionsPage() {
                               >
                                 <span className="tabular-nums text-foreground">{idx + 1}</span>
                                 <span className="tabular-nums text-foreground">{kg.toFixed(1)} kg</span>
-                                <span className="tabular-nums text-foreground">{price}</span>
+                                {canViewFinancials && (
+                                  <span className="tabular-nums text-foreground">{price}</span>
+                                )}
                                 <span className="text-muted-foreground tabular-nums text-xs">{timeStr}</span>
                                 <div className="flex items-center justify-end gap-0.5 w-14">
                                   {canManageIntake && selectedCollection?.status !== 'closed' && (

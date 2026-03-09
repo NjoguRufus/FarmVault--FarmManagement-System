@@ -137,7 +137,15 @@ export type PermissionPresetKey =
   | 'manager'
   | 'full-access';
 
-export type EmployeeStatus = 'active' | 'inactive' | 'on-leave';
+export type EmployeeStatus =
+  | 'draft'
+  | 'invited'
+  | 'active'
+  | 'suspended'
+  | 'archived'
+  // Legacy / non-Supabase statuses (Firebase, etc.)
+  | 'inactive'
+  | 'on-leave';
 
 export interface User {
   displayName: string;
