@@ -19,7 +19,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const isMobile = useIsMobile();
-  const { fullName, roleLabel } = useStaff();
+  const { fullName, roleLabel, avatarUrl } = useStaff();
 
   const items: Array<{ label: string; path: string }> = [{ label: 'My Dashboard', path: '/staff' }];
 
@@ -50,7 +50,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[Nav] visible staff nav items', {
+    console.log('[StaffSidebar] visible nav items', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,
@@ -105,6 +105,17 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
                   <Link
                     to={itemPath}
                     onClick={() => isMobile && onToggle()}
+                    data-tour={
+                      item.path === '/staff/harvest-collections'
+                        ? 'staff-nav-harvest'
+                        : item.path === '/staff/inventory'
+                        ? 'staff-nav-inventory'
+                        : item.path === '/staff/expenses'
+                        ? 'staff-nav-expenses'
+                        : item.path === '/staff/operations'
+                        ? 'staff-nav-operations'
+                        : undefined
+                    }
                     className={cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                       isActive
@@ -125,7 +136,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
           <div className="shrink-0 border-t border-sidebar-border/30 p-4">
             <div className="flex items-center gap-3">
               <UserAvatar
-                avatarUrl={user.avatar}
+                avatarUrl={avatarUrl ?? user.avatar}
                 name={displayName}
                 size="md"
                 className="h-9 w-9 shrink-0"

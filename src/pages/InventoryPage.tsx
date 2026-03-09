@@ -906,9 +906,12 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in" data-tour="staff-inventory-root">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        data-tour="staff-inventory-header"
+      >
         <div>
           <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
           <p className="text-sm text-muted-foreground mt-1">

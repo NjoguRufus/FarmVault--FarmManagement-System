@@ -345,6 +345,7 @@ const App = () => (
               >
                 <Route index element={<StaffDashboard />} />
                 <Route path="profile" element={<StaffProfilePage />} />
+                <Route path="support" element={<SupportPage />} />
                 <Route
                   path="harvest-collections"
                   element={

@@ -28,6 +28,7 @@ import { db } from '@/lib/db';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { Employee } from '@/types';
+import { UserAvatar } from '@/components/UserAvatar';
 
 type TabId = 'profile' | 'access' | 'projects' | 'activity' | 'security';
 
@@ -164,11 +165,17 @@ export default function EmployeeProfilePage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/employees')}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </Button>
+        <UserAvatar
+          avatarUrl={employee.avatarUrl}
+          name={employee.fullName || employee.name}
+          size="md"
+          className="h-10 w-10 bg-primary/10 text-primary"
+        />
         <h1 className="text-xl font-bold truncate">{employee.fullName || employee.name}</h1>
       </div>
 

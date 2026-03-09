@@ -568,9 +568,12 @@ export default function ExpensesPage() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in" data-tour="staff-expenses-root">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        data-tour="staff-expenses-header"
+      >
         <div>
           <h1 className="text-2xl font-bold text-foreground">Expenses</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -669,7 +672,11 @@ export default function ExpensesPage() {
           </>
           )}
           {canExportExpenseReport && (
-            <button className="fv-btn fv-btn--secondary" onClick={handleExport}>
+            <button
+              className="fv-btn fv-btn--secondary"
+              onClick={handleExport}
+              data-tour="staff-expenses-export"
+            >
               <Download className="h-4 w-4" />
               Export
             </button>
@@ -683,7 +690,10 @@ export default function ExpensesPage() {
             }}
           >
             <DialogTrigger asChild>
-              <button className="fv-btn fv-btn--primary">
+              <button
+                className="fv-btn fv-btn--primary"
+                data-tour="staff-expenses-add"
+              >
                 <Plus className="h-4 w-4" />
                 Add Expense
               </button>

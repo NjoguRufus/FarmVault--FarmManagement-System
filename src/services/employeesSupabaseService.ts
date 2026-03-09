@@ -47,6 +47,7 @@ function mapRowToEmployee(row: Record<string, unknown>): Employee {
     createdAt: row.created_at,
     // UI legacy: treat join date as created_at for Supabase-backed employees
     joinDate: row.created_at,
+    avatarUrl: row.avatar_url != null ? String(row.avatar_url) : undefined,
   };
 }
 
