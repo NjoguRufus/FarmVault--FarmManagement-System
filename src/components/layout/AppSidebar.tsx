@@ -44,6 +44,14 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
     return can(module, 'view');
   });
 
+  if (import.meta.env.DEV && user) {
+    // eslint-disable-next-line no-console
+    console.log('[Nav] visible nav items', {
+      uid: user.id,
+      items: navItems.map((i) => i.path),
+    });
+  }
+
   return (
     <div className="hidden lg:block">
       {/* Mobile overlay when sidebar is open (desktop only - sidebar hidden on mobile) */}

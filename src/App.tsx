@@ -13,6 +13,8 @@ import { DeveloperDashboard } from "@/pages/dashboard/DeveloperDashboard";
 import { EmployeeDashboard } from "@/pages/dashboard/EmployeeDashboard";
 import { BrokerDashboard } from "@/pages/dashboard/BrokerDashboard";
 import { DriverDashboard } from "@/pages/dashboard/DriverDashboard";
+import { StaffLayout } from "@/components/layout/StaffLayout";
+import { StaffDashboard } from "@/pages/dashboard/StaffDashboard";
 import ProjectsPage from "@/pages/ProjectsPage";
 import ProjectDetailsPage from "@/pages/ProjectDetailsPage";
 import ProjectPlanningPage from "@/pages/ProjectPlanningPage";
@@ -29,6 +31,8 @@ import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
+import EmployeeProfilePage from "@/pages/EmployeeProfilePage";
+import StaffProfilePage from "@/pages/StaffProfilePage";
 import ReportsPage from "@/pages/ReportsPage";
 import BillingPage from "@/pages/BillingPage";
 import SupportPage from "@/pages/SupportPage";
@@ -68,6 +72,7 @@ import BlogPostPage from "@/pages/seo/BlogPostPage";
 import LoginPage from "@/pages/Auth/LoginPage";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
+import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
 import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
@@ -122,15 +127,35 @@ const CompanyDashboardRoute = () => {
   const { user } = useAuth();
 
   if (!user) {
+    if (import.meta.env.DEV) {
+      // Temporary routing debug: unauthenticated user hitting dashboard route.
+      // Final redirect will go to /sign-in.
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] No user → /sign-in");
+    }
     return <Navigate to="/sign-in" replace />;
   }
 
   if (user.role === "company-admin" || user.role === "company_admin") {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] company admin → CompanyDashboard", {
+        uid: user.id,
+        role: user.role,
+        employeeRole: (user as any).employeeRole,
+      });
+    }
     return <CompanyDashboard />;
   }
 
   // Developers should use the admin area, not the company dashboard.
   if (user.role === "developer") {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] developer → /admin redirect", {
+        uid: user.id,
+      });
+    }
     return <Navigate to="/admin" replace />;
   }
 
@@ -140,31 +165,50 @@ const CompanyDashboardRoute = () => {
     (user as any).employeeRole === "manager" ||
     (user as any).employeeRole === "operations-manager"
   ) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] manager → /manager redirect", {
+        uid: user.id,
+        role: user.role,
+        employeeRole: (user as any).employeeRole,
+      });
+    }
     return <Navigate to="/manager" replace />;
   }
 
   // Brokers go to broker dashboard
   if (user.role === "broker") {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] broker → /broker redirect", {
+        uid: user.id,
+      });
+    }
     return <Navigate to="/broker" replace />;
   }
 
-  // Generic employees: route based on fine-grained employeeRole when available
-  if (user.role === "employee" || user.role === ("user" as any)) {
-    const employeeRole = (user as any).employeeRole as string | undefined;
-    if (employeeRole === "logistics-driver" || employeeRole === "driver") {
-      return <Navigate to="/driver" replace />;
+  // All staff (non-admin, non-developer) go to dedicated staff workspace.
+  if (user.role === "employee" || user.role === ("user" as any) || user.role === "manager" || user.role === "broker") {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("[CompanyDashboardRoute] staff → /staff redirect", {
+        uid: user.id,
+        role: user.role,
+        employeeRole: (user as any).employeeRole,
+      });
     }
-    if (employeeRole === "operations-manager" || employeeRole === "manager") {
-      return <Navigate to="/manager" replace />;
-    }
-    if (employeeRole === "sales-broker" || employeeRole === "broker") {
-      return <Navigate to="/broker" replace />;
-    }
-    // Role-less employees use the company dashboard and permissions decide visibility.
-    return <CompanyDashboard />;
+    return <Navigate to="/staff" replace />;
   }
 
   // Catch-all: send to projects list
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log("[CompanyDashboardRoute] fallback → /projects redirect", {
+      uid: user.id,
+      role: user.role,
+      employeeRole: (user as any).employeeRole,
+    });
+  }
   return <Navigate to="/projects" replace />;
 };
 
@@ -190,6 +234,8 @@ const App = () => (
               <Route path="/sign-in/*" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
               <Route path="/sign-up" element={<SignUpPage />} />
               <Route path="/sign-up/*" element={<SignUpPage />} />
+              <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+              <Route path="/accept-invitation/*" element={<AcceptInvitationPage />} />
               <Route path="/dev/sign-in" element={<DevSignInPage />} />
               <Route path="/dev/sign-in/*" element={<DevSignInPage />} />
               <Route path="/dev/sign-up" element={<DevSignUpPage />} />
@@ -270,6 +316,7 @@ const App = () => (
                 <Route path="/suppliers" element={<PermissionRoute module="projects"><SuppliersPage /></PermissionRoute>} />
                 <Route path="/challenges" element={<PermissionRoute module="planning"><SeasonChallengesPage /></PermissionRoute>} />
                 <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />
+                <Route path="/employees/:employeeId" element={<PermissionRoute module="employees"><EmployeeProfilePage /></PermissionRoute>} />
                 <Route path="/reports" element={<PermissionRoute module="reports"><ReportsPage /></PermissionRoute>} />
                 <Route path="/billing" element={<PermissionRoute module="settings"><BillingPage /></PermissionRoute>} />
                 <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
@@ -282,6 +329,51 @@ const App = () => (
                   element={
                     <PermissionRoute module="notes">
                       <AdminRecordDetailPage />
+                    </PermissionRoute>
+                  }
+                />
+              </Route>
+
+              {/* Staff workspace routes */}
+              <Route
+                path="/staff"
+                element={
+                  <RequireAuth>
+                    <StaffLayout />
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<StaffDashboard />} />
+                <Route path="profile" element={<StaffProfilePage />} />
+                <Route
+                  path="harvest-collections"
+                  element={
+                    <PermissionRoute module="harvest">
+                      <HarvestCollectionsPage />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="inventory"
+                  element={
+                    <PermissionRoute module="inventory">
+                      <InventoryPage />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="expenses"
+                  element={
+                    <PermissionRoute module="expenses">
+                      <ExpensesPage />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="operations"
+                  element={
+                    <PermissionRoute module="operations">
+                      <OperationsPage />
                     </PermissionRoute>
                   }
                 />

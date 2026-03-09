@@ -2,9 +2,11 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { User, UserRole, Employee, PermissionMap } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
-import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions } from '@/lib/permissions';
+import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
+import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
+import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -138,7 +140,7 @@ function hydrateCachedUser(raw: any): User | null {
   return {
     id: String(raw.id),
     email: String(raw.email),
-    name: String(raw.name || 'User'),
+    name: raw.name != null && String(raw.name).trim().length > 0 ? String(raw.name) : String(raw.email || ''),
     role: (raw.role || 'employee') as UserRole,
     employeeRole: raw.employeeRole ? String(raw.employeeRole) : undefined,
     companyId: raw.companyId ?? null,
@@ -178,23 +180,27 @@ function writeCachedUser(user: User | null) {
 }
 
 function mapEmployeeRow(row: any): Employee {
+  const fullName = row.full_name != null ? String(row.full_name) : undefined;
   return {
     id: String(row.id ?? ''),
     companyId: String(row.company_id ?? ''),
-    name: String(row.name ?? row.full_name ?? 'User'),
-    fullName: row.full_name != null ? String(row.full_name) : row.name != null ? String(row.name) : undefined,
+    // `employees` table uses `full_name` (no `name` column). Keep UI `name` derived.
+    name: fullName ?? 'User',
+    fullName,
     email: row.email != null ? String(row.email) : undefined,
     phone: row.phone != null ? String(row.phone) : undefined,
-    contact: row.contact != null ? String(row.contact) : undefined,
+    // UI legacy: keep `contact` derived from phone for display/search.
+    contact: row.phone != null ? String(row.phone) : undefined,
     role: row.role ?? null,
-    employeeRole: row.employee_role ?? row.role ?? null,
+    // `employees` table has only `role` (no `employee_role` column)
+    employeeRole: row.role ?? null,
     department: row.department != null ? String(row.department) : undefined,
     status: (row.status as Employee['status']) ?? 'active',
     permissions: row.permissions as PermissionMap | undefined,
-    joinDate: row.join_date ?? undefined,
+    // UI legacy: treat join date as created_at for Supabase-backed employees
+    joinDate: row.created_at ?? undefined,
     createdAt: row.created_at ?? undefined,
-    createdBy: row.created_by != null ? String(row.created_by) : undefined,
-    authUserId: row.clerk_user_id != null ? String(row.clerk_user_id) : (row.auth_user_id != null ? String(row.auth_user_id) : undefined),
+    authUserId: row.clerk_user_id != null ? String(row.clerk_user_id) : undefined,
   };
 }
 
@@ -203,7 +209,7 @@ async function loadEmployeeProfile(uid: string): Promise<Employee | null> {
     const { data, error } = await db
       .public()
       .from('employees')
-      .select('*')
+      .select(EMPLOYEES_SELECT)
       .eq('clerk_user_id', uid)
       .order('created_at', { ascending: false })
       .limit(1);
@@ -237,11 +243,28 @@ function getPermissionRole(user: User | null, employeeProfile: Employee | null):
 
 function buildEffectivePermissions(user: User | null, employeeProfile: Employee | null): PermissionMap {
   if (!user) return getDefaultPermissions();
-  if (user.role === 'developer' || user.role === 'company-admin' || (user as any).role === 'company_admin') {
+  // When an employee profile exists, always derive permissions from employee role/overrides,
+  // even if user.role is company-admin. This prevents invited employees from getting
+  // owner-level permissions while still allowing real company owners (without employeeProfile)
+  // to have full access.
+  if (!employeeProfile && (user.role === 'developer' || user.role === 'company-admin' || (user as any).role === 'company_admin')) {
     return getFullAccessPermissions();
   }
   const permissionRole = getPermissionRole(user, employeeProfile);
-  const permissionOverrides = employeeProfile?.permissions ?? (user as any)?.permissions ?? null;
+  const rawOverrides = employeeProfile?.permissions ?? (user as any)?.permissions ?? null;
+
+  // employees.permissions is stored as flat keys (e.g. \"harvest.view\").
+  // Convert flat JSON into nested PermissionMap overrides before resolving.
+  let permissionOverrides: PermissionMap | null = null;
+  if (rawOverrides && typeof rawOverrides === 'object') {
+    const asRecord = rawOverrides as Record<string, boolean>;
+    if (Object.keys(asRecord).some((k) => k.includes('.'))) {
+      permissionOverrides = expandFlatPermissions(asRecord);
+    } else {
+      permissionOverrides = rawOverrides as PermissionMap;
+    }
+  }
+
   return resolvePermissions(permissionRole, permissionOverrides);
 }
 
@@ -309,6 +332,7 @@ export function AuthProvider({
     return false;
   });
   const [setupIncomplete, setSetupIncomplete] = useState(false);
+  const [activationResolved, setActivationResolved] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState<boolean>(() => {
     if (typeof window === 'undefined' || clerkState === null) return false;
     return window.localStorage.getItem('fv:isDeveloper') === '1';
@@ -366,11 +390,13 @@ export function AuthProvider({
       if (emergencyUser) {
         setPermissions(buildEffectivePermissions(emergencyUser, null));
         setSetupIncomplete(false);
+        setActivationResolved(true);
         setIsEmergencySession(true);
       } else {
         setEmployeeProfile(null);
         setPermissions(getDefaultPermissions());
         setIsEmergencySession(false);
+        setActivationResolved(true);
       }
       return;
     }
@@ -390,6 +416,7 @@ export function AuthProvider({
         setPermissions(buildEffectivePermissions(emergencyUser, null));
         setSetupIncomplete(false);
         setIsEmergencySession(true);
+        setActivationResolved(true);
         setAuthReady(true);
         return;
       }
@@ -401,6 +428,7 @@ export function AuthProvider({
       setSetupIncomplete(false);
       setIsDeveloper(false);
       setIsEmergencySession(false);
+      setActivationResolved(true);
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('fv:isDeveloper', '0');
       }
@@ -415,11 +443,19 @@ export function AuthProvider({
     let cancelled = false;
     setAuthReady(false);
     setSetupIncomplete(false);
+    setActivationResolved(false);
 
     (async () => {
       try {
         const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
-        const fallbackName = clerkUser?.fullName ?? clerkUser?.username ?? 'User';
+        const fallbackName =
+          (clerkUser?.fullName && clerkUser.fullName.trim().length > 0
+            ? clerkUser.fullName
+            : undefined) ??
+          (clerkUser?.username && clerkUser.username.trim().length > 0
+            ? clerkUser.username
+            : undefined) ??
+          '';
 
         // 1) Determine developer status as early as possible.
         const devRoute = isCurrentRouteDev();
@@ -578,6 +614,23 @@ export function AuthProvider({
           });
         }
 
+        // Ensure membership exists for this user + company so employees RLS can pass.
+        try {
+          const { data: ensureData, error: ensureError } = await supabase.rpc('ensure_current_membership');
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Membership ensure result (pre-link)', {
+              error: ensureError,
+              data: ensureData,
+            });
+          }
+        } catch (membershipError) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] ensure_current_membership (pre-link) failed (non-blocking):', membershipError);
+          }
+        }
+
         const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
         // Avatar priority: 1) profile.avatar_url (custom upload), 2) Clerk/Google imageUrl, 3) UI shows initials
         const resolvedAvatar = profileAvatarUrl || clerkImageUrl || null;
@@ -592,33 +645,160 @@ export function AuthProvider({
           createdAt: new Date(),
         };
 
-        if (setupIncompleteFlag) {
+        // 5) Activate invited employee via SECURITY DEFINER RPC only. No client-side employees lookup.
+        // Routing: (1) activation RPC result, (2) existing membership, (3) owner onboarding.
+        let effectiveCompanyId = contextCompanyId;
+        let employeeFromRpc: Employee | null = null;
+        try {
+          const linkResult = await linkCurrentUserToInvitedEmployee({
+            clerk_user_id: userId,
+            email: fallbackEmail,
+          });
+            if (linkResult.matched) {
+            effectiveCompanyId = linkResult.company_id ?? effectiveCompanyId;
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.log('[Auth] Skipping onboarding for invited employee');
+            }
+            // Build minimal employee from RPC so we never depend on client-side employees query for invite matching.
+            // Name/fullName will be filled from DB via loadEmployeeProfile when available.
+            if (linkResult.employee_id && linkResult.company_id) {
+              employeeFromRpc = {
+                id: linkResult.employee_id,
+                companyId: linkResult.company_id,
+                name: null as any,
+                fullName: null as any,
+                email: fallbackEmail,
+                role: linkResult.role ?? null,
+                employeeRole: linkResult.role ?? null,
+                status: (linkResult.status as Employee['status']) ?? 'active',
+              };
+            }
+            const nowIso = new Date().toISOString();
+            if (effectiveCompanyId) {
+              const { error: profileUpdateError } = await db
+                .core()
+                .from('profiles')
+                .update({ active_company_id: effectiveCompanyId, updated_at: nowIso })
+                .eq('clerk_user_id', userId);
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.log('[Auth] Active company set from RPC-activated employee', {
+                  clerk_user_id: userId,
+                  companyId: effectiveCompanyId,
+                  error: profileUpdateError ?? null,
+                });
+              }
+              try {
+                const { data: ensureAfterData, error: ensureAfterError } = await supabase.rpc('ensure_current_membership');
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.log('[Auth] Membership ensure result (post-activation)', {
+                    error: ensureAfterError,
+                    data: ensureAfterData,
+                    companyId: effectiveCompanyId,
+                  });
+                }
+              } catch (membershipError) {
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Auth] ensure_current_membership (post-activation) failed (non-blocking):', membershipError);
+                }
+              }
+            }
+          }
+        } catch {
+          // Non-blocking; activation is best-effort but must not crash auth.
+        }
+        if (cancelled) return;
+
+        const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
+        if (setupIncompleteFlag && !hasEffectiveCompany) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Owner onboarding path (no company, no invite/membership match)', {
+              uid: userId,
+              email: fallbackEmail,
+              contextCompanyId,
+              contextRole,
+              setupIncompleteFlag,
+            });
+          }
           setUser({ ...mapped, companyId: null });
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(true);
           writeCachedUser(null);
+          setActivationResolved(true);
           setAuthReady(true);
           return;
         }
+        const mappedWithCompany = hasEffectiveCompany ? { ...mapped, companyId: effectiveCompanyId } : mapped;
 
-        const employee = await loadEmployeeProfile(userId);
+        // Always prefer the real employees row from DB (now safe after membership is ensured).
+        // RPC result is used as a fallback when DB load fails.
+        let employee: Employee | null = await loadEmployeeProfile(userId);
+        if (!employee) {
+          employee = employeeFromRpc;
+        }
         if (cancelled) return;
         if (import.meta.env.DEV) {
+          if (employeeFromRpc) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Redirecting employee to /dashboard (invite matched via RPC)');
+          } else if (employee) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Employee session path', {
+              uid: userId,
+              employeeId: employee.id,
+              companyId: mappedWithCompany.companyId,
+            });
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Normal sign-in path (no employee profile)', {
+              uid: userId,
+              companyId: mappedWithCompany.companyId,
+              role: mappedWithCompany.role,
+            });
+          }
+        }
+        const effectivePermissions = buildEffectivePermissions(mappedWithCompany, employee);
+
+        // Prefer real employee display name over generic Clerk fallback.
+        const displayName =
+          (employee?.fullName && employee.fullName.trim()) ||
+          (employee?.name && employee.name.trim()) ||
+          (fallbackName && fallbackName.trim()) ||
+          fallbackEmail ||
+          'User';
+
+        const userWithDisplayName: User = {
+          ...mappedWithCompany,
+          name: displayName,
+          // keep other fields from mappedWithCompany
+        };
+
+        if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[Employees Query Fixed]', {
-            clerkUserId: userId,
-            companyId: mapped.companyId ?? null,
-            queryEnabled: true,
-            employeeFound: !!employee,
+          console.log('[Employee Context] loaded employee', {
+            employeeId: employee?.id ?? null,
+            employeeFullName: employee?.fullName ?? null,
+            employeeRole: employee?.employeeRole ?? employee?.role ?? null,
+            companyId: userWithDisplayName.companyId,
+          });
+          // eslint-disable-next-line no-console
+          console.log('[Employee Context] loaded permissions', {
+            rawPermissions: employee?.permissions ?? null,
+            effectivePermissions,
           });
         }
-        const effectivePermissions = buildEffectivePermissions(mapped, employee);
-        setUser(mapped);
+
+        setUser(userWithDisplayName);
         setEmployeeProfile(employee);
         setPermissions(effectivePermissions);
-        writeCachedUser(mapped);
+        writeCachedUser(userWithDisplayName);
         setSetupIncomplete(false);
+        setActivationResolved(true);
         setAuthReady(true);
       } catch (error) {
         const cached = readCachedUser();
@@ -628,6 +808,7 @@ export function AuthProvider({
           setPermissions(buildEffectivePermissions(cached, null));
           writeCachedUser(cached);
           setSetupIncomplete(false);
+          setActivationResolved(true);
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
           const fallbackName = clerkUser?.fullName ?? 'User';
@@ -647,6 +828,7 @@ export function AuthProvider({
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(true);
           writeCachedUser(null);
+          setActivationResolved(true);
         }
         const errMsg = (error as Error)?.message ?? String(error);
         if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
@@ -764,7 +946,7 @@ export function AuthProvider({
         employeeProfile,
         permissions,
         isAuthenticated: !!user,
-        authReady,
+        authReady: authReady && activationResolved,
         isDeveloper,
         setupIncomplete,
         isEmergencySession: !!isEmergencySession,
