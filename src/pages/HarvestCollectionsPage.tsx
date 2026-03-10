@@ -52,6 +52,7 @@ import {
   listPickerPaymentsByCollectionIds,
   mapPicker,
   computeCollectionFinancials,
+  updateHarvestPicker,
 } from '@/services/harvestCollectionsService';
 import {
   computeWalletSummary,
@@ -150,6 +151,10 @@ export default function HarvestCollectionsPage() {
   const [weighKg, setWeighKg] = useState('');
   const [weighTrip, setWeighTrip] = useState('1');
   const [weighOpenedFromCard, setWeighOpenedFromCard] = useState(false);
+  const [isEditingWeighPickerName, setIsEditingWeighPickerName] = useState(false);
+  const [editingWeighPickerName, setEditingWeighPickerName] = useState('');
+  const [editingWeighPickerSaving, setEditingWeighPickerSaving] = useState(false);
+  const editingWeighPickerNameRef = useRef<HTMLInputElement>(null);
   const [recentPickerIds, setRecentPickerIds] = useState<string[]>([]);
   const [lastWeighPickerId, setLastWeighPickerId] = useState<string | null>(null);
   const [quickPayOpen, setQuickPayOpen] = useState(false);
@@ -437,7 +442,12 @@ export default function HarvestCollectionsPage() {
       const pricePerKg = priceByCollection.get(p.collection_id) ?? 0;
       const totalPay = Math.round(totalKg * pricePerKg);
       const paid = paidByPicker.get(p.id) ?? 0;
-      const isPaid = totalPay > 0 && paid >= totalPay;
+      /**
+       * Treat pickers with zero payable amount as settled/non-blocking:
+       * - totalPay <= 0 means there is no payable balance for this picker.
+       * - Such pickers should not be counted as pending obligations or block buyer payment.
+       */
+      const isPaid = totalPay <= 0 || paid >= totalPay;
       return mapPicker(p, totalKg, totalPay, isPaid) as HarvestPicker;
     });
   }, [pickersRaw, intakeRaw, paymentsRaw, collectionsRaw]);
@@ -1136,6 +1146,21 @@ export default function HarvestCollectionsPage() {
     [pickersForCollection]
   );
 
+  /**
+   * Outstanding picker balances:
+   * - Only pickers with payable amount > 0 and unpaid are considered "outstanding".
+   * - Zero-amount pickers are treated as settled so they do not block buyer payment.
+   */
+  const hasOutstandingPickerBalances = useMemo(() => {
+    if (pickersForCollection.length === 0) return false;
+    return pickersForCollection.some((p) => {
+      const totals = getPickerTotals(p.id);
+      const due = totals.totalPay;
+      const paid = paidByPickerId[p.id] ?? 0;
+      return due > 0 && paid < due;
+    });
+  }, [pickersForCollection, pickerTotalsById, paidByPickerId]);
+
   const totalRevenue = useMemo(() => {
     const buyerPrice =
       selectedCollection?.pricePerKgBuyer != null && selectedCollection.pricePerKgBuyer > 0
@@ -1225,17 +1250,52 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Invalid input', description: 'Picker number and name required', variant: 'destructive' });
       return;
     }
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     const numberTaken = pickersForCollection.some((p) => (p.pickerNumber ?? 0) === num);
+
     if (numberTaken) {
-      toast({
-        title: 'Number already used',
-        description: 'One number can only have one picker in this collection. Use a different number.',
-        variant: 'destructive',
-      });
+      const existing = pickersForCollection.find((p) => (p.pickerNumber ?? 0) === num);
+      if (!existing) {
+        toast({
+          title: 'Number already used',
+          description: 'One number can only have one picker in this collection. Use a different number.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (isOffline) {
+        toast({
+          title: 'Offline',
+          description: 'Cannot update picker name while offline. Go online and try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setAddingPicker(true);
+      try {
+        await updateHarvestPicker({
+          companyId,
+          pickerId: existing.id,
+          pickerName: name,
+        });
+        if (import.meta.env.DEV) {
+          console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+        }
+        queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
+        toast({
+          title: 'Picker updated',
+          description: `Name updated for picker #${num}.`,
+        });
+        setNewPickerName('');
+      } catch (e: any) {
+        toast({ title: 'Error', description: e?.message ?? 'Failed to update picker', variant: 'destructive' });
+      } finally {
+        setAddingPicker(false);
+      }
       return;
     }
-
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddingPicker(true);
     try {
       await addHarvestPicker({
@@ -1262,6 +1322,47 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Error', description: e?.message ?? 'Failed to add picker', variant: 'destructive' });
     } finally {
       setAddingPicker(false);
+    }
+  };
+
+  const handleSaveWeighPickerName = async () => {
+    if (!companyId || !weighPickerId) return;
+    const name = editingWeighPickerName.trim();
+    if (!name) {
+      toast({ title: 'Invalid input', description: 'Picker name is required', variant: 'destructive' });
+      return;
+    }
+
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline) {
+      toast({
+        title: 'Offline',
+        description: 'Cannot update picker name while offline. Go online and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setEditingWeighPickerSaving(true);
+    try {
+      await updateHarvestPicker({
+        companyId,
+        pickerId: weighPickerId,
+        pickerName: name,
+      });
+      if (import.meta.env.DEV) {
+        console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+      }
+      queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
+      toast({
+        title: 'Picker name updated',
+        description: `Name updated for picker in this collection.`,
+      });
+      setIsEditingWeighPickerName(false);
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message ?? 'Failed to update picker', variant: 'destructive' });
+    } finally {
+      setEditingWeighPickerSaving(false);
     }
   };
 
@@ -1872,14 +1973,6 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Invalid price', description: 'Buyer price per kg must be > 0', variant: 'destructive' });
       return;
     }
-    if (markBuyerPaid && !allPickersPaid) {
-      toast({
-        title: 'Cannot close',
-        description: 'All pickers must be marked cash paid before marking buyer paid.',
-        variant: 'destructive',
-      });
-      return;
-    }
     setMarkingBuyerPaid(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
@@ -1904,7 +1997,11 @@ export default function HarvestCollectionsPage() {
         queryClient.invalidateQueries({ queryKey: ['sales'] });
         toast({
           title: isOffline ? 'Buyer payment saved offline' : 'Buyer paid – harvest closed',
-          description: isOffline ? 'Will sync when back online.' : undefined,
+          description: isOffline
+            ? 'Will sync when back online.'
+            : hasOutstandingPickerBalances
+              ? 'Buyer marked as paid, but some pickers with outstanding balances are still unpaid.'
+              : undefined,
         });
         setBuyerPricePerKg('');
       } else {
@@ -3649,15 +3746,16 @@ export default function HarvestCollectionsPage() {
                                 <Button
                                   size="lg"
                                   className="min-h-12 rounded-xl flex-1 bg-green-600 hover:bg-green-700"
-                                  disabled={!buyerPricePerKg || !allPickersPaid || markingBuyerPaid || !canCloseHarvest}
+                                  disabled={!buyerPricePerKg || markingBuyerPaid || !canCloseHarvest}
                                   onClick={() => handleSetBuyerPrice(true)}
                                 >
                                   MARK BUYER PAID
                                 </Button>
                               </div>
-                              {!allPickersPaid && pickersForCollection.length > 0 && (
+                              {hasOutstandingPickerBalances && pickersForCollection.length > 0 && (
                                 <p className="text-amber-600 dark:text-amber-400 text-sm">
-                                  All pickers must be marked cash paid before closing.
+                                  Buyer can be marked as paid even if some pickers still have outstanding balances. Remember
+                                  to finish picker payouts later.
                                 </p>
                               )}
                               {!canCloseHarvest && (
@@ -3872,10 +3970,44 @@ export default function HarvestCollectionsPage() {
             </DialogHeader>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-4 py-2 scrollbar-app">
               {weighOpenedFromCard && weighPickerId ? (
-                <p className="font-medium text-foreground">
-                  #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
-                  {pickersForCollection.find((x) => x.id === weighPickerId)?.pickerName}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-foreground">
+                    #{pickersForCollection.find((x) => x.id === weighPickerId)?.pickerNumber}{' '}
+                    {isEditingWeighPickerName ? '' : pickersForCollection.find((x) => x.id === weighPickerId)?.pickerName}
+                  </p>
+                  {isEditingWeighPickerName ? (
+                    <Input
+                      ref={editingWeighPickerNameRef}
+                      value={editingWeighPickerName}
+                      onChange={(e) => setEditingWeighPickerName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleSaveWeighPickerName();
+                        }
+                      }}
+                      placeholder="Edit name"
+                      className="h-8 w-40 rounded-lg text-sm"
+                      disabled={editingWeighPickerSaving}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background hover:bg-muted text-muted-foreground"
+                      onClick={() => {
+                        const current = pickersForCollection.find((x) => x.id === weighPickerId);
+                        setEditingWeighPickerName(current?.pickerName ?? '');
+                        setIsEditingWeighPickerName(true);
+                        setTimeout(() => {
+                          editingWeighPickerNameRef.current?.focus();
+                        }, 0);
+                      }}
+                      title="Edit picker name"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div>
                   <Label>Picker</Label>

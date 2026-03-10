@@ -329,6 +329,22 @@ export async function addPicker(params: {
   return data.id;
 }
 
+export async function updateHarvestPicker(params: {
+  companyId: string;
+  pickerId: string;
+  pickerName: string;
+}): Promise<void> {
+  const { error } = await harvest()
+    .from('harvest_pickers')
+    .update({
+      picker_name: params.pickerName,
+    })
+    .eq('id', params.pickerId)
+    .eq('company_id', params.companyId);
+
+  if (error) throw error;
+}
+
 export async function listPickers(collectionId: string): Promise<DbPicker[]> {
   const { data, error } = await harvest()
     .from('harvest_pickers')
