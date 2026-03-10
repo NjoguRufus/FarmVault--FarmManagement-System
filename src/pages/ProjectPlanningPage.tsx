@@ -6,7 +6,6 @@ import { ChallengeType, CropStage, EnvironmentType, Project, SeasonChallenge, Su
 import { useProjectStages } from '@/hooks/useProjectStages';
 import { useCollection } from '@/hooks/useCollection';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { detectStageForCrop } from '@/knowledge/stageDetection';
 import { findCropKnowledgeByTypeKey } from '@/knowledge/cropCatalog';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -15,6 +14,18 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { getProject } from '@/services/projectsService';
 import { db } from '@/lib/db';
+import { createSeasonChallenge } from '@/services/seasonChallengesService';
+import { useSeasonChallenges, invalidateSeasonChallengesQuery } from '@/hooks/useSeasonChallenges';
+import { getCropTimeline } from '@/config/cropTimelines';
+import { calculateDaysSince, getStageForDay } from '@/utils/cropStages';
+import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
+import {
+  PlanningHero,
+  SeasonStagesBuilder,
+  ExpectedChallengesCard,
+  PlanningSummaryCard,
+  PlanningHistoryCard,
+} from '@/components/planning';
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -42,11 +53,10 @@ export default function ProjectPlanningPage() {
   );
 
   const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers', scope);
-  const { data: allSeasonChallenges = [] } = useCollection<SeasonChallenge>(
-    'project-planning-season-challenges',
-    'seasonChallenges',
-    scope,
-  );
+  const { challenges: allSeasonChallenges } = useSeasonChallenges(companyId, projectId ?? null);
+  if (import.meta.env?.DEV && projectId) {
+    console.log('[ProjectPlanningPage] season challenges fetch', { projectId, count: allSeasonChallenges.length });
+  }
   const companySuppliers = useMemo(
     () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
     [suppliers, companyId],
@@ -122,51 +132,28 @@ export default function ProjectPlanningPage() {
     return Number.isNaN(d.getTime()) ? 0 : d.getTime();
   };
 
+  // Single source of truth: project-scoped challenges from shared hook (same as Project Details & Season Challenges page)
   const preSeasonChallenges = useMemo(() => {
     if (!project) return [];
 
-    const fromSeason = allSeasonChallenges
-      .filter(
-        (c) => c.projectId === project.id && String((c as any).source ?? '') === 'preseason-plan'
-      )
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        description: c.description,
-        challengeType: c.challengeType,
-        severity: c.severity,
-        status: c.status,
-        addedAt: (c as any).dateIdentified ?? c.createdAt,
-        addedBy: c.createdByName || c.createdBy || 'unknown',
-        sourcePlanChallengeId: c.sourcePlanChallengeId,
-        pending: Boolean((c as any).pending),
-      }));
+    return allSeasonChallenges.map((c) => ({
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      challengeType: c.challengeType,
+      severity: c.severity,
+      status: c.status,
+      addedAt: (c as any).dateIdentified ?? c.createdAt,
+      addedBy: c.createdByName || c.createdBy || 'unknown',
+      sourcePlanChallengeId: c.sourcePlanChallengeId,
+      pending: false,
+    }));
+  }, [allSeasonChallenges, project]);
 
-    const linkedPlanningIds = new Set(
-      fromSeason
-        .map((c) => c.sourcePlanChallengeId)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0)
-    );
-
-    const fromPlanning = expectedChallenges
-      .filter((c: any) => !linkedPlanningIds.has(String(c.id ?? '')))
-      .map((c: any) => ({
-        id: String(c.id ?? ''),
-        title: String(c.title ?? c.description ?? ''),
-        description: String(c.description ?? ''),
-        challengeType: c.challengeType as ChallengeType | undefined,
-        severity: c.severity as 'low' | 'medium' | 'high' | undefined,
-        status: c.status as 'identified' | 'mitigating' | 'resolved' | undefined,
-        addedAt: c.addedAt,
-        addedBy: String(c.addedBy ?? 'unknown'),
-        sourcePlanChallengeId: c.id,
-        pending: false,
-      }));
-
-    return [...fromSeason, ...fromPlanning].sort(
-      (a, b) => toChallengeTime(b.addedAt) - toChallengeTime(a.addedAt)
-    );
-  }, [allSeasonChallenges, expectedChallenges, project]);
+  const cropTimeline = useMemo(
+    () => getCropTimeline(project?.cropType ?? null),
+    [project?.cropType],
+  );
 
   const hasPlantingDate = Boolean(project?.plantingDate);
   const hasExistingSeed = Boolean(project?.planning?.seed && (project.planning.seed as any)?.name);
@@ -381,52 +368,25 @@ export default function ProjectPlanningPage() {
     setSavingChallenge(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
-      const changedAt = new Date().toISOString();
-      const challengeId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const entry = {
-        id: challengeId,
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] challenge create', { projectId, title: newChallengeTitle.trim() });
+      }
+      await createSeasonChallenge({
+        companyId,
+        projectId,
+        cropType: project.cropType ?? 'other',
         title: newChallengeTitle.trim(),
         description: newChallengeDescription.trim(),
         challengeType: newChallengeType,
         severity: newChallengeSeverity,
-        status: 'identified' as const,
-        addedAt: changedAt,
-        addedBy: user?.id ?? 'unknown',
-      };
-      const historyEntry = {
-        field: 'planning.expectedChallenges',
-        oldValue: null,
-        newValue: entry.title,
-        reason: `Added expected challenge (${entry.challengeType})`,
-        changedAt,
-        changedBy: user?.id ?? 'unknown',
-      };
-
-      const { data, error } = await db
-        .projects()
-        .from('projects')
-        .select('planning')
-        .eq('id', projectId)
-        .maybeSingle();
-      if (error) throw error;
-
-      const planning = (data?.planning as Project['planning']) ?? {};
-      const existingChallenges = planning?.expectedChallenges ?? [];
-      const existingHistory = planning?.planHistory ?? [];
-
-      const nextPlanning: Project['planning'] = {
-        ...planning,
-        expectedChallenges: [...existingChallenges, entry],
-        planHistory: [...existingHistory, historyEntry],
-      };
-
-      const { error: updateError } = await db
-        .projects()
-        .from('projects')
-        .update({ planning: nextPlanning })
-        .eq('id', projectId);
-      if (updateError) throw updateError;
-
+        status: 'identified',
+        source: 'preseason-plan',
+        createdBy: user?.id ?? undefined,
+      });
+      invalidateSeasonChallengesQuery(queryClient);
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] challenge create success, invalidated queries');
+      }
       setNewChallengeTitle('');
       setNewChallengeDescription('');
       setNewChallengeType('other');
@@ -440,6 +400,9 @@ export default function ProjectPlanningPage() {
       );
     } catch (error) {
       console.error('Failed to add planned challenge:', error);
+      if (import.meta.env?.DEV) {
+        console.warn('[ProjectPlanningPage] challenge create error', error);
+      }
       toast.error('Failed to add planned challenge.');
     } finally {
       setSavingChallenge(false);
@@ -501,42 +464,46 @@ export default function ProjectPlanningPage() {
   const totalPlanChanges = planHistory.length;
   const totalExpectedChallenges = preSeasonChallenges.length;
 
+  const templateStages = cropTimeline?.stages ?? [];
+  const plantingDateRaw = project.plantingDate as unknown;
+  const plantingDateObj =
+    plantingDateRaw instanceof Date
+      ? plantingDateRaw
+      : plantingDateRaw
+        ? new Date(plantingDateRaw as string)
+        : null;
+  const daysSincePlanting =
+    plantingDateObj && !isNaN(plantingDateObj.getTime())
+      ? calculateDaysSince(plantingDateObj)
+      : null;
+  const currentStageForDay =
+    daysSincePlanting != null && templateStages.length
+      ? getStageForDay(templateStages, daysSincePlanting)
+      : null;
+  const expectedHarvestDate = getExpectedHarvestDate(project, undefined);
+  const nextStageLabel =
+    currentStageForDay?.stage.label ?? templateStages[0]?.label ?? null;
+  const harvestWindowStr = expectedHarvestDate ? formatDate(expectedHarvestDate) : null;
+
+  const expectedChallengeItems = preSeasonChallenges.map((c) => ({
+    id: c.id,
+    title: c.title || c.description || '—',
+    description: c.description && c.title ? c.description : undefined,
+    challengeType: c.challengeType,
+    severity: c.severity,
+  }));
+
   return (
-    <div className="space-y-8 animate-fade-in" role="main">
-      {/* Back + Planning mode (same row) */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          className="fv-btn fv-btn--secondary"
-          onClick={() => navigate(`/projects/${project.id}`)}
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Back to Project
-        </button>
-        <div className="flex items-center gap-1.5 rounded-lg border bg-amber-50/80 dark:bg-amber-900/20 px-2.5 py-1.5 text-xs font-medium text-foreground">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-          <span>Planning mode</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
-                aria-label="More information"
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs">
-              <p>Changes here affect project timelines and reports. All edits are logged as immutable change-of-plan events.</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+    <div className="space-y-8 animate-fade-in pb-8" role="main">
+      <PlanningHero
+        projectName={project.name}
+        onBack={() => navigate(`/projects/${project.id}`)}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-        {/* Left: forms */}
         <div className="space-y-6 xl:col-span-2">
-          {/* 1️⃣ Planting Date Planning */}
-          <div className="fv-card space-y-4">
+          {/* 1. Planting Date Planning */}
+          <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">Planting Date Planning</h2>
@@ -656,8 +623,8 @@ export default function ProjectPlanningPage() {
             )}
           </div>
 
-          {/* 2️⃣ Seed / Variety Planning */}
-          <div className="fv-card space-y-4">
+          {/* 2. Seed / Variety Planning */}
+          <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
@@ -812,223 +779,120 @@ export default function ProjectPlanningPage() {
 
           </div>
 
-          {/* 3️⃣ Pre-season / planned challenges */}
-          <div className="fv-card space-y-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold">Pre-season / Planned Challenges</h2>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-help"
-                    aria-label="More information"
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-xs">
-                  <p>Record anticipated risks such as pest pressure, late rains, or labour constraints. These are separate from actual season challenges and help compare plan vs reality.</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            {showAddPreSeasonForm ? (
-              <form onSubmit={handleAddExpectedChallenge} className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Title</label>
-                  <input
-                    className="fv-input"
-                    placeholder="E.g. High whitefly pressure expected"
-                    value={newChallengeTitle}
-                    onChange={(e) => setNewChallengeTitle(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Description</label>
-                  <textarea
-                    className="fv-input resize-none"
-                    rows={2}
-                    placeholder="Add details for this planned challenge"
-                    value={newChallengeDescription}
-                    onChange={(e) => setNewChallengeDescription(e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Season Stages */}
+          <SeasonStagesBuilder
+            stages={templateStages.map((s) => ({
+              key: s.key,
+              label: s.label,
+              dayStart: s.dayStart,
+              dayEnd: s.dayEnd,
+              color: s.color,
+            }))}
+            currentStageIndex={currentStageForDay?.index ?? null}
+          />
+
+          {/* Expected Challenges */}
+          <ExpectedChallengesCard
+            challenges={expectedChallengeItems}
+            onAddChallenge={() => setShowAddPreSeasonForm(true)}
+            addForm={
+              showAddPreSeasonForm ? (
+                <form onSubmit={handleAddExpectedChallenge} className="space-y-3 pt-2">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Challenge type</label>
-                    <select
-                      className="fv-select w-full"
-                      value={newChallengeType}
-                      onChange={(e) => setNewChallengeType(e.target.value as ChallengeType)}
-                    >
-                      <option value="weather">Weather</option>
-                      <option value="pests">Pests</option>
-                      <option value="diseases">Diseases</option>
-                      <option value="prices">Prices</option>
-                      <option value="labor">Labour / People</option>
-                      <option value="equipment">Equipment</option>
-                      <option value="other">Custom (not listed)</option>
-                    </select>
+                    <label className="text-sm font-medium text-foreground">Title</label>
+                    <input
+                      className="fv-input w-full"
+                      placeholder="E.g. High whitefly pressure expected"
+                      value={newChallengeTitle}
+                      onChange={(e) => setNewChallengeTitle(e.target.value)}
+                      required
+                    />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Severity</label>
-                    <select
-                      className="fv-select w-full"
-                      value={newChallengeSeverity}
-                      onChange={(e) => setNewChallengeSeverity(e.target.value as 'low' | 'medium' | 'high')}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
+                    <label className="text-sm font-medium text-foreground">Description</label>
+                    <textarea
+                      className="fv-input w-full resize-none"
+                      rows={2}
+                      placeholder="Add details for this planned challenge"
+                      value={newChallengeDescription}
+                      onChange={(e) => setNewChallengeDescription(e.target.value)}
+                    />
                   </div>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
-                  <Label htmlFor="save-as-reusable" className="text-sm font-medium cursor-pointer">
-                    Save as reusable (use for future projects)
-                  </Label>
-                  <Switch
-                    id="save-as-reusable"
-                    checked={saveAsReusable}
-                    onCheckedChange={setSaveAsReusable}
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  {preSeasonChallenges.length > 0 && (
-                    <button
-                      type="button"
-                      className="fv-btn fv-btn--secondary"
-                      onClick={() => setShowAddPreSeasonForm(false)}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    className="fv-btn fv-btn--secondary"
-                    disabled={savingChallenge || !newChallengeTitle.trim()}
-                  >
-                    {savingChallenge ? 'Adding…' : 'Add planned challenge'}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="fv-btn fv-btn--secondary"
-                  onClick={() => setShowAddPreSeasonForm(true)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add another challenge
-                </button>
-              </div>
-            )}
-            <div className="space-y-2">
-              {preSeasonChallenges.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No pre-season challenges recorded yet.
-                </p>
-              )}
-              {preSeasonChallenges.map((c) => (
-                <div key={c.id} className="flex items-start justify-between gap-3 border border-border/60 rounded-lg px-3 py-2">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <p className="text-sm font-medium text-foreground">{c.title || c.description}</p>
-                      {c.challengeType && (
-                        <span className="fv-badge text-xs bg-muted text-muted-foreground capitalize">
-                          {c.challengeType}
-                        </span>
-                      )}
-                      {c.severity && (
-                        <span className="fv-badge text-xs capitalize">{c.severity}</span>
-                      )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Challenge type</label>
+                      <select
+                        className="fv-select w-full"
+                        value={newChallengeType}
+                        onChange={(e) => setNewChallengeType(e.target.value as ChallengeType)}
+                      >
+                        <option value="weather">Weather</option>
+                        <option value="pests">Pests</option>
+                        <option value="diseases">Diseases</option>
+                        <option value="prices">Prices</option>
+                        <option value="labor">Labour / People</option>
+                        <option value="equipment">Equipment</option>
+                        <option value="other">Custom (not listed)</option>
+                      </select>
                     </div>
-                    {c.title && c.description && (
-                      <p className="text-sm text-muted-foreground">{c.description}</p>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Severity</label>
+                      <select
+                        className="fv-select w-full"
+                        value={newChallengeSeverity}
+                        onChange={(e) => setNewChallengeSeverity(e.target.value as 'low' | 'medium' | 'high')}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+                    <Label htmlFor="save-as-reusable" className="text-sm font-medium cursor-pointer">
+                      Save as reusable (use for future projects)
+                    </Label>
+                    <Switch
+                      id="save-as-reusable"
+                      checked={saveAsReusable}
+                      onCheckedChange={setSaveAsReusable}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    {preSeasonChallenges.length > 0 && (
+                      <button
+                        type="button"
+                        className="fv-btn fv-btn--secondary"
+                        onClick={() => setShowAddPreSeasonForm(false)}
+                      >
+                        Cancel
+                      </button>
                     )}
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <p className="text-xs text-muted-foreground">
-                        Added on {formatDate(c.addedAt)} by {c.addedBy}
-                      </p>
-                      {(c as any).pending && (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                          Syncing...
-                        </span>
-                      )}
-                    </div>
+                    <button
+                      type="submit"
+                      className="fv-btn fv-btn--secondary"
+                      disabled={savingChallenge || !newChallengeTitle.trim()}
+                    >
+                      {savingChallenge ? 'Adding…' : 'Add planned challenge'}
+                    </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                </form>
+              ) : undefined
+            }
+          />
         </div>
 
         {/* Right: summary & history */}
         <div className="space-y-6">
-          {/* 4️⃣ Planning summary panel */}
-          <div className="fv-card space-y-3">
-            <h2 className="text-lg font-semibold">Planning Summary</h2>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Current planting date</span>
-                <span className="font-medium">{formatDate(project.plantingDate)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Seed</span>
-                <span className="font-medium">
-                  {seedName || 'Not set'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Variety</span>
-                <span className="font-medium">
-                  {seedVariety || '—'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Plan changes</span>
-                <span className="font-medium">{totalPlanChanges}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Expected challenges</span>
-                <span className="font-medium">{totalExpectedChallenges}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 5️⃣ Planning history timeline */}
-          <div className="fv-card space-y-3">
-            <h2 className="text-lg font-semibold">Planning History</h2>
-            {planHistory.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No change-of-plan events recorded yet. All future edits from this page will appear here.
-              </p>
-            )}
-            {planHistory.length > 0 && (
-              <div className="space-y-3 text-sm">
-                {planHistory
-                  .slice()
-                  .reverse()
-                  .map((h, idx) => (
-                    <div key={idx} className="border-l border-border/60 pl-3 ml-1">
-                      <p className="font-medium">
-                        {h.field === 'plantingDate'
-                          ? 'Changed planting date'
-                          : `Changed ${h.field}`}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        From: <code className="px-1">{String(h.oldValue ?? '—')}</code> → To:{' '}
-                        <code className="px-1">{String(h.newValue ?? '—')}</code>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Reason: {h.reason}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
+          <PlanningSummaryCard
+            nextStage={nextStageLabel}
+            expectedHarvestWindow={harvestWindowStr}
+            totalStages={templateStages.length}
+          />
+          <PlanningHistoryCard
+            entries={planHistory}
+            formatDate={(d) => formatDate(d)}
+          />
         </div>
       </div>
     </div>

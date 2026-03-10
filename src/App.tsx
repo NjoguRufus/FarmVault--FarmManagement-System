@@ -17,6 +17,7 @@ import { StaffLayout } from "@/components/layout/StaffLayout";
 import { StaffDashboard } from "@/pages/dashboard/StaffDashboard";
 import ProjectsPage from "@/pages/ProjectsPage";
 import ProjectDetailsPage from "@/pages/ProjectDetailsPage";
+import EditProjectPage from "@/pages/EditProjectPage";
 import ProjectPlanningPage from "@/pages/ProjectPlanningPage";
 import CropStagesPage from "@/pages/CropStagesPage";
 import ExpensesPage from "@/pages/ExpensesPage";
@@ -303,6 +304,7 @@ const App = () => (
                 <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
                 <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><Navigate to="/projects?new=1" replace /></RequireNotBroker></PermissionRoute>} />
+                <Route path="/projects/:projectId/edit" element={<PermissionRoute module="projects"><RequireNotBroker><EditProjectPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/projects/:projectId" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectDetailsPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/projects/:projectId/planning" element={<PermissionRoute module="planning"><RequireNotBroker><ProjectPlanningPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/crop-stages" element={<PermissionRoute module="planning"><CropStagesPage /></PermissionRoute>} />
