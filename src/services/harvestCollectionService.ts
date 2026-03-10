@@ -388,10 +388,12 @@ export async function setBuyerPriceAndMaybeClose(params: {
 
     // Read pickers outside transaction to avoid BatchGetDocuments path that can receive undefined refs
     const pickersSnap = await getDocs(pickersQuery);
-    const allPaid = pickersSnap.docs.length > 0 && pickersSnap.docs.every((d) => d.data().isPaid === true);
-    if (params.markBuyerPaid && !allPaid) {
-      throw new Error('Cannot close harvest: some pickers are still unpaid.');
-    }
+    /**
+     * Buyer payment is allowed independently of picker payouts:
+     * - Some pickers may still be unpaid when the buyer settles.
+     * - Closing the harvest (marking buyer paid) must not be blocked by picker status.
+     * - Zero-amount or unpaid pickers are handled via UI warnings, not backend validation.
+     */
 
     await runTransaction(db, async (tx) => {
       // Build colRef inside transaction from db + collectionId so the ref is never stale/undefined
