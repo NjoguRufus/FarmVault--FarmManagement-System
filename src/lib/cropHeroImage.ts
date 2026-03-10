@@ -1,6 +1,6 @@
 const CROP_HERO_IMAGE_MAP: Record<string, string> = {
   tomatoes: '/cropstage%20images/tomatoes.png',
-  frenchbeans: '/cropstage%20images/Frenchbeans.png',
+  frenchbeans: '/heroimages/frenchbeans.jpeg',
   capsicum: '/cropstage%20images/capsicum.png',
   watermelon: '/cropstage%20images/watermelon.png',
   watermelons: '/cropstage%20images/watermelon.png',

@@ -2,12 +2,17 @@ import React, { useState } from 'react';
 import { Plus, AlertTriangle, CheckCircle, Clock, MoreHorizontal, Edit, ChevronDown, ChevronUp, Cloud, Bug, DollarSign, Users, Wrench as WrenchIcon, Droplets, Package, X } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from '@/lib/firestore-stub';
-import { useCollection } from '@/hooks/useCollection';
 import { SeasonChallenge, ChallengeType, InventoryItem, InventoryCategory, NeededItem } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSeasonChallenges, invalidateSeasonChallengesQuery } from '@/hooks/useSeasonChallenges';
+import {
+  createSeasonChallenge,
+  updateSeasonChallenge,
+} from '@/services/seasonChallengesService';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
+import { useCollection } from '@/hooks/useCollection';
 import { formatDate } from '@/lib/dateUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -39,12 +44,19 @@ export default function SeasonChallengesPage() {
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
-  const { data: allChallenges = [], isLoading } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges', scope);
+  const { challenges: challengesFromHook, isLoading } = useSeasonChallenges(
+    companyId,
+    activeProject?.id ?? null
+  );
+  if (import.meta.env?.DEV && companyId) {
+    console.log('[SeasonChallengesPage] season challenges fetch', {
+      projectId: activeProject?.id ?? 'all',
+      count: challengesFromHook.length,
+    });
+  }
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
-  const challenges = activeProject
-    ? allChallenges.filter(c => c.projectId === activeProject.id)
-    : allChallenges;
+  const challenges = challengesFromHook;
 
   const [expandedChallenges, setExpandedChallenges] = useState<Set<string>>(new Set());
   const [editingChallenge, setEditingChallenge] = useState<SeasonChallenge | null>(null);
@@ -140,20 +152,25 @@ export default function SeasonChallengesPage() {
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddOpen(false);
     try {
-      await addDoc(collection(db, 'seasonChallenges'), {
+      if (import.meta.env?.DEV) {
+        console.log('[SeasonChallengesPage] challenge create', { projectId: activeProject.id, title });
+      }
+      await createSeasonChallenge({
+        companyId: activeProject.companyId,
+        projectId: activeProject.id,
+        cropType: activeProject.cropType,
         title,
         description,
         challengeType,
         severity,
         status: 'identified',
-        projectId: activeProject.id,
-        companyId: activeProject.companyId,
-        cropType: activeProject.cropType,
-        stageIndex: activeProject.startingStageIndex || 0,
-        dateIdentified: serverTimestamp(),
-        createdAt: serverTimestamp(),
+        stageIndex: activeProject.startingStageIndex ?? 0,
+        createdBy: user?.id,
       });
-      
+      invalidateSeasonChallengesQuery(queryClient);
+      if (import.meta.env?.DEV) {
+        console.log('[SeasonChallengesPage] challenge create success, invalidated queries');
+      }
       if (saveAsReusable && activeProject?.companyId && user?.id) {
         try {
           await upsertChallengeTemplate({
@@ -171,7 +188,6 @@ export default function SeasonChallengesPage() {
           toast.error('Challenge saved but could not save as reusable template.');
         }
       }
-      queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
       setTitle('');
       setDescription('');
       setChallengeType('other');
@@ -184,6 +200,9 @@ export default function SeasonChallengesPage() {
       );
     } catch (error) {
       console.error('Failed to report challenge:', error);
+      if (import.meta.env?.DEV) {
+        console.warn('[SeasonChallengesPage] challenge create error', error);
+      }
       toast.error('Failed to report challenge.');
     } finally {
       setSaving(false);
@@ -305,54 +324,27 @@ export default function SeasonChallengesPage() {
         })
         .filter(item => Object.keys(item).length > 0);
 
-      const updateData: any = {
+      if (import.meta.env?.DEV) {
+        console.log('[SeasonChallengesPage] challenge update', { id: editingChallenge.id });
+      }
+      await updateSeasonChallenge(editingChallenge.id, {
         title: editTitle,
         description: editDescription,
         challengeType: editChallengeType,
         severity: editSeverity,
         status: editStatus,
-        updatedAt: serverTimestamp(),
-      };
-
-      // Only include optional fields if they have values
-      if (editWhatWasDone && editWhatWasDone.trim()) {
-        updateData.whatWasDone = editWhatWasDone.trim();
+        whatWasDone: editWhatWasDone?.trim() || undefined,
+        plan2IfFails: editPlan2IfFails?.trim() || undefined,
+        itemsUsed: validItems.length > 0 ? validItems : undefined,
+        dateResolved:
+          editStatus === 'resolved' && editingChallenge.status !== 'resolved'
+            ? new Date().toISOString().slice(0, 10)
+            : undefined,
+      });
+      invalidateSeasonChallengesQuery(queryClient);
+      if (import.meta.env?.DEV) {
+        console.log('[SeasonChallengesPage] challenge update success, invalidated queries');
       }
-      if (editPlan2IfFails && editPlan2IfFails.trim()) {
-        updateData.plan2IfFails = editPlan2IfFails.trim();
-      }
-      if (validItems.length > 0) {
-        updateData.itemsUsed = validItems;
-      }
-
-      if (editStatus === 'resolved' && editingChallenge.status !== 'resolved') {
-        updateData.dateResolved = serverTimestamp();
-      }
-
-      // Recursively remove any undefined values before sending to Firestore
-      const cleanUndefined = (obj: any): any => {
-        if (obj === null || obj === undefined) {
-          return null;
-        }
-        if (Array.isArray(obj)) {
-          return obj.map(cleanUndefined).filter(item => item !== null && item !== undefined);
-        }
-        if (typeof obj === 'object') {
-          const cleaned: any = {};
-          Object.keys(obj).forEach(key => {
-            const value = cleanUndefined(obj[key]);
-            if (value !== undefined && value !== null) {
-              cleaned[key] = value;
-            }
-          });
-          return cleaned;
-        }
-        return obj;
-      };
-
-      const cleanedUpdateData = cleanUndefined(updateData);
-
-      await updateDoc(doc(db, 'seasonChallenges', editingChallenge.id), cleanedUpdateData);
 
       if (saveAsReusableEdit && editingChallenge.companyId && user?.id) {
         const itemsUsedSummary = editItemsUsed.length > 0
@@ -378,7 +370,6 @@ export default function SeasonChallengesPage() {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
       queryClient.invalidateQueries({ queryKey: ['neededItems'] });
 
       // Reset form state

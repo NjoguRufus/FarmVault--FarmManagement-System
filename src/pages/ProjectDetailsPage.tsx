@@ -1,38 +1,37 @@
 import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Calendar as CalendarIcon, CheckCircle, ChevronDown, ChevronLeft, ChevronUp, Clock, Package, Users, Activity, Wallet, Wrench as WrenchIcon, ListChecks, Trash2 } from 'lucide-react';
+import { ChevronLeft, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChallengeType, CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
+import { CropStage, Expense, InventoryUsage, Project, SeasonChallenge, WorkLog } from '@/types';
 import { useProject } from '@/contexts/ProjectContext';
 import { toDate, formatDate } from '@/lib/dateUtils';
-import { cn } from '@/lib/utils';
 import { getCropTimeline } from '@/config/cropTimelines';
 import {
   calculateDaysSince,
   getStageForDay,
   buildTimeline,
   getProgressWithinStage,
-  getStageEndDate,
   assertCropStagesDev,
   type StageRule,
 } from '@/utils/cropStages';
 import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
-import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { getProject, deleteProject as deleteProjectService } from '@/services/projectsService';
-import { useCollection } from '@/hooks/useCollection';
-import { useProjectBlocks } from '@/hooks/useProjectBlocks';
+import { getCropHeroImage } from '@/lib/cropHeroImage';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
+  ProjectHeroCard,
+  SeasonProgressTimeline,
+  ProjectFinancialSnapshot,
+  ProjectOperationsSummary,
+  ProjectChallengesPanel,
+  ProjectQuickActions,
+  ProjectPlanningPreview,
+  ProjectDangerZone,
+  SeasonInsightPanel,
+} from '@/components/project-details';
+import { useCollection } from '@/hooks/useCollection';
+import { useSeasonChallenges } from '@/hooks/useSeasonChallenges';
+import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import {
   Dialog,
   DialogContent,
@@ -63,15 +62,31 @@ export default function ProjectDetailsPage() {
     error: projectError,
   } = useQuery({
     queryKey: ['project', projectId ?? '', companyId ?? ''],
-    queryFn: () => getProject(projectId!, { companyId }),
+    queryFn: () => {
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectDetailsPage] project details fetch', { projectId, companyId });
+      }
+      return getProject(projectId!, { companyId });
+    },
     enabled: Boolean(projectId && (companyId || isDeveloper)),
   });
+  if (import.meta.env.DEV && projectId && !projectsLoading && project) {
+    console.log('[ProjectDetailsPage] project details loaded', { projectId, name: project.name });
+  }
   if (import.meta.env.DEV && projectId && !projectsLoading && !project && (projectError != null || project === null)) {
     console.warn('[ProjectDetailsPage] Project not found', {
       projectId,
       companyId,
       setupIncomplete: !companyId,
       error: projectError != null ? String(projectError) : 'no row returned',
+    });
+  }
+
+  const { challenges: allChallengesFromHook } = useSeasonChallenges(companyId, projectId ?? null);
+  if (import.meta.env?.DEV && companyId && projectId) {
+    console.log('[ProjectDetailsPage] season challenges fetch (project-specific)', {
+      projectId,
+      count: allChallengesFromHook.length,
     });
   }
 
@@ -83,11 +98,7 @@ export default function ProjectDetailsPage() {
     ...scope,
     projectId: projectId ?? null,
   });
-  const { data: allChallenges = [] } = useCollection<SeasonChallenge>(
-    'project-details-challenges',
-    'seasonChallenges',
-    { ...scope, projectId: projectId ?? null },
-  );
+  const allChallenges = allChallengesFromHook;
   const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>(
     'project-details-usage',
     'inventoryUsage',
@@ -135,6 +146,13 @@ export default function ProjectDetailsPage() {
         : [],
     [allChallenges, companyId, projectId],
   );
+  if (import.meta.env?.DEV && projectId) {
+    console.log('[ProjectDetailsPage] project-specific challenge filtering', {
+      projectId,
+      totalFromHook: allChallenges.length,
+      filtered: challenges.length,
+    });
+  }
   const inventoryUsage = useMemo(
     () =>
       companyId && projectId
@@ -196,6 +214,53 @@ export default function ProjectDetailsPage() {
   const avgDailyCost =
     daysSincePlanting && daysSincePlanting > 0 ? Math.round(totalExpenses / daysSincePlanting) : 0;
 
+  const totalSeasonDays = cropTimeline?.totalDaysToHarvest ?? null;
+  const dayOfSeason =
+    plantingDate == null
+      ? 'Set planting date'
+      : daysSincePlanting != null && daysSincePlanting < 0
+        ? `Starts in ${Math.abs(daysSincePlanting)} days`
+        : totalSeasonDays != null
+          ? `Day ${Math.floor(daysSincePlanting ?? 0)} of ${totalSeasonDays}`
+          : `Day ${Math.floor(daysSincePlanting ?? 0)} of season`;
+
+  const harvestInDays = useMemo(() => {
+    if (!expectedHarvestDate) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const harvest = new Date(expectedHarvestDate);
+    harvest.setHours(0, 0, 0, 0);
+    return Math.ceil((harvest.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  }, [expectedHarvestDate]);
+
+  const nextMilestone =
+    harvestInDays != null && harvestInDays >= 0
+      ? `Harvest in ${harvestInDays} days`
+      : currentStageLabel && currentStageLabel !== 'Set planting date'
+        ? `Current: ${currentStageLabel}`
+        : null;
+
+  const latestActivity = useMemo(() => {
+    const workLog = [...workLogs]
+      .sort((a, b) => (normalizeDate(b.date)?.getTime() ?? 0) - (normalizeDate(a.date)?.getTime() ?? 0))[0];
+    const expense = [...expenses]
+      .sort((a, b) => (normalizeDate(b.date)?.getTime() ?? 0) - (normalizeDate(a.date)?.getTime() ?? 0))[0];
+    const wlTime = workLog ? normalizeDate(workLog.date)?.getTime() ?? 0 : 0;
+    const exTime = expense ? normalizeDate(expense.date)?.getTime() ?? 0 : 0;
+    if (wlTime >= exTime && workLog) {
+      return `Work log: ${workLog.workCategory ?? 'Activity'} on ${formatDate(normalizeDate(workLog.date) ?? new Date())}`;
+    }
+    if (expense) {
+      return `Expense: KES ${expense.amount.toLocaleString()} on ${formatDate(normalizeDate(expense.date) ?? new Date())}`;
+    }
+    return null;
+  }, [workLogs, expenses]);
+
+  const insightAlerts = useMemo(() => {
+    const open = challenges.filter((c) => String(c.status).toLowerCase() !== 'resolved');
+    return open.map((c) => c.title).filter(Boolean);
+  }, [challenges]);
+
   const totalPeopleDays = workLogs.reduce(
     (sum, w) => sum + (w.numberOfPeople || 0),
     0,
@@ -228,54 +293,9 @@ export default function ProjectDetailsPage() {
     return acc;
   }, {});
 
-  // Season challenge display helpers (same as SeasonChallengesPage)
-  const getChallengeTypeIcon = (type?: ChallengeType) => {
-    if (!type) return null;
-    const icons: Record<ChallengeType, string> = {
-      weather: '🌦️',
-      pests: '🐛',
-      diseases: '🦠',
-      prices: '💰',
-      labor: '👷',
-      equipment: '🔧',
-      other: '⚠️',
-    };
-    return <span className="text-2xl" aria-hidden>{icons[type] || icons.other}</span>;
-  };
-  const isPreSeasonChallenge = (challenge: SeasonChallenge) =>
-    String((challenge as any).source ?? '') === 'preseason-plan';
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'resolved':
-        return <CheckCircle className="h-5 w-5 text-fv-success" />;
-      case 'mitigating':
-        return <Clock className="h-5 w-5 text-fv-warning" />;
-      default:
-        return <AlertTriangle className="h-5 w-5 text-muted-foreground" />;
-    }
-  };
-  const getSeverityBadge = (severity: string) => {
-    const styles: Record<string, string> = {
-      high: 'bg-destructive/20 text-destructive',
-      medium: 'fv-badge--warning',
-      low: 'fv-badge--info',
-    };
-    return styles[severity] || 'bg-muted text-muted-foreground';
-  };
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      resolved: 'fv-badge--active',
-      mitigating: 'fv-badge--warning',
-      identified: 'bg-muted text-muted-foreground',
-    };
-    return styles[status] || 'bg-muted text-muted-foreground';
-  };
-
   const [deletingProject, setDeletingProject] = useState(false);
   type SummaryTab = 'workLogs' | 'inventory' | 'expenses';
-  const [activeSummaryTab, setActiveSummaryTab] = useState<SummaryTab>('workLogs');
   const [detailsDialog, setDetailsDialog] = useState<SummaryTab | null>(null);
-  const [expandedChallenges, setExpandedChallenges] = useState<Set<string>>(new Set());
 
   if (!companyId) {
     return (
@@ -326,696 +346,144 @@ export default function ProjectDetailsPage() {
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
+  const fieldSize = project.acreage != null ? `${Number(project.acreage)} ac` : '—';
+  const expectedHarvestStr = expectedHarvestDate ? formatDate(expectedHarvestDate) : null;
+  const openChallengesCount = challenges.filter((c) => String(c.status).toLowerCase() !== 'resolved').length;
+
+  const handleStageClick = (index: number) => {
+    const item = timelineItems[index];
+    if (!item || !projectId || !companyId) return;
+    const existingStage = projectStages.find((s) => s.stageIndex === index);
+    const stageForEdit: CropStage = existingStage ?? ({
+      id: `placeholder-${index}`,
+      projectId,
+      companyId,
+      cropType: (project?.cropType as any) ?? '',
+      stageName: templateStages[index]?.label ?? `Stage ${index}`,
+      stageIndex: index,
+      status: 'pending',
+    } as CropStage);
+    setSelectedStageForEdit(stageForEdit);
+    setStageEditOpen(true);
+  };
+
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Back + Header Strip */}
-      <div className="flex flex-col gap-4">
-        <button
-          className="fv-btn fv-btn--secondary w-fit"
-          onClick={() => navigate('/projects')}
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Back to Projects
-        </button>
-
-        {/* Project summary card */}
-        <div className="fv-card overflow-hidden">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 pb-4 border-b border-border/60">
-            <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{project.name}</h1>
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                <span className="fv-badge capitalize text-xs">{project.cropType.replace('-', ' ')}</span>
-                <span className="fv-badge capitalize text-xs">{project.status}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-muted-foreground mt-3">
-                {project.plantingDate && (
-                  <span className="flex items-center gap-1">
-                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
-                    Planted {formatDate(project.plantingDate)}
-                  </span>
-                )}
-                {expectedHarvestDate && (
-                  <span className="flex items-center gap-1">
-                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
-                    Expected harvest {formatDate(expectedHarvestDate)}
-                  </span>
-                )}
-              </div>
-              {project.useBlocks && projectBlocks.length > 0 && (
-                <div className="mt-2 space-y-1 text-xs sm:text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">
-                    Blocks ({projectBlocks.length})
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {projectBlocks.slice(0, 4).map((b) => {
-                      const planted = normalizeDate(b.plantingDate as any);
-                      const cropDays = getCropDaysToHarvest(project.cropType);
-                      const expected =
-                        b.expectedEndDate
-                          ? normalizeDate(b.expectedEndDate as any)
-                          : (() => {
-                              if (!planted || cropDays == null) return undefined;
-                              const d = new Date(planted);
-                              d.setDate(d.getDate() + cropDays);
-                              return d;
-                            })();
-                      return (
-                        <span
-                          key={b.id}
-                          className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 bg-muted/40"
-                        >
-                          <span className="font-medium text-foreground text-[11px] sm:text-xs">
-                            {b.blockName}
-                          </span>
-                          {typeof b.acreage === 'number' && (
-                            <span className="text-[11px] sm:text-xs">
-                              · {b.acreage} ac
-                            </span>
-                          )}
-                          {planted && (
-                            <span className="text-[11px] sm:text-xs">
-                              · Planted {formatDate(planted)}
-                            </span>
-                          )}
-                          {expected && (
-                            <span className="text-[11px] sm:text-xs">
-                              · Harvest {formatDate(expected)}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
-                    {projectBlocks.length > 4 && (
-                      <span className="text-[11px] sm:text-xs">
-                        +{projectBlocks.length - 4} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            {project.status === 'active' && (
-              <button
-                className="fv-btn fv-btn--primary shrink-0 w-full sm:w-auto"
-                onClick={() => navigate(`/projects/${project.id}/planning`)}
-              >
-                {project.planning ? 'Plan changes' : 'Season Plan'}
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
-            <div className="space-y-0.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Days since planting</p>
-              <p className="text-lg font-semibold text-foreground tabular-nums">
-                {plantingDate == null
-                  ? '—'
-                  : daysSincePlanting != null && daysSincePlanting < 0
-                    ? `Not planted (in ${Math.abs(daysSincePlanting)} days)`
-                    : typeof daysSincePlanting === 'number'
-                      ? Math.floor(daysSincePlanting)
-                      : '—'}
-              </p>
-            </div>
-            <div className="space-y-0.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Current stage</p>
-              <p className="text-sm font-semibold text-foreground leading-tight">{currentStageLabel}</p>
-            </div>
-            <div className="space-y-0.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage progress</p>
-              <p className="text-lg font-semibold text-foreground tabular-nums">{stageProgressPercent}%</p>
-            </div>
-            <div className="space-y-0.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total expenses</p>
-              <p className="text-sm font-semibold text-foreground tabular-nums">{formatCurrency(totalExpenses)}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Operations Summary: Work Logs, Inventory Usage, Expenses (before Crop Stages) */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Operations Summary</h2>
-
-        {/* Mobile: compact title buttons in one row (no scroll) */}
-        <div className="md:hidden space-y-3">
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              onClick={() => setActiveSummaryTab('workLogs')}
-              className={cn(
-                'fv-btn fv-btn--secondary min-w-0 py-2 px-2 text-xs gap-1',
-                activeSummaryTab === 'workLogs' && 'ring-2 ring-primary ring-offset-1',
-              )}
-            >
-              <Users className="h-3 w-3 shrink-0" />
-              <span className="truncate">Work Logs</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSummaryTab('inventory')}
-              className={cn(
-                'fv-btn fv-btn--secondary min-w-0 py-2 px-2 text-xs gap-1',
-                activeSummaryTab === 'inventory' && 'ring-2 ring-primary ring-offset-1',
-              )}
-            >
-              <Activity className="h-3 w-3 shrink-0" />
-              <span className="truncate">Inventory</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSummaryTab('expenses')}
-              className={cn(
-                'fv-btn fv-btn--secondary min-w-0 py-2 px-2 text-xs gap-1',
-                activeSummaryTab === 'expenses' && 'ring-2 ring-primary ring-offset-1',
-              )}
-            >
-              <Wallet className="h-3 w-3 shrink-0" />
-              <span className="truncate">Expenses</span>
-            </button>
-          </div>
-          <div className="fv-card">
-            {activeSummaryTab === 'workLogs' && (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    Work Logs
-                  </h3>
-                  <button
-                    type="button"
-                    className="fv-btn fv-btn--secondary text-sm"
-                    onClick={() => setDetailsDialog('workLogs')}
-                  >
-                    Details
-                  </button>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total work logs</span>
-                    <span className="font-medium">{workLogs.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total people-days</span>
-                    <span className="font-medium">{totalPeopleDays}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Derived labour cost</span>
-                    <span className="font-medium">{formatCurrency(derivedLabourCost)}</span>
-                  </div>
-                </div>
-                {Object.keys(workLogsByCategory).length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">By work type</p>
-                    <div className="space-y-1 text-xs">
-                      {Object.entries(workLogsByCategory).map(([key, count]) => (
-                        <div key={key} className="flex justify-between">
-                          <span className="text-muted-foreground truncate mr-2">{key}</span>
-                          <span className="font-medium">{count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-            {activeSummaryTab === 'inventory' && (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Activity className="h-4 w-4" />
-                    Inventory Usage
-                  </h3>
-                  <button
-                    type="button"
-                    className="fv-btn fv-btn--secondary text-sm"
-                    onClick={() => setDetailsDialog('inventory')}
-                  >
-                    Details
-                  </button>
-                </div>
-                {!Object.keys(inventoryUsageByItem).length && (
-                  <p className="text-sm text-muted-foreground">No inventory usage recorded yet.</p>
-                )}
-                {!!Object.keys(inventoryUsageByItem).length && (
-                  <div className="space-y-1 text-sm">
-                    {Object.entries(inventoryUsageByItem).map(([id, data]) => (
-                      <div key={id} className="flex justify-between">
-                        <span className="text-muted-foreground capitalize">{data.category}</span>
-                        <span className="font-medium">{data.quantity} {data.unit}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            {activeSummaryTab === 'expenses' && (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Wallet className="h-4 w-4" />
-                    Expenses Summary
-                  </h3>
-                  <button
-                    type="button"
-                    className="fv-btn fv-btn--secondary text-sm"
-                    onClick={() => setDetailsDialog('expenses')}
-                  >
-                    Details
-                  </button>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total expenses</span>
-                    <span className="font-medium">{formatCurrency(totalExpenses)}</span>
-                  </div>
-                  {['labour', 'fertilizer', 'chemical', 'fuel', 'other'].map((cat) => (
-                    <div key={cat} className="flex justify-between">
-                      <span className="text-muted-foreground capitalize">{cat}</span>
-                      <span className="font-medium">{formatCurrency(expensesByCategory[cat] || 0)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Tablet: 2 per row; larger screens: 3 per row */}
-        <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Work logs card */}
-          <div className="fv-card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Work Logs
-              </h2>
-              <button
-                type="button"
-                className="fv-btn fv-btn--secondary text-sm"
-                onClick={() => setDetailsDialog('workLogs')}
-              >
-                Details
-              </button>
-            </div>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total work logs</span>
-                <span className="font-medium">{workLogs.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total people-days</span>
-                <span className="font-medium">{totalPeopleDays}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Derived labour cost</span>
-                <span className="font-medium">{formatCurrency(derivedLabourCost)}</span>
-              </div>
-            </div>
-            {Object.keys(workLogsByCategory).length > 0 && (
-              <div className="mt-4">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">By work type</p>
-                <div className="space-y-1 text-xs">
-                  {Object.entries(workLogsByCategory).map(([key, count]) => (
-                    <div key={key} className="flex justify-between">
-                      <span className="text-muted-foreground truncate mr-2">{key}</span>
-                      <span className="font-medium">{count}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Inventory usage card */}
-          <div className="fv-card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Activity className="h-4 w-4" />
-                Inventory Usage
-              </h2>
-              <button
-                type="button"
-                className="fv-btn fv-btn--secondary text-sm"
-                onClick={() => setDetailsDialog('inventory')}
-              >
-                Details
-              </button>
-            </div>
-            {!Object.keys(inventoryUsageByItem).length && (
-              <p className="text-sm text-muted-foreground">No inventory usage recorded yet.</p>
-            )}
-            {!!Object.keys(inventoryUsageByItem).length && (
-              <div className="space-y-1 text-sm">
-                {Object.entries(inventoryUsageByItem).map(([id, data]) => (
-                  <div key={id} className="flex justify-between">
-                    <span className="text-muted-foreground capitalize">{data.category}</span>
-                    <span className="font-medium">{data.quantity} {data.unit}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Expenses summary card */}
-          <div className="fv-card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Wallet className="h-4 w-4" />
-                Expenses Summary
-              </h2>
-              <button
-                type="button"
-                className="fv-btn fv-btn--secondary text-sm"
-                onClick={() => setDetailsDialog('expenses')}
-              >
-                Details
-              </button>
-            </div>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total expenses</span>
-                <span className="font-medium">{formatCurrency(totalExpenses)}</span>
-              </div>
-              {['labour', 'fertilizer', 'chemical', 'fuel', 'other'].map((cat) => (
-                <div key={cat} className="flex justify-between">
-                  <span className="text-muted-foreground capitalize">{cat}</span>
-                  <span className="font-medium">{formatCurrency(expensesByCategory[cat] || 0)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Season Challenges (after Operations Summary) */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Season Challenges</h2>
-        {!challenges.length && (
-          <div className="fv-card flex items-center gap-2 text-sm text-muted-foreground p-4">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            No challenges recorded yet.
-          </div>
-        )}
-        {!!challenges.length && (
-          <div className="space-y-3">
-            {challenges.map((c) => {
-              const stage = templateStages[(c as any).stageIndex];
-              const stageLabel = stage?.label ?? `Stage ${(c as any).stageIndex}`;
-              const challengeDate = c.dateIdentified ? normalizeDate(c.dateIdentified as any) : null;
-              const isExpanded = expandedChallenges.has(c.id);
-              const preSeason = isPreSeasonChallenge(c);
-              const toggleExpand = () => {
-                const next = new Set(expandedChallenges);
-                if (next.has(c.id)) next.delete(c.id);
-                else next.add(c.id);
-                setExpandedChallenges(next);
-              };
-
-              return (
-                <div key={c.id} className="fv-card p-4 sm:p-5 rounded-lg border border-border/60 shadow-sm relative overflow-hidden">
-                  {preSeason && (
-                    <div className="pointer-events-none absolute right-0 top-0 h-20 w-20 overflow-hidden">
-                      <div className="absolute right-[-26px] top-[14px] rotate-45 bg-primary px-8 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-sm">
-                        PRE-SEASON
-                      </div>
-                    </div>
-                  )}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={toggleExpand}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(); } }}
-                    className="flex flex-col sm:flex-row sm:items-start gap-4 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-muted/50">
-                        {c.challengeType ? getChallengeTypeIcon(c.challengeType) : getStatusIcon(c.status)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <h3 className="font-semibold text-foreground text-sm sm:text-base">{c.title}</h3>
-                          <span className="shrink-0 text-muted-foreground" aria-hidden>
-                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          </span>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{c.description}</p>
-                        <div className="flex flex-wrap items-center gap-2 mt-3">
-                          {c.challengeType && (
-                            <span className="fv-badge text-xs bg-muted text-muted-foreground capitalize">
-                              {c.challengeType}
-                            </span>
-                          )}
-                          <span className={cn('fv-badge text-xs capitalize', getSeverityBadge(c.severity))}>
-                            {c.severity}
-                          </span>
-                          <span className={cn('fv-badge text-xs capitalize', getStatusBadge(c.status))}>
-                            {c.status}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
-                          <span>Identified: {challengeDate ? formatDate(challengeDate) : '—'}</span>
-                          {c.dateResolved && (
-                            <span>Resolved: {formatDate(normalizeDate(c.dateResolved as any) ?? (c.dateResolved as Date))}</span>
-                          )}
-                          {stage && (
-                            <span>Stage: <span className="font-medium text-foreground">{stageLabel}</span></span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="mt-4 pt-4 border-t border-border/60 space-y-4">
-                      {c.whatWasDone && (
-                        <div>
-                          <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
-                            <WrenchIcon className="h-3 w-3 sm:h-4 sm:w-4" />
-                            What Was Done
-                          </h4>
-                          <p className="text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap break-words">{c.whatWasDone}</p>
-                        </div>
-                      )}
-                      {(c.itemsUsed?.length ?? 0) > 0 || ((c as any).chemicalsUsed?.length ?? 0) > 0 ? (
-                        <div>
-                          <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
-                            <Package className="h-3 w-3 sm:h-4 sm:w-4" />
-                            Items Used
-                          </h4>
-                          <div className="space-y-2">
-                            {(c.itemsUsed || (c as any).chemicalsUsed || []).map((item: any, idx: number) => {
-                              const itemName = item.itemName || item.inventoryItemName || 'Unknown Item';
-                              const needsPurchase = item.needsPurchase || !item.inventoryItemId;
-                              return (
-                                <div key={idx} className={cn('rounded-lg border p-2 sm:p-3 text-xs sm:text-sm', needsPurchase && 'border-fv-warning/50 bg-fv-warning/5')}>
-                                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                    <div className="flex-1 min-w-0">
-                                      <span className="font-medium break-words">{itemName}</span>
-                                      <span className="text-muted-foreground ml-2">
-                                        {item.quantity ? `${item.quantity} ` : ''}{item.unit}
-                                      </span>
-                                      <span className="text-xs text-muted-foreground ml-2 capitalize">
-                                        ({item.category || 'chemical'})
-                                      </span>
-                                    </div>
-                                    {needsPurchase && (
-                                      <span className="fv-badge fv-badge--warning text-xs shrink-0">Needs Purchase</span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : null}
-                      {c.plan2IfFails && (
-                        <div>
-                          <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
-                            <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4 text-fv-warning" />
-                            Plan 2 (If Current Solution Fails)
-                          </h4>
-                          <p className="text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap break-words">{c.plan2IfFails}</p>
-                        </div>
-                      )}
-                      {!c.whatWasDone && !(c.itemsUsed?.length ?? 0) && !(c as any).chemicalsUsed?.length && !c.plan2IfFails && (
-                        <p className="text-xs sm:text-sm text-muted-foreground italic">No additional details recorded.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Crop stage timeline — driven by project.plantingDate + stage template. Click a stage to edit and add notes. */}
-      <div className="fv-card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Crop Stage Timeline</h2>
-          <p className="text-xs text-muted-foreground">Click a stage to edit dates and add notes.</p>
-        </div>
-        {!plantingDate && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <AlertTriangle className="h-4 w-4" />
-            Set planting date to track stages.
-          </div>
-        )}
-        {plantingDate && !templateStages.length && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <AlertTriangle className="h-4 w-4" />
-            No stage template for this crop. Create one.
-          </div>
-        )}
-        {plantingDate && daysSincePlanting != null && daysSincePlanting < 0 && templateStages.length > 0 && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-            Not planted yet (starts in {Math.abs(daysSincePlanting)} days). All stages upcoming.
-          </div>
-        )}
-        {plantingDate && templateStages.length > 0 && (
-          <p className="text-sm text-muted-foreground mb-4">
-            Day {Math.max(0, daysSincePlanting ?? 0)} since planting
-            {currentStageForDay != null && (
-              <> · Estimated stage end: {formatDate(getStageEndDate(plantingDate, currentStageForDay.stage.dayEnd), { month: 'short', day: 'numeric', year: 'numeric' })}</>
-            )}
-          </p>
-        )}
-        <div className="space-y-4">
-          {timelineItems.map((item, index) => {
-            const statusLabel = item.status === 'completed' ? 'completed' : item.status === 'current' ? 'active' : 'pending';
-            const estimatedEnd = plantingDate ? getStageEndDate(plantingDate, item.estimatedEndDay) : null;
-            const dayRange = `Day ${item.stage.dayStart}–${item.stage.dayEnd}`;
-            const existingStage = projectStages.find((s) => s.stageIndex === index);
-            const stageForEdit: CropStage = existingStage ?? ({
-              id: `placeholder-${index}`,
-              projectId: projectId ?? '',
-              companyId: companyId ?? '',
-              cropType: (project?.cropType as any) ?? '',
-              stageName: templateStages[index]?.label ?? `Stage ${index}`,
-              stageIndex: index,
-              status: 'pending',
-            } as CropStage);
-            return (
-              <div
-                key={item.stage.key}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setSelectedStageForEdit(stageForEdit);
-                  setStageEditOpen(true);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedStageForEdit(stageForEdit);
-                    setStageEditOpen(true);
-                  }
-                }}
-                className="flex items-start gap-4 cursor-pointer rounded-lg p-2 -mx-2 hover:bg-muted/40 transition-colors"
-              >
-                <div className="flex flex-col items-center">
-                  <div
-                    className={[
-                      'flex h-10 w-10 items-center justify-center rounded-full border-2',
-                      item.status === 'completed' && 'border-fv-success bg-fv-success/10',
-                      item.status === 'current' && 'border-fv-warning bg-fv-warning/10',
-                      item.status === 'upcoming' && 'border-muted bg-muted',
-                    ].join(' ')}
-                  >
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  {index < timelineItems.length - 1 && (
-                    <div className="w-0.5 h-8 mt-2 bg-muted" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 pb-4 border-b last:border-b-0 border-border/60">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-foreground">{item.stage.label}</h3>
-                    <span className="fv-badge text-xs capitalize">
-                      {statusLabel}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground flex flex-wrap gap-3">
-                    <span>{dayRange}</span>
-                    {item.status === 'current' && (
-                      <span>{Math.round(item.progress * 100)}% through stage</span>
-                    )}
-                    {estimatedEnd && (
-                      <span>
-                        Est. end: {formatDate(estimatedEnd, { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Financial snapshot */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <SimpleStatCard
-          title="Total project cost"
-          value={formatCurrency(totalExpenses)}
-          layout="vertical"
-        />
-        <SimpleStatCard
-          title="Labour cost"
-          value={formatCurrency(labourCost)}
-          layout="vertical"
-        />
-        <SimpleStatCard
-          title="Input cost"
-          value={formatCurrency(inputCost)}
-          layout="vertical"
-        />
-        <SimpleStatCard
-          title="Avg daily cost"
-          value={formatCurrency(Number.isFinite(avgDailyCost) ? avgDailyCost : 0)}
-          layout="vertical"
+    <div className="flex flex-col gap-6 sm:gap-8 lg:gap-8 animate-fade-in pb-8">
+      {/* 1. Hero – full width; fill gap under navbar on mobile and PC */}
+      <div className="-mt-6 -mx-6 w-[calc(100%+3rem)] order-1">
+        <ProjectHeroCard
+        project={project}
+        onBack={() => navigate('/projects')}
+        onEditProject={() => navigate(`/projects/${project.id}/edit`)}
+        onPlanSeason={() => navigate(`/projects/${project.id}/planning`)}
+        dayOfSeason={dayOfSeason}
+        currentStage={currentStageLabel}
+        expectedHarvest={expectedHarvestStr}
+        nextMilestone={nextMilestone}
+        location={project.location ?? '—'}
+        fieldSize={fieldSize}
+        heroImageUrl={(project as { heroImageUrl?: string })?.heroImageUrl ?? getCropHeroImage(project.cropType)}
         />
       </div>
 
-      {/* 6️⃣ Quick actions */}
-      <div className="fv-card flex flex-wrap gap-3">
-        {project.status === 'active' && (
-          <button
-            className="fv-btn fv-btn--primary"
-            onClick={() => navigate(`/projects/${project.id}/planning`)}
-          >
-            Planning
-          </button>
-        )}
-        <button
-          className="fv-btn fv-btn--secondary"
-          onClick={() => navigate('/challenges')}
-        >
-          <ListChecks className="h-4 w-4" />
-          Add Season Challenge
-        </button>
-        <button
-          className="fv-btn fv-btn--secondary"
-          onClick={() => navigate('/operations')}
-        >
-          <Users className="h-4 w-4" />
-          View Work Logs
-        </button>
-        <button
-          className="fv-btn fv-btn--secondary"
-          onClick={() => navigate('/expenses')}
-        >
-          <Wallet className="h-4 w-4" />
-          View Expenses
-        </button>
-        <button
-          className="fv-btn fv-btn--secondary"
-          onClick={() => navigate('/inventory')}
-        >
-          <Activity className="h-4 w-4" />
-          View Inventory Usage
-        </button>
+      {/* 2. Season Progress – after hero on desktop, after Financial on mobile */}
+      {timelineItems.length > 0 && (
+        <div className="order-3 lg:order-2">
+          <SeasonProgressTimeline
+            items={timelineItems}
+            onStageClick={handleStageClick}
+          />
+        </div>
+      )}
+
+      {/* 3. Financial – before Season Progress on mobile */}
+      <div className="order-2 lg:order-3">
+      <ProjectFinancialSnapshot
+        totalSpent={totalExpenses}
+        labourCost={labourCost}
+        inputCost={inputCost}
+        averageDailyCost={Number.isFinite(avgDailyCost) ? avgDailyCost : 0}
+        budgetRemaining={project.budget != null ? (project.budget as number) - totalExpenses : null}
+        formatCurrency={formatCurrency}
+      />
+      </div>
+
+      {/* 4. Operations Summary + 5. Season Challenges (left) | Insight + Quick Actions (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 order-4">
+        <div className="lg:col-span-2 space-y-6">
+          <ProjectOperationsSummary
+            workLogCount={workLogs.length}
+            totalPeopleDays={totalPeopleDays}
+            derivedLabourCost={derivedLabourCost}
+            inventoryUsageByItem={inventoryUsageByItem}
+            expensesByCategory={expensesByCategory}
+            openChallengesCount={openChallengesCount}
+            formatCurrency={formatCurrency}
+            onViewWorkLogs={() => setDetailsDialog('workLogs')}
+            onViewInventory={() => setDetailsDialog('inventory')}
+            onViewExpenses={() => setDetailsDialog('expenses')}
+            onViewChallenges={() => navigate('/challenges')}
+            workLogsByCategory={workLogsByCategory}
+          />
+          <ProjectChallengesPanel
+            challenges={challenges}
+            onAddChallenge={() => navigate('/challenges')}
+            onViewAll={() => navigate('/challenges')}
+            limit={5}
+          />
+        </div>
+        <div className="space-y-6">
+          <SeasonInsightPanel
+            currentStage={currentStageLabel}
+            harvestInDays={harvestInDays}
+            latestActivity={latestActivity}
+            alerts={insightAlerts}
+          />
+          <ProjectQuickActions
+            onPlanSeason={() => navigate(`/projects/${project.id}/planning`)}
+            onViewWorkLogs={() => setDetailsDialog('workLogs')}
+            onViewExpenses={() => setDetailsDialog('expenses')}
+            onViewInventory={() => setDetailsDialog('inventory')}
+            onAddChallenge={() => navigate('/challenges')}
+            showPlanSeason={project.status === 'active'}
+          />
+        </div>
+      </div>
+
+      {/* 6. Planning Preview / Quick Actions */}
+      <div className="order-5">
+      <ProjectPlanningPreview
+        hasPlan={Boolean(project.planning || project.plantingDate)}
+        plantingDate={project.plantingDate ? formatDate(project.plantingDate) : null}
+        seedVariety={(project.planning as any)?.seed?.variety ?? (project.planning as any)?.seed?.name ?? null}
+        expectedChallengesCount={(project.planning as any)?.expectedChallenges?.length ?? 0}
+        lastUpdated={(project.planning as any)?.planHistory?.[0] ? 'Recently' : null}
+        onPlanSeason={() => navigate(`/projects/${project.id}/planning`)}
+        onViewFullPlan={() => navigate(`/projects/${project.id}/planning`)}
+      />
+      </div>
+
+      {/* 7. Danger Zone */}
+      <div className="order-6">
+      <ProjectDangerZone
+        onDelete={async () => {
+          if (!companyId || !project?.id) return;
+          setDeletingProject(true);
+          try {
+            await deleteProjectService(project.id);
+            if (activeProject?.id === project.id) setActiveProject(null);
+            await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
+            await queryClient.invalidateQueries({ queryKey: ['project', project.id, companyId] });
+            navigate('/projects');
+          } catch (err) {
+            console.error('Failed to delete project:', err);
+            alert('Failed to delete project. Please try again.');
+          } finally {
+            setDeletingProject(false);
+          }
+        }}
+        deleting={deletingProject}
+      />
       </div>
 
       {/* Details dialog: deep view for Work Logs / Inventory / Expenses */}
@@ -1137,64 +605,6 @@ export default function ProjectDetailsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete project - bottom */}
-      <div className="fv-card border-destructive/30">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Delete project</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              Permanently delete this project and all its stages, work logs, expenses, and season challenges. This cannot be undone.
-            </p>
-          </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <button
-                type="button"
-                className="fv-btn fv-btn--secondary text-destructive hover:bg-destructive/10 w-fit"
-                disabled={deletingProject}
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete project
-              </button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this project?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete the project and all its stages, work logs, expenses, and season challenges. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    if (!companyId || !project?.id) return;
-                    setDeletingProject(true);
-                    try {
-                      await deleteProjectService(project.id);
-                      if (activeProject?.id === project.id) {
-                        setActiveProject(null);
-                      }
-                      await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
-                      await queryClient.invalidateQueries({ queryKey: ['project', project.id, companyId] });
-                      navigate('/projects');
-                    } catch (err) {
-                      console.error('Failed to delete project:', err);
-                      alert('Failed to delete project. Please try again.');
-                    } finally {
-                      setDeletingProject(false);
-                    }
-                  }}
-                >
-                  {deletingProject ? 'Deleting…' : 'Delete'}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      </div>
       <StageEditModal
         open={stageEditOpen}
         onOpenChange={setStageEditOpen}
