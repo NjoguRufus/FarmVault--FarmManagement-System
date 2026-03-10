@@ -336,13 +336,22 @@ Deno.serve(async (req: Request) => {
     const appBaseUrlEnv =
       Deno.env.get("APP_BASE_URL") ??
       Deno.env.get("FARMVAULT_APP_URL") ??
-      Deno.env.get("SITE_URL") ??
       "";
 
-    // Default local base URL when no explicit app base URL is configured.
-    // Production should always set APP_BASE_URL=https://farmvaultco.vercel.app
-    // Local dev should set APP_BASE_URL=http://localhost:8088
-    const appBaseUrl = (appBaseUrlEnv && appBaseUrlEnv.trim().length > 0 ? appBaseUrlEnv : "http://localhost:8088").replace(/\/$/, "");
+    // Resolve base URL for Clerk invite redirects.
+    // Priority:
+    // 1) APP_BASE_URL / FARMVAULT_APP_URL when set
+    // 2) Hard-coded production domain when in production and no env configured
+    // 3) Localhost:8088 for local development
+    let appBaseUrlRaw = (appBaseUrlEnv || "").trim();
+    if (!appBaseUrlRaw) {
+      if (denoEnv === "production") {
+        appBaseUrlRaw = "https://farmvaultco.vercel.app";
+      } else {
+        appBaseUrlRaw = "http://localhost:8088";
+      }
+    }
+    const appBaseUrl = appBaseUrlRaw.replace(/\/$/, "");
     const redirectParams = new URLSearchParams({
       email,
       company_id: companyId,
