@@ -36,6 +36,8 @@ interface AuthContextType {
   switchRole: (role: UserRole) => void;
   /** Refetch profile avatar and update user.avatar (e.g. after avatar upload). */
   refreshUserAvatar: () => Promise<void>;
+  /** Refetch profile name + avatar and update user.name/user.avatar. */
+  refreshUserProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -562,23 +564,35 @@ export function AuthProvider({
         const { error: upsertError } = await db
           .core()
           .from('profiles')
-          .upsert({ clerk_user_id: userId }, { onConflict: 'clerk_user_id' });
+          .upsert(
+            {
+              clerk_user_id: userId,
+              email: fallbackEmail || null,
+              full_name: fallbackName || null,
+            },
+            { onConflict: 'clerk_user_id' },
+          );
 
         if (upsertError && import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn('[Auth] Profile upsert warning:', upsertError);
         }
 
-        // 3b) Load profile avatar_url for avatar priority: custom upload > Clerk/Google imageUrl
+        // 3b) Load profile full_name + avatar_url (user display + avatar priority)
         let profileAvatarUrl: string | null = null;
+        let profileFullName: string | null = null;
         try {
           const { data: profileRow } = await db
             .core()
             .from('profiles')
-            .select('avatar_url')
+            .select('avatar_url, full_name')
             .eq('clerk_user_id', userId)
             .maybeSingle();
           profileAvatarUrl = profileRow?.avatar_url ?? null;
+          profileFullName =
+            profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
+              ? String(profileRow.full_name)
+              : null;
         } catch {
           // Non-blocking; fall back to Clerk image
         }
@@ -637,7 +651,7 @@ export function AuthProvider({
         const mapped: User = {
           id: userId,
           email: fallbackEmail,
-          name: fallbackName,
+          name: profileFullName || fallbackName,
           role: normalizedRole,
           employeeRole: undefined,
           companyId: hasCompanyId && hasRole ? contextCompanyId : null,
@@ -939,6 +953,33 @@ export function AuthProvider({
     }
   };
 
+  const refreshUserProfile = async () => {
+    if (isEmergencySession || !userId || !user) return;
+    try {
+      const { data: profileRow } = await db
+        .core()
+        .from('profiles')
+        .select('avatar_url, full_name')
+        .eq('clerk_user_id', userId)
+        .maybeSingle();
+      const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
+      const resolvedAvatar = profileRow?.avatar_url || clerkImageUrl || null;
+      const resolvedName =
+        profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
+          ? String(profileRow.full_name)
+          : user.name;
+      const next = {
+        ...user,
+        name: resolvedName,
+        avatar: resolvedAvatar ? String(resolvedAvatar) : undefined,
+      };
+      setUser(next);
+      writeCachedUser(next);
+    } catch {
+      // Non-blocking
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -954,6 +995,7 @@ export function AuthProvider({
         logout,
         switchRole,
         refreshUserAvatar,
+        refreshUserProfile,
       }}
     >
       {children}

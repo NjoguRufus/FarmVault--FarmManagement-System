@@ -44,10 +44,10 @@ export function StaffProvider({ children }: { children: ReactNode }) {
       const { data } = await db
         .core()
         .from('profiles')
-        .select('name, avatar_url')
+        .select('full_name, avatar_url')
         .eq('clerk_user_id', user.id)
         .maybeSingle();
-      const raw = (data as { name?: string; avatar_url?: string } | null)?.name;
+      const raw = (data as { full_name?: string; avatar_url?: string } | null)?.full_name;
       return raw && String(raw).trim().length > 0 ? String(raw) : null;
     },
     enabled: Boolean(user?.id),

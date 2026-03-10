@@ -34,6 +34,7 @@ import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
 import EmployeeProfilePage from "@/pages/EmployeeProfilePage";
 import StaffProfilePage from "@/pages/StaffProfilePage";
+import MyProfilePage from "@/pages/MyProfilePage";
 import ReportsPage from "@/pages/ReportsPage";
 import BillingPage from "@/pages/BillingPage";
 import SupportPage from "@/pages/SupportPage";
@@ -321,6 +322,7 @@ const App = () => (
                 <Route path="/employees/:employeeId" element={<PermissionRoute module="employees"><EmployeeProfilePage /></PermissionRoute>} />
                 <Route path="/reports" element={<PermissionRoute module="reports"><ReportsPage /></PermissionRoute>} />
                 <Route path="/billing" element={<PermissionRoute module="settings"><BillingPage /></PermissionRoute>} />
+                <Route path="/profile" element={<MyProfilePage />} />
                 <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
                 <Route path="/support" element={<SupportPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />

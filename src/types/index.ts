@@ -711,15 +711,26 @@ export interface Supplier {
   id: string;
   companyId: string;
   name: string;
+  /** Combined contact display, derived from contactPerson/phone/location where available */
   contact: string;
+  /** DB: contact_person */
+  contactPerson?: string;
+  /** DB: phone */
+  phone?: string;
   email?: string;
-  /** Single category (legacy); use categories when present */
+  /** DB: location */
+  location?: string;
+  /** DB: notes */
+  notes?: string;
+  /** DB: created_by */
+  createdBy?: string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  // Legacy fields kept for backwards-compat only. Do NOT rely on them for new code.
   category?: string;
-  /** Multiple categories this supplier can provide */
   categories?: string[];
-  rating: number;
-  status: 'active' | 'inactive';
-  /** Short notes for future reference (review section) */
+  rating?: number;
+  status?: 'active' | 'inactive';
   reviewNotes?: string;
 }
 
@@ -802,25 +813,20 @@ export interface SeasonChallenge {
   updatedAt?: Date;
 }
 
-/** Reusable pre-season challenge template (company + crop scoped). */
-export type ChallengeTemplatePhase = 'preseason' | 'inseason' | 'harvest';
-
+/** Reusable challenge template (company + crop scoped). */
 export interface ChallengeTemplate {
   id: string;
   companyId: string;
   cropType: string;
-  phase: ChallengeTemplatePhase;
   title: string;
   description?: string;
-  priority?: 'low' | 'medium' | 'high';
-  defaultDueOffsetDays?: number;
-  isReusable: true;
+  challengeType?: ChallengeType;
+  severity?: 'low' | 'medium' | 'high';
+  recommendedAction?: string;
+  recommendedInput?: string;
   createdBy: string;
   createdAt: unknown;
-  /** Resolution / what to do (saved from challenge whatWasDone, plan2IfFails, items) */
-  whatWasDone?: string;
-  plan2IfFails?: string;
-  itemsUsedSummary?: string;
+  updatedAt?: unknown;
 }
 
 // Items that need to be purchased (derived from challenges)
