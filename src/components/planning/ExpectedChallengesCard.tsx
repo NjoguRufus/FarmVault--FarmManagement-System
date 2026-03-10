@@ -25,12 +25,15 @@ export interface ExpectedChallengesCardProps {
   onAddChallenge: () => void;
   /** Form or modal content rendered by parent */
   addForm?: React.ReactNode;
+  /** Optional per-row action area (edit/delete buttons, etc.) */
+  renderItemActions?: (item: ExpectedChallengeItem) => React.ReactNode;
 }
 
 export function ExpectedChallengesCard({
   challenges,
   onAddChallenge,
   addForm,
+  renderItemActions,
 }: ExpectedChallengesCardProps) {
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
@@ -56,17 +59,29 @@ export function ExpectedChallengesCard({
             <span className="shrink-0">
               {CHALLENGE_ICON[c.challengeType ?? 'other'] ?? CHALLENGE_ICON.other}
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground">{c.title}</p>
               {c.description && (
                 <p className="text-xs text-muted-foreground mt-0.5">{c.description}</p>
               )}
-              {c.severity && (
-                <span className="text-xs text-muted-foreground capitalize mt-1 inline-block">
-                  {c.severity}
-                </span>
-              )}
+              <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                {c.challengeType && (
+                  <span className="rounded-md border border-border/60 bg-background px-2 py-0.5 capitalize">
+                    {c.challengeType}
+                  </span>
+                )}
+                {c.severity && (
+                  <span className="rounded-md border border-border/60 bg-background px-2 py-0.5 capitalize">
+                    Intensity: {c.severity}
+                  </span>
+                )}
+              </div>
             </div>
+            {renderItemActions ? (
+              <div className="shrink-0 pt-0.5">
+                {renderItemActions(c)}
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>

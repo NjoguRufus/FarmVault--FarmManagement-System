@@ -3,7 +3,7 @@
  * Used by: Project Details, Plan Season, Season Challenges page.
  * All read/write goes through this service so challenges stay in sync.
  */
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import type { SeasonChallenge } from '@/types';
 
 type DbRow = {
@@ -73,21 +73,31 @@ export async function listSeasonChallenges(
     console.log('[seasonChallenges] listSeasonChallenges', {
       companyId,
       projectId: projectId ?? 'all',
+      schema: 'public',
+      table: TABLE,
     });
   }
   try {
-    let q = db
-      .public()
+    let query = supabase
       .from(TABLE)
       .select('*')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false });
 
     if (projectId != null && projectId !== '') {
-      q = q.eq('project_id', projectId);
+      query = query.eq('project_id', projectId);
     }
 
-    const { data, error } = await q;
+    const { data, error } = await query;
+
+    if (import.meta.env?.DEV) {
+      console.log('[seasonChallenges] listSeasonChallenges response', {
+        table: TABLE,
+        schema: 'public',
+        error,
+        rows: Array.isArray(data) ? data.length : null,
+      });
+    }
 
     if (error) {
       if (import.meta.env?.DEV) {
@@ -141,12 +151,13 @@ export async function createSeasonChallenge(
     console.log('[seasonChallenges] createSeasonChallenge', {
       projectId: input.projectId,
       title: input.title,
+      schema: 'public',
+      table: TABLE,
     });
   }
   try {
     const dateIdentified = new Date().toISOString().slice(0, 10);
-    const { data, error } = await db
-      .public()
+    const { data, error } = await supabase
       .from(TABLE)
       .insert({
         company_id: input.companyId,
@@ -167,6 +178,15 @@ export async function createSeasonChallenge(
       })
       .select('*')
       .single();
+
+    if (import.meta.env?.DEV) {
+      console.log('[seasonChallenges] createSeasonChallenge response', {
+        table: TABLE,
+        schema: 'public',
+        error,
+        data,
+      });
+    }
 
     if (error) {
       if (import.meta.env?.DEV) {
@@ -215,8 +235,15 @@ export async function updateSeasonChallenge(
   if (updates.dateResolved !== undefined) row.date_resolved = updates.dateResolved;
 
   if (Object.keys(row).length === 0) return;
-
-  const { error } = await db.public().from(TABLE).update(row).eq('id', id);
+  const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('*');
+  if (import.meta.env?.DEV) {
+    console.log('[seasonChallenges] updateSeasonChallenge response', {
+      table: TABLE,
+      schema: 'public',
+      error,
+      data,
+    });
+  }
   if (error) {
     if (import.meta.env?.DEV) {
       console.warn('[seasonChallenges] updateSeasonChallenge error', error.message);
@@ -232,7 +259,15 @@ export async function deleteSeasonChallenge(id: string): Promise<void> {
   if (import.meta.env?.DEV) {
     console.log('[seasonChallenges] deleteSeasonChallenge', { id });
   }
-  const { error } = await db.public().from(TABLE).delete().eq('id', id);
+  const { data, error } = await supabase.from(TABLE).delete().eq('id', id).select('*');
+  if (import.meta.env?.DEV) {
+    console.log('[seasonChallenges] deleteSeasonChallenge response', {
+      table: TABLE,
+      schema: 'public',
+      error,
+      data,
+    });
+  }
   if (error) {
     if (import.meta.env?.DEV) {
       console.warn('[seasonChallenges] deleteSeasonChallenge error', error.message);

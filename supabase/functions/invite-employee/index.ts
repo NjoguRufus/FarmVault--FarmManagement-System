@@ -332,8 +332,17 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const appUrlEnv = Deno.env.get("FARMVAULT_APP_URL") ?? Deno.env.get("SITE_URL");
-    const appBaseUrl = (appUrlEnv && appUrlEnv.trim().length > 0 ? appUrlEnv : "http://localhost:8080").replace(/\/$/, "");
+    const denoEnv = Deno.env.get("DENO_ENV") ?? Deno.env.get("NODE_ENV") ?? "unknown";
+    const appBaseUrlEnv =
+      Deno.env.get("APP_BASE_URL") ??
+      Deno.env.get("FARMVAULT_APP_URL") ??
+      Deno.env.get("SITE_URL") ??
+      "";
+
+    // Default local base URL when no explicit app base URL is configured.
+    // Production should always set APP_BASE_URL=https://farmvaultco.vercel.app
+    // Local dev should set APP_BASE_URL=http://localhost:8088
+    const appBaseUrl = (appBaseUrlEnv && appBaseUrlEnv.trim().length > 0 ? appBaseUrlEnv : "http://localhost:8088").replace(/\/$/, "");
     const redirectParams = new URLSearchParams({
       email,
       company_id: companyId,
@@ -344,7 +353,8 @@ Deno.serve(async (req: Request) => {
     const redirectUrl = `${appBaseUrl}/accept-invitation?${redirectParams.toString()}`;
 
     log("Clerk invitation redirectUrl resolved", {
-      appUrlEnv,
+      environment: denoEnv,
+      appBaseUrlEnv,
       appBaseUrl,
       redirectUrl,
       metadata: {

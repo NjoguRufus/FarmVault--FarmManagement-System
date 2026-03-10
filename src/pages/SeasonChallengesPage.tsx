@@ -165,6 +165,7 @@ export default function SeasonChallengesPage() {
         severity,
         status: 'identified',
         stageIndex: activeProject.startingStageIndex ?? 0,
+        source: 'field-report',
         createdBy: user?.id,
       });
       invalidateSeasonChallengesQuery(queryClient);
@@ -173,16 +174,17 @@ export default function SeasonChallengesPage() {
       }
       if (saveAsReusable && activeProject?.companyId && user?.id) {
         try {
-          await upsertChallengeTemplate({
+          const { isUpdate } = await upsertChallengeTemplate({
             companyId: activeProject.companyId,
             cropType: activeProject.cropType,
-            phase: 'preseason',
             title,
             description: description || undefined,
-            priority: severity,
+            challengeType,
+            severity,
             createdBy: user.id,
           });
           queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+          toast.success(isUpdate ? 'Reusable template updated.' : 'Reusable template saved.');
         } catch (templateErr) {
           console.warn('Failed to save as reusable template:', templateErr);
           toast.error('Challenge saved but could not save as reusable template.');
@@ -351,19 +353,19 @@ export default function SeasonChallengesPage() {
           ? editItemsUsed.map((i) => `${i.itemName}${i.quantity != null ? ` (${i.quantity} ${i.unit})` : ''}`).filter(Boolean).join('; ')
           : undefined;
         try {
-          await upsertChallengeTemplate({
+          const { isUpdate } = await upsertChallengeTemplate({
             companyId: editingChallenge.companyId,
             cropType: editingChallenge.cropType,
-            phase: 'preseason',
             title: editTitle.trim(),
             description: editDescription.trim() || undefined,
-            priority: editSeverity,
+            challengeType: editChallengeType,
+            severity: editSeverity,
+            recommendedAction: editWhatWasDone.trim() || undefined,
+            recommendedInput: itemsUsedSummary || undefined,
             createdBy: user.id,
-            whatWasDone: editWhatWasDone.trim() || undefined,
-            plan2IfFails: editPlan2IfFails.trim() || undefined,
-            itemsUsedSummary: itemsUsedSummary || undefined,
           });
           queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+          toast.success(isUpdate ? 'Reusable template updated.' : 'Reusable template saved.');
         } catch (templateErr) {
           console.warn('Failed to save as reusable template:', templateErr);
           toast.error('Challenge saved but could not save as reusable template.');

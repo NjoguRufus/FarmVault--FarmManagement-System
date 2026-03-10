@@ -21,6 +21,15 @@ export function PlanningHistoryCard({
 }: PlanningHistoryCardProps) {
   const displayEntries = entries.slice(0, 10);
 
+  const summarize = (entry: PlanHistoryEntry) => {
+    const field = (entry.field ?? '').toLowerCase();
+    if (field.includes('planting')) return 'Planting date updated';
+    if (field.includes('seed')) return 'Seed plan updated';
+    if (field.includes('challenge')) return 'Challenge updated';
+    if (field.includes('stage')) return 'Stages updated';
+    return 'Plan updated';
+  };
+
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
       <div className="flex items-center gap-2">
@@ -36,14 +45,21 @@ export function PlanningHistoryCard({
           {displayEntries.map((entry, i) => (
             <li
               key={i}
-              className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-xs space-y-0.5"
+              className="rounded-lg border border-border/40 bg-muted/15 px-3 py-2 text-sm"
             >
-              <p className="font-medium text-foreground">
-                {entry.field ?? 'Plan updated'} · {entry.reason ?? '—'}
-              </p>
-              {entry.changedAt && (
-                <p className="text-muted-foreground">
-                  {formatDate(entry.changedAt)}
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="font-medium text-foreground">
+                  {entry.changedAt ? formatDate(entry.changedAt) : '—'} — {summarize(entry)}
+                </p>
+                {entry.changedBy && (
+                  <p className="text-xs text-muted-foreground">
+                    {entry.changedBy}
+                  </p>
+                )}
+              </div>
+              {entry.reason && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {entry.reason}
                 </p>
               )}
             </li>

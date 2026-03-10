@@ -147,9 +147,9 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     [selectedCrop],
   );
   const { data: challengeTemplates = [] } = useQuery({
-    queryKey: ['challengeTemplates', user?.companyId ?? '', projectCropTypeForTemplates, 'preseason'],
+    queryKey: ['challengeTemplates', user?.companyId ?? '', projectCropTypeForTemplates],
     queryFn: () =>
-      getChallengeTemplates(user!.companyId, projectCropTypeForTemplates, 'preseason'),
+      getChallengeTemplates(user!.companyId, projectCropTypeForTemplates),
     enabled: !!user?.companyId && !!projectCropTypeForTemplates,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,

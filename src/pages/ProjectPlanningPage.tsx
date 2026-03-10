@@ -4,7 +4,6 @@ import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, Info, Plus } from
 import { useAuth } from '@/contexts/AuthContext';
 import { ChallengeType, CropStage, EnvironmentType, Project, SeasonChallenge, Supplier } from '@/types';
 import { useProjectStages } from '@/hooks/useProjectStages';
-import { useCollection } from '@/hooks/useCollection';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { findCropKnowledgeByTypeKey } from '@/knowledge/cropCatalog';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
@@ -14,8 +13,10 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { getProject } from '@/services/projectsService';
 import { db } from '@/lib/db';
-import { createSeasonChallenge } from '@/services/seasonChallengesService';
+import { createSeasonChallenge, deleteSeasonChallenge, updateSeasonChallenge } from '@/services/seasonChallengesService';
 import { useSeasonChallenges, invalidateSeasonChallengesQuery } from '@/hooks/useSeasonChallenges';
+import { getChallengeTemplates, upsertChallengeTemplate } from '@/services/challengeTemplatesService';
+import { createSupplier, listSuppliers } from '@/services/suppliersService';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince, getStageForDay } from '@/utils/cropStages';
 import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
@@ -52,7 +53,15 @@ export default function ProjectPlanningPage() {
     projectId,
   );
 
-  const { data: suppliers = [] } = useCollection<Supplier>('suppliers', 'suppliers', scope);
+  const { data: suppliers = [] } = useQuery<Supplier[]>({
+    queryKey: ['suppliers', companyId],
+    queryFn: () => listSuppliers(companyId!),
+    enabled: Boolean(companyId),
+    staleTime: 60_000,
+  });
+  if (import.meta.env?.DEV && companyId) {
+    console.log('[ProjectPlanningPage] suppliers load source', { source: 'supabase', count: suppliers.length });
+  }
   const { challenges: allSeasonChallenges } = useSeasonChallenges(companyId, projectId ?? null);
   if (import.meta.env?.DEV && projectId) {
     console.log('[ProjectPlanningPage] season challenges fetch', { projectId, count: allSeasonChallenges.length });
@@ -70,11 +79,29 @@ export default function ProjectPlanningPage() {
 
   const handleAddNewSupplier = async () => {
     const name = seedSupplier.trim();
-    if (!name || !companyId || addingSupplier) return;
+    if (!name || !companyId || !user?.id || addingSupplier) return;
     setAddingSupplier(true);
     try {
-      toast.error('Adding suppliers from this screen is not yet supported with Supabase.');
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] supplier create payload', {
+          companyId,
+          name,
+          userId: user?.id,
+        });
+      }
+      const created = await createSupplier({
+        companyId,
+        name,
+        createdBy: user.id,
+      });
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] supplier create response', created);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['suppliers', companyId] });
+      setSeedSupplier(created.name);
       setSupplierDropdownOpen(false);
+      supplierInputRef.current?.blur();
+      toast.success('Supplier added.');
     } finally {
       setAddingSupplier(false);
     }
@@ -119,6 +146,13 @@ export default function ProjectPlanningPage() {
   const [savingChallenge, setSavingChallenge] = useState(false);
   const [showAddPreSeasonForm, setShowAddPreSeasonForm] = useState(false);
   const [saveAsReusable, setSaveAsReusable] = useState(false);
+
+  const [editingChallengeId, setEditingChallengeId] = useState<string | null>(null);
+  const [editChallengeTitle, setEditChallengeTitle] = useState('');
+  const [editChallengeDescription, setEditChallengeDescription] = useState('');
+  const [editChallengeType, setEditChallengeType] = useState<ChallengeType>('other');
+  const [editChallengeSeverity, setEditChallengeSeverity] = useState<'low' | 'medium' | 'high'>('medium');
+  const [savingChallengeEdit, setSavingChallengeEdit] = useState(false);
   const [editingSeed, setEditingSeed] = useState(false);
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [addingSupplier, setAddingSupplier] = useState(false);
@@ -136,19 +170,55 @@ export default function ProjectPlanningPage() {
   const preSeasonChallenges = useMemo(() => {
     if (!project) return [];
 
-    return allSeasonChallenges.map((c) => ({
-      id: c.id,
-      title: c.title,
-      description: c.description,
-      challengeType: c.challengeType,
-      severity: c.severity,
-      status: c.status,
-      addedAt: (c as any).dateIdentified ?? c.createdAt,
-      addedBy: c.createdByName || c.createdBy || 'unknown',
-      sourcePlanChallengeId: c.sourcePlanChallengeId,
-      pending: false,
-    }));
+    // Only show planned/pre-season challenges on the Planning page.
+    // Backward-compatible: also include older rows with no source set but matching basic shape.
+    return allSeasonChallenges
+      .filter((c) => {
+        const source = String(c.source ?? '');
+        if (source === 'preseason-plan') return true;
+        // Backward compat: treat legacy identified challenges without a stage as planned.
+        if (!source && c.status === 'identified' && (c.stageIndex == null || Number.isNaN(c.stageIndex))) {
+          return true;
+        }
+        return false;
+      })
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        challengeType: c.challengeType,
+        severity: c.severity,
+        status: c.status,
+        addedAt: (c as any).dateIdentified ?? c.createdAt,
+        addedBy: c.createdByName || c.createdBy || 'unknown',
+        sourcePlanChallengeId: c.sourcePlanChallengeId,
+        pending: false,
+      }));
   }, [allSeasonChallenges, project]);
+
+  const projectCropTypeForTemplates = useMemo(
+    () => project?.cropType ?? project?.cropTypeKey ?? null,
+    [project?.cropType, project?.cropTypeKey],
+  );
+
+  const { data: suggestedTemplates = [], isLoading: templatesLoading } = useQuery({
+    queryKey: ['challengeTemplates', companyId, projectCropTypeForTemplates],
+    queryFn: () =>
+      companyId && projectCropTypeForTemplates
+        ? getChallengeTemplates(companyId, projectCropTypeForTemplates)
+        : Promise.resolve([]),
+    enabled: Boolean(companyId && projectCropTypeForTemplates),
+    staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
+  });
+
+  if (import.meta.env?.DEV && companyId && projectCropTypeForTemplates) {
+    console.log('[ProjectPlanningPage] challenge templates fetch', {
+      companyId,
+      cropType: projectCropTypeForTemplates,
+      count: suggestedTemplates.length,
+    });
+  }
 
   const cropTimeline = useMemo(
     () => getCropTimeline(project?.cropType ?? null),
@@ -368,21 +438,43 @@ export default function ProjectPlanningPage() {
     setSavingChallenge(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
+      const title = newChallengeTitle.trim();
+      const description = newChallengeDescription.trim();
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] challenge create', { projectId, title: newChallengeTitle.trim() });
+        console.log('[ProjectPlanningPage] challenge create', { projectId, title });
       }
       await createSeasonChallenge({
         companyId,
         projectId,
         cropType: project.cropType ?? 'other',
-        title: newChallengeTitle.trim(),
-        description: newChallengeDescription.trim(),
+        title,
+        description,
         challengeType: newChallengeType,
         severity: newChallengeSeverity,
         status: 'identified',
         source: 'preseason-plan',
         createdBy: user?.id ?? undefined,
       });
+
+      if (saveAsReusable && user?.id) {
+        try {
+          const { isUpdate } = await upsertChallengeTemplate({
+            companyId,
+            cropType: project.cropType ?? 'other',
+            title,
+            description,
+            challengeType: newChallengeType,
+            severity: newChallengeSeverity,
+            createdBy: user.id,
+          });
+          queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
+          toast.success(isUpdate ? 'Reusable template updated.' : 'Reusable template saved.');
+        } catch (templateError) {
+          console.warn('[ProjectPlanningPage] template upsert failed', templateError);
+          toast.error('Challenge saved, but template could not be saved.');
+        }
+      }
+
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
         console.log('[ProjectPlanningPage] challenge create success, invalidated queries');
@@ -465,6 +557,10 @@ export default function ProjectPlanningPage() {
   const totalExpectedChallenges = preSeasonChallenges.length;
 
   const templateStages = cropTimeline?.stages ?? [];
+  const seasonLengthDays = (() => {
+    const maxDay = templateStages.reduce((m, s) => Math.max(m, Number(s.dayEnd ?? 0)), 0);
+    return maxDay > 0 ? maxDay : null;
+  })();
   const plantingDateRaw = project.plantingDate as unknown;
   const plantingDateObj =
     plantingDateRaw instanceof Date
@@ -493,20 +589,106 @@ export default function ProjectPlanningPage() {
     severity: c.severity,
   }));
 
+  const applyTemplateToForm = (templateId: string) => {
+    const template = suggestedTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+    if (import.meta.env?.DEV) {
+      console.log('[ProjectPlanningPage] apply template to challenge form', {
+        templateId,
+        title: template.title,
+      });
+    }
+    setNewChallengeTitle(template.title);
+    setNewChallengeDescription(template.description ?? '');
+    setNewChallengeType((template.challengeType as ChallengeType) ?? 'other');
+    setNewChallengeSeverity((template.severity as any) ?? 'medium');
+    setShowAddPreSeasonForm(true);
+  };
+
+  const startEditChallenge = (id: string) => {
+    const existing = preSeasonChallenges.find((c) => c.id === id);
+    if (!existing) return;
+    setEditingChallengeId(id);
+    setEditChallengeTitle(existing.title ?? '');
+    setEditChallengeDescription(existing.description ?? '');
+    setEditChallengeType((existing.challengeType as ChallengeType) ?? 'other');
+    setEditChallengeSeverity((existing.severity as any) ?? 'medium');
+    setShowAddPreSeasonForm(false);
+  };
+
+  const cancelEditChallenge = () => {
+    setEditingChallengeId(null);
+    setEditChallengeTitle('');
+    setEditChallengeDescription('');
+    setEditChallengeType('other');
+    setEditChallengeSeverity('medium');
+  };
+
+  const handleSaveChallengeEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingChallengeId) return;
+    setSavingChallengeEdit(true);
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] challenge edit payload', {
+          id: editingChallengeId,
+          title: editChallengeTitle.trim(),
+          challengeType: editChallengeType,
+          severity: editChallengeSeverity,
+        });
+      }
+      await updateSeasonChallenge(editingChallengeId, {
+        title: editChallengeTitle.trim(),
+        description: editChallengeDescription.trim(),
+        challengeType: editChallengeType,
+        severity: editChallengeSeverity,
+      });
+      invalidateSeasonChallengesQuery(queryClient);
+      toast.success('Challenge updated.');
+      cancelEditChallenge();
+    } catch (err) {
+      console.error('Failed to update challenge:', err);
+      toast.error('Failed to update challenge.');
+    } finally {
+      setSavingChallengeEdit(false);
+    }
+  };
+
+  const handleDeleteChallenge = async (id: string) => {
+    const ok = typeof window !== 'undefined' ? window.confirm('Delete this expected challenge?') : false;
+    if (!ok) return;
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[ProjectPlanningPage] challenge delete', { id });
+      }
+      await deleteSeasonChallenge(id);
+      invalidateSeasonChallengesQuery(queryClient);
+      toast.success('Challenge deleted.');
+      if (editingChallengeId === id) cancelEditChallenge();
+    } catch (err) {
+      console.error('Failed to delete challenge:', err);
+      toast.error('Failed to delete challenge.');
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in pb-8" role="main">
       <PlanningHero
         projectName={project.name}
+        plantingDate={plantingDateObj ? formatDate(plantingDateObj) : 'Not set'}
+        expectedHarvest={harvestWindowStr}
+        seasonLength={seasonLengthDays ? `${seasonLengthDays} days` : null}
+        currentStage={currentStageForDay?.stage.label ?? null}
         onBack={() => navigate(`/projects/${project.id}`)}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
         <div className="space-y-6 xl:col-span-2">
-          {/* 1. Planting Date Planning */}
+          {/* 2. Planting Plan */}
           <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold">Planting Date Planning</h2>
+                <h2 className="text-lg font-semibold">Planting Plan</h2>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -518,7 +700,7 @@ export default function ProjectPlanningPage() {
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-xs">
-                    <p>Plan and adjust the season start date. Any change is recorded as a change of plan and future stages are recalculated, while completed stages are preserved.</p>
+                    <p>Set the season start date. Changes are logged and stage timings recalculate automatically.</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -623,11 +805,11 @@ export default function ProjectPlanningPage() {
             )}
           </div>
 
-          {/* 2. Seed / Variety Planning */}
+          {/* 3. Seed / Variety */}
           <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold">Seed & Variety Planning</h2>
+                <h2 className="text-lg font-semibold">Seed / Variety</h2>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -639,7 +821,7 @@ export default function ProjectPlanningPage() {
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-xs">
-                    <p>Capture the exact seed, variety, supplier, and batch. This enables yield analysis and traceability across seasons.</p>
+                    <p>Capture what you plan to plant (seed + variety). Supplier/batch helps traceability later.</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -779,24 +961,135 @@ export default function ProjectPlanningPage() {
 
           </div>
 
-          {/* Season Stages */}
-          <SeasonStagesBuilder
-            stages={templateStages.map((s) => ({
-              key: s.key,
-              label: s.label,
-              dayStart: s.dayStart,
-              dayEnd: s.dayEnd,
-              color: s.color,
-            }))}
-            currentStageIndex={currentStageForDay?.index ?? null}
-          />
+          {/* Suggested Challenges from reusable templates */}
+          {suggestedTemplates.length > 0 && (
+            <div className="rounded-xl border border-border/60 bg-card p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Suggested Challenges
+                </h2>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Reusable templates for this crop and company. Click &ldquo;Use&rdquo; to prefill the expected challenge form.
+              </p>
+              <ul className="space-y-2">
+                {suggestedTemplates.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground">{t.title}</p>
+                      {t.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                          {t.description}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs font-medium text-primary hover:underline"
+                      onClick={() => applyTemplateToForm(t.id)}
+                    >
+                      Use
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Expected Challenges */}
           <ExpectedChallengesCard
             challenges={expectedChallengeItems}
             onAddChallenge={() => setShowAddPreSeasonForm(true)}
+            renderItemActions={(c) => (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={() => startEditChallenge(c.id)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-destructive hover:underline"
+                  onClick={() => handleDeleteChallenge(c.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
             addForm={
-              showAddPreSeasonForm ? (
+              editingChallengeId ? (
+                <form onSubmit={handleSaveChallengeEdit} className="space-y-3 pt-2">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Title</label>
+                    <input
+                      className="fv-input w-full"
+                      value={editChallengeTitle}
+                      onChange={(e) => setEditChallengeTitle(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-foreground">Description</label>
+                    <textarea
+                      className="fv-input w-full resize-none"
+                      rows={2}
+                      value={editChallengeDescription}
+                      onChange={(e) => setEditChallengeDescription(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Challenge type</label>
+                      <select
+                        className="fv-select w-full"
+                        value={editChallengeType}
+                        onChange={(e) => setEditChallengeType(e.target.value as ChallengeType)}
+                      >
+                        <option value="weather">Weather</option>
+                        <option value="pests">Pests</option>
+                        <option value="diseases">Diseases</option>
+                        <option value="prices">Prices</option>
+                        <option value="labor">Labour / People</option>
+                        <option value="equipment">Equipment</option>
+                        <option value="other">Custom (not listed)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Intensity</label>
+                      <select
+                        className="fv-select w-full"
+                        value={editChallengeSeverity}
+                        onChange={(e) => setEditChallengeSeverity(e.target.value as 'low' | 'medium' | 'high')}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="fv-btn fv-btn--secondary"
+                      onClick={cancelEditChallenge}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="fv-btn fv-btn--secondary"
+                      disabled={savingChallengeEdit || !editChallengeTitle.trim()}
+                    >
+                      {savingChallengeEdit ? 'Saving…' : 'Save changes'}
+                    </button>
+                  </div>
+                </form>
+              ) : showAddPreSeasonForm ? (
                 <form onSubmit={handleAddExpectedChallenge} className="space-y-3 pt-2">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-foreground">Title</label>
@@ -836,7 +1129,7 @@ export default function ProjectPlanningPage() {
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Severity</label>
+                      <label className="text-sm font-medium text-foreground">Intensity</label>
                       <select
                         className="fv-select w-full"
                         value={newChallengeSeverity}
@@ -850,7 +1143,7 @@ export default function ProjectPlanningPage() {
                   </div>
                   <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
                     <Label htmlFor="save-as-reusable" className="text-sm font-medium cursor-pointer">
-                      Save as reusable (use for future projects)
+                      Save as reusable challenge template
                     </Label>
                     <Switch
                       id="save-as-reusable"
@@ -880,6 +1173,18 @@ export default function ProjectPlanningPage() {
               ) : undefined
             }
           />
+
+          {/* Season Stages */}
+          <SeasonStagesBuilder
+            stages={templateStages.map((s) => ({
+              key: s.key,
+              label: s.label,
+              dayStart: s.dayStart,
+              dayEnd: s.dayEnd,
+              color: s.color,
+            }))}
+            currentStageIndex={currentStageForDay?.index ?? null}
+          />
         </div>
 
         {/* Right: summary & history */}
@@ -888,6 +1193,8 @@ export default function ProjectPlanningPage() {
             nextStage={nextStageLabel}
             expectedHarvestWindow={harvestWindowStr}
             totalStages={templateStages.length}
+            seasonDuration={seasonLengthDays ? `${seasonLengthDays} days` : null}
+            expectedChallengesCount={totalExpectedChallenges}
           />
           <PlanningHistoryCard
             entries={planHistory}
