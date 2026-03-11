@@ -113,6 +113,8 @@ export default function HarvestCollectionsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const isAdminUser = user?.role === 'company-admin' || user?.role === 'developer';
+
   const companyProjects = useMemo(
     () => (user ? projects.filter((p) => p.companyId === user.companyId) : projects),
     [projects, user?.companyId]
@@ -464,7 +466,8 @@ export default function HarvestCollectionsPage() {
     }));
   }, [intakeRaw]);
 
-  const isFrenchBeansProject = String(effectiveProject?.cropType ?? '').toLowerCase() === 'french-beans';
+  const isFrenchBeansProject =
+    String(effectiveProject?.cropType ?? '').toLowerCase().replace('_', '-') === 'french-beans';
 
   const { data: financeWalletTotals } = useQuery({
     queryKey: ['projectWalletTotals', companyId ?? '', effectiveProjectId ?? ''],
@@ -516,6 +519,19 @@ export default function HarvestCollectionsPage() {
     };
     return [...filtered].sort((a, b) => toTime(b) - toTime(a));
   }, [allCollections, effectiveProject]);
+
+  const collectionsSummary = useMemo(() => {
+    const onlyFrench = collections.filter(
+      (c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'
+    );
+    const totalKg = onlyFrench.reduce((sum, c) => sum + Number(c.totalHarvestKg ?? 0), 0);
+    const totalRevenue = onlyFrench.reduce((sum, c) => sum + Number(c.totalRevenue ?? 0), 0);
+    return {
+      totalKg,
+      totalRevenue,
+      totalCollections: onlyFrench.length,
+    };
+  }, [collections]);
 
   /** Pending = buyer not yet marked as paid (harvest not completed). */
   const pendingCollections = useMemo(
@@ -1586,7 +1602,7 @@ export default function HarvestCollectionsPage() {
           reason: 'Picker cash payout',
           createdAtLocal: Date.now(),
           createdByUid: user?.id ?? '',
-          createdByName: user?.displayName ?? user?.email ?? 'System',
+          createdByName: user?.name ?? user?.email ?? 'System',
         } as ProjectWalletLedgerEntry,
       ]);
     }
@@ -1873,7 +1889,7 @@ export default function HarvestCollectionsPage() {
           reason: 'Picker batch payout',
           createdAtLocal: Date.now(),
           createdByUid: user?.id ?? '',
-          createdByName: user?.displayName ?? user?.email ?? 'System',
+          createdByName: user?.name ?? user?.email ?? 'System',
         } as ProjectWalletLedgerEntry,
       ]);
     }
@@ -2086,17 +2102,7 @@ export default function HarvestCollectionsPage() {
                 <ChevronLeft className="h-5 w-5" />
                 Back
               </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-9 rounded-lg gap-1 text-sm"
-                onClick={() => navigate('/harvest-sales')}
-              >
-                <ChevronLeft className="h-5 w-5" />
-                Back
-              </Button>
-            )}
+            ) : null}
             <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate" data-tour="harvest-collections-title">
               {selectedCollectionId ? (selectedCollection?.name ?? 'Collection') : 'Harvest Collections'}
             </h1>
@@ -2136,7 +2142,7 @@ export default function HarvestCollectionsPage() {
               </SelectContent>
             </UiSelect>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
             {(hasPendingWrites || !isOnline) && (
               <Button
                 size="sm"
@@ -2161,6 +2167,16 @@ export default function HarvestCollectionsPage() {
             )}
             {!selectedCollectionId ? (
               <>
+                {isFrenchBeansProject && isAdminUser && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs min-h-8 px-3 rounded-lg"
+                    onClick={() => navigate('/harvest-sales')}
+                  >
+                    View More
+                  </Button>
+                )}
                 {canCreateCollection && (
                   <Button
                     size="sm"
@@ -2326,6 +2342,27 @@ export default function HarvestCollectionsPage() {
             ) : null}
           </div>
         </div>
+
+        {isFrenchBeansProject && !selectedCollectionId && canViewFinancials && (
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 max-w-xl">
+            <Card className="border-primary/10 bg-card/60 backdrop-blur">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-muted-foreground">Total KG collected</p>
+                <p className="text-base sm:text-lg font-bold tabular-nums text-foreground">
+                  {collectionsSummary.totalKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-primary/10 bg-card/60 backdrop-blur">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-muted-foreground">Total revenue</p>
+                <p className="text-base sm:text-lg font-bold tabular-nums text-foreground">
+                  KES {Math.round(collectionsSummary.totalRevenue).toLocaleString()}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* List of collections */}
         {!selectedCollectionId && (

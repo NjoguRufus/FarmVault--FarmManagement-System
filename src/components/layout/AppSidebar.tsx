@@ -22,6 +22,7 @@ function getSidebarTourId(path: string): string | undefined {
     '/operations': 'nav-operations',
     '/manager/operations': 'nav-operations',
     '/inventory': 'nav-inventory',
+    '/harvest': 'nav-harvest-sales',
     '/harvest-sales': 'nav-harvest-sales',
     '/reports': 'nav-reports',
     '/settings': 'nav-settings',

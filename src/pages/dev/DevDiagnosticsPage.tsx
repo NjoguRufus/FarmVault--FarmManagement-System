@@ -55,13 +55,8 @@ export default function DevDiagnosticsPage() {
 
         let isDeveloper = false;
         if (clerkUserId) {
-          const { data: devRow } = await db
-            .admin()
-            .from('developers')
-            .select('clerk_user_id')
-            .eq('clerk_user_id', clerkUserId)
-            .maybeSingle();
-          isDeveloper = Boolean(devRow);
+          const { data: isDev } = await supabase.rpc('is_developer');
+          isDeveloper = isDev === true;
         }
 
         let projectsCount = 0;

@@ -53,6 +53,7 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
 import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
 import { useNavigate } from 'react-router-dom';
+import { AdminAlertCenter } from '@/components/alerts/AdminAlertCenter';
 import { useQuery } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
 
@@ -710,6 +711,8 @@ export function CompanyDashboard() {
         </div>
       </div>
 
+      <AdminAlertCenter />
+
       {/* Stats Grid */}
       <div className="space-y-3" data-tour="dashboard-stats">
         {!isHarvestActive ? (
@@ -735,6 +738,7 @@ export function CompanyDashboard() {
                   knowledgeDetection={activeProjectKnowledgeDetection}
                   recentActivityLogs={activityLogs}
                   advisorySummary={advisorySummary}
+                  compact={user?.role === 'employee'}
                 />
               </div>
             ) : showRevenueCard ? (

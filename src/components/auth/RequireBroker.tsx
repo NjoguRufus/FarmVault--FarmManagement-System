@@ -51,6 +51,6 @@ export function RequireBroker({ children }: RequireBrokerProps) {
     }
   }
 
-  // Redirect non-brokers to their appropriate dashboard
-  return <Navigate to="/dashboard" replace />;
+  // Redirect non-brokers to staff dashboard (staff are isolated under /staff/*)
+  return <Navigate to="/staff/staff-dashboard" replace />;
 }

@@ -77,6 +77,8 @@ export interface CropStageProgressCardProps {
   recentActivityLogs?: ActivityLogDoc[] | null;
   /** Advisory summary to show when "Advisory" tab is selected */
   advisorySummary?: { headline: string; body: string; why: string } | null;
+  /** Compact mode for staff: hide detailed metrics + Updates & Advisory drawer. */
+  compact?: boolean;
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -217,6 +219,7 @@ export function CropStageProgressCard({
   knowledgeDetection = null,
   recentActivityLogs = null,
   advisorySummary = null,
+  compact = false,
 }: CropStageProgressCardProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showRecents, setShowRecents] = useState(true);
@@ -284,7 +287,7 @@ export function CropStageProgressCard({
       ? formatStageDate(knowledgeDetection.estimatedHarvestStartDate)
       : '—';
 
-    const hasDrawer = recentActivityLogs != null || advisorySummary != null;
+    const hasDrawer = !compact && (recentActivityLogs != null || advisorySummary != null);
     const progressCardClass = hasDrawer
       ? cn(cardClasses, '!rounded-t-lg !rounded-b-none !border-b-0 !shadow-none')
       : cardClasses;
@@ -299,10 +302,11 @@ export function CropStageProgressCard({
           daysCompleted={daysCompleted}
           estimatedFinish={estimatedHarvestStart}
           daysLeft={daysLeft}
-          primaryMetricLabel={`Day ${daysCompleted} of ${dayOf}`}
-          primaryMetricDetail={`${daysCompleted} ${daysCompleted === 1 ? 'day' : 'days'} since planting`}
-          secondaryMetricLabel={`Est. harvest start ${estimatedHarvestStart}`}
-          secondaryMetricDetail={`${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to next stage`}
+          showMetrics={!compact}
+          primaryMetricLabel={compact ? undefined : `Day ${daysCompleted} of ${dayOf}`}
+          primaryMetricDetail={compact ? undefined : `${daysCompleted} ${daysCompleted === 1 ? 'day' : 'days'} since planting`}
+          secondaryMetricLabel={compact ? undefined : `Est. harvest start ${estimatedHarvestStart}`}
+          secondaryMetricDetail={compact ? undefined : `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to next stage`}
           className={hasDrawer ? progressCardClass : cardClasses}
         />
         {hasDrawer && (
@@ -413,7 +417,7 @@ export function CropStageProgressCard({
   const daysCompleted = normalizedStatus === 'completed' ? totalDays : normalizedStatus === 'pending' ? 0 : dayNumber;
   const daysLeft = clamp(totalDays - daysCompleted, 0, totalDays);
 
-  const hasDrawer = recentActivityLogs != null || advisorySummary != null;
+  const hasDrawer = !compact && (recentActivityLogs != null || advisorySummary != null);
   const progressCardClass = hasDrawer
     ? cn(cardClasses, '!rounded-t-lg !rounded-b-none !border-b-0 !shadow-none')
     : cardClasses;
@@ -428,6 +432,7 @@ export function CropStageProgressCard({
         daysCompleted={daysCompleted}
         estimatedFinish={formatStageDate(stageDetails.end)}
         daysLeft={daysLeft}
+        showMetrics={!compact}
         className={hasDrawer ? progressCardClass : cardClasses}
       />
       {hasDrawer && (

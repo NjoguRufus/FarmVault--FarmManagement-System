@@ -34,7 +34,7 @@ export function StaffBottomNav() {
   if (!user || isDesktop) return null;
 
   const items: Array<{ label: string; path: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { label: 'Dashboard', path: '/staff', icon: LayoutDashboard },
+    { label: 'Dashboard', path: '/staff/staff-dashboard', icon: LayoutDashboard },
   ];
 
   const canHarvestCollections = canKey('harvest_collections.view') || can('harvest', 'view');

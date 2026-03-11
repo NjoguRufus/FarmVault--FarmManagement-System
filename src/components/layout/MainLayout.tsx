@@ -12,7 +12,7 @@ import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { user, isEmergencySession } = useAuth();
+  const { user, isEmergencySession, effectiveAccess } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);
@@ -27,53 +27,18 @@ export function MainLayout() {
     return allowed ? null : '/dashboard';
   }, [isEmergencySession, location.pathname]);
 
-  // Memoize broker check to prevent infinite loops
-  // Extract employeeRole from user object to ensure stable reference
-  const employeeRole = useMemo(() => {
-    return user ? ((user as any).employeeRole as string | undefined) : undefined;
-  }, [user?.employeeRole]);
-  
-  const isBroker = useMemo(() => {
-    if (!user) return false;
-    return user.role === 'broker' || 
-           (user.role === 'employee' && (employeeRole === 'sales-broker' || employeeRole === 'broker'));
-  }, [user?.role, employeeRole]);
-
   // Enforce role-based access to main app sections.
-  // Only redirect if we're NOT already on a role-specific route (to avoid loops)
   const redirectTarget = useMemo(() => {
     if (emergencyRedirectTarget) return emergencyRedirectTarget;
     if (!user) return null;
     const path = location.pathname;
 
-    // If already on a role-specific route, don't redirect (let the role guard handle it)
-    if (path.startsWith('/manager') || path.startsWith('/broker') || path.startsWith('/driver') || path.startsWith('/admin')) {
-      return null;
-    }
+    const isCompanyAdmin =
+      user.role === 'company-admin' || (user as any).role === 'company_admin';
+    const isDeveloper = user.role === 'developer';
+    const isStaffUser = user.role === 'employee' && !isCompanyAdmin && !isDeveloper;
 
-    // Broker: only broker dashboard + broker harvest-sales + expenses
-    if (isBroker) {
-      const allowedPrefixes = ['/broker', '/expenses'];
-      const allowed = allowedPrefixes.some(
-        (prefix) => path === prefix || path.startsWith(prefix + '/'),
-      );
-      if (!allowed) {
-        return '/broker';
-      }
-    }
-
-    // Staff (non-admin, non-developer, non-manager/broker/driver) should use staff shell only.
-    const isAdminLikeRole =
-      user.role === 'company-admin' ||
-      (user as any).role === 'company_admin' ||
-      user.role === 'developer' ||
-      user.role === 'manager' ||
-      user.role === 'broker' ||
-      user.role === 'driver';
-
-    const isStaffShellUser = !isAdminLikeRole;
-
-    if (isStaffShellUser && !path.startsWith('/staff')) {
+    if (isStaffUser && !path.startsWith('/staff')) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[Shell] staff user → /staff redirect', {
@@ -81,10 +46,10 @@ export function MainLayout() {
           role: user.role,
           employeeRole: (user as any).employeeRole,
           from: path,
-          to: '/staff',
+          to: effectiveAccess.landingPage,
         });
       }
-      return '/staff';
+      return effectiveAccess.landingPage || '/staff/staff-dashboard';
     }
 
     if (import.meta.env.DEV) {
@@ -98,7 +63,7 @@ export function MainLayout() {
     }
 
     return null;
-  }, [user, location.pathname, isBroker, emergencyRedirectTarget]);
+  }, [user, location.pathname, emergencyRedirectTarget, effectiveAccess.landingPage]);
 
   // Use useEffect to handle navigation instead of conditional rendering
   // This prevents infinite loops by only redirecting when the target actually changes

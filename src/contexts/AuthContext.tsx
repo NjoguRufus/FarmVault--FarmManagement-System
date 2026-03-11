@@ -3,6 +3,7 @@ import { User, UserRole, Employee, PermissionMap } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
+import { resolveEffectiveAccess, type EffectiveAccess } from '@/lib/access';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
@@ -24,6 +25,8 @@ interface AuthContextType {
   user: User | null;
   employeeProfile: Employee | null;
   permissions: PermissionMap;
+  /** Resolved access (landing page, allowed modules, etc.). Use this for nav, routes, and landing—not raw role. */
+  effectiveAccess: EffectiveAccess;
   isAuthenticated: boolean;
   authReady: boolean;
   isDeveloper: boolean;
@@ -38,6 +41,8 @@ interface AuthContextType {
   refreshUserAvatar: () => Promise<void>;
   /** Refetch profile name + avatar and update user.name/user.avatar. */
   refreshUserProfile: () => Promise<void>;
+  /** Refetch employee profile + context and recompute role/permissions. Returns new landingPage for redirect. */
+  refreshAuthState: () => Promise<{ landingPage: string } | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -270,6 +275,37 @@ function buildEffectivePermissions(user: User | null, employeeProfile: Employee 
   return resolvePermissions(permissionRole, permissionOverrides);
 }
 
+const DEFAULT_EFFECTIVE_ACCESS: EffectiveAccess = {
+  employeeId: null,
+  companyId: null,
+  rolePreset: 'custom',
+  permissions: {},
+  allowedModules: [],
+  landingPage: '/staff',
+  canSeeDashboard: false,
+  isBroker: false,
+  isDriver: false,
+};
+
+function buildEffectiveAccess(
+  user: User | null,
+  employeeProfile: Employee | null,
+  permissions: PermissionMap
+): EffectiveAccess {
+  if (!user) return DEFAULT_EFFECTIVE_ACCESS;
+  const legacyRole = getPermissionRole(user, employeeProfile);
+  const isCompanyAdmin =
+    user.role === 'company-admin' || (user as { role?: string }).role === 'company_admin';
+  return resolveEffectiveAccess({
+    permissions,
+    employeeId: employeeProfile?.id ?? null,
+    companyId: user.companyId ?? null,
+    legacyRole: legacyRole ?? undefined,
+    isCompanyAdmin,
+    isDeveloper: user.role === 'developer',
+  });
+}
+
 /** Maps DB role (core.company_members.role) to app UserRole. company_admin/admin → company-admin; do not default to employee when membership has a role. */
 function normalizeRole(role: string | null | undefined): UserRole {
   if (!role) return 'employee';
@@ -329,6 +365,10 @@ export function AuthProvider({
   });
   const [employeeProfile, setEmployeeProfile] = useState<Employee | null>(null);
   const [permissions, setPermissions] = useState<PermissionMap>(() => getDefaultPermissions());
+  const effectiveAccess = React.useMemo(
+    () => buildEffectiveAccess(user, employeeProfile, permissions),
+    [user, employeeProfile, permissions]
+  );
   const [authReady, setAuthReady] = useState(() => {
     if (clerkState === null) return true;
     return false;
@@ -468,43 +508,25 @@ export function AuthProvider({
           // Allow-listed emails are always treated as developers, regardless of route.
           if (isDevEmail(email || undefined)) {
             dev = true;
-            // Ensure developer record exists in admin schema; non-blocking.
+            // Ensure developer record exists via public RPC (avoids 406 when admin schema is not exposed).
             void (async () => {
               try {
-                await db
-                  .admin()
-                  .from('developers')
-                  .upsert(
-                    {
-                      clerk_user_id: userId,
-                      email,
-                      role: 'super_admin',
-                    },
-                    { onConflict: 'clerk_user_id' },
-                  );
+                await supabase.rpc('bootstrap_developer', { _email: email ?? null });
               } catch (devUpsertError) {
                 if (import.meta.env.DEV) {
                   // eslint-disable-next-line no-console
-                  console.warn('[Auth] Developer upsert failed:', devUpsertError);
+                  console.warn('[Auth] Developer bootstrap failed:', devUpsertError);
                 }
               }
             })();
           } else if (devRoute) {
-            // Non-allowlisted users can still be developers if present in admin.developers,
-            // but we only check this on /dev routes.
-            const { data: devRow, error: devError } = await db
-              .admin()
-              .from('developers')
-              .select('clerk_user_id')
-              .eq('clerk_user_id', userId)
-              .maybeSingle();
-            if (devError) {
-              if (import.meta.env.DEV) {
-                // eslint-disable-next-line no-console
-                console.warn('[Auth] Developer check failed:', devError);
-              }
+            // Non-allowlisted users can still be developers; check via public RPC.
+            const { data: isDev, error: devError } = await supabase.rpc('is_developer');
+            if (devError && import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] Developer check failed:', devError);
             }
-            dev = Boolean(devRow?.clerk_user_id);
+            dev = isDev === true;
           }
         } catch (devUnexpectedError) {
           if (import.meta.env.DEV) {
@@ -786,13 +808,23 @@ export function AuthProvider({
           fallbackEmail ||
           'User';
 
+        // Canonical: when user has an employee profile, their dashboard/sidebar/route role is employees.role (DB).
+        const employeeRoleForUser = employee?.role ?? employee?.employeeRole ?? undefined;
         const userWithDisplayName: User = {
           ...mappedWithCompany,
           name: displayName,
-          // keep other fields from mappedWithCompany
+          employeeRole: employeeRoleForUser,
         };
 
         if (import.meta.env.DEV) {
+          // Temporary trace: canonical source of truth for role is employees.role (when profile exists) else company_members.role.
+          // eslint-disable-next-line no-console
+          console.log('[Auth] role trace', {
+            currentUserId: userId,
+            companyRole: mappedWithCompany.role,
+            latestEmployeeRole: employeeRoleForUser,
+            resolvedPermissionsModules: Object.keys(effectivePermissions).filter((k) => (effectivePermissions as any)[k]?.view === true).slice(0, 8),
+          });
           // eslint-disable-next-line no-console
           console.log('[Employee Context] loaded employee', {
             employeeId: employee?.id ?? null,
@@ -980,12 +1012,53 @@ export function AuthProvider({
     }
   };
 
+  const refreshAuthState = async (): Promise<{ landingPage: string } | null> => {
+    if (isEmergencySession || !userId || !user) return null;
+    try {
+      const employee = await loadEmployeeProfile(userId);
+      const employeeRoleForUser = employee?.role ?? employee?.employeeRole ?? undefined;
+      const displayName =
+        (employee?.fullName && employee.fullName.trim()) ||
+        (employee?.name && employee.name.trim()) ||
+        user.name ||
+        'User';
+      const nextUser: User = {
+        ...user,
+        name: displayName,
+        employeeRole: employeeRoleForUser,
+      };
+      const effectivePermissions = buildEffectivePermissions(nextUser, employee);
+      const access = buildEffectiveAccess(nextUser, employee, effectivePermissions);
+      setUser(nextUser);
+      setEmployeeProfile(employee);
+      setPermissions(effectivePermissions);
+      writeCachedUser(nextUser);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Auth] refreshAuthState applied', {
+          uid: userId,
+          employeeRole: employeeRoleForUser,
+          landingPage: access.landingPage,
+          allowedModules: access.allowedModules,
+        });
+      }
+      return { landingPage: access.landingPage };
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[Auth] refreshAuthState failed', err);
+      }
+      return null;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
         employeeProfile,
         permissions,
+        effectiveAccess,
         isAuthenticated: !!user,
         authReady: authReady && activationResolved,
         isDeveloper,
@@ -996,6 +1069,7 @@ export function AuthProvider({
         switchRole,
         refreshUserAvatar,
         refreshUserProfile,
+        refreshAuthState,
       }}
     >
       {children}

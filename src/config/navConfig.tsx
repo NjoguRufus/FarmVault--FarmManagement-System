@@ -39,7 +39,7 @@ export const companyNavConfig: NavItem[] = [
   { label: 'Inventory', path: '/inventory', icon: Package, group: 'main' },
   { label: 'Crop Stages', path: '/crop-stages', icon: Layers, group: 'more' },
   { label: 'Expenses', path: '/expenses', icon: Receipt, group: 'more' },
-  { label: 'Harvest & Sales', path: '/harvest-sales', icon: TrendingUp, group: 'more' },
+  { label: 'Harvest', path: '/harvest', icon: TrendingUp, group: 'more' },
   { label: 'Suppliers', path: '/suppliers', icon: Truck, group: 'more' },
   { label: 'Season Challenges', path: '/challenges', icon: AlertTriangle, group: 'more' },
   { label: 'Employees', path: '/employees', icon: Users, group: 'more' },
@@ -106,9 +106,22 @@ export const driverNavConfig: NavItem[] = [
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
+/** Staff/employee nav: all routes live under /staff/* */
+export const staffNavConfig: NavItem[] = [
+  { label: 'Dashboard', path: '/staff/staff-dashboard', icon: LayoutDashboard, group: 'main' },
+  { label: 'Operations', path: '/staff/operations', icon: Wrench, group: 'main' },
+  { label: 'Inventory', path: '/staff/inventory', icon: Package, group: 'main' },
+  { label: 'Harvest & Collections', path: '/staff/harvest-collections', icon: TrendingUp, group: 'more' },
+  { label: 'Expenses', path: '/staff/expenses', icon: Receipt, group: 'more' },
+  { label: 'Reports', path: '/staff/reports', icon: FileText, group: 'more' },
+  { label: 'Support', path: '/staff/support', icon: HelpCircle, group: 'more' },
+  { label: 'Feedback', path: '/staff/feedback', icon: MessageSquare, group: 'more' },
+  { label: 'Profile', path: '/staff/profile', icon: Users, group: 'more' },
+];
+
 export type NavConfig = NavItem[];
 
-/** Returns full nav items for Sidebar (all groups). */
+/** Returns full nav items for Sidebar. Filter by permission in consumer (e.g. can(module, 'view')). */
 export function getNavItemsForSidebar(user: { role?: string; employeeRole?: string } | null): NavConfig {
   if (!user) return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
 
@@ -117,6 +130,7 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
   if (user.role === 'developer') return developerNavConfig;
   if (user.role === 'company-admin' || user.role === ('company_admin' as any))
     return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
+  if (user.role === 'employee' || user.role === ('user' as any)) return staffNavConfig;
   if (
     user.role === 'manager' ||
     emp === 'manager' ||
@@ -134,10 +148,6 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
     (emp === 'logistics-driver' || emp === 'driver')
   )
     return driverNavConfig;
-
-  if (user.role === 'employee' || user.role === ('user' as any)) {
-    return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
-  }
 
   return companyNavConfig.filter((i) => i.path === '/dashboard');
 }

@@ -15,13 +15,13 @@ interface StaffSidebarProps {
 
 export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   const location = useLocation();
-  const { user, employeeProfile } = useAuth();
+  const { user } = useAuth();
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const isMobile = useIsMobile();
   const { fullName, roleLabel, avatarUrl } = useStaff();
 
-  const items: Array<{ label: string; path: string }> = [{ label: 'My Dashboard', path: '/staff' }];
+  const items: Array<{ label: string; path: string }> = [{ label: 'Dashboard', path: '/staff/staff-dashboard' }];
 
   const canHarvestCollections = canKey('harvest_collections.view') || can('harvest', 'view');
   const canInventory = effectivePermissionKeys.has('inventory.view') || can('inventory', 'view');

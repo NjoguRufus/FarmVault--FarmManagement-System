@@ -70,7 +70,7 @@ export const TOUR_CONFIG: ToursConfig = {
       },
       {
         id: "admin-harvest-page",
-        route: "/harvest-sales",
+        route: "/harvest",
         target: '[data-tour="harvest-summary"]',
         content: "Track harvest totals and sales performance from here.",
       },
@@ -124,7 +124,7 @@ export const TOUR_CONFIG: ToursConfig = {
       },
       {
         id: "admin-mobile-harvest-summary",
-        route: "/harvest-sales",
+        route: "/harvest",
         target: '[data-tour="harvest-summary"]',
         content: "Review harvest and sales summary on this page.",
       },

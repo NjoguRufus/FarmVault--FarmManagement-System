@@ -24,7 +24,7 @@ export function RequireManager({ children }: RequireManagerProps) {
     user?.employeeRole === 'manager' || user?.employeeRole === 'operations-manager';
 
   if (!isManagerPlatformRole && !isManagerEmployeeRole) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/staff/staff-dashboard" replace />;
   }
 
   return children;
