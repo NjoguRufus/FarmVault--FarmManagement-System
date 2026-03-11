@@ -14,8 +14,8 @@ const OPTIONS = [
   { label: 'Add expense', path: '/expenses?add=1', icon: Receipt },
   { label: 'Plan / Record daily work', path: '/operations?add=1', icon: Wrench },
   { label: 'Add inventory item', path: '/inventory?add=1', icon: Package },
-  { label: 'Record harvest', path: '/harvest-sales?harvest=1', icon: TrendingUp },
-  { label: 'Add sale', path: '/harvest-sales?sale=1', icon: TrendingUp },
+  { label: 'Record harvest', path: '/harvest?harvest=1', icon: TrendingUp },
+  { label: 'Add sale', path: '/harvest?sale=1', icon: TrendingUp },
   { label: 'Add project', path: '/projects/new', icon: FolderPlus },
 ] as const;
 

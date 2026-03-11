@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package, Info } from 'lucide-react';
+import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package, Info, Star, Trash2 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
@@ -17,10 +17,12 @@ import {
   updateWorkCard,
   approveWorkCard,
   rejectWorkCard,
+  deleteWorkCard,
   canAdminApproveOrReject,
 } from '@/services/operationsWorkCardService';
 import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
+import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getCompany } from '@/services/companyService';
 import {
@@ -31,6 +33,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectTrigger,
@@ -172,8 +180,13 @@ export default function OperationsPage() {
 
   // Work cards (operationsWorkCards): Admin creates; Admin views Planned vs Actual and approves/rejects
   const companyIdForCards = activeProject?.companyId ?? user?.companyId ?? null;
-  const { data: workCards = [] } = useWorkCardsForCompany(companyIdForCards);
+  const { workCards = [], refetch: refetchWorkCards } = useWorkCardsForCompany(companyIdForCards);
   const invalidateWorkCards = useInvalidateWorkCards();
+
+  if (import.meta.env.DEV && typeof workCards !== 'undefined') {
+    // Temporary debug: list query result length (remove after verifying create visibility)
+    console.log('[Operations] work cards list', { companyIdForCards, count: workCards?.length ?? 0, projectIds: workCards?.map((c) => c.projectId) });
+  }
   const workCardsForProject = useMemo(() => {
     if (!activeProject) return workCards;
     return workCards.filter((c) => c.projectId === activeProject.id);
@@ -199,7 +212,7 @@ export default function OperationsPage() {
     };
     const logEntries = workLogs.map((log) => ({ type: 'workLog' as const, log, sortTime: toTime(log.date) }));
     const cardEntries = approvedOrPaidWorkCards.map((card) => {
-      const t = toTime(card.actual?.actualDate ?? card.approvedAt ?? card.createdAt);
+      const t = toTime(card.actualDate ?? (card as { actual?: { actualDate?: unknown } }).actual?.actualDate ?? card.approvedAt ?? card.createdAt);
       return { type: 'workCard' as const, card, sortTime: t };
     });
     return [...logEntries, ...cardEntries].sort((a, b) => b.sortTime - a.sortTime);
@@ -207,8 +220,8 @@ export default function OperationsPage() {
 
   const totalLabourFromWorkCards = useMemo(() => {
     return workCardsForProject.reduce((sum, card) => {
-      const w = card.actual?.actualWorkers ?? 0;
-      const r = card.actual?.ratePerPerson ?? 0;
+      const w = card.actualWorkers ?? (card as { actual?: { actualWorkers?: number } }).actual?.actualWorkers ?? 0;
+      const r = card.actualRatePerPerson ?? (card as { actual?: { ratePerPerson?: number } }).actual?.ratePerPerson ?? 0;
       return sum + w * r;
     }, 0);
   }, [workCardsForProject]);
@@ -256,6 +269,24 @@ export default function OperationsPage() {
   const [rejectingCard, setRejectingCard] = useState(false);
   const [insufficientStockMissing, setInsufficientStockMissing] = useState<{ itemName: string; unit: string; need: string; have: string }[] | null>(null);
   const [workCardEditMode, setWorkCardEditMode] = useState(false);
+  const [starredWorkCardIds, setStarredWorkCardIds] = useState<Set<string>>(new Set());
+  /** Admin can manage cards they created; manager can only manage cards they created. */
+  const canManageWorkCard = (card: { createdByAdminId?: string; createdByManagerId?: string | null }) => {
+    if (!user?.id) return false;
+    const createdByAdmin = (card as { createdByAdminId?: string }).createdByAdminId;
+    const createdByManager = (card as { createdByManagerId?: string | null }).createdByManagerId;
+    return createdByAdmin === user.id || createdByManager === user.id;
+  };
+  const toggleStarWorkCard = (id: string) => {
+    const isCurrentlyStarred = starredWorkCardIds.has(id);
+    setStarredWorkCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    toast.success(isCurrentlyStarred ? 'Removed from starred' : 'Starred');
+  };
   // Create card form state
   const [cardWorkTitle, setCardWorkTitle] = useState('');
   const [cardWorkCategory, setCardWorkCategory] = useState('');
@@ -315,39 +346,78 @@ export default function OperationsPage() {
       toast.error('Select a farm to plan work for.');
       return;
     }
-    const stage = stageForCard;
-    if (!stage) {
-      toast.error('No stage available for this farm. Ensure the farm has stages set up on the Crop Stages page.');
+    const title = (cardWorkTitle || cardWorkCategory).trim();
+    if (!title) {
+      toast.error('Title is required', { description: 'Please enter a title for this work card.' });
       return;
     }
+    const stage = stageForCard;
     const resource = buildPlannedResourceString();
     const block = cardBlockId ? projectBlocksForCard.find((b) => b.id === cardBlockId) : null;
     setSavingCard(true);
     setAddCardOpen(false);
     try {
-      await createWorkCard({
+      if (import.meta.env.DEV) {
+        // Temporary debug: inspect createWorkCard payload shape.
+        // eslint-disable-next-line no-console
+        console.log('[Operations] createWorkCard payload', {
+          companyId: selectedProjectForCard.companyId,
+          projectId: selectedProjectForCard.id,
+          stageId: stage?.id ?? null,
+          stageName: stage?.stageName ?? null,
+          blockId: block?.id ?? null,
+          blockName: block?.blockName ?? null,
+          workTitle: title,
+          workCategory: cardWorkCategory,
+          planned: {
+            date: cardPlannedDate,
+            workers: Number(cardPlannedWorkers || '0'),
+            inputs: resource.inputs,
+            fuel: resource.fuel,
+            chemicals: resource.chemicals,
+            fertilizer: resource.fertilizer,
+          },
+          allocatedManagerId:
+            cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__'
+              ? cardAllocatedManagerId
+              : null,
+          createdByAdminId: user.id,
+          actorEmail: user.email,
+          actorUid: user.id,
+        });
+      }
+      const plannedWorkers = Number(cardPlannedWorkers || '0') || 0;
+      const plannedRatePerPerson = plannedWorkers > 0 && cardEstimatedCost
+        ? Number(cardEstimatedCost) / plannedWorkers
+        : 0;
+      const plannedDateIso = cardPlannedDate instanceof Date
+        ? cardPlannedDate.toISOString().split('T')[0]
+        : (cardPlannedDate as Date)?.toISOString?.()?.split('T')[0] ?? null;
+      const created = await createWorkCard({
         companyId: selectedProjectForCard.companyId,
         projectId: selectedProjectForCard.id,
-        stageId: stage.id,
-        stageName: stage.stageName,
+        stageId: stage?.id ?? null,
+        stageIndex: (stage as { stageIndex?: number; order?: number })?.stageIndex ?? (stage as { order?: number })?.order ?? null,
+        stageName: stage?.stageName ?? null,
         blockId: block?.id ?? null,
         blockName: block?.blockName ?? null,
-        workTitle: cardWorkTitle || cardWorkCategory,
+        workTitle: title,
         workCategory: cardWorkCategory,
-        planned: {
-          date: cardPlannedDate,
-          workers: Number(cardPlannedWorkers || '0'),
-          inputs: resource.inputs,
-          fuel: resource.fuel,
-          chemicals: resource.chemicals,
-          fertilizer: resource.fertilizer,
-        },
+        plannedDate: plannedDateIso,
+        plannedWorkers,
+        plannedRatePerPerson,
+        notes: [resource.inputs, resource.fuel, resource.chemicals, resource.fertilizer].filter(Boolean).join('; ') || null,
         allocatedManagerId: (cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__') ? cardAllocatedManagerId : null,
         createdByAdminId: user.id,
-        actorEmail: user.email,
-        actorUid: user.id,
+        createdByAdminName: user.name ?? user.email ?? null,
+        actorUserId: user.id,
+        actorUserName: user.name ?? user.email ?? null,
       });
+      if (import.meta.env.DEV) {
+        console.log('[Operations] createWorkCard result', { id: created.id, projectId: created.projectId, status: created.status });
+      }
       invalidateWorkCards();
+      await refetchWorkCards();
       setCardWorkTitle('');
       setCardWorkCategory('');
       setCardPlannedWorkers('');
@@ -449,56 +519,99 @@ export default function OperationsPage() {
     if (!selectedWorkCard) return;
     setCardWorkTitle(selectedWorkCard.workTitle ?? '');
     setCardWorkCategory(selectedWorkCard.workCategory ?? '');
-    setCardPlannedWorkers(String(selectedWorkCard.planned?.workers ?? ''));
+    const plannedWorkers = selectedWorkCard.plannedWorkers ?? (selectedWorkCard as { planned?: { workers?: number } }).planned?.workers;
+    setCardPlannedWorkers(plannedWorkers != null ? String(plannedWorkers) : '');
     setCardPlannedItemId('');
     setCardPlannedQuantity('');
     setCardPlannedQuantitySecondary('');
-    setCardEstimatedCost(selectedWorkCard.planned?.estimatedCost != null ? String(selectedWorkCard.planned.estimatedCost) : '');
-    setCardAllocatedManagerId(selectedWorkCard.allocatedManagerId ?? '');
-    setCardStageId(selectedWorkCard.stageId ?? '');
+    const estimatedCost = (selectedWorkCard as { planned?: { estimatedCost?: number } }).planned?.estimatedCost;
+    setCardEstimatedCost(estimatedCost != null ? String(estimatedCost) : '');
+    const allocId = selectedWorkCard.allocatedManagerId;
+    setCardAllocatedManagerId(allocId && allocId !== 'undefined' && allocId !== 'null' ? allocId : '');
+    setCardStageId(selectedWorkCard.stageId && selectedWorkCard.stageId !== 'undefined' ? selectedWorkCard.stageId : '');
     setCardStageName(selectedWorkCard.stageName ?? '');
     setWorkCardEditMode(true);
   };
 
+  /** Normalize optional UUID: never send "undefined", "null", or empty string to the API. */
+  const normalizeUuid = (v: string | null | undefined): string | null => {
+    if (v == null || typeof v !== 'string') return null;
+    const t = v.trim();
+    if (t === '' || t === 'undefined' || t === 'null' || t === '__unassigned__' || t === '__none__') return null;
+    return t;
+  };
+
   const handleUpdateWorkCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedWorkCard || !user?.email) return;
+    if (!selectedWorkCard || !user?.id) return;
     const resource = cardPlannedItemId ? buildPlannedResourceString() : {};
-    const planned = {
-      date: selectedWorkCard.planned?.date,
-      workers: Number(cardPlannedWorkers || '0'),
-      inputs: resource.inputs ?? selectedWorkCard.planned?.inputs,
-      fuel: resource.fuel ?? selectedWorkCard.planned?.fuel,
-      chemicals: resource.chemicals ?? selectedWorkCard.planned?.chemicals,
-      fertilizer: resource.fertilizer ?? selectedWorkCard.planned?.fertilizer,
+    const plannedWorkers = Number(cardPlannedWorkers || '0') || 0;
+    const plannedRatePerPerson = plannedWorkers > 0 && cardEstimatedCost ? Number(cardEstimatedCost) / plannedWorkers : 0;
+    const plannedDate = selectedWorkCard.planned?.date != null
+      ? (typeof selectedWorkCard.planned.date === 'string' ? selectedWorkCard.planned.date : (selectedWorkCard.planned.date as Date)?.toISOString?.()?.split('T')[0] ?? null)
+      : null;
+    const notes = [resource.inputs, resource.fuel, resource.chemicals, resource.fertilizer].filter(Boolean).join('; ') || null;
+    const allocatedManagerId = normalizeUuid(cardAllocatedManagerId);
+    const stageId = normalizeUuid(cardStageId);
+    const stageName = (cardStageName?.trim() && cardStageName !== 'undefined') ? cardStageName.trim() : null;
+    const payload = {
+      id: selectedWorkCard.id,
+      workTitle: (cardWorkTitle || cardWorkCategory || '').trim() || (selectedWorkCard.workTitle ?? ''),
+      workCategory: (cardWorkCategory || '').trim() || (selectedWorkCard.workCategory ?? ''),
+      plannedDate,
+      plannedWorkers,
+      plannedRatePerPerson,
+      notes,
+      stageId,
+      stageName,
+      allocatedManagerId,
+      actorUserId: user.id,
+      actorUserName: user.name ?? user.email ?? null,
     };
+    if (import.meta.env.DEV) {
+      console.log('updateWorkCard payload', payload);
+    }
     setSavingCardUpdate(true);
     try {
-      await updateWorkCard({
-        cardId: selectedWorkCard.id,
-        workTitle: cardWorkTitle || cardWorkCategory,
-        workCategory: cardWorkCategory,
-        stageId: cardStageId || undefined,
-        stageName: cardStageName || undefined,
-        planned,
-        allocatedManagerId: (cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__') ? cardAllocatedManagerId : null,
-        existingCard: selectedWorkCard,
-        actorEmail: user.email,
-        actorUid: user.id,
-      });
+      await updateWorkCard(payload);
       invalidateWorkCards();
+      await refetchWorkCards();
       setSelectedWorkCard({
         ...selectedWorkCard,
-        workTitle: cardWorkTitle || cardWorkCategory,
-        workCategory: cardWorkCategory,
-        stageId: cardStageId || selectedWorkCard.stageId,
-        stageName: cardStageName || selectedWorkCard.stageName,
-        planned: { ...selectedWorkCard.planned, ...planned } as typeof selectedWorkCard.planned,
-        allocatedManagerId: (cardAllocatedManagerId && cardAllocatedManagerId !== '__unassigned__') ? cardAllocatedManagerId : null,
+        workTitle: payload.workTitle,
+        workCategory: payload.workCategory,
+        stageId: stageId ?? selectedWorkCard.stageId,
+        stageName: stageName ?? selectedWorkCard.stageName,
+        plannedWorkers: payload.plannedWorkers,
+        plannedRatePerPerson: payload.plannedRatePerPerson,
+        plannedDate: payload.plannedDate,
+        notes: payload.notes,
+        allocatedManagerId,
       });
       setWorkCardEditMode(false);
     } finally {
       setSavingCardUpdate(false);
+    }
+  };
+
+  const handleDeleteWorkCard = async (card: OperationsWorkCard) => {
+    if (!user?.id || card.status !== 'planned') return;
+    if (!canManageWorkCard(card)) {
+      toast.error('You can only delete work cards you created.');
+      return;
+    }
+    try {
+      await deleteWorkCard({ id: card.id, actorUserId: user.id });
+      invalidateWorkCards();
+      await refetchWorkCards();
+      if (selectedWorkCard?.id === card.id) {
+        setWorkCardModalOpen(false);
+        setSelectedWorkCard(null);
+      }
+      toast.success('Work card deleted');
+    } catch (err) {
+      console.error('Delete work card failed:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to delete work card');
     }
   };
 
@@ -1514,7 +1627,7 @@ export default function OperationsPage() {
                         </span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        Stage: <span className="font-medium text-foreground">{card.stageName || card.stageId || '—'}</span>
+                        Stage: <span className="font-medium text-foreground">{card.stageName || card.stageId || 'Unassigned'}</span>
                       </p>
                       {isManagerCreated && (
                         <p className="text-[11px] text-sky-800 font-medium">
@@ -1524,7 +1637,7 @@ export default function OperationsPage() {
                       <p className="text-[11px] text-muted-foreground">
                         Workers planned:{' '}
                         <span className="font-medium text-foreground">
-                          {card.planned?.workers ?? 0}
+                          {card.plannedWorkers ?? (card as { planned?: { workers?: number } }).planned?.workers ?? 0}
                         </span>
                         {card.allocatedManagerId && (
                           <>
@@ -1536,6 +1649,35 @@ export default function OperationsPage() {
                         )}
                       </p>
                     </div>
+                    {canManageWorkCard(card) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="shrink-0 p-1.5 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Card options"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toggleStarWorkCard(card.id); }}>
+                            <Star className={cn('h-4 w-4 mr-2', starredWorkCardIds.has(card.id) && 'fill-amber-400 text-amber-500')} />
+                            {starredWorkCardIds.has(card.id) ? 'Unstar' : 'Star'}
+                          </DropdownMenuItem>
+                          {card.status === 'planned' && (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteWorkCard(card); }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
 
                   {/* Quick status summary strip */}
@@ -1895,14 +2037,42 @@ export default function OperationsPage() {
       {/* Admin Work Card Modal: Planned vs Actual (admin-created) or Manager submission only (manager-created) + Approve/Reject */}
       <Dialog open={workCardModalOpen} onOpenChange={(open) => { setWorkCardModalOpen(open); if (!open) setWorkCardEditMode(false); }}>
         <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
+          <DialogHeader className="flex flex-row items-start justify-between gap-2">
+            <DialogTitle className="pr-8">
               {(selectedWorkCard as { createdByManagerId?: string } | null)?.createdByManagerId
                 ? 'Manager work submission'
                 : workCardEditMode
                   ? 'Edit Work Card (Planned)'
                   : 'Work Card: Planned vs Actual'}
             </DialogTitle>
+            {selectedWorkCard && canManageWorkCard(selectedWorkCard) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="shrink-0 p-1.5 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground -mt-1 -mr-1"
+                    aria-label="Card options"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem onClick={() => toggleStarWorkCard(selectedWorkCard.id)}>
+                    <Star className={cn('h-4 w-4 mr-2', starredWorkCardIds.has(selectedWorkCard.id) && 'fill-amber-400 text-amber-500')} />
+                    {starredWorkCardIds.has(selectedWorkCard.id) ? 'Unstar' : 'Star'}
+                  </DropdownMenuItem>
+                  {selectedWorkCard.status === 'planned' && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => handleDeleteWorkCard(selectedWorkCard)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </DialogHeader>
           {selectedWorkCard && (
             <div className="space-y-4">

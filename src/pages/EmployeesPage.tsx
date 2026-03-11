@@ -41,6 +41,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { formatDate } from '@/lib/dateUtils';
@@ -50,7 +57,8 @@ import { getDefaultPermissions, resolvePermissions, expandFlatPermissions } from
 import { getPresetPermissions as getEmployeePresetPermissions } from '@/lib/employees/permissionPresets';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
-import { EMPLOYEE_ROLE_LABELS, EMPLOYEE_ROLES, type EmployeeRoleKey } from '@/config/accessControl';
+import { EMPLOYEE_ROLES, PERMISSION_GROUPS, type EmployeeRoleKey, type PermissionKey } from '@/config/accessControl';
+import { ROLE_PRESET_LABELS, ROLE_PRESET_KEYS, roleToPreset, presetToLegacyRole } from '@/lib/access';
 import { logActivity } from '@/services/employeeAccessService';
 import { UserAvatar } from '@/components/UserAvatar';
 
@@ -58,34 +66,34 @@ type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-br
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
 type PermissionEditorPreset = PermissionPresetKey | 'custom';
 
-const BASIC_PERMISSION_MODULES: Array<{
-  id: string;
-  label: string;
-  permissionKey: string;
-}> = [
-  { id: 'dashboard', label: 'Dashboard', permissionKey: 'dashboard.view' },
-  { id: 'projects', label: 'Projects', permissionKey: 'projects.view' },
-  { id: 'planning', label: 'Planning', permissionKey: 'planning.view' },
-  { id: 'inventory', label: 'Inventory', permissionKey: 'inventory.view' },
-  { id: 'expenses', label: 'Expenses', permissionKey: 'expenses.view' },
-  { id: 'operations', label: 'Operations', permissionKey: 'operations.view' },
-  { id: 'harvest', label: 'Harvest', permissionKey: 'harvest.view' },
-  { id: 'reports', label: 'Reports', permissionKey: 'reports.view' },
-  { id: 'employees', label: 'Employees', permissionKey: 'employees.view' },
-  { id: 'settings', label: 'Settings', permissionKey: 'settings.view' },
-];
+function labelForPermissionKey(key: PermissionKey): string {
+  const [, action] = key.split('.');
+  // Keep the UI consistent with existing copy in screenshots.
+  return (action || 'view').replace(/_/g, ' ');
+}
 
+function normalizeFlatPermissions(input: unknown): Record<string, boolean> {
+  if (!input || typeof input !== 'object') return {};
+  const raw = input as Record<string, unknown>;
+  const out: Record<string, boolean> = {};
+  Object.entries(raw).forEach(([k, v]) => {
+    if (typeof v === 'boolean') out[k] = v;
+  });
+  return out;
+}
+
+// Role options: new preset labels with legacy DB values for backward-safe save.
 const ROLE_OPTIONS: Array<{
-  value: ManagedEmployeeRole;
+  value: ManagedEmployeeRole | string;
   label: string;
   department: string;
 }> = [
-  ...EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((value) => ({
-    value: value as ManagedEmployeeRole,
-    label: EMPLOYEE_ROLE_LABELS[value],
-    department: value === 'admin' ? 'Admin' : value === 'farm_manager' ? 'Management' : value === 'finance_officer' ? 'Finance' : value === 'inventory_officer' ? 'Inventory' : 'General',
-  })),
-  { value: 'operations-manager', label: 'Operations (Manager)', department: 'Operations' },
+  { value: 'admin', label: ROLE_PRESET_LABELS.administrator, department: 'Admin' },
+  { value: 'operations-manager', label: ROLE_PRESET_LABELS.operations_manager, department: 'Operations' },
+  { value: 'inventory_officer', label: ROLE_PRESET_LABELS.inventory_staff, department: 'Inventory' },
+  { value: 'weighing_clerk', label: ROLE_PRESET_LABELS.harvest_staff, department: 'Harvest' },
+  { value: 'finance_officer', label: ROLE_PRESET_LABELS.finance_staff, department: 'Finance' },
+  { value: 'custom', label: ROLE_PRESET_LABELS.custom, department: 'General' },
   { value: 'logistics-driver', label: 'Logistics (Driver)', department: 'Logistics' },
   { value: 'sales-broker', label: 'Sales (Broker)', department: 'Sales' },
 ];
@@ -144,12 +152,12 @@ function getDepartmentFromRole(role: ManagedEmployeeRole | null): string {
 }
 
 export default function EmployeesPage() {
-  const { user, employeeProfile } = useAuth();
+  const { user, employeeProfile, refreshAuthState } = useAuth();
+  const navigate = useNavigate();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canCreateEmployees = can('employees', 'create');
   const canEditEmployees = can('employees', 'edit');
-  const navigate = useNavigate();
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       active: 'fv-badge--active',
@@ -230,6 +238,9 @@ export default function EmployeesPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editPermissions, setEditPermissions] = useState<PermissionMap>(DEFAULT_PERMISSIONS);
   const [editPreset, setEditPreset] = useState<PermissionEditorPreset>('custom');
+  // Supabase employees.permissions uses flat permission keys (module.action) from config/accessControl.
+  const [editPermissionPreset, setEditPermissionPreset] = useState<EmployeeRoleKey>('custom');
+  const [editPermissionsFlat, setEditPermissionsFlat] = useState<Record<string, boolean>>({});
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
@@ -248,11 +259,14 @@ export default function EmployeesPage() {
   }
 
   const openEdit = (employee: Employee) => {
-  const employeeRole = getEmployeeRole(employee);
+  const rawRole = employee.employeeRole ?? employee.role ?? null;
+  const preset = roleToPreset(rawRole);
+  const displayRole = presetToLegacyRole(preset);
+  const employeeRole = ROLE_OPTIONS.some((o) => o.value === rawRole) ? rawRole : displayRole;
   setEditingEmployee(employee);
   setEditName(getEmployeeName(employee));
-  setEditRole(employeeRole || 'none');
-  setEditDepartment(employee.department || getDepartmentFromRole(employeeRole));
+  setEditRole((employeeRole as EmployeeRoleSelection) || 'none');
+  setEditDepartment(employee.department || getDepartmentFromRole(employeeRole as ManagedEmployeeRole | null));
   setEditContact(getEmployeePhone(employee));
   setEditStatus((employee.status as typeof editStatus) || 'active');
   if (import.meta.env.DEV) {
@@ -266,6 +280,16 @@ export default function EmployeesPage() {
       permissions: employee.permissions ?? null,
     });
   }
+  if (isEmployeesSupabase) {
+    const presetRaw = (employee as any).permission_preset ?? 'custom';
+    const presetKey = (EMPLOYEE_ROLES.includes(presetRaw as EmployeeRoleKey) ? presetRaw : 'custom') as EmployeeRoleKey;
+    setEditPermissionPreset(presetKey);
+    const flat = normalizeFlatPermissions(employee.permissions);
+    setEditPermissionsFlat(Object.keys(flat).length > 0 ? flat : getEmployeePresetPermissions(presetKey));
+    setEditOpen(true);
+    return;
+  }
+
   let overrides = employee.permissions ?? getDefaultPermissions();
   const raw = employee.permissions as any;
   if (raw && typeof raw === 'object' && Object.keys(raw).some((k) => k.includes('.'))) {
@@ -285,9 +309,9 @@ export default function EmployeesPage() {
       employeeId: employee.id,
     });
   }
-  setEditPermissions(resolvePermissions(employeeRole, overrides));
-    setEditPreset('custom');
-    setEditOpen(true);
+  setEditPermissions(resolvePermissions(employeeRole as any, overrides));
+  setEditPreset('custom');
+  setEditOpen(true);
   };
 
   const resetAddForm = () => {
@@ -330,6 +354,19 @@ export default function EmployeesPage() {
     const normalized = value === 'none' ? null : normalizeEmployeeRole(value);
     setEditRole((normalized ?? 'none') as EmployeeRoleSelection);
     setEditDepartment(getDepartmentFromRole(normalized));
+    if (isEmployeesSupabase) {
+      if (!normalized) {
+        setEditPermissionPreset('custom');
+        setEditPermissionsFlat({});
+        return;
+      }
+      const asRoleKey = EMPLOYEE_ROLES.includes(normalized as EmployeeRoleKey)
+        ? (normalized as EmployeeRoleKey)
+        : 'viewer';
+      setEditPermissionPreset(asRoleKey);
+      setEditPermissionsFlat(getEmployeePresetPermissions(asRoleKey));
+      return;
+    }
     setEditPermissions(resolvePermissions(normalized, getDefaultPermissions()));
     setEditPreset('custom');
   };
@@ -375,7 +412,6 @@ export default function EmployeesPage() {
     try {
       if (isEmployeesSupabase) {
         const selectedRole = resolveRoleForSave(editRole, editingEmployee);
-        const resolvedPermissions = resolvePermissions(selectedRole, editPermissions);
         const resolvedDepartment = editDepartment || getDepartmentFromRole(normalizeEmployeeRole(selectedRole));
 
         if (import.meta.env.DEV) {
@@ -387,8 +423,8 @@ export default function EmployeesPage() {
             department: resolvedDepartment,
             phone: editContact || undefined,
             status: editStatus,
-            permission_preset: editPreset === 'custom' ? null : editPreset,
-            permissions: resolvedPermissions,
+            permission_preset: editPermissionPreset,
+            permissions: editPermissionsFlat,
           });
         }
 
@@ -398,8 +434,8 @@ export default function EmployeesPage() {
           department: resolvedDepartment,
           phone: editContact || undefined,
           status: editStatus,
-          permissions: resolvedPermissions,
-          permission_preset: editPreset === 'custom' ? null : editPreset,
+          permissions: editPermissionsFlat as any,
+          permission_preset: editPermissionPreset,
         });
         if (companyId) {
           await logActivity({
@@ -422,6 +458,12 @@ export default function EmployeesPage() {
         setEditOpen(false);
         setEditingEmployee(null);
         setEditSaving(false);
+        // If the edited employee is the current user, refresh auth so sidebar/perms/landing reflect immediately.
+        const editedIsCurrentUser = editingEmployee.authUserId === user?.id || editingEmployee.id === user?.id;
+        if (editedIsCurrentUser && refreshAuthState) {
+          const result = await refreshAuthState();
+          navigate(result?.landingPage ?? '/staff', { replace: true });
+        }
         return;
       }
 
@@ -930,37 +972,61 @@ export default function EmployeesPage() {
                           <SelectItem value="custom">Custom</SelectItem>
                           {EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((r) => (
                             <SelectItem key={r} value={r}>
-                              {EMPLOYEE_ROLE_LABELS[r]}
+                              {ROLE_PRESET_LABELS[roleToPreset(r)]}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {BASIC_PERMISSION_MODULES.map((mod) => {
-                        const checked = Boolean(permissionsFlat[mod.permissionKey]);
-                        return (
-                          <div
-                            key={mod.id}
-                            className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5"
-                          >
-                            <div>
-                              <p className="text-sm font-medium text-foreground">{mod.label}</p>
-                              <p className="text-xs text-muted-foreground">View</p>
-                            </div>
-                            <Switch
-                              checked={checked}
-                              onCheckedChange={(next) =>
-                                setPermissionsFlat((prev) => ({
-                                  ...prev,
-                                  [mod.permissionKey]: Boolean(next),
-                                }))
-                              }
-                              aria-label={`${mod.label} view permission`}
-                            />
-                          </div>
-                        );
-                      })}
+                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3">
+                      <Accordion type="multiple" className="w-full">
+                        {PERMISSION_GROUPS.map((group) => {
+                          const viewKey = `${group.module}.view`;
+                          const canView = Boolean(permissionsFlat[viewKey]);
+                          return (
+                            <AccordionItem key={group.module} value={group.module} className="border-border/50">
+                              <div className="flex items-center gap-3">
+                                <AccordionTrigger className="py-3 hover:no-underline">
+                                  <span className="text-sm font-medium text-foreground">{group.label}</span>
+                                </AccordionTrigger>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">View</span>
+                                  <Switch
+                                    checked={canView}
+                                    onCheckedChange={(checked) =>
+                                      setPermissionsFlat((prev) => ({ ...prev, [viewKey]: Boolean(checked) }))
+                                    }
+                                    aria-label={`${group.label} view permission`}
+                                  />
+                                </div>
+                              </div>
+                              <AccordionContent className="pt-1 pb-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {group.keys
+                                    .filter((k) => k !== (viewKey as PermissionKey))
+                                    .map((key) => {
+                                      const checked = Boolean(permissionsFlat[key]);
+                                      return (
+                                        <label
+                                          key={key}
+                                          className="flex items-center gap-2 rounded-md border border-border/50 bg-background/70 px-2.5 py-2 text-xs sm:text-sm"
+                                        >
+                                          <Checkbox
+                                            checked={checked}
+                                            onCheckedChange={(next) =>
+                                              setPermissionsFlat((prev) => ({ ...prev, [key]: Boolean(next) }))
+                                            }
+                                          />
+                                          <span className="text-foreground">{labelForPermissionKey(key)}</span>
+                                        </label>
+                                      );
+                                    })}
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          );
+                        })}
+                      </Accordion>
                     </div>
                   </>
                 )}
@@ -1309,13 +1375,92 @@ export default function EmployeesPage() {
                 />
               </div>
               <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
-                <PermissionEditor
-                  value={editPermissions}
-                  onChange={handleEditPermissionChange}
-                  preset={editPreset}
-                  onPresetChange={handleEditPresetChange}
-                  lockedRole={editRole === 'none' ? null : editRole}
-                />
+                {isEmployeesSupabase ? (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-foreground">Permission preset</label>
+                      <Select
+                        value={editPermissionPreset}
+                        onValueChange={(val) => {
+                          const next = val as EmployeeRoleKey;
+                          setEditPermissionPreset(next);
+                          if (next === 'custom') return;
+                          setEditPermissionsFlat(getEmployeePresetPermissions(next));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Custom" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="custom">Custom</SelectItem>
+                          {EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((r) => (
+                            <SelectItem key={r} value={r}>
+                              {ROLE_PRESET_LABELS[roleToPreset(r)]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3">
+                      <Accordion type="multiple" className="w-full">
+                        {PERMISSION_GROUPS.map((group) => {
+                          const viewKey = `${group.module}.view`;
+                          const canView = Boolean(editPermissionsFlat[viewKey]);
+                          return (
+                            <AccordionItem key={group.module} value={group.module} className="border-border/50">
+                              <div className="flex items-center gap-3">
+                                <AccordionTrigger className="py-3 hover:no-underline">
+                                  <span className="text-sm font-medium text-foreground">{group.label}</span>
+                                </AccordionTrigger>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">View</span>
+                                  <Switch
+                                    checked={canView}
+                                    onCheckedChange={(checked) =>
+                                      setEditPermissionsFlat((prev) => ({ ...prev, [viewKey]: Boolean(checked) }))
+                                    }
+                                    aria-label={`${group.label} view permission`}
+                                  />
+                                </div>
+                              </div>
+                              <AccordionContent className="pt-1 pb-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {group.keys
+                                    .filter((k) => k !== (viewKey as PermissionKey))
+                                    .map((key) => {
+                                      const checked = Boolean(editPermissionsFlat[key]);
+                                      return (
+                                        <label
+                                          key={key}
+                                          className="flex items-center gap-2 rounded-md border border-border/50 bg-background/70 px-2.5 py-2 text-xs sm:text-sm"
+                                        >
+                                          <Checkbox
+                                            checked={checked}
+                                            onCheckedChange={(next) =>
+                                              setEditPermissionsFlat((prev) => ({ ...prev, [key]: Boolean(next) }))
+                                            }
+                                          />
+                                          <span className="text-foreground">{labelForPermissionKey(key)}</span>
+                                        </label>
+                                      );
+                                    })}
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          );
+                        })}
+                      </Accordion>
+                    </div>
+                  </div>
+                ) : (
+                  <PermissionEditor
+                    value={editPermissions}
+                    onChange={handleEditPermissionChange}
+                    preset={editPreset}
+                    onPresetChange={handleEditPresetChange}
+                    lockedRole={editRole === 'none' ? null : editRole}
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Status</label>

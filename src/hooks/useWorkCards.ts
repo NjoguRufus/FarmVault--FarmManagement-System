@@ -1,94 +1,134 @@
-import { useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { where, type QueryConstraint } from '@/lib/firestore-stub';
-import type { OperationsWorkCard } from '@/types';
-import { useCollection } from '@/hooks/useCollection';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  getWorkCardsForCompany,
+  getWorkCardsForManager,
+  getWorkCardById,
+  type WorkCard,
+} from '@/services/operationsWorkCardService';
 
-const WORK_CARDS_PATH = 'operationsWorkCards';
-const WORK_CARDS_KEY = 'operationsWorkCards';
+const QUERY_KEY_BASE = 'ops.workCards';
 
-function useWorkCardsCollection(
-  key: string,
-  options: {
-    enabled: boolean;
-    companyId: string | null;
-    projectId?: string | null;
-    constraints?: QueryConstraint[];
-  }
+export function useWorkCardsForCompany(
+  companyId: string | null | undefined,
+  options?: { projectId?: string | null; enabled?: boolean }
 ) {
-  const result = useCollection<OperationsWorkCard>(key, WORK_CARDS_PATH, {
-    enabled: options.enabled,
-    companyScoped: true,
-    companyId: options.companyId,
-    projectId: options.projectId ?? undefined,
-    constraints: options.constraints ?? [],
+  const enabled = Boolean(companyId) && (options?.enabled ?? true);
+  const projectId = options?.projectId ?? null;
+
+  const queryKey = [QUERY_KEY_BASE, 'company', companyId ?? 'none', projectId ?? 'all'];
+
+  const query = useQuery<WorkCard[]>({
+    queryKey,
+    enabled,
+    queryFn: () =>
+      getWorkCardsForCompany({
+        companyId: companyId as string,
+        projectId,
+      }),
   });
 
   return {
-    data: result.data,
-    isLoading: result.isLoading,
-    error: result.error,
-    fromCache: result.fromCache,
-    hasPendingWrites: result.hasPendingWrites,
+    workCards: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
   };
 }
 
 export function useWorkCardsForManager(
-  managerIds: string[],
-  companyId?: string | null
+  companyId: string | null | undefined,
+  managerId: string | null | undefined,
+  options?: { projectId?: string | null; enabled?: boolean }
 ) {
-  const dedupedManagerIds = useMemo(
-    () => [...new Set(managerIds)].filter(Boolean).slice(0, 30),
-    [managerIds]
-  );
+  const enabled =
+    Boolean(companyId) && Boolean(managerId) && (options?.enabled ?? true);
+  const projectId = options?.projectId ?? null;
 
-  const constraints = useMemo<QueryConstraint[]>(() => {
-    if (dedupedManagerIds.length === 0) return [];
-    return [where('allocatedManagerId', 'in', dedupedManagerIds)];
-  }, [dedupedManagerIds]);
+  const queryKey = [
+    QUERY_KEY_BASE,
+    'manager',
+    companyId ?? 'none',
+    managerId ?? 'none',
+    projectId ?? 'all',
+  ];
 
-  const enabled = dedupedManagerIds.length > 0 && Boolean(companyId);
+  const query = useQuery<WorkCard[]>({
+    queryKey,
+    enabled,
+    queryFn: () =>
+      getWorkCardsForManager({
+        companyId: companyId as string,
+        managerId: managerId as string,
+        projectId,
+      }),
+  });
 
-  return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-manager-${companyId ?? 'none'}-${dedupedManagerIds.join(',')}`,
-    {
-      enabled,
-      companyId: companyId ?? null,
-      constraints,
-    }
-  );
+  return {
+    workCards: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }
 
-export function useWorkCardsForCompany(
-  companyId: string | null,
-  _options?: { refetchInterval?: number }
-) {
-  return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-company-${companyId ?? 'none'}`,
-    {
-      enabled: Boolean(companyId),
-      companyId,
-    }
-  );
+export function useWorkCard(id: string | null | undefined) {
+  const enabled = Boolean(id);
+  const queryKey = [QUERY_KEY_BASE, 'single', id ?? 'none'];
+
+  const query = useQuery<WorkCard | null>({
+    queryKey,
+    enabled,
+    queryFn: () => getWorkCardById(id as string),
+  });
+
+  return {
+    workCard: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }
 
+/**
+ * Convenience hook for fetching work cards for a single project in a company.
+ * Used by dashboards that only care about one active project context.
+ */
 export function useWorkCardsForProject(
-  projectId: string | null,
-  companyId?: string | null
+  projectId: string | null | undefined,
+  companyId: string | null | undefined
 ) {
-  const enabled = Boolean(projectId && companyId);
+  const enabled = Boolean(companyId) && Boolean(projectId);
+  const queryKey = [QUERY_KEY_BASE, 'project', companyId ?? 'none', projectId ?? 'none'];
 
-  return useWorkCardsCollection(
-    `${WORK_CARDS_KEY}-project-${projectId ?? 'none'}-${companyId ?? 'all'}`,
-    {
-      enabled,
-      companyId: companyId ?? null,
-      projectId: projectId ?? null,
-    }
-  );
+  const query = useQuery<WorkCard[]>({
+    queryKey,
+    enabled,
+    queryFn: () =>
+      getWorkCardsForCompany({
+        companyId: companyId as string,
+        projectId: projectId ?? null,
+      }),
+  });
+
+  return {
+    workCards: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
+  };
 }
 
+/**
+ * Helper hook to invalidate all work card queries after a mutation
+ * (create/update/approve/reject/pay). Use this so dashboards and lists stay in sync.
+ */
 export function useInvalidateWorkCards() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: [WORK_CARDS_KEY] });
+
+  return () => {
+    queryClient.invalidateQueries({ queryKey: [QUERY_KEY_BASE] });
+  };
 }
+
+
+

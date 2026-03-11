@@ -113,6 +113,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TourProvider } from "@/tour/TourProvider";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
+import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
 import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
@@ -122,96 +123,37 @@ import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 
 const queryClient = new QueryClient();
 
-// Route-level wrapper that ensures only company-admin users can access the
-// main company dashboard at /dashboard. Everyone else is redirected to
-// their role-specific dashboard or a relevant page.
+// Permission-driven landing: use effectiveAccess.landingPage so role/permission changes apply immediately.
 const CompanyDashboardRoute = () => {
-  const { user } = useAuth();
+  const { user, effectiveAccess } = useAuth();
 
   if (!user) {
     if (import.meta.env.DEV) {
-      // Temporary routing debug: unauthenticated user hitting dashboard route.
-      // Final redirect will go to /sign-in.
       // eslint-disable-next-line no-console
       console.log("[CompanyDashboardRoute] No user → /sign-in");
     }
     return <Navigate to="/sign-in" replace />;
   }
 
-  if (user.role === "company-admin" || user.role === "company_admin") {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] company admin → CompanyDashboard", {
-        uid: user.id,
-        role: user.role,
-        employeeRole: (user as any).employeeRole,
-      });
-    }
-    return <CompanyDashboard />;
-  }
-
-  // Developers should use the admin area, not the company dashboard.
-  if (user.role === "developer") {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] developer → /admin redirect", {
-        uid: user.id,
-      });
-    }
-    return <Navigate to="/admin" replace />;
-  }
-
-  // Managers go to manager dashboard
-  if (
-    user.role === "manager" ||
-    (user as any).employeeRole === "manager" ||
-    (user as any).employeeRole === "operations-manager"
-  ) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] manager → /manager redirect", {
-        uid: user.id,
-        role: user.role,
-        employeeRole: (user as any).employeeRole,
-      });
-    }
-    return <Navigate to="/manager" replace />;
-  }
-
-  // Brokers go to broker dashboard
-  if (user.role === "broker") {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] broker → /broker redirect", {
-        uid: user.id,
-      });
-    }
-    return <Navigate to="/broker" replace />;
-  }
-
-  // All staff (non-admin, non-developer) go to dedicated staff workspace.
-  if (user.role === "employee" || user.role === ("user" as any) || user.role === "manager" || user.role === "broker") {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] staff → /staff redirect", {
-        uid: user.id,
-        role: user.role,
-        employeeRole: (user as any).employeeRole,
-      });
-    }
-    return <Navigate to="/staff" replace />;
-  }
-
-  // Catch-all: send to projects list
+  const landing = effectiveAccess.landingPage;
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log("[CompanyDashboardRoute] fallback → /projects redirect", {
+    console.log("[CompanyDashboardRoute] landing", {
       uid: user.id,
-      role: user.role,
-      employeeRole: (user as any).employeeRole,
+      landingPage: landing,
+      canSeeDashboard: effectiveAccess.canSeeDashboard,
+      rolePreset: effectiveAccess.rolePreset,
     });
   }
-  return <Navigate to="/projects" replace />;
+
+  if (landing === "/admin") return <Navigate to="/admin" replace />;
+  if (landing === "/dashboard") return <CompanyDashboard />;
+  if (landing === "/manager" || landing === "/manager/operations") return <Navigate to="/manager" replace />;
+  if (landing === "/broker") return <Navigate to="/broker" replace />;
+  if (landing === "/driver") return <Navigate to="/driver" replace />;
+  if (landing === "/staff") return <Navigate to="/staff" replace />;
+
+  return <Navigate to={landing} replace />;
 };
 
 const App = () => (
@@ -300,8 +242,8 @@ const App = () => (
                   </RequireAuth>
                 }
               >
-                <Route path="/app" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/app/*" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/app" element={<CompanyDashboardRoute />} />
+                <Route path="/app/*" element={<CompanyDashboardRoute />} />
                 <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
                 <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><Navigate to="/projects?new=1" replace /></RequireNotBroker></PermissionRoute>} />
@@ -312,6 +254,8 @@ const App = () => (
                 <Route path="/expenses" element={<PermissionRoute module="expenses"><ExpensesPage /></PermissionRoute>} />
                 <Route path="/operations" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
                 <Route path="/inventory" element={<PermissionRoute module="inventory"><InventoryPage /></PermissionRoute>} />
+                {/* Crop-aware Harvest entrypoint (French Beans → Collections; others → Harvest & Sales) */}
+                <Route path="/harvest" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestEntryRoute /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/harvest-sales" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/harvest-sales/harvest/:harvestId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker></PermissionRoute>} />
                 {/* Single route with optional projectId so the page does not remount when URL gains/loses projectId */}
@@ -347,9 +291,11 @@ const App = () => (
                   </RequireAuth>
                 }
               >
-                <Route index element={<StaffDashboard />} />
+                <Route index element={<Navigate to="/staff/staff-dashboard" replace />} />
+                <Route path="staff-dashboard" element={<StaffDashboard />} />
                 <Route path="profile" element={<StaffProfilePage />} />
                 <Route path="support" element={<SupportPage />} />
+                <Route path="feedback" element={<FeedbackPage />} />
                 <Route
                   path="harvest-collections"
                   element={
@@ -382,43 +328,22 @@ const App = () => (
                     </PermissionRoute>
                   }
                 />
+                <Route
+                  path="reports"
+                  element={
+                    <PermissionRoute module="reports">
+                      <ReportsPage />
+                    </PermissionRoute>
+                  }
+                />
               </Route>
 
-              {/* Role-based dashboard routes */}
-              <Route
-                element={
-                  <RequireManager>
-                    <MainLayout />
-                  </RequireManager>
-                }
-              >
-                <Route path="/manager" element={<Navigate to="/manager/operations" replace />} />
-                <Route path="/manager/operations" element={<PermissionRoute module="operations"><ManagerOperationsPage /></PermissionRoute>} />
-              </Route>
-
-              <Route
-                path="/broker"
-                element={
-                  <RequireBroker>
-                    <MainLayout />
-                  </RequireBroker>
-                }
-              >
-                <Route index element={<PermissionRoute module="dashboard"><BrokerDashboard /></PermissionRoute>} />
-                <Route path="harvest-sales" element={<PermissionRoute module="harvest"><BrokerHarvestSalesPage /></PermissionRoute>} />
-                <Route path="harvest/:harvestId" element={<PermissionRoute module="harvest"><BrokerHarvestDetailsPage /></PermissionRoute>} />
-                <Route path="expenses" element={<PermissionRoute module="expenses"><BrokerExpensesPage /></PermissionRoute>} />
-              </Route>
-
-              <Route
-                element={
-                  <RequireDriver>
-                    <MainLayout />
-                  </RequireDriver>
-                }
-              >
-                <Route path="/driver" element={<PermissionRoute module="harvest"><DriverDashboard /></PermissionRoute>} />
-              </Route>
+              {/* Legacy role-based routes (manager/broker/driver) are no longer used; keep redirects for old bookmarks. */}
+              <Route path="/manager" element={<Navigate to="/staff/staff-dashboard" replace />} />
+              <Route path="/manager/*" element={<Navigate to="/staff/staff-dashboard" replace />} />
+              <Route path="/broker" element={<Navigate to="/staff/staff-dashboard" replace />} />
+              <Route path="/broker/*" element={<Navigate to="/staff/staff-dashboard" replace />} />
+              <Route path="/driver" element={<Navigate to="/staff/staff-dashboard" replace />} />
 
               {/* Developer-only routes under /admin and /dev */}
               <Route

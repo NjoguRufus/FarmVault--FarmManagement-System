@@ -148,8 +148,6 @@ export type EmployeeStatus =
   | 'on-leave';
 
 export interface User {
-  displayName: string;
-  displayName: string;
   id: string;
   email: string;
   name: string;

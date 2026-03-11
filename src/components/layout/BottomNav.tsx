@@ -29,6 +29,7 @@ function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undef
     '/operations': 'mobile-nav-operations',
     '/manager/operations': 'mobile-nav-operations',
     '/inventory': 'mobile-nav-inventory',
+    '/harvest': 'mobile-nav-harvest',
     '/broker': 'mobile-nav-broker-dashboard',
     '/broker/harvest-sales': 'mobile-nav-broker-harvest',
     '/broker/expenses': 'mobile-nav-broker-expenses',
@@ -85,15 +86,15 @@ export function BottomNav() {
     const allMain = [...mainItems];
 
     // On wide-but-not-lg screens, we want a specific priority:
-    // 1) Dashboard first, 2) all other main items, 3) Harvest & Sales last (just before More).
+    // 1) Dashboard first, 2) all other main items, 3) Harvest last (just before More).
     if (isWide) {
       const dashboard = allMain.find((i) => i.path === '/dashboard');
-      const harvestFromMain = allMain.find((i) => i.path === '/harvest-sales');
-      const harvestFromMore = moreItems.find((i) => i.path === '/harvest-sales');
+      const harvestFromMain = allMain.find((i) => i.path === '/harvest');
+      const harvestFromMore = moreItems.find((i) => i.path === '/harvest');
       const harvest = harvestFromMain ?? harvestFromMore;
 
       const rest = allMain.filter(
-        (i) => i.path !== '/dashboard' && i.path !== '/harvest-sales'
+        (i) => i.path !== '/dashboard' && i.path !== '/harvest'
       );
 
       const ordered: BottomNavItem[] = [];

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/react';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
 
@@ -27,36 +27,21 @@ export function useIsDeveloper(): UseIsDeveloperState {
       return;
     }
 
-    // If email is allowlisted, treat as developer immediately and ensure admin.developers row exists.
+    // If email is allowlisted, treat as developer immediately and ensure developer record via public RPC.
     if (isDevEmail(email)) {
       setState({ isDeveloper: true, loading: false });
-      void db
-        .admin()
-        .from('developers')
-        .upsert(
-          {
-            clerk_user_id: clerkUserId,
-            email,
-            role: 'super_admin',
-          },
-          { onConflict: 'clerk_user_id' },
-        );
+      void supabase.rpc('bootstrap_developer', { _email: email ?? null });
       return;
     }
 
     setState((prev) => ({ ...prev, loading: true }));
 
-    db
-      .admin()
-      .from('developers')
-      .select('clerk_user_id')
-      .eq('clerk_user_id', clerkUserId)
-      .maybeSingle()
-      .then(({ data, error }) => {
+    supabase
+      .rpc('is_developer')
+      .then(({ data: isDev, error }) => {
         if (cancelled) return;
 
         if (error) {
-          // Non-fatal: fall back to non-developer but notify user in dev mode.
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.warn('[useIsDeveloper] Failed to check developer status:', error);
@@ -71,7 +56,7 @@ export function useIsDeveloper(): UseIsDeveloperState {
         }
 
         setState({
-          isDeveloper: Boolean(data?.clerk_user_id),
+          isDeveloper: isDev === true,
           loading: false,
         });
       })

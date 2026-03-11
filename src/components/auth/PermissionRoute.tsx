@@ -2,6 +2,8 @@ import React from 'react';
 import type { PermissionModule } from '@/types';
 import { usePermissions } from '@/hooks/usePermissions';
 import AccessRestrictedPage from '@/pages/AccessRestrictedPage';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface PermissionRouteProps {
   module: PermissionModule;
@@ -11,6 +13,7 @@ interface PermissionRouteProps {
 
 export function PermissionRoute({ module, actionPath, children }: PermissionRouteProps) {
   const { can, isDeveloper, isCompanyAdmin } = usePermissions();
+  const { user, effectiveAccess } = useAuth();
 
   if (isDeveloper || isCompanyAdmin) {
     return children;
@@ -28,6 +31,10 @@ export function PermissionRoute({ module, actionPath, children }: PermissionRout
   }
 
   if (!allowed) {
+    // Staff isolation: staff users should never land on restricted admin pages; redirect them back into /staff.
+    if (user?.role === 'employee') {
+      return <Navigate to={effectiveAccess.landingPage || '/staff/staff-dashboard'} replace />;
+    }
     return <AccessRestrictedPage />;
   }
 

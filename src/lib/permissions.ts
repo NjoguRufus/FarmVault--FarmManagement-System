@@ -3,6 +3,7 @@ import type {
   PermissionModule,
   PermissionPresetKey,
 } from '@/types';
+import { getPresetDefaultPermissions, roleToPreset } from '@/lib/access';
 
 type PermissionMapInput = Partial<PermissionMap> | null | undefined;
 type LockedPermissionPath = {
@@ -513,10 +514,15 @@ export function getPresetPermissions(presetKey: PermissionPresetKey): Permission
 
 export function getRoleDefaultPermissions(role?: string | null): PermissionMap {
   if (!role) return getDefaultPermissions();
-  const key = role.toLowerCase();
-  const preset = ROLE_DEFAULTS[key];
-  const normalized = normalizePermissions(preset);
-  return applyRoleLockedPermissions(normalized, role);
+  const legacyKey = role.toLowerCase();
+  const preset = ROLE_DEFAULTS[legacyKey];
+  if (preset) {
+    const normalized = normalizePermissions(preset);
+    return applyRoleLockedPermissions(normalized, role);
+  }
+  const rolePreset = roleToPreset(role);
+  const presetPerms = getPresetDefaultPermissions(rolePreset);
+  return applyRoleLockedPermissions(presetPerms, role);
 }
 
 export function resolvePermissions(
@@ -599,12 +605,14 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/expenses', module: 'expenses' },
   { prefix: '/operations', module: 'operations' },
   { prefix: '/manager/operations', module: 'operations' },
+  { prefix: '/harvest', module: 'harvest' },
   { prefix: '/harvest-sales', module: 'harvest' },
   { prefix: '/harvest-collections', module: 'harvest' },
   { prefix: '/staff/harvest-collections', module: 'harvest' },
   { prefix: '/staff/inventory', module: 'inventory' },
   { prefix: '/staff/expenses', module: 'expenses' },
   { prefix: '/staff/operations', module: 'operations' },
+  { prefix: '/staff/reports', module: 'reports' },
   { prefix: '/broker/harvest-sales', module: 'harvest' },
   { prefix: '/broker/harvest', module: 'harvest' },
   { prefix: '/broker/expenses', module: 'expenses' },

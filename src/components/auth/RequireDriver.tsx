@@ -36,5 +36,5 @@ export function RequireDriver({ children }: RequireDriverProps) {
     }
   }
 
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/staff/staff-dashboard" replace />;
 }

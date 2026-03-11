@@ -16,7 +16,7 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
   }
 
   if (isEmergencySession) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/staff/staff-dashboard" replace />;
   }
 
   if (!isAuthenticated) {
@@ -37,7 +37,7 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
         companyId: user?.companyId ?? null,
       });
     }
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/staff/staff-dashboard" replace />;
   }
 
   return children;

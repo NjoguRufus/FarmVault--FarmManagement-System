@@ -64,6 +64,8 @@ export interface CropProgressCardProps {
   primaryMetricDetail?: string;
   secondaryMetricLabel?: string;
   secondaryMetricDetail?: string;
+  /** Hide the metric boxes (Day X of Y / Est. finish) for compact staff views. */
+  showMetrics?: boolean;
   className?: string;
 }
 
@@ -163,6 +165,7 @@ export function CropProgressCard({
   primaryMetricDetail,
   secondaryMetricLabel,
   secondaryMetricDetail,
+  showMetrics = true,
   className,
 }: CropProgressCardProps) {
   const safeProgress = useMemo(
@@ -245,23 +248,25 @@ export function CropProgressCard({
           onImageError={handleImageError}
         />
 
-        <div className="mt-4 grid grid-cols-2 gap-2 text-[10px] sm:text-xs">
-          <div className="rounded-lg border border-border/25 bg-background/30 p-2">
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <CalendarDays className="h-3 w-3" />
-              <span>{resolvedPrimaryMetricLabel}</span>
+        {showMetrics && (
+          <div className="mt-4 grid grid-cols-2 gap-2 text-[10px] sm:text-xs">
+            <div className="rounded-lg border border-border/25 bg-background/30 p-2">
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <CalendarDays className="h-3 w-3" />
+                <span>{resolvedPrimaryMetricLabel}</span>
+              </div>
+              <p className="mt-1 truncate text-foreground/90">{resolvedPrimaryMetricDetail}</p>
             </div>
-            <p className="mt-1 truncate text-foreground/90">{resolvedPrimaryMetricDetail}</p>
-          </div>
 
-          <div className="rounded-lg border border-border/25 bg-background/30 p-2">
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Flag className="h-3 w-3" />
-              <span>{resolvedSecondaryMetricLabel}</span>
+            <div className="rounded-lg border border-border/25 bg-background/30 p-2">
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Flag className="h-3 w-3" />
+                <span>{resolvedSecondaryMetricLabel}</span>
+              </div>
+              <p className="mt-1 truncate text-foreground/90">{resolvedSecondaryMetricDetail}</p>
             </div>
-            <p className="mt-1 truncate text-foreground/90">{resolvedSecondaryMetricDetail}</p>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

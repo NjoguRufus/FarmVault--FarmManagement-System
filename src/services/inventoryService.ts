@@ -1,175 +1,857 @@
-import {
-  collection,
-  addDoc,
-  doc,
-  getDoc,
-  updateDoc,
-  writeBatch,
-  serverTimestamp,
-  increment,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
-import { InventoryItem, InventoryPurchase, InventoryUsage, InventoryCategory } from '@/types';
+import { db, requireCompanyId } from '@/lib/db';
+import { collection, addDoc, getDoc, doc, serverTimestamp } from '@/lib/firestore-stub';
+import { db as firestoreDb } from '@/lib/firebase';
+import type {
+  InventoryItem,
+  InventoryCategory,
+  ChemicalPackagingType,
+  FuelType,
+  CropType,
+} from '@/types';
 
-type RestockInput = {
-  companyId: string;
-  inventoryItemId: string;
-  quantityAdded: number;
+const ITEMS_TABLE = 'items';
+const MOVEMENTS_TABLE = 'movements';
+const PURCHASES_TABLE = 'purchases';
+const AUDIT_LOGS_TABLE = 'audit_logs';
+
+type DbInventoryItemRow = {
+  id: string;
+  company_id: string;
+  name: string;
+  category: InventoryCategory;
   unit: string;
-  totalCost: number;
-  projectId?: string;
-  date: Date;
+  current_quantity: number;
+  price_per_unit: number | null;
+  packaging_type: ChemicalPackagingType | null;
+  units_per_box: number | null;
+  fuel_type: FuelType | null;
+  containers: number | null;
+  litres: number | null;
+  bags: number | null;
+  kgs: number | null;
+  box_size: 'big' | 'medium' | 'small' | null;
+  scope: 'project' | 'crop' | 'all' | null;
+  project_id: string | null;
+  crop_type: CropType | 'all' | null;
+  crop_types: CropType[] | null;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  pickup_date: string | null;
+  min_threshold: number | null;
+  last_updated: string;
+  created_at: string;
 };
 
-export async function restockInventoryAndCreateExpense(input: RestockInput) {
-  const { companyId, inventoryItemId, quantityAdded, unit, totalCost, projectId, date } = input;
+export type InventoryMovementDirection = 'in' | 'out';
 
-  const batch = writeBatch(db);
+export type InventoryMovementSource =
+  | 'restock'
+  | 'manual'
+  | 'correction'
+  | 'system';
 
-  const itemRef = doc(db, 'inventoryItems', inventoryItemId);
-  batch.update(itemRef, {
-    quantity: (quantityAdded || 0) ? undefined : undefined,
-    lastUpdated: serverTimestamp(),
-  });
+type DbInventoryMovementRow = {
+  id: string;
+  company_id: string;
+  inventory_item_id: string;
+  direction: InventoryMovementDirection;
+  quantity_delta: number;
+  reason: string | null;
+  source: InventoryMovementSource | null;
+  metadata: Record<string, unknown> | null;
+  created_by_user_id: string | null;
+  created_by_name: string | null;
+  created_at: string;
+};
 
-  const purchaseRef = doc(collection(db, 'inventoryPurchases'));
-  const purchase: Omit<InventoryPurchase, 'id'> = {
-    companyId,
-    inventoryItemId,
-    quantityAdded,
-    unit,
-    totalCost,
-    pricePerUnit: quantityAdded ? totalCost / quantityAdded : undefined,
-    projectId,
-    date,
-    expenseId: undefined,
-    createdAt: new Date(),
+export type InventoryAuditAction =
+  | 'ADD_ITEM'
+  | 'EDIT_ITEM'
+  | 'RESTOCK'
+  | 'DEDUCT'
+  | 'DELETE'
+  | 'TRANSFER'
+  | 'ADD_NEEDED'
+  | 'STATUS_CHANGE';
+
+type DbInventoryAuditLogRow = {
+  id: string;
+  company_id: string;
+  action: InventoryAuditAction;
+  inventory_item_id: string | null;
+  quantity: number | null;
+  metadata: Record<string, unknown> | null;
+  created_by_user_id: string | null;
+  created_by_name: string | null;
+  created_at: string;
+};
+
+export type InventoryMovement = {
+  id: string;
+  companyId: string;
+  inventoryItemId: string;
+  direction: InventoryMovementDirection;
+  quantityDelta: number;
+  reason?: string;
+  source?: InventoryMovementSource;
+  metadata?: Record<string, unknown>;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt: string;
+};
+
+export type InventoryAuditLog = {
+  id: string;
+  companyId: string;
+  action: InventoryAuditAction;
+  inventoryItemId?: string;
+  quantity?: number;
+  metadata?: Record<string, unknown>;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt: string;
+};
+
+type ActorInfo = {
+  actorUserId: string;
+  actorName?: string | null;
+};
+
+export type AddInventoryItemInput = {
+  companyId: string;
+  name: string;
+  category: InventoryCategory;
+  unit: string;
+  quantity?: number;
+  pricePerUnit?: number;
+  packagingType?: ChemicalPackagingType;
+  unitsPerBox?: number;
+  fuelType?: FuelType;
+  containers?: number;
+  litres?: number;
+  bags?: number;
+  kgs?: number;
+  boxSize?: 'big' | 'medium' | 'small';
+  scope?: 'project' | 'crop' | 'all';
+  projectId?: string | null;
+  cropType?: CropType | 'all';
+  cropTypes?: CropType[];
+  supplierId?: string;
+  supplierName?: string;
+  pickupDate?: string;
+  minThreshold?: number;
+};
+
+export type UpdateInventoryItemInput = {
+  id: string;
+  companyId: string;
+  name?: string;
+  category?: InventoryCategory;
+  unit?: string;
+  pricePerUnit?: number | null;
+  packagingType?: ChemicalPackagingType | null;
+  unitsPerBox?: number | null;
+  fuelType?: FuelType | null;
+  containers?: number | null;
+  litres?: number | null;
+  bags?: number | null;
+  kgs?: number | null;
+  boxSize?: 'big' | 'medium' | 'small' | null;
+  scope?: 'project' | 'crop' | 'all' | null;
+  projectId?: string | null;
+  cropType?: CropType | 'all' | null;
+  cropTypes?: CropType[] | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  pickupDate?: string | null;
+  minThreshold?: number | null;
+};
+
+export type RestockInventoryInput = {
+  companyId: string;
+  itemId: string;
+  quantity: number;
+  unit?: string;
+  totalCost: number;
+  projectId?: string | null;
+  supplierId?: string | null;
+  date: string;
+} & ActorInfo;
+
+export type DeductInventoryManualInput = {
+  companyId: string;
+  itemId: string;
+  quantity: number;
+  reason?: string;
+} & ActorInfo;
+
+export type RecordInventoryMovementInput = {
+  companyId: string;
+  itemId: string;
+  delta: number;
+  reason?: string;
+  source?: InventoryMovementSource;
+  metadata?: Record<string, unknown>;
+} & ActorInfo;
+
+function mapRowToInventoryItem(row: DbInventoryItemRow): InventoryItem {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    name: row.name,
+    category: row.category,
+    quantity: row.current_quantity,
+    unit: row.unit,
+    pricePerUnit: row.price_per_unit ?? undefined,
+    packagingType: row.packaging_type ?? undefined,
+    unitsPerBox: row.units_per_box ?? undefined,
+    fuelType: row.fuel_type ?? undefined,
+    containers: row.containers ?? undefined,
+    litres: row.litres ?? undefined,
+    bags: row.bags ?? undefined,
+    kgs: row.kgs ?? undefined,
+    boxSize: row.box_size ?? undefined,
+    scope: row.scope ?? undefined,
+    cropType: row.crop_type ?? undefined,
+    cropTypes: row.crop_types ?? undefined,
+    supplierId: row.supplier_id ?? undefined,
+    supplierName: row.supplier_name ?? undefined,
+    pickupDate: row.pickup_date ?? undefined,
+    minThreshold: row.min_threshold ?? undefined,
+    lastUpdated: new Date(row.last_updated),
+    createdAt: row.created_at ? new Date(row.created_at) : undefined,
   };
-
-  batch.set(purchaseRef, {
-    ...purchase,
-    date,
-    createdAt: serverTimestamp(),
-  });
-
-  await batch.commit();
 }
 
-type RecordUsageInput = {
+function mapRowToMovement(row: DbInventoryMovementRow): InventoryMovement {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    inventoryItemId: row.inventory_item_id,
+    direction: row.direction,
+    quantityDelta: row.quantity_delta,
+    reason: row.reason ?? undefined,
+    source: row.source ?? undefined,
+    metadata: row.metadata ?? undefined,
+    createdByUserId: row.created_by_user_id ?? undefined,
+    createdByName: row.created_by_name ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function mapRowToAuditLog(row: DbInventoryAuditLogRow): InventoryAuditLog {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    action: row.action,
+    inventoryItemId: row.inventory_item_id ?? undefined,
+    quantity: row.quantity ?? undefined,
+    metadata: row.metadata ?? undefined,
+    createdByUserId: row.created_by_user_id ?? undefined,
+    createdByName: row.created_by_name ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+async function logAuditEvent(params: {
+  companyId: string;
+  action: InventoryAuditAction;
+  inventoryItemId?: string;
+  quantity?: number;
+  metadata?: Record<string, unknown>;
+  actor: ActorInfo;
+  severity?: 'normal' | 'high' | 'critical';
+}): Promise<void> {
+  const companyId = requireCompanyId(params.companyId);
+
+  const { error } = await db
+    .inventory()
+    .from(AUDIT_LOGS_TABLE)
+    .insert({
+      company_id: companyId,
+      action: params.action,
+      inventory_item_id: params.inventoryItemId ?? null,
+      quantity: params.quantity ?? null,
+      metadata: params.metadata ?? null,
+      created_by_user_id: params.actor.actorUserId,
+      created_by_name: params.actor.actorName ?? null,
+    });
+
+  if (error && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.error('[inventory] Failed to log audit event', params.action, error);
+  }
+
+  const isHighRisk = params.action === 'EDIT_ITEM' || params.action === 'DELETE' || params.action === 'DEDUCT';
+  if (isHighRisk) {
+    const { createAdminAlert } = await import('@/services/adminAlertService');
+    const label = (params.metadata as { name?: string })?.name ?? params.inventoryItemId ?? 'Item';
+    createAdminAlert({
+      companyId,
+      severity: 'high',
+      module: 'inventory',
+      action: params.action,
+      actorUserId: params.actor.actorUserId,
+      actorName: params.actor.actorName ?? undefined,
+      targetId: params.inventoryItemId ?? undefined,
+      targetLabel: label,
+      metadata: params.metadata ?? undefined,
+      detailPath: params.inventoryItemId ? `/inventory?highlight=${params.inventoryItemId}` : '/inventory',
+    }).catch((err) => {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[inventory] Admin alert create failed', err);
+      }
+    });
+  }
+}
+
+async function applyStockChange(params: {
+  companyId: string;
+  itemId: string;
+  delta: number;
+  reason?: string;
+  source: InventoryMovementSource;
+  metadata?: Record<string, unknown>;
+  actor: ActorInfo;
+}): Promise<{ item: InventoryItem; movement: InventoryMovement | null }> {
+  const companyId = requireCompanyId(params.companyId);
+  if (!params.itemId) {
+    throw new Error('Missing inventory item id');
+  }
+  if (!Number.isFinite(params.delta) || params.delta === 0) {
+    throw new Error('Stock change delta must be non-zero');
+  }
+
+  const { data: existing, error: fetchError } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('id', params.itemId)
+    .maybeSingle<DbInventoryItemRow>();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+  if (!existing) {
+    throw new Error('Inventory item not found');
+  }
+
+  const newQuantity = (existing.current_quantity ?? 0) + params.delta;
+  if (newQuantity < 0) {
+    throw new Error('Insufficient stock for this adjustment');
+  }
+
+  const { data: updatedRow, error: updateError } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .update({
+      current_quantity: newQuantity,
+      last_updated: new Date().toISOString(),
+    })
+    .eq('company_id', companyId)
+    .eq('id', params.itemId)
+    .select('*')
+    .single<DbInventoryItemRow>();
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  let movement: InventoryMovement | null = null;
+
+  const { data: movementRow, error: movementError } = await db
+    .inventory()
+    .from(MOVEMENTS_TABLE)
+    .insert({
+      company_id: companyId,
+      inventory_item_id: params.itemId,
+      direction: params.delta > 0 ? 'in' : 'out',
+      quantity_delta: params.delta,
+      reason: params.reason ?? null,
+      source: params.source,
+      metadata: params.metadata ?? null,
+      created_by_user_id: params.actor.actorUserId,
+      created_by_name: params.actor.actorName ?? null,
+    })
+    .select('*')
+    .maybeSingle<DbInventoryMovementRow>();
+
+  if (!movementError && movementRow) {
+    movement = mapRowToMovement(movementRow);
+  } else if (movementError && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.error('[inventory] Failed to record inventory movement', movementError);
+  }
+
+  const item = mapRowToInventoryItem(updatedRow);
+  return { item, movement };
+}
+
+export async function addInventoryItem(
+  input: AddInventoryItemInput & ActorInfo,
+): Promise<InventoryItem> {
+  const companyId = requireCompanyId(input.companyId);
+
+  const payload = {
+    company_id: companyId,
+    name: input.name.trim(),
+    category: input.category,
+    unit: input.unit,
+    current_quantity: input.quantity ?? 0,
+    price_per_unit: input.pricePerUnit ?? null,
+    packaging_type: input.packagingType ?? null,
+    units_per_box: input.unitsPerBox ?? null,
+    fuel_type: input.fuelType ?? null,
+    containers: input.containers ?? null,
+    litres: input.litres ?? null,
+    bags: input.bags ?? null,
+    kgs: input.kgs ?? null,
+    box_size: input.boxSize ?? null,
+    scope: input.scope ?? null,
+    project_id: input.projectId ?? null,
+    crop_type: input.cropType ?? null,
+    crop_types: input.cropTypes ?? null,
+    supplier_id: input.supplierId ?? null,
+    supplier_name: input.supplierName ?? null,
+    pickup_date: input.pickupDate ?? null,
+    min_threshold: input.minThreshold ?? null,
+  };
+
+  const { data, error } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .insert(payload)
+    .select('*')
+    .single<DbInventoryItemRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  await logAuditEvent({
+    companyId,
+    action: 'ADD_ITEM',
+    inventoryItemId: data.id,
+    quantity: data.current_quantity ?? 0,
+    metadata: { name: data.name, category: data.category },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  return mapRowToInventoryItem(data);
+}
+
+export async function updateInventoryItem(
+  input: UpdateInventoryItemInput & ActorInfo,
+): Promise<InventoryItem> {
+  const companyId = requireCompanyId(input.companyId);
+
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.category !== undefined) patch.category = input.category;
+  if (input.unit !== undefined) patch.unit = input.unit;
+  if (input.pricePerUnit !== undefined) patch.price_per_unit = input.pricePerUnit;
+  if (input.packagingType !== undefined) patch.packaging_type = input.packagingType;
+  if (input.unitsPerBox !== undefined) patch.units_per_box = input.unitsPerBox;
+  if (input.fuelType !== undefined) patch.fuel_type = input.fuelType;
+  if (input.containers !== undefined) patch.containers = input.containers;
+  if (input.litres !== undefined) patch.litres = input.litres;
+  if (input.bags !== undefined) patch.bags = input.bags;
+  if (input.kgs !== undefined) patch.kgs = input.kgs;
+  if (input.boxSize !== undefined) patch.box_size = input.boxSize;
+  if (input.scope !== undefined) patch.scope = input.scope;
+  if (input.projectId !== undefined) patch.project_id = input.projectId;
+  if (input.cropType !== undefined) patch.crop_type = input.cropType;
+  if (input.cropTypes !== undefined) patch.crop_types = input.cropTypes;
+  if (input.supplierId !== undefined) patch.supplier_id = input.supplierId;
+  if (input.supplierName !== undefined) patch.supplier_name = input.supplierName;
+  if (input.pickupDate !== undefined) patch.pickup_date = input.pickupDate;
+  if (input.minThreshold !== undefined) patch.min_threshold = input.minThreshold;
+
+  if (Object.keys(patch).length === 0) {
+    const existing = await getInventoryItemById(input.companyId, input.id);
+    if (!existing) {
+      throw new Error('Inventory item not found');
+    }
+    return existing;
+  }
+
+  const { data, error } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .update({
+      ...patch,
+      last_updated: new Date().toISOString(),
+    })
+    .eq('company_id', companyId)
+    .eq('id', input.id)
+    .select('*')
+    .single<DbInventoryItemRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  await logAuditEvent({
+    companyId,
+    action: 'EDIT_ITEM',
+    inventoryItemId: data.id,
+    metadata: { patch },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  return mapRowToInventoryItem(data);
+}
+
+export async function deleteInventoryItem(
+  params: { companyId: string; itemId: string } & ActorInfo,
+): Promise<void> {
+  const companyId = requireCompanyId(params.companyId);
+
+  const { data: existing, error: getError } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('id', params.itemId)
+    .maybeSingle<DbInventoryItemRow>();
+
+  if (getError) {
+    throw getError;
+  }
+
+  const { error } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .delete()
+    .eq('company_id', companyId)
+    .eq('id', params.itemId);
+
+  if (error) {
+    throw error;
+  }
+
+  await logAuditEvent({
+    companyId,
+    action: 'DELETE',
+    inventoryItemId: params.itemId,
+    quantity: existing?.current_quantity ?? undefined,
+    metadata: existing ? { name: existing.name, category: existing.category } : undefined,
+    actor: { actorUserId: params.actorUserId, actorName: params.actorName },
+  });
+}
+
+export async function restockInventory(
+  input: RestockInventoryInput,
+): Promise<InventoryItem> {
+  const companyId = requireCompanyId(input.companyId);
+  if (input.quantity <= 0) {
+    throw new Error('Quantity must be greater than zero');
+  }
+  if (input.totalCost <= 0) {
+    throw new Error('Total cost must be greater than zero');
+  }
+
+  const dateIso = input.date;
+
+  const { item } = await applyStockChange({
+    companyId,
+    itemId: input.itemId,
+    delta: input.quantity,
+    reason: 'Restock',
+    source: 'restock',
+    metadata: {
+      totalCost: input.totalCost,
+      projectId: input.projectId ?? null,
+      supplierId: input.supplierId ?? null,
+      date: dateIso,
+    },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  const pricePerUnit =
+    input.quantity > 0 ? input.totalCost / input.quantity : null;
+
+  const { error: purchaseError } = await db
+    .inventory()
+    .from(PURCHASES_TABLE)
+    .insert({
+      company_id: companyId,
+      inventory_item_id: input.itemId,
+      quantity_added: input.quantity,
+      unit: input.unit ?? item.unit,
+      total_cost: input.totalCost,
+      price_per_unit: pricePerUnit,
+      project_id: input.projectId ?? null,
+      supplier_id: input.supplierId ?? null,
+      date: dateIso,
+    });
+
+  if (purchaseError && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.error('[inventory] Failed to record purchase', purchaseError);
+  }
+
+  await logAuditEvent({
+    companyId,
+    action: 'RESTOCK',
+    inventoryItemId: input.itemId,
+    quantity: input.quantity,
+    metadata: {
+      totalCost: input.totalCost,
+      pricePerUnit,
+      projectId: input.projectId ?? null,
+      supplierId: input.supplierId ?? null,
+      date: dateIso,
+    },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  return item;
+}
+
+export async function deductInventoryManual(
+  input: DeductInventoryManualInput,
+): Promise<InventoryItem> {
+  const companyId = requireCompanyId(input.companyId);
+  if (input.quantity <= 0) {
+    throw new Error('Quantity must be greater than zero');
+  }
+
+  const { item } = await applyStockChange({
+    companyId,
+    itemId: input.itemId,
+    delta: -Math.abs(input.quantity),
+    reason: input.reason ?? 'Manual deduction',
+    source: 'manual',
+    metadata: undefined,
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  await logAuditEvent({
+    companyId,
+    action: 'DEDUCT',
+    inventoryItemId: input.itemId,
+    quantity: input.quantity,
+    metadata: { reason: input.reason ?? 'Manual deduction' },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  return item;
+}
+
+export async function recordInventoryMovement(
+  input: RecordInventoryMovementInput,
+): Promise<{ item: InventoryItem; movement: InventoryMovement | null }> {
+  const companyId = requireCompanyId(input.companyId);
+
+  const { item, movement } = await applyStockChange({
+    companyId,
+    itemId: input.itemId,
+    delta: input.delta,
+    reason: input.reason,
+    source: input.source ?? (input.delta > 0 ? 'restock' : 'manual'),
+    metadata: input.metadata,
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  await logAuditEvent({
+    companyId,
+    action: input.delta > 0 ? 'RESTOCK' : 'DEDUCT',
+    inventoryItemId: input.itemId,
+    quantity: Math.abs(input.delta),
+    metadata: {
+      reason: input.reason,
+      source: input.source,
+      ...input.metadata,
+    },
+    actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+  });
+
+  return { item, movement };
+}
+
+export async function getInventoryItems(
+  companyId: string,
+): Promise<InventoryItem[]> {
+  const tenant = requireCompanyId(companyId);
+
+  const { data, error } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .select('*')
+    .eq('company_id', tenant)
+    .order('created_at', { ascending: false })
+    .returns<DbInventoryItemRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRowToInventoryItem);
+}
+
+export async function getInventoryItemById(
+  companyId: string,
+  itemId: string,
+): Promise<InventoryItem | null> {
+  const tenant = requireCompanyId(companyId);
+
+  const { data, error } = await db
+    .inventory()
+    .from(ITEMS_TABLE)
+    .select('*')
+    .eq('company_id', tenant)
+    .eq('id', itemId)
+    .maybeSingle<DbInventoryItemRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapRowToInventoryItem(data) : null;
+}
+
+export async function getInventoryMovementsForItem(params: {
+  companyId: string;
+  itemId: string;
+  limit?: number;
+}): Promise<InventoryMovement[]> {
+  const tenant = requireCompanyId(params.companyId);
+
+  const { data, error } = await db
+    .inventory()
+    .from(MOVEMENTS_TABLE)
+    .select('*')
+    .eq('company_id', tenant)
+    .eq('inventory_item_id', params.itemId)
+    .order('created_at', { ascending: false })
+    .limit(params.limit ?? 100)
+    .returns<DbInventoryMovementRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRowToMovement);
+}
+
+export async function getInventoryAuditLogs(params: {
+  companyId: string;
+  itemId?: string;
+  limit?: number;
+}): Promise<InventoryAuditLog[]> {
+  const tenant = requireCompanyId(params.companyId);
+
+  let query = db
+    .inventory()
+    .from(AUDIT_LOGS_TABLE)
+    .select('*')
+    .eq('company_id', tenant)
+    .order('created_at', { ascending: false });
+
+  if (params.itemId) {
+    query = query.eq('inventory_item_id', params.itemId);
+  }
+
+  if (params.limit && params.limit > 0) {
+    query = query.limit(params.limit);
+  }
+
+  const { data, error } = await query.returns<DbInventoryAuditLogRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRowToAuditLog);
+}
+
+// --- Legacy Firestore helpers used by Operations (Phase 1) ---
+
+export type RecordInventoryUsageInput = {
   companyId: string;
   projectId: string;
   inventoryItemId: string;
   category: InventoryCategory;
   quantity: number;
   unit: string;
-  source: 'workLog' | 'manual-adjustment';
+  source: 'workLog' | 'manual-adjustment' | 'workCard' | 'harvest';
   workLogId?: string;
+  workCardId?: string;
+  harvestId?: string;
   stageIndex?: number;
   stageName?: string;
   date: Date;
 };
 
-export async function recordInventoryUsage(input: RecordUsageInput) {
-  const usage: Omit<InventoryUsage, 'id'> = {
+export async function recordInventoryUsage(input: RecordInventoryUsageInput) {
+  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
     ...input,
-    createdAt: new Date(),
-  };
-
-  await addDoc(collection(db, 'inventoryUsage'), {
-    ...usage,
-    date: input.date,
     createdAt: serverTimestamp(),
   });
 }
 
-export type DeductForWorkCardInput = {
+export type CheckStockForWorkCardInput = {
   companyId: string;
-  projectId: string;
   inventoryItemId: string;
   quantity: number;
-  stageName?: string;
-  workCardId: string;
-  date: Date;
-  /** Manager who submitted the work (for usage record). */
-  managerName?: string;
 };
-
-function isSingleUnitLabel(unit: string | undefined): boolean {
-  if (!unit) return false;
-  const u = unit.toLowerCase();
-  return u === 'units' || u === 'pieces' || u === 'unit' || u === 'piece';
-}
-
-/** True when work card quantity is in single units (we deduct in units or convert from units to boxes). */
-function itemUsesUnitConversion(item: InventoryItem & { packagingType?: string; unitsPerBox?: number }): boolean {
-  const upb = item.unitsPerBox ?? 0;
-  if (upb > 0) return true;
-  if (isSingleUnitLabel(item.unit)) return true;
-  // "Boxes" used as count (e.g. Belt): 2 = 2 items, stock stored as count
-  if (item.unit && item.unit.toLowerCase() === 'boxes') return true;
-  return false;
-}
-
-/**
- * Deduct inventory for a work card (after admin approves).
- * - When item has unitsPerBox: work card quantity = single UNITS (items); we convert to stock and deduct.
- *   E.g. 1 box = 12 units, quantity 24 → deduct 2 from stock (boxes). Stock is stored in base unit (boxes).
- * - When item has no unitsPerBox: work card quantity and stock use the same unit (item.unit); deduct as-is.
- */
-export async function deductInventoryForWorkCard(input: DeductForWorkCardInput): Promise<void> {
-  const { companyId, projectId, inventoryItemId, quantity, stageName, workCardId, date, managerName } = input;
-  if (!inventoryItemId || quantity <= 0) return;
-
-  const itemSnap = await getDoc(doc(db, 'inventoryItems', inventoryItemId));
-  if (!itemSnap.exists()) throw new Error('Inventory item not found');
-  const item = { id: itemSnap.id, ...itemSnap.data() } as InventoryItem;
-  if (item.companyId !== companyId) throw new Error('Item does not belong to company');
-
-  const it = item as InventoryItem & { packagingType?: string; unitsPerBox?: number };
-  const useUnitConversion = itemUsesUnitConversion(it);
-  const unitsPerBox = useUnitConversion ? Math.max(1, Number(it.unitsPerBox)) : 1;
-
-  // When useUnitConversion: quantity = single units used; stock is in base (e.g. boxes). Deduct quantity/unitsPerBox.
-  const quantityToDeductFromStock = useUnitConversion ? quantity / unitsPerBox : quantity;
-  const currentQty = Number(item.quantity) || 0;
-  if (currentQty < quantityToDeductFromStock) {
-    const needDisplay = useUnitConversion ? `${quantity} units` : `${quantity} ${item.unit}`;
-    const haveDisplay = useUnitConversion
-      ? `${Math.floor(currentQty * unitsPerBox)} units`
-      : `${currentQty} ${item.unit}`;
-    throw new Error(`Insufficient stock: ${item.name} has ${haveDisplay}, need ${needDisplay}`);
-  }
-
-  const itemRef = doc(db, 'inventoryItems', inventoryItemId);
-  await updateDoc(itemRef, {
-    quantity: increment(-quantityToDeductFromStock),
-    lastUpdated: serverTimestamp(),
-  });
-
-  const quantityForUsage = quantity;
-  const unitForUsage = useUnitConversion ? 'units' : item.unit;
-  await addDoc(collection(db, 'inventoryUsage'), {
-    companyId,
-    projectId,
-    inventoryItemId,
-    category: item.category,
-    quantity: quantityForUsage,
-    unit: unitForUsage,
-    source: 'workCard',
-    workCardId,
-    managerName: managerName ?? undefined,
-    stageName: stageName ?? undefined,
-    date,
-    createdAt: serverTimestamp(),
-  });
-}
 
 export type CheckStockForWorkCardResult = {
   sufficient: boolean;
   missing?: { itemName: string; unit: string; need: string; have: string }[];
 };
 
-export type DeductForHarvestInput = {
+export async function checkStockForWorkCard(
+  input: CheckStockForWorkCardInput,
+): Promise<CheckStockForWorkCardResult> {
+  const { companyId, inventoryItemId, quantity } = input;
+  if (!inventoryItemId || quantity <= 0) return { sufficient: true };
+
+  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  if (!snap.exists()) {
+    return {
+      sufficient: false,
+      missing: [{ itemName: 'Unknown item', unit: '', need: String(quantity), have: '0' }],
+    };
+  }
+
+  const data = snap.data() as InventoryItem;
+  if (data.companyId !== companyId) {
+    return {
+      sufficient: false,
+      missing: [
+        {
+          itemName: data.name,
+          unit: data.unit ?? '',
+          need: String(quantity),
+          have: '0',
+        },
+      ],
+    };
+  }
+
+  const currentQty = Number(data.quantity) || 0;
+  if (currentQty >= quantity) {
+    return { sufficient: true };
+  }
+
+  return {
+    sufficient: false,
+    missing: [
+      {
+        itemName: data.name,
+        unit: data.unit ?? '',
+        need: String(quantity),
+        have: String(currentQty),
+      },
+    ],
+  };
+}
+
+export type DeductInventoryForHarvestInput = {
   companyId: string;
   projectId: string;
   inventoryItemId: string;
@@ -178,14 +860,19 @@ export type DeductForHarvestInput = {
   date: Date;
 };
 
-/** Deduct wooden crates from inventory when recording a tomato harvest in crates. */
-export async function deductInventoryForHarvest(input: DeductForHarvestInput): Promise<void> {
-  const { companyId, projectId, inventoryItemId, quantity, harvestId, date } = input;
+/**
+ * Legacy Firestore helper: deduct wooden crates from inventory when recording a harvest.
+ * Phase 1 harvest flows still call this directly.
+ */
+export async function deductInventoryForHarvest(
+  input: DeductInventoryForHarvestInput,
+): Promise<void> {
+  const { companyId, inventoryItemId, quantity } = input;
   if (!inventoryItemId || quantity <= 0) return;
 
-  const itemSnap = await getDoc(doc(db, 'inventoryItems', inventoryItemId));
-  if (!itemSnap.exists()) throw new Error('Inventory item not found');
-  const item = { id: itemSnap.id, ...itemSnap.data() } as InventoryItem;
+  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  if (!snap.exists()) throw new Error('Inventory item not found');
+  const item = snap.data() as InventoryItem;
   if (item.companyId !== companyId) throw new Error('Item does not belong to company');
 
   const currentQty = Number(item.quantity) || 0;
@@ -193,51 +880,19 @@ export async function deductInventoryForHarvest(input: DeductForHarvestInput): P
     throw new Error(`Insufficient wooden crates: ${item.name} has ${currentQty}, need ${quantity}`);
   }
 
-  const itemRef = doc(db, 'inventoryItems', inventoryItemId);
-  await updateDoc(itemRef, {
-    quantity: increment(-quantity),
-    lastUpdated: serverTimestamp(),
-  });
-
-  await addDoc(collection(db, 'inventoryUsage'), {
+  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
     companyId,
-    projectId,
+    projectId: input.projectId,
     inventoryItemId,
     category: item.category,
     quantity,
     unit: item.unit ?? 'units',
     source: 'harvest',
-    harvestId,
-    date,
+    harvestId: input.harvestId,
+    date: input.date,
     createdAt: serverTimestamp(),
   });
 }
 
-/** Check if there is enough stock for a work card (same logic as deduct). Use before approve. */
-export async function checkStockForWorkCard(input: DeductForWorkCardInput): Promise<CheckStockForWorkCardResult> {
-  const { companyId, inventoryItemId, quantity } = input;
-  if (!inventoryItemId || quantity <= 0) return { sufficient: true };
 
-  const itemSnap = await getDoc(doc(db, 'inventoryItems', inventoryItemId));
-  if (!itemSnap.exists()) return { sufficient: false, missing: [{ itemName: 'Unknown item', unit: '', need: String(quantity), have: '0' }] };
-  const item = { id: itemSnap.id, ...itemSnap.data() } as InventoryItem;
-  if (item.companyId !== companyId) return { sufficient: false, missing: [{ itemName: item.name, unit: item.unit ?? '', need: String(quantity), have: '0' }] };
-
-  const it = item as InventoryItem & { packagingType?: string; unitsPerBox?: number };
-  const useUnitConversion = itemUsesUnitConversion(it);
-  const unitsPerBox = useUnitConversion ? Math.max(1, Number(it.unitsPerBox)) : 1;
-  const quantityToDeductFromStock = useUnitConversion ? quantity / unitsPerBox : quantity;
-  const currentQty = Number(item.quantity) || 0;
-
-  if (currentQty >= quantityToDeductFromStock) return { sufficient: true };
-
-  const needDisplay = useUnitConversion ? `${quantity} units` : `${quantity} ${item.unit ?? ''}`;
-  const haveDisplay = useUnitConversion
-    ? `${Math.floor(currentQty * unitsPerBox)} units`
-    : `${currentQty} ${item.unit ?? ''}`;
-  return {
-    sufficient: false,
-    missing: [{ itemName: item.name, unit: useUnitConversion ? 'units' : (item.unit ?? ''), need: needDisplay, have: haveDisplay }],
-  };
-}
 
