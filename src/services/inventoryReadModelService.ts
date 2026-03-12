@@ -484,3 +484,350 @@ export async function recordInventoryUsage(input: RecordUsageInput): Promise<voi
   }
 }
 
+// --- Deduct Stock (Manual Deduction) ------------------------------------------
+
+export interface DeductStockInput {
+  companyId: string;
+  itemId: string;
+  quantity: number;
+  reason?: string;
+  actorUserId?: string;
+  actorName?: string;
+}
+
+export async function deductInventoryStock(input: DeductStockInput): Promise<void> {
+  const tenant = await resolveCompanyIdForWrite(input.companyId);
+
+  if (input.quantity <= 0) {
+    throw new Error('Quantity must be greater than zero');
+  }
+
+  const rpcPayload = {
+    company_id: tenant,
+    inventory_item_id: input.itemId,
+    quantity: input.quantity,
+    project_id: null,
+    crop_stage: null,
+    used_on: new Date().toISOString().split('T')[0],
+    purpose: 'manual_deduction',
+    notes: input.reason ?? 'Manual stock deduction',
+  };
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[inventory] deduct_inventory_stock (via usage) payload', rpcPayload);
+  }
+
+  const { error } = await db.public().rpc('record_inventory_usage', rpcPayload);
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] deduct_inventory_stock error', {
+        message: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+      });
+    }
+    throw error;
+  }
+}
+
+// --- Archive (Soft Delete) ----------------------------------------------------
+
+export interface ArchiveInventoryItemInput {
+  companyId: string;
+  itemId: string;
+  actorUserId?: string;
+  actorName?: string;
+}
+
+export async function archiveInventoryItem(input: ArchiveInventoryItemInput): Promise<void> {
+  const tenant = await resolveCompanyIdForWrite(input.companyId);
+
+  // Note: archived_by stores actor name (TEXT) since Clerk user IDs are not UUIDs.
+  // The full audit trail with user ID is captured in inventory_audit_logs.
+  const payload = {
+    is_archived: true,
+    archived_at: new Date().toISOString(),
+    archived_by: input.actorName ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[inventory] archiveInventoryItem payload', { itemId: input.itemId, ...payload });
+  }
+
+  const { error } = await db
+    .public()
+    .from('inventory_item_master')
+    .update(payload)
+    .eq('company_id', tenant)
+    .eq('id', input.itemId);
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] archiveInventoryItem error', {
+        message: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+      });
+    }
+    throw error;
+  }
+}
+
+// --- Restore Archived Item ----------------------------------------------------
+
+export interface RestoreInventoryItemInput {
+  companyId: string;
+  itemId: string;
+  actorUserId?: string;
+  actorName?: string;
+}
+
+export async function restoreInventoryItem(input: RestoreInventoryItemInput): Promise<void> {
+  const tenant = await resolveCompanyIdForWrite(input.companyId);
+
+  const payload = {
+    is_archived: false,
+    archived_at: null,
+    archived_by: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[inventory] restoreInventoryItem payload', { itemId: input.itemId, ...payload });
+  }
+
+  const { error } = await db
+    .public()
+    .from('inventory_item_master')
+    .update(payload)
+    .eq('company_id', tenant)
+    .eq('id', input.itemId);
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] restoreInventoryItem error', {
+        message: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+        hint: (error as any).hint,
+      });
+    }
+    throw error;
+  }
+}
+
+// --- Get Archived Items -------------------------------------------------------
+
+export async function listArchivedInventoryItems(companyId: string): Promise<InventoryItemMasterRow[]> {
+  const tenant = requireCompanyId(companyId);
+
+  const { data, error } = await db
+    .public()
+    .from('inventory_item_master')
+    .select('*')
+    .eq('company_id', tenant)
+    .eq('is_archived', true)
+    .order('archived_at', { ascending: false })
+    .returns<InventoryItemMasterRow[]>();
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] listArchivedInventoryItems error', error);
+    }
+    throw error;
+  }
+
+  return data ?? [];
+}
+
+// --- Inventory Audit Logs -----------------------------------------------------
+// 
+// IMPORTANT: The inventory_audit_logs table must be created via migration.
+// See: docs/migrations/001_inventory_audit_logs.sql
+//
+// Action types supported:
+// - ITEM_CREATED: New inventory item created
+// - ITEM_EDITED: Item details updated
+// - STOCK_IN: Stock added (purchase, opening balance, adjustment)
+// - STOCK_DEDUCTED: Manual stock deduction
+// - USAGE_RECORDED: Usage recorded against a project
+// - ITEM_ARCHIVED: Item soft-deleted (archived)
+// - ITEM_RESTORED: Archived item restored
+// - ITEM_DELETED: Item permanently deleted
+
+export type InventoryAuditActionType =
+  | 'ITEM_CREATED'
+  | 'ITEM_EDITED'
+  | 'STOCK_IN'
+  | 'STOCK_DEDUCTED'
+  | 'USAGE_RECORDED'
+  | 'ITEM_ARCHIVED'
+  | 'ITEM_RESTORED'
+  | 'ITEM_DELETED';
+
+export interface InventoryAuditLogRow {
+  id: string;
+  company_id: string;
+  inventory_item_id?: string | null;
+  action_type: string;
+  item_name?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  actor_user_id?: string | null;
+  actor_name?: string | null;
+  actor_role?: string | null;
+  notes?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export async function listInventoryAuditLogs(params: {
+  companyId: string;
+  itemId?: string;
+  limit?: number;
+}): Promise<InventoryAuditLogRow[]> {
+  const tenant = requireCompanyId(params.companyId);
+
+  try {
+    let query = db
+      .public()
+      .from('inventory_audit_logs')
+      .select('*')
+      .eq('company_id', tenant)
+      .order('created_at', { ascending: false });
+
+    if (params.itemId) {
+      query = query.eq('inventory_item_id', params.itemId);
+    }
+
+    if (params.limit && params.limit > 0) {
+      query = query.limit(params.limit);
+    }
+
+    const { data, error } = await query.returns<InventoryAuditLogRow[]>();
+
+    if (error) {
+      // Check if table doesn't exist (42P01 = undefined_table)
+      const code = (error as any).code as string | undefined;
+      if (code === '42P01' || error.message?.includes('does not exist')) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[inventory] inventory_audit_logs table does not exist. Run the migration: docs/migrations/001_inventory_audit_logs.sql');
+        }
+        return [];
+      }
+      throw error;
+    }
+
+    return data ?? [];
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] listInventoryAuditLogs error', err);
+    }
+    // Return empty array on error to prevent UI crash
+    return [];
+  }
+}
+
+// --- Log Audit Event ----------------------------------------------------------
+
+export interface LogAuditEventInput {
+  companyId: string;
+  action: InventoryAuditActionType | string;
+  inventoryItemId?: string;
+  itemName?: string;
+  quantity?: number;
+  unit?: string;
+  actorUserId?: string;
+  actorName?: string;
+  actorRole?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function logInventoryAuditEvent(input: LogAuditEventInput): Promise<void> {
+  const tenant = await resolveCompanyIdForWrite(input.companyId);
+
+  // Map legacy action names to new action types
+  const actionTypeMap: Record<string, InventoryAuditActionType> = {
+    'ADD_ITEM': 'ITEM_CREATED',
+    'CREATED': 'ITEM_CREATED',
+    'EDIT_ITEM': 'ITEM_EDITED',
+    'STOCK_IN': 'STOCK_IN',
+    'RESTOCK': 'STOCK_IN',
+    'DEDUCT': 'STOCK_DEDUCTED',
+    'USAGE': 'USAGE_RECORDED',
+    'ARCHIVE': 'ITEM_ARCHIVED',
+    'DELETE': 'ITEM_DELETED',
+    'RESTORE': 'ITEM_RESTORED',
+  };
+
+  const actionType = actionTypeMap[input.action] ?? input.action;
+
+  const payload = {
+    company_id: tenant,
+    inventory_item_id: input.inventoryItemId ?? null,
+    action_type: actionType,
+    item_name: input.itemName ?? null,
+    quantity: input.quantity ?? null,
+    unit: input.unit ?? null,
+    actor_user_id: input.actorUserId ?? null,
+    actor_name: input.actorName ?? null,
+    actor_role: input.actorRole ?? null,
+    notes: input.notes ?? null,
+    metadata: input.metadata ?? null,
+  };
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[inventory] logInventoryAuditEvent payload', payload);
+  }
+
+  try {
+    const { error } = await db
+      .public()
+      .from('inventory_audit_logs')
+      .insert(payload);
+
+    if (error) {
+      // Check if table doesn't exist
+      const code = (error as any).code as string | undefined;
+      if (code === '42P01' || error.message?.includes('does not exist')) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[inventory] inventory_audit_logs table does not exist. Audit event not logged. Run migration: docs/migrations/001_inventory_audit_logs.sql');
+        }
+        return;
+      }
+      
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('[inventory] logInventoryAuditEvent error', {
+          message: error.message,
+          code: (error as any).code,
+          details: (error as any).details,
+          hint: (error as any).hint,
+        });
+      }
+    }
+  } catch (err) {
+    // Silently fail audit logging to not break main operations
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] logInventoryAuditEvent exception', err);
+    }
+  }
+}
+

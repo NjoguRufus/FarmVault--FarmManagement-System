@@ -3,10 +3,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
-import { recordInventoryUsage } from '@/services/inventoryReadModelService';
+import { recordInventoryUsage, logInventoryAuditEvent } from '@/services/inventoryReadModelService';
 import { toast } from 'sonner';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import type { Project } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 interface RecordUsageModalProps {
   open: boolean;
@@ -25,6 +27,8 @@ export function RecordUsageModal({
   projects,
   onRecorded,
 }: RecordUsageModalProps) {
+  const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const [quantity, setQuantity] = useState('');
   const [projectId, setProjectId] = useState('');
   const [cropStage, setCropStage] = useState('');
@@ -67,6 +71,29 @@ export function RecordUsageModal({
         purpose: purpose || undefined,
         notes: notes || undefined,
       });
+
+      await logInventoryAuditEvent({
+        companyId,
+        action: 'USAGE_RECORDED',
+        inventoryItemId: item.id,
+        itemName: item.name,
+        quantity: qty,
+        unit: item.unit || 'units',
+        actorUserId: user?.id,
+        actorName: user?.name ?? user?.email,
+        notes: notes || purpose || undefined,
+        metadata: { 
+          purpose: purpose || undefined,
+          cropStage: cropStage || undefined,
+        },
+      });
+
+      addNotification({
+        title: 'Usage Recorded',
+        message: `${user?.name ?? 'User'} used ${qty} ${item.unit || 'units'} of ${item.name}`,
+        type: 'warning',
+      });
+
       toast.success('Usage recorded.');
       onOpenChange(false);
       onRecorded?.();

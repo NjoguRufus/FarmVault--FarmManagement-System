@@ -28,10 +28,13 @@ import {
   createInventoryCategory,
   createInventoryItem,
   recordInventoryStockIn,
+  logInventoryAuditEvent,
 } from '@/services/inventoryReadModelService';
 import { createSupplier } from '@/services/suppliersService';
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/react';
+import { useAuth as useAppAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 type PackagingType = 'single' | 'sack' | 'box' | 'bottle' | 'pack' | 'other';
 type UnitType = 'kg' | 'g' | 'litres' | 'ml' | 'pieces' | 'metres';
@@ -150,6 +153,8 @@ export function AddInventoryItemModal({
 }: AddInventoryItemModalProps) {
   const { sessionClaims } = useAuth();
   const sessionCompanyId = (sessionClaims?.company_id as string | undefined)?.trim();
+  const { user } = useAppAuth();
+  const { addNotification } = useNotifications();
   
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
@@ -539,6 +544,29 @@ export function AddInventoryItemModal({
         notes: showAdvanced ? notes || undefined : undefined,
       } as const;
       await recordInventoryStockIn(rpcPayload);
+
+      await logInventoryAuditEvent({
+        companyId: activeCompanyId,
+        action: 'ITEM_CREATED',
+        inventoryItemId: created.id,
+        itemName: name,
+        quantity: qty,
+        unit: normalizedUnit,
+        actorUserId: user?.id ?? createdBy,
+        actorName: user?.name ?? user?.email,
+        notes: showAdvanced ? notes || undefined : undefined,
+        metadata: { 
+          category: resolvedCategoryUuid,
+          packagingType,
+          unit: normalizedUnit,
+        },
+      });
+
+      addNotification({
+        title: 'Item Created',
+        message: `${user?.name ?? 'User'} created new inventory item: ${name}`,
+        type: 'success',
+      });
 
       toast.success('Inventory item created.');
       resetForm();

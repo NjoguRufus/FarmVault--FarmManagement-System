@@ -5,8 +5,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 import type { Supplier } from '@/types';
-import { recordInventoryStockIn } from '@/services/inventoryReadModelService';
+import { recordInventoryStockIn, logInventoryAuditEvent } from '@/services/inventoryReadModelService';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 interface RecordStockInModalProps {
   open: boolean;
@@ -25,6 +27,8 @@ export function RecordStockInModal({
   suppliers,
   onRecorded,
 }: RecordStockInModalProps) {
+  const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
   const [transactionType, setTransactionType] = useState('Purchase');
@@ -70,6 +74,30 @@ export function RecordStockInModal({
         date: date || new Date().toISOString(),
         notes: notes || undefined,
       });
+
+      await logInventoryAuditEvent({
+        companyId,
+        action: 'STOCK_IN',
+        inventoryItemId: item.id,
+        itemName: item.name,
+        quantity: qty,
+        unit: item.unit || 'units',
+        actorUserId: user?.id,
+        actorName: user?.name ?? user?.email,
+        notes: notes || undefined,
+        metadata: { 
+          transactionType, 
+          unitCost: cost,
+          totalCost: qty * cost,
+        },
+      });
+
+      addNotification({
+        title: 'Stock Added',
+        message: `${user?.name ?? 'User'} added ${qty} ${item.unit || 'units'} to ${item.name}`,
+        type: 'success',
+      });
+
       toast.success('Stock in recorded.');
       onOpenChange(false);
       onRecorded?.();
