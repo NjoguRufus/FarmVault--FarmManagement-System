@@ -30,6 +30,8 @@ import { resolveCompanyIdForWrite } from '@/lib/tenant';
 
 export type InventoryStockStatus = 'ok' | 'low' | 'out' | string;
 
+export type PackagingType = 'single' | 'sack' | 'box' | 'bottle' | 'pack' | 'other';
+
 export interface InventoryStockRow {
   id: string;
   company_id: string;
@@ -45,6 +47,9 @@ export interface InventoryStockRow {
   average_cost?: number | null;
   total_value?: number | null;
   stock_status?: InventoryStockStatus | null;
+  unit_size?: number | null;
+  unit_size_label?: string | null;
+  packaging_type?: PackagingType | null;
 }
 
 export interface InventoryTransactionRow {
@@ -103,6 +108,7 @@ export interface InventoryItemMasterRow {
   average_cost?: number | null;
   unit_size?: number | null;
   unit_size_label?: string | null;
+  packaging_type?: PackagingType | null;
   default_project_id?: string | null;
   default_crop_stage_id?: string | null;
 }
@@ -120,6 +126,7 @@ export interface CreateInventoryItemInput {
   description?: string;
   unitSize?: number;
   unitSizeLabel?: string;
+  packagingType?: PackagingType;
   defaultProjectId?: string;
   defaultCropStageId?: string;
 }
@@ -166,7 +173,7 @@ export async function listInventoryStock(params: {
     .eq('company_id', tenant);
 
   if (params.categoryId) {
-    query = query.eq('category_id', params.categoryId);
+    query = query.eq('category', params.categoryId);
   }
   if (params.supplierId) {
     query = query.eq('supplier_id', params.supplierId);
@@ -368,6 +375,7 @@ export async function createInventoryItem(input: CreateInventoryItemInput): Prom
     description: input.description?.trim() || null,
     unit_size: input.unitSize ?? null,
     unit_size_label: input.unitSizeLabel?.trim() || null,
+    packaging_type: input.packagingType ?? null,
     default_project_id: input.defaultProjectId ?? null,
     default_crop_stage_id: input.defaultCropStageId ?? null,
   };
