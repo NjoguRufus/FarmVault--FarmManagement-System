@@ -58,6 +58,7 @@ export interface InventoryPermissions {
   deduct?: boolean;
   categories?: boolean;
   purchases?: boolean;
+  viewAudit?: boolean;
 }
 
 export interface ExpensesPermissions {

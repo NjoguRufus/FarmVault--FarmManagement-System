@@ -29,6 +29,7 @@ export default function InventoryPage() {
   const { can } = usePermissions();
   const companyId = user?.companyId ?? null;
   const canAddInventoryItem = can('inventory', 'addItem');
+  const canViewAudit = can('inventory', 'viewAudit');
   // Farmers start with "Add Item". Other actions are contextual (row/details).
   const canRestockInventory = can('inventory', 'restock');
   const canDeductInventory = can('inventory', 'deduct');
@@ -164,11 +165,11 @@ export default function InventoryPage() {
   const totalInventoryValue = useMemo(
     () =>
       stockItems.reduce((sum, i) => {
-        const unitCost = parseNumeric(i.average_cost as any);
-        if (!Number.isFinite(unitCost)) {
+        const itemTotalValue = parseNumeric(i.total_value as any);
+        if (!Number.isFinite(itemTotalValue)) {
           return sum;
         }
-        return sum + unitCost;
+        return sum + itemTotalValue;
       }, 0),
     [stockItems],
   );
@@ -227,14 +228,16 @@ export default function InventoryPage() {
             <Plus className="h-4 w-4" />
             Add Item
           </button>
-          <button
-            type="button"
-            className="fv-btn fv-btn--outline"
-            onClick={() => setAuditOpen(true)}
-          >
-            <FileText className="h-4 w-4" />
-            Inventory Audit
-          </button>
+          {canViewAudit && (
+            <button
+              type="button"
+              className="fv-btn fv-btn--outline"
+              onClick={() => setAuditOpen(true)}
+            >
+              <FileText className="h-4 w-4" />
+              Inventory Audit
+            </button>
+          )}
         </div>
       </div>
 

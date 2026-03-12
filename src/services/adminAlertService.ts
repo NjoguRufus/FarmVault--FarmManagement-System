@@ -36,7 +36,7 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
   }
 
   try {
-    await db.public().from('admin_alerts').insert({
+    const insertPayload = {
       id: record.id,
       company_id: payload.companyId,
       severity: payload.severity,
@@ -49,12 +49,24 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
       metadata: payload.metadata ?? null,
       detail_path: payload.detailPath ?? null,
       read: false,
-    });
-  } catch (e) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[AdminAlert] persist failed (table may not exist)', e);
+    };
+
+    console.log('[AdminAlert] Inserting to admin_alerts table', insertPayload);
+
+    const { error } = await db.public().from('admin_alerts').insert(insertPayload);
+
+    if (error) {
+      console.error('[AdminAlert] Insert failed', {
+        error: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+      });
+      appendToLocalFallback(record);
+    } else {
+      console.log('[AdminAlert] Successfully inserted to admin_alerts', record.id);
     }
+  } catch (e) {
+    console.error('[AdminAlert] Exception during insert', e);
     appendToLocalFallback(record);
   }
 

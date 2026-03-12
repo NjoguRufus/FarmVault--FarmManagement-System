@@ -38,17 +38,47 @@ export function useInventoryStock(params: {
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: key,
-    queryFn: () =>
-      listInventoryStock({
+    queryFn: async () => {
+      const result = await listInventoryStock({
         companyId: params.companyId!,
         search: params.search,
         categoryId: params.categoryId,
         supplierId: params.supplierId,
         stockStatus: (params.stockStatus as any) ?? 'all',
-      }),
+      });
+      
+      // DEBUG: Log raw stock data from view
+      if (import.meta.env.DEV && result.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log('[useInventoryStock] Raw data from inventory_stock_view:', {
+          itemCount: result.length,
+          firstItem: result[0],
+          stockFields: result.slice(0, 3).map(item => ({
+            id: item.id,
+            name: item.name,
+            current_stock: item.current_stock,
+            stock_status: item.stock_status,
+            min_stock_level: item.min_stock_level,
+            unit: item.unit,
+          })),
+        });
+      }
+      
+      return result;
+    },
     enabled: Boolean(params.companyId),
     staleTime: 30_000,
   });
+
+  // DEBUG: Log when items change
+  if (import.meta.env.DEV && data && data.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log('[useInventoryStock] Returning items:', {
+      count: data.length,
+      hasZeroStock: data.filter(i => i.current_stock === 0).length,
+      hasOutStatus: data.filter(i => i.stock_status === 'out').length,
+    });
+  }
 
   return {
     items: (data ?? []) as InventoryStockRow[],

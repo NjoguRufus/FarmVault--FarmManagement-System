@@ -67,6 +67,7 @@ const DEFAULT_MINIMAL_PERMISSIONS: PermissionMap = {
     deduct: false,
     categories: false,
     purchases: false,
+    viewAudit: false,
   },
   expenses: {
     view: false,
@@ -245,6 +246,7 @@ const FULL_ACCESS_PERMISSIONS: PermissionMap = {
     deduct: true,
     categories: true,
     purchases: true,
+    viewAudit: true,
   },
   expenses: {
     view: true,

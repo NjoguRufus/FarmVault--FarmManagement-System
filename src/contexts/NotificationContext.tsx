@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { playNotificationSound, preloadAllSounds } from '@/services/notificationSoundService';
+import type { NotificationSoundFile } from '@/services/notificationSoundService';
 
 export interface AppNotification {
   id: string;
@@ -11,9 +13,16 @@ export interface AppNotification {
   type?: 'info' | 'success' | 'warning' | 'error';
 }
 
+interface AddNotificationOptions {
+  title: string;
+  message?: string;
+  type?: AppNotification['type'];
+  skipSound?: boolean; // Skip sound playback (used when sound is handled elsewhere, e.g., real-time alerts)
+}
+
 interface NotificationContextValue {
   notifications: AppNotification[];
-  addNotification: (n: { title: string; message?: string; type?: AppNotification['type'] }) => void;
+  addNotification: (n: AddNotificationOptions) => void;
   markAsRead: (id: string) => void;
   markAllRead: () => void;
   unreadCount: number;
@@ -45,13 +54,46 @@ function normalizeStoredNotification(value: unknown): AppNotification | null {
   };
 }
 
+const NOTIFICATION_PREFS_KEY_PREFIX = 'farmvault:notification-prefs:v1:';
+
+function getNotificationPrefs(userId: string | undefined): { 
+  enabled: boolean; 
+  soundEnabled: boolean; 
+  soundFile: NotificationSoundFile;
+} {
+  if (typeof window === 'undefined' || !userId) {
+    return { enabled: false, soundEnabled: false, soundFile: 'notification1.aac' };
+  }
+  try {
+    const raw = window.localStorage.getItem(`${NOTIFICATION_PREFS_KEY_PREFIX}${userId}`);
+    if (!raw) return { enabled: false, soundEnabled: false, soundFile: 'notification1.aac' };
+    const parsed = JSON.parse(raw);
+    return {
+      enabled: Boolean(parsed.notificationsEnabled),
+      soundEnabled: parsed.soundEnabled !== false,
+      soundFile: parsed.soundFile || 'notification1.aac',
+    };
+  } catch {
+    return { enabled: false, soundEnabled: false, soundFile: 'notification1.aac' };
+  }
+}
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const soundsPreloaded = useRef(false);
   const storageKey = useMemo(
     () => `${STORAGE_KEY_PREFIX}${user?.id ?? 'anonymous'}`,
     [user?.id],
   );
+
+  // Preload notification sounds on mount
+  useEffect(() => {
+    if (!soundsPreloaded.current) {
+      preloadAllSounds();
+      soundsPreloaded.current = true;
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -91,10 +133,22 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [notifications, storageKey, user?.id]);
 
   const addNotification = useCallback(
-    (n: { title: string; message?: string; type?: AppNotification['type'] }) => {
+    (n: AddNotificationOptions) => {
       if (!user?.id) return;
       const createdAt = Date.now();
       const id = `n-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[NotificationContext] addNotification called', {
+          title: n.title,
+          message: n.message,
+          type: n.type,
+          skipSound: n.skipSound,
+          userId: user.id,
+        });
+      }
+
       setNotifications((prev) => {
         const next: AppNotification = {
           id,
@@ -107,6 +161,39 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         return [next, ...prev].slice(0, MAX_NOTIFICATIONS);
       });
       toast(n.title, { description: n.message, duration: 4000 });
+
+      // Play notification sound if enabled (unless skipSound is true)
+      if (n.skipSound) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[NotificationContext] Skipping sound (handled elsewhere)');
+        }
+        return;
+      }
+
+      const prefs = getNotificationPrefs(user.id);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[NotificationContext] Sound prefs', {
+          enabled: prefs.enabled,
+          soundEnabled: prefs.soundEnabled,
+          soundFile: prefs.soundFile,
+        });
+      }
+
+      if (prefs.enabled && prefs.soundEnabled) {
+        playNotificationSound(prefs.soundFile).then((played) => {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[NotificationContext] Sound played:', played);
+          }
+        }).catch((err) => {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[NotificationContext] Sound playback failed', err);
+          }
+        });
+      }
     },
     [user?.id]
   );

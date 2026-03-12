@@ -201,7 +201,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                 </span>
               )}
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80 max-h-[70vh] overflow-hidden flex flex-col">
+            <DropdownMenuContent align="end" className="w-80 overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-2 py-1.5">
                 <DropdownMenuLabel className="p-0">Notifications</DropdownMenuLabel>
                 {notifications.length > 0 && (
@@ -216,7 +216,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                 )}
               </div>
               <DropdownMenuSeparator />
-              <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="overflow-y-auto max-h-[280px]">
                 {notifications.length === 0 ? (
                   <p className="px-2 py-4 text-sm text-muted-foreground text-center">No notifications yet.</p>
                 ) : (
