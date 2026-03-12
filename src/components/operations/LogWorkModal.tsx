@@ -1,0 +1,489 @@
+import React, { useState, useMemo } from 'react';
+import { Calendar as CalendarIcon, Plus, Trash2, Package, MapPin, Briefcase } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { format } from 'date-fns';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
+import { useQuery } from '@tanstack/react-query';
+import { listInventoryStock } from '@/services/inventoryReadModelService';
+import { createWorkCard, recordWork, recordInventoryUsageForWorkCard } from '@/services/operationsWorkCardService';
+import { recordInventoryUsage } from '@/services/inventoryService';
+import { createAdminAlert } from '@/services/adminAlertService';
+import type { InputUsed } from '@/types';
+
+interface LogWorkModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+}
+
+const WORK_TYPES = [
+  'Spraying',
+  'Fertilizer Application',
+  'Watering',
+  'Weeding',
+  'Tying',
+  'Harvesting',
+  'Planting',
+  'Land Preparation',
+  'Pruning',
+  'Pest Control',
+  'General Maintenance',
+  'Other',
+];
+
+interface InputItem {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
+  currentStock: number;
+}
+
+export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProps) {
+  const { user } = useAuth();
+  const { projects, activeProject } = useProject();
+  const companyId = user?.companyId ?? null;
+
+  const [saving, setSaving] = useState(false);
+  const [formData, setFormData] = useState({
+    projectId: activeProject?.id ?? '',
+    workTitle: '',
+    workCategory: '',
+    workDate: new Date(),
+    workDone: '',
+    actualWorkers: 1,
+    actualRatePerPerson: 0,
+    notes: '',
+  });
+
+  const [inputs, setInputs] = useState<InputItem[]>([]);
+
+  // Fetch inventory items for input selection
+  const { data: inventoryItems = [] } = useQuery({
+    queryKey: ['inventory-stock', companyId],
+    queryFn: () => listInventoryStock({ companyId: companyId! }),
+    enabled: !!companyId,
+  });
+
+  const actualTotal = formData.actualWorkers * formData.actualRatePerPerson;
+
+  const addInput = () => {
+    setInputs(prev => [...prev, { itemId: '', itemName: '', quantity: 0, unit: '', currentStock: 0 }]);
+  };
+
+  const removeInput = (index: number) => {
+    setInputs(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateInput = (index: number, field: keyof InputItem, value: string | number) => {
+    setInputs(prev => prev.map((input, i) => {
+      if (i !== index) return input;
+      
+      if (field === 'itemId') {
+        const item = inventoryItems.find(inv => inv.id === value);
+        return {
+          ...input,
+          itemId: value as string,
+          itemName: item?.name ?? '',
+          unit: item?.unit ?? '',
+          currentStock: item?.current_stock ?? 0,
+        };
+      }
+      
+      return { ...input, [field]: value };
+    }));
+  };
+
+  const hasLowStockWarning = inputs.some(input => 
+    input.itemId && input.quantity > input.currentStock
+  );
+
+  const handleSubmit = async () => {
+    if (!formData.projectId) {
+      toast.error('Please select a project');
+      return;
+    }
+    if (!formData.workTitle.trim()) {
+      toast.error('Please enter a work name');
+      return;
+    }
+    if (!formData.workCategory) {
+      toast.error('Please select a work type');
+      return;
+    }
+    if (!formData.workDone.trim()) {
+      toast.error('Please describe the work done');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Step 1: Create the work card in "planned" status
+      const workCard = await createWorkCard({
+        companyId: companyId!,
+        projectId: formData.projectId,
+        workTitle: formData.workTitle.trim(),
+        workCategory: formData.workCategory,
+        plannedDate: format(formData.workDate, 'yyyy-MM-dd'),
+        plannedWorkers: formData.actualWorkers,
+        plannedRatePerPerson: formData.actualRatePerPerson,
+        notes: formData.notes.trim() || null,
+        allocatedManagerId: user?.id ?? null,
+        allocatedWorkerName: user?.name ?? null,
+        createdByAdminId: user?.id ?? '',
+        createdByAdminName: user?.name ?? null,
+        actorUserId: user?.id ?? '',
+        actorUserName: user?.name ?? null,
+      });
+
+      // Step 2: Immediately record the work (move to "logged" status)
+      const inputsUsed: InputUsed[] = inputs
+        .filter(i => i.itemId && i.quantity > 0)
+        .map(i => ({
+          itemId: i.itemId,
+          itemName: i.itemName,
+          quantity: i.quantity,
+          unit: i.unit,
+        }));
+
+      await recordWork({
+        workCardId: workCard.id,
+        companyId: companyId!,
+        actorUserId: user?.id ?? '',
+        actorUserName: user?.name ?? null,
+        actualDate: format(formData.workDate, 'yyyy-MM-dd'),
+        actualWorkers: formData.actualWorkers,
+        actualRatePerPerson: formData.actualRatePerPerson,
+        workDone: formData.workDone.trim(),
+        executionNotes: formData.notes.trim() || null,
+        inputsUsed,
+        workerIds: [],
+      });
+
+      // Step 3: Record inventory usage for each input
+      for (const input of inputsUsed) {
+        try {
+          await recordInventoryUsage({
+            companyId: companyId!,
+            itemId: input.itemId,
+            quantity: input.quantity,
+            reason: `Work: ${formData.workTitle}`,
+            projectId: formData.projectId,
+            actorUserId: user?.id ?? '',
+            actorUserName: user?.name ?? null,
+          });
+        } catch (err) {
+          console.warn('[LogWorkModal] Failed to record inventory usage for', input.itemName, err);
+        }
+      }
+
+      // Step 4: Record in work card inventory usage table
+      if (inputsUsed.length > 0) {
+        await recordInventoryUsageForWorkCard({
+          workCardId: workCard.id,
+          companyId: companyId!,
+          inputsUsed,
+          actorUserId: user?.id ?? '',
+          actorUserName: user?.name ?? null,
+        });
+      }
+
+      // Step 5: Create admin alert
+      await createAdminAlert({
+        companyId: companyId!,
+        type: 'work_logged',
+        title: 'Work Logged',
+        message: `${user?.name ?? 'Employee'} logged work: ${formData.workTitle}`,
+        severity: 'info',
+        metadata: {
+          workCardId: workCard.id,
+          workTitle: formData.workTitle,
+          loggedBy: user?.name,
+        },
+      });
+
+      toast.success('Work logged successfully');
+      
+      // Reset form
+      setFormData({
+        projectId: activeProject?.id ?? '',
+        workTitle: '',
+        workCategory: '',
+        workDate: new Date(),
+        workDone: '',
+        actualWorkers: 1,
+        actualRatePerPerson: 0,
+        notes: '',
+      });
+      setInputs([]);
+
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to log work:', error);
+      toast.error('Failed to log work');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Briefcase className="h-5 w-5" />
+            Log Work
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Project Selection */}
+          <div className="space-y-2">
+            <Label htmlFor="project">Farm / Project *</Label>
+            <Select
+              value={formData.projectId}
+              onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      {p.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Work Name */}
+          <div className="space-y-2">
+            <Label htmlFor="workTitle">Work Name *</Label>
+            <Input
+              id="workTitle"
+              placeholder="e.g., Applied DAP fertilizer to Field A"
+              value={formData.workTitle}
+              onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
+            />
+          </div>
+
+          {/* Work Type */}
+          <div className="space-y-2">
+            <Label htmlFor="workCategory">Work Type *</Label>
+            <Select
+              value={formData.workCategory}
+              onValueChange={(v) => setFormData(prev => ({ ...prev, workCategory: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select work type" />
+              </SelectTrigger>
+              <SelectContent>
+                {WORK_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>{type}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Date */}
+          <div className="space-y-2">
+            <Label>Date *</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    'w-full justify-start text-left font-normal',
+                    !formData.workDate && 'text-muted-foreground'
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {formData.workDate ? format(formData.workDate, 'PPP') : 'Pick a date'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={formData.workDate}
+                  onSelect={(date) => date && setFormData(prev => ({ ...prev, workDate: date }))}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Work Done */}
+          <div className="space-y-2">
+            <Label htmlFor="workDone">Work Done *</Label>
+            <Textarea
+              id="workDone"
+              placeholder="Describe what was accomplished..."
+              value={formData.workDone}
+              onChange={(e) => setFormData(prev => ({ ...prev, workDone: e.target.value }))}
+              rows={3}
+            />
+          </div>
+
+          {/* Workers and Rate */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="actualWorkers">Workers</Label>
+              <Input
+                id="actualWorkers"
+                type="number"
+                min={1}
+                value={formData.actualWorkers}
+                onChange={(e) => setFormData(prev => ({ 
+                  ...prev, 
+                  actualWorkers: parseInt(e.target.value) || 1 
+                }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="actualRate">Rate per Person (KSh)</Label>
+              <Input
+                id="actualRate"
+                type="number"
+                min={0}
+                value={formData.actualRatePerPerson}
+                onChange={(e) => setFormData(prev => ({ 
+                  ...prev, 
+                  actualRatePerPerson: parseFloat(e.target.value) || 0 
+                }))}
+              />
+            </div>
+          </div>
+
+          {/* Total */}
+          {actualTotal > 0 && (
+            <div className="p-3 rounded-lg bg-muted/50 text-center">
+              <p className="text-sm text-muted-foreground">Total Cost</p>
+              <p className="text-xl font-semibold">KSh {actualTotal.toLocaleString()}</p>
+            </div>
+          )}
+
+          {/* Inputs Used */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Inputs Used (Optional)</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addInput}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Input
+              </Button>
+            </div>
+
+            {inputs.map((input, index) => (
+              <div key={index} className="flex gap-2 items-start p-3 rounded-lg border bg-muted/20">
+                <div className="flex-1 space-y-2">
+                  <Select
+                    value={input.itemId || 'none'}
+                    onValueChange={(v) => updateInput(index, 'itemId', v === 'none' ? '' : v)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select item" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select item</SelectItem>
+                      {inventoryItems.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          <div className="flex items-center gap-2">
+                            <Package className="h-4 w-4 text-muted-foreground" />
+                            {item.name} ({item.current_stock} {item.unit})
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="Qty"
+                      value={input.quantity || ''}
+                      onChange={(e) => updateInput(index, 'quantity', parseFloat(e.target.value) || 0)}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground self-center">
+                      {input.unit || 'unit'}
+                    </span>
+                  </div>
+                  {input.itemId && input.quantity > input.currentStock && (
+                    <p className="text-xs text-amber-600">
+                      Low stock: only {input.currentStock} {input.unit} available
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeInput(index)}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          {hasLowStockWarning && (
+            <Alert variant="default" className="border-amber-300 bg-amber-50">
+              <AlertDescription className="text-amber-800">
+                Some items have low stock. The work will still be logged.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Notes */}
+          <div className="space-y-2">
+            <Label htmlFor="notes">Additional Notes</Label>
+            <Textarea
+              id="notes"
+              placeholder="Any additional notes..."
+              value={formData.notes}
+              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+              rows={2}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {saving ? 'Logging...' : 'Log Work'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

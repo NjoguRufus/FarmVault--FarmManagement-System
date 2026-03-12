@@ -5,7 +5,7 @@
 [api]
 enabled = true
 port = 54321
-schemas = ["public"]
+schemas = ["public", "core", "projects", "harvest", "finance", "ops", "billing", "admin"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 

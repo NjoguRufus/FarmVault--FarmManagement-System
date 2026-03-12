@@ -50,6 +50,8 @@ export interface InventoryStockRow {
   unit_size?: number | null;
   unit_size_label?: string | null;
   packaging_type?: PackagingType | null;
+  description?: string | null;
+  farm_usage_notes?: string | null;
 }
 
 export interface InventoryTransactionRow {
