@@ -6,9 +6,11 @@ import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
+import { NotificationSetupPrompt } from '@/components/notifications/NotificationSetupPrompt';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
+import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -16,6 +18,9 @@ export function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);
+
+  // Real-time admin alerts subscription (only active for admins/developers)
+  useAdminAlertsRealtime();
 
   // Emergency access: only allow operational routes; redirect rest to dashboard
   const emergencyRedirectTarget = useMemo(() => {
@@ -132,6 +137,7 @@ export function MainLayout() {
 
       <BottomNav />
       <AIChatButton />
+      <NotificationSetupPrompt />
     </div>
   );
 }

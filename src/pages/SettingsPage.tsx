@@ -10,6 +10,7 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { useTour } from '@/tour/TourProvider';
 import { UserAvatar } from '@/components/UserAvatar';
 import { uploadAvatar, clearAvatar } from '@/services/avatarService';
+import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -228,6 +229,9 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Notification settings */}
+      <NotificationSettings />
 
       {/* Company settings - editable */}
       <div className="fv-card">

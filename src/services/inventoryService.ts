@@ -244,13 +244,19 @@ async function logAuditEvent(params: {
     console.error('[inventory] Failed to log audit event', params.action, error);
   }
 
+  // Create admin alert for important inventory actions
   const isHighRisk = params.action === 'EDIT_ITEM' || params.action === 'DELETE' || params.action === 'DEDUCT';
-  if (isHighRisk) {
+  const isNotableAction = params.action === 'CREATE' || params.action === 'STOCK_IN' || params.action === 'RESTORE' || params.action === 'USAGE';
+  const shouldAlert = isHighRisk || isNotableAction;
+
+  if (shouldAlert) {
     const { createAdminAlert } = await import('@/services/adminAlertService');
     const label = (params.metadata as { name?: string })?.name ?? params.inventoryItemId ?? 'Item';
+    const severity = params.severity ?? (isHighRisk ? 'high' : 'normal');
+
     createAdminAlert({
       companyId,
-      severity: 'high',
+      severity,
       module: 'inventory',
       action: params.action,
       actorUserId: params.actor.actorUserId,

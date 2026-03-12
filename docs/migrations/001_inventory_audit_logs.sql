@@ -16,7 +16,7 @@
 
 CREATE TABLE IF NOT EXISTS public.inventory_audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+    company_id TEXT NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
     inventory_item_id UUID REFERENCES public.inventory_item_master(id) ON DELETE SET NULL,
     
     -- Action details
@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS public.inventory_audit_logs (
     quantity NUMERIC,
     unit TEXT,
     
-    -- Actor information
-    actor_user_id UUID,
+    -- Actor information (TEXT because Clerk user IDs are not UUIDs)
+    actor_user_id TEXT,
     actor_name TEXT,
     actor_role TEXT,
     
@@ -291,14 +291,19 @@ GRANT SELECT ON public.inventory_low_stock_view TO anon;
 -- STEP 7: Create helper function to log audit events
 -- ============================================================================
 
+-- Drop all existing versions of the function first to avoid conflicts
+DROP FUNCTION IF EXISTS public.log_inventory_audit(UUID, UUID, TEXT, TEXT, NUMERIC, TEXT, UUID, TEXT, TEXT, TEXT, JSONB);
+DROP FUNCTION IF EXISTS public.log_inventory_audit(TEXT, UUID, TEXT, TEXT, NUMERIC, TEXT, UUID, TEXT, TEXT, TEXT, JSONB);
+DROP FUNCTION IF EXISTS public.log_inventory_audit(TEXT, UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB);
+
 CREATE OR REPLACE FUNCTION public.log_inventory_audit(
-    p_company_id UUID,
+    p_company_id TEXT,
     p_inventory_item_id UUID,
     p_action_type TEXT,
     p_item_name TEXT DEFAULT NULL,
     p_quantity NUMERIC DEFAULT NULL,
     p_unit TEXT DEFAULT NULL,
-    p_actor_user_id UUID DEFAULT NULL,
+    p_actor_user_id TEXT DEFAULT NULL,
     p_actor_name TEXT DEFAULT NULL,
     p_actor_role TEXT DEFAULT NULL,
     p_notes TEXT DEFAULT NULL,
@@ -339,8 +344,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Grant execute permission
-GRANT EXECUTE ON FUNCTION public.log_inventory_audit TO authenticated;
+-- Grant execute permission (specify full signature to avoid ambiguity)
+GRANT EXECUTE ON FUNCTION public.log_inventory_audit(TEXT, UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB) TO authenticated;
 
 -- ============================================================================
 -- VERIFICATION QUERIES

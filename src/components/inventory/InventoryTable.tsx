@@ -256,116 +256,130 @@ function ListView({
 }: Omit<InventoryTableProps, 'isLoading'>) {
   return (
     <div className="w-full bg-card rounded-xl border border-border/50 overflow-hidden">
-      {/* Table Header */}
-      <div className="grid grid-cols-[40px_1fr_80px_auto_36px] gap-2 px-3 py-2.5 bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-        <div></div>
-        <div className="-ml-12">Name</div>
-        <div className="-ml-12">Stock</div>
-        <div>Status</div>
-        <div></div>
-      </div>
-      
-      {/* Table Rows */}
-      <div>
-        {items.map((item, index) => {
-          const stockDisplay = getFarmerFriendlyStock(item);
-          const stock = typeof item.current_stock === 'number' ? item.current_stock : 0;
-          const isEven = index % 2 === 0;
+      {/* Horizontally scrollable container - everything scrolls together */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          {/* Table Header */}
+          <thead>
+            <tr className="bg-muted/40 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              <th className="text-left px-3 py-2.5 min-w-[180px]">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 shrink-0"></span>
+                  <span>Name</span>
+                </div>
+              </th>
+              <th className="text-left px-3 py-2.5 whitespace-nowrap min-w-[100px]">Stock</th>
+              <th className="text-left px-3 py-2.5 whitespace-nowrap min-w-[80px]">Status</th>
+              <th className="w-10 px-2 py-2.5"></th>
+            </tr>
+          </thead>
           
-          return (
-            <div
-              key={item.id}
-              className={`grid grid-cols-[40px_1fr_80px_auto_36px] gap-2 items-center px-3 py-2.5 cursor-pointer hover:bg-primary/5 transition-colors border-b border-border/40 last:border-b-0 ${
-                isEven ? 'bg-background' : 'bg-muted/20'
-              }`}
-              onClick={() => onViewDetails?.(item.id)}
-            >
-              {/* Icon - far left */}
-              <div>
-                <ItemIcon item={item} size="sm" />
-              </div>
+          {/* Table Body */}
+          <tbody>
+            {items.map((item, index) => {
+              const stockDisplay = getFarmerFriendlyStock(item);
+              const stock = typeof item.current_stock === 'number' ? item.current_stock : 0;
+              const isEven = index % 2 === 0;
+              const rowBg = isEven ? 'bg-background' : 'bg-muted/20';
               
-              {/* Name + Category stacked */}
-              <div className="min-w-0">
-                <p className="font-medium text-foreground truncate text-sm leading-tight">{item.name}</p>
-                <p className="text-[11px] text-muted-foreground truncate leading-tight">
-                  {item.category_name || item.category}
-                </p>
-              </div>
-              
-              {/* Stock (no "remaining" text) */}
-              <div>
-                <p className={`text-sm font-medium ${stock <= 0 ? 'text-red-600' : 'text-foreground'}`}>
-                  {stockDisplay.display}
-                </p>
-              </div>
-              
-              {/* Status - smaller badge */}
-              <div>
-                <LowStockBadge
-                  status={item.stock_status ?? undefined}
-                  current={stock}
-                  min={item.min_stock_level ?? undefined}
-                  size="sm"
-                />
-              </div>
-              
-              {/* Actions Menu */}
-              <div onClick={(e) => e.stopPropagation()}>
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="p-1 rounded-md hover:bg-muted focus:outline-none">
-                    <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {onViewDetails && (
-                      <DropdownMenuItem onClick={() => onViewDetails(item.id)}>
-                        <Eye className="h-4 w-4 mr-2" />
-                        View details
-                      </DropdownMenuItem>
-                    )}
-                    {onEditItem && (
-                      <DropdownMenuItem onClick={() => onEditItem(item)}>
-                        <Edit3 className="h-4 w-4 mr-2" />
-                        Edit
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuSeparator />
-                    {onRecordStockIn && (
-                      <DropdownMenuItem onClick={() => onRecordStockIn(item)}>
-                        <Plus className="h-4 w-4 mr-2 text-emerald-600" />
-                        Stock in
-                      </DropdownMenuItem>
-                    )}
-                    {onDeductStock && (
-                      <DropdownMenuItem onClick={() => onDeductStock(item)}>
-                        <Minus className="h-4 w-4 mr-2 text-orange-600" />
-                        Deduct
-                      </DropdownMenuItem>
-                    )}
-                    {onRecordUsage && (
-                      <DropdownMenuItem onClick={() => onRecordUsage(item)}>
-                        <Minus className="h-4 w-4 mr-2" />
-                        Record usage
-                      </DropdownMenuItem>
-                    )}
-                    {onArchiveItem && (
-                      <>
+              return (
+                <tr
+                  key={item.id}
+                  className={`${rowBg} cursor-pointer hover:bg-primary/5 transition-colors border-b border-border/40 last:border-b-0`}
+                  onClick={() => onViewDetails?.(item.id)}
+                >
+                  {/* Name Column - full width, no truncation */}
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="shrink-0">
+                        <ItemIcon item={item} size="sm" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground text-sm leading-tight whitespace-nowrap">
+                          {item.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground leading-tight whitespace-nowrap">
+                          {item.category_name || item.category}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  
+                  {/* Stock Column */}
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <p className={`text-sm font-medium ${stock <= 0 ? 'text-red-600' : 'text-foreground'}`}>
+                      {stockDisplay.display}
+                    </p>
+                  </td>
+                  
+                  {/* Status Column */}
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <LowStockBadge
+                      status={item.stock_status ?? undefined}
+                      current={stock}
+                      min={item.min_stock_level ?? undefined}
+                      size="sm"
+                    />
+                  </td>
+                  
+                  {/* Actions Menu */}
+                  <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="p-1 rounded-md hover:bg-muted focus:outline-none">
+                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {onViewDetails && (
+                          <DropdownMenuItem onClick={() => onViewDetails(item.id)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            View details
+                          </DropdownMenuItem>
+                        )}
+                        {onEditItem && (
+                          <DropdownMenuItem onClick={() => onEditItem(item)}>
+                            <Edit3 className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={() => onArchiveItem(item)}
-                          className="text-red-600 focus:text-red-600 focus:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          );
-        })}
+                        {onRecordStockIn && (
+                          <DropdownMenuItem onClick={() => onRecordStockIn(item)}>
+                            <Plus className="h-4 w-4 mr-2 text-emerald-600" />
+                            Stock in
+                          </DropdownMenuItem>
+                        )}
+                        {onDeductStock && (
+                          <DropdownMenuItem onClick={() => onDeductStock(item)}>
+                            <Minus className="h-4 w-4 mr-2 text-orange-600" />
+                            Deduct
+                          </DropdownMenuItem>
+                        )}
+                        {onRecordUsage && (
+                          <DropdownMenuItem onClick={() => onRecordUsage(item)}>
+                            <Minus className="h-4 w-4 mr-2" />
+                            Record usage
+                          </DropdownMenuItem>
+                        )}
+                        {onArchiveItem && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              onClick={() => onArchiveItem(item)}
+                              className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -392,9 +406,9 @@ function CardView({
             className="bg-card rounded-xl border border-border/50 p-3 cursor-pointer hover:shadow-md hover:border-primary/20 transition-all relative group"
             onClick={() => onViewDetails?.(item.id)}
           >
-            {/* Actions Menu - top right */}
+            {/* Actions Menu - top right, always visible on mobile */}
             <div 
-              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute top-2 right-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
               onClick={(e) => e.stopPropagation()}
             >
               <DropdownMenu>
@@ -430,21 +444,21 @@ function CardView({
               </DropdownMenu>
             </div>
 
-            {/* Row 1: Icon + Name + Category */}
+            {/* Row 1: Icon + Name + Category - name wraps instead of truncating */}
             <div className="flex items-start gap-3 mb-3">
               <ItemIcon item={item} size="md" />
               <div className="flex-1 min-w-0 pr-8">
-                <p className="font-semibold text-foreground truncate leading-tight" title={item.name}>
+                <p className="font-semibold text-foreground leading-tight break-words" title={item.name}>
                   {item.name}
                 </p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5 break-words">
                   {item.category_name || item.category}
                 </p>
               </div>
             </div>
             
-            {/* Row 2: Stock + Status */}
-            <div className="flex items-center justify-between gap-2 mb-3">
+            {/* Row 2: Stock + Status - stack on very small screens */}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <p className={`text-sm font-medium ${stock <= 0 ? 'text-red-600' : 'text-foreground'}`}>
                 {stockDisplay.display}
               </p>

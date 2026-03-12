@@ -196,8 +196,32 @@ export async function listInventoryStock(params: {
 
   const { data, error } = await query.returns<InventoryStockRow[]>();
   if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[inventory] listInventoryStock error:', {
+        message: error.message,
+        code: (error as any).code,
+        details: (error as any).details,
+      });
+    }
     throw error;
   }
+  
+  // DEBUG: Log raw response from Supabase
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[inventory] listInventoryStock raw response:', {
+      rowCount: data?.length ?? 0,
+      sample: data?.slice(0, 2).map(row => ({
+        id: row.id,
+        name: row.name,
+        current_stock: row.current_stock,
+        stock_status: row.stock_status,
+        unit: row.unit,
+      })),
+    });
+  }
+  
   return data ?? [];
 }
 
@@ -428,25 +452,34 @@ export async function recordInventoryStockIn(input: RecordStockInInput): Promise
     notes: input.notes ?? null,
   };
 
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('[inventory] record_inventory_stock_in payload', rpcPayload);
-  }
+  // eslint-disable-next-line no-console
+  console.log('[inventory] record_inventory_stock_in CALLING RPC', {
+    payload: rpcPayload,
+    inputCompanyId: input.companyId,
+    resolvedTenant: tenant,
+    itemId: input.itemId,
+    quantity: input.quantity,
+  });
 
-  const { error } = await db.public().rpc('record_inventory_stock_in', rpcPayload);
+  const { data: rpcResult, error } = await db.public().rpc('record_inventory_stock_in', rpcPayload);
 
   if (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('[inventory] record_inventory_stock_in error', {
-        message: error.message,
-        code: (error as any).code,
-        details: (error as any).details,
-        hint: (error as any).hint,
-      });
-    }
+    // eslint-disable-next-line no-console
+    console.error('[inventory] record_inventory_stock_in FAILED', {
+      message: error.message,
+      code: (error as any).code,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      payload: rpcPayload,
+    });
     throw error;
   }
+  
+  // eslint-disable-next-line no-console
+  console.log('[inventory] record_inventory_stock_in SUCCESS', {
+    transactionId: rpcResult,
+    payload: rpcPayload,
+  });
 }
 
 export async function recordInventoryUsage(input: RecordUsageInput): Promise<void> {
@@ -821,6 +854,36 @@ export async function logInventoryAuditEvent(input: LogAuditEventInput): Promise
           hint: (error as any).hint,
         });
       }
+    }
+
+    // Create admin alert for important inventory actions
+    const highRiskActions = ['STOCK_DEDUCTED', 'ITEM_EDITED', 'ITEM_DELETED', 'ITEM_ARCHIVED'];
+    const notableActions = ['ITEM_CREATED', 'STOCK_IN', 'ITEM_RESTORED', 'USAGE_RECORDED'];
+    const isHighRisk = highRiskActions.includes(actionType);
+    const isNotable = notableActions.includes(actionType);
+
+    if (isHighRisk || isNotable) {
+      const { createAdminAlert } = await import('@/services/adminAlertService');
+      const label = input.itemName ?? input.inventoryItemId ?? 'Item';
+      const severity = isHighRisk ? 'high' : 'normal';
+
+      createAdminAlert({
+        companyId: tenant,
+        severity,
+        module: 'inventory',
+        action: actionType,
+        actorUserId: input.actorUserId ?? undefined,
+        actorName: input.actorName ?? undefined,
+        targetId: input.inventoryItemId ?? undefined,
+        targetLabel: label,
+        metadata: input.metadata ?? undefined,
+        detailPath: input.inventoryItemId ? `/inventory?highlight=${input.inventoryItemId}` : '/inventory',
+      }).catch((err) => {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[inventory] Admin alert create failed', err);
+        }
+      });
     }
   } catch (err) {
     // Silently fail audit logging to not break main operations
