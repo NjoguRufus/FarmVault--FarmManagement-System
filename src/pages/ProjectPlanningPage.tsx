@@ -92,7 +92,6 @@ export default function ProjectPlanningPage() {
       const created = await createSupplier({
         companyId,
         name,
-        createdBy: user.id,
       });
       if (import.meta.env?.DEV) {
         console.log('[ProjectPlanningPage] supplier create response', created);
