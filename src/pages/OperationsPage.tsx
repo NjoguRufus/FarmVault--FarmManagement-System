@@ -20,7 +20,7 @@ import {
   deleteWorkCard,
   canAdminApproveOrReject,
 } from '@/services/operationsWorkCardService';
-import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryService';
+import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryFirebaseService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';

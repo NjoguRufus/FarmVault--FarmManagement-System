@@ -9,7 +9,11 @@ export const db = {
   projects: () => supabase.schema('projects'),
   harvest: () => supabase.schema('harvest'),
   finance: () => supabase.schema('finance'),
-  inventory: () => supabase.schema('inventory'),
+  /**
+   * Inventory tables now live in `public` in production.
+   * Prefer db.public().from('inventory_item_master') etc.
+   */
+  inventory: () => supabase.schema('public'),
   ops: () => supabase.schema('ops'),
   billing: () => supabase.schema('billing'),
   admin: () => supabase.schema('admin'),

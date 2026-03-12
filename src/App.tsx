@@ -23,6 +23,9 @@ import CropStagesPage from "@/pages/CropStagesPage";
 import ExpensesPage from "@/pages/ExpensesPage";
 import OperationsPage from "@/pages/OperationsPage";
 import InventoryPage from "@/pages/InventoryPage";
+import InventoryItemDetailsPage from "@/pages/InventoryItemDetailsPage";
+import InventoryCategoriesPage from "@/pages/InventoryCategoriesPage";
+import InventorySuppliersPage from "@/pages/InventorySuppliersPage";
 import HarvestSalesPage from "@/pages/HarvestSalesPage";
 import HarvestDetailsPage from "@/pages/HarvestDetailsPage";
 import HarvestCollectionsPage from "@/pages/HarvestCollectionsPage";
@@ -254,6 +257,9 @@ const App = () => (
                 <Route path="/expenses" element={<PermissionRoute module="expenses"><ExpensesPage /></PermissionRoute>} />
                 <Route path="/operations" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
                 <Route path="/inventory" element={<PermissionRoute module="inventory"><InventoryPage /></PermissionRoute>} />
+                <Route path="/inventory/item/:itemId" element={<PermissionRoute module="inventory"><InventoryItemDetailsPage /></PermissionRoute>} />
+                <Route path="/inventory/categories" element={<PermissionRoute module="inventory"><InventoryCategoriesPage /></PermissionRoute>} />
+                <Route path="/inventory/suppliers" element={<PermissionRoute module="inventory"><InventorySuppliersPage /></PermissionRoute>} />
                 {/* Crop-aware Harvest entrypoint (French Beans → Collections; others → Harvest & Sales) */}
                 <Route path="/harvest" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestEntryRoute /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/harvest-sales" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker></PermissionRoute>} />
@@ -309,6 +315,14 @@ const App = () => (
                   element={
                     <PermissionRoute module="inventory">
                       <InventoryPage />
+                    </PermissionRoute>
+                  }
+                />
+                <Route
+                  path="inventory/item/:itemId"
+                  element={
+                    <PermissionRoute module="inventory">
+                      <InventoryItemDetailsPage />
                     </PermissionRoute>
                   }
                 />

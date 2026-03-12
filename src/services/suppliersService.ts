@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import type { Supplier } from '@/types';
 
 const TABLE = 'suppliers';
@@ -82,17 +83,16 @@ export async function createSupplier(input: {
   email?: string;
   location?: string;
   notes?: string;
-  createdBy?: string;
 }): Promise<Supplier> {
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
   const payload = {
-    company_id: input.companyId,
+    company_id: companyId,
     name: input.name.trim(),
     contact_person: input.contactPerson?.trim() || null,
     phone: input.phone?.trim() || null,
     email: input.email?.trim() || null,
     location: input.location?.trim() || null,
     notes: input.notes?.trim() || null,
-    created_by: input.createdBy ?? null,
   };
 
   if (import.meta.env?.DEV) {
@@ -109,6 +109,19 @@ export async function createSupplier(input: {
     });
   }
   if (error) {
+    const code = (error as any).code as string | undefined;
+    if (code === '23505') {
+      const normalizedName = input.name.trim();
+      const { data: existing } = await supabase
+        .from(TABLE)
+        .select('id,company_id,name,contact_person,phone,email,location,notes,created_by,created_at,updated_at')
+        .eq('company_id', companyId)
+        .ilike('name', normalizedName)
+        .maybeSingle<DbRow>();
+      if (existing) {
+        return toSupplier(existing as DbRow);
+      }
+    }
     if (import.meta.env?.DEV) {
       console.warn('[suppliers] createSupplier error', { message: error.message });
     }

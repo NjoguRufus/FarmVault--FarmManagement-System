@@ -1,6 +1,5 @@
 import { db, requireCompanyId } from '@/lib/db';
-import { collection, addDoc, getDoc, doc, serverTimestamp } from '@/lib/firestore-stub';
-import { db as firestoreDb } from '@/lib/firebase';
+import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import type {
   InventoryItem,
   InventoryCategory,
@@ -9,10 +8,9 @@ import type {
   CropType,
 } from '@/types';
 
-const ITEMS_TABLE = 'items';
-const MOVEMENTS_TABLE = 'movements';
-const PURCHASES_TABLE = 'purchases';
-const AUDIT_LOGS_TABLE = 'audit_logs';
+const ITEMS_TABLE = 'inventory_items';
+const PURCHASES_TABLE = 'inventory_purchases';
+const AUDIT_LOGS_TABLE = 'inventory_audit_logs';
 
 type DbInventoryItemRow = {
   id: string;
@@ -50,19 +48,9 @@ export type InventoryMovementSource =
   | 'correction'
   | 'system';
 
-type DbInventoryMovementRow = {
-  id: string;
-  company_id: string;
-  inventory_item_id: string;
-  direction: InventoryMovementDirection;
-  quantity_delta: number;
-  reason: string | null;
-  source: InventoryMovementSource | null;
-  metadata: Record<string, unknown> | null;
-  created_by_user_id: string | null;
-  created_by_name: string | null;
-  created_at: string;
-};
+// NOTE: there is currently no dedicated inventory_movements table in the SQL schema.
+// The movement type and helpers remain for potential future use but are not persisted.
+type DbInventoryMovementRow = never;
 
 export type InventoryAuditAction =
   | 'ADD_ITEM'
@@ -77,28 +65,15 @@ export type InventoryAuditAction =
 type DbInventoryAuditLogRow = {
   id: string;
   company_id: string;
-  action: InventoryAuditAction;
+  action: string;
   inventory_item_id: string | null;
   quantity: number | null;
   metadata: Record<string, unknown> | null;
-  created_by_user_id: string | null;
-  created_by_name: string | null;
+  created_by: string | null;
   created_at: string;
 };
 
-export type InventoryMovement = {
-  id: string;
-  companyId: string;
-  inventoryItemId: string;
-  direction: InventoryMovementDirection;
-  quantityDelta: number;
-  reason?: string;
-  source?: InventoryMovementSource;
-  metadata?: Record<string, unknown>;
-  createdByUserId?: string;
-  createdByName?: string;
-  createdAt: string;
-};
+export type InventoryMovement = never;
 
 export type InventoryAuditLog = {
   id: string;
@@ -224,31 +199,19 @@ function mapRowToInventoryItem(row: DbInventoryItemRow): InventoryItem {
 }
 
 function mapRowToMovement(row: DbInventoryMovementRow): InventoryMovement {
-  return {
-    id: row.id,
-    companyId: row.company_id,
-    inventoryItemId: row.inventory_item_id,
-    direction: row.direction,
-    quantityDelta: row.quantity_delta,
-    reason: row.reason ?? undefined,
-    source: row.source ?? undefined,
-    metadata: row.metadata ?? undefined,
-    createdByUserId: row.created_by_user_id ?? undefined,
-    createdByName: row.created_by_name ?? undefined,
-    createdAt: row.created_at,
-  };
+  return row as never;
 }
 
 function mapRowToAuditLog(row: DbInventoryAuditLogRow): InventoryAuditLog {
   return {
     id: row.id,
     companyId: row.company_id,
-    action: row.action,
+    action: row.action as InventoryAuditAction,
     inventoryItemId: row.inventory_item_id ?? undefined,
     quantity: row.quantity ?? undefined,
     metadata: row.metadata ?? undefined,
-    createdByUserId: row.created_by_user_id ?? undefined,
-    createdByName: row.created_by_name ?? undefined,
+    createdByUserId: row.created_by ?? undefined,
+    createdByName: undefined,
     createdAt: row.created_at,
   };
 }
@@ -273,8 +236,7 @@ async function logAuditEvent(params: {
       inventory_item_id: params.inventoryItemId ?? null,
       quantity: params.quantity ?? null,
       metadata: params.metadata ?? null,
-      created_by_user_id: params.actor.actorUserId,
-      created_by_name: params.actor.actorName ?? null,
+      created_by: params.actor.actorUserId,
     });
 
   if (error && import.meta.env.DEV) {
@@ -361,29 +323,7 @@ async function applyStockChange(params: {
 
   let movement: InventoryMovement | null = null;
 
-  const { data: movementRow, error: movementError } = await db
-    .inventory()
-    .from(MOVEMENTS_TABLE)
-    .insert({
-      company_id: companyId,
-      inventory_item_id: params.itemId,
-      direction: params.delta > 0 ? 'in' : 'out',
-      quantity_delta: params.delta,
-      reason: params.reason ?? null,
-      source: params.source,
-      metadata: params.metadata ?? null,
-      created_by_user_id: params.actor.actorUserId,
-      created_by_name: params.actor.actorName ?? null,
-    })
-    .select('*')
-    .maybeSingle<DbInventoryMovementRow>();
-
-  if (!movementError && movementRow) {
-    movement = mapRowToMovement(movementRow);
-  } else if (movementError && import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.error('[inventory] Failed to record inventory movement', movementError);
-  }
+  // Movement rows are not persisted until a dedicated movements table exists.
 
   const item = mapRowToInventoryItem(updatedRow);
   return { item, movement };
@@ -392,7 +332,7 @@ async function applyStockChange(params: {
 export async function addInventoryItem(
   input: AddInventoryItemInput & ActorInfo,
 ): Promise<InventoryItem> {
-  const companyId = requireCompanyId(input.companyId);
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
 
   const payload = {
     company_id: companyId,
@@ -445,7 +385,7 @@ export async function addInventoryItem(
 export async function updateInventoryItem(
   input: UpdateInventoryItemInput & ActorInfo,
 ): Promise<InventoryItem> {
-  const companyId = requireCompanyId(input.companyId);
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
 
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = input.name;
@@ -507,7 +447,7 @@ export async function updateInventoryItem(
 export async function deleteInventoryItem(
   params: { companyId: string; itemId: string } & ActorInfo,
 ): Promise<void> {
-  const companyId = requireCompanyId(params.companyId);
+  const companyId = await resolveCompanyIdForWrite(params.companyId);
 
   const { data: existing, error: getError } = await db
     .inventory()
@@ -545,7 +485,7 @@ export async function deleteInventoryItem(
 export async function restockInventory(
   input: RestockInventoryInput,
 ): Promise<InventoryItem> {
-  const companyId = requireCompanyId(input.companyId);
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
   if (input.quantity <= 0) {
     throw new Error('Quantity must be greater than zero');
   }
@@ -614,7 +554,7 @@ export async function restockInventory(
 export async function deductInventoryManual(
   input: DeductInventoryManualInput,
 ): Promise<InventoryItem> {
-  const companyId = requireCompanyId(input.companyId);
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
   if (input.quantity <= 0) {
     throw new Error('Quantity must be greater than zero');
   }
@@ -644,7 +584,7 @@ export async function deductInventoryManual(
 export async function recordInventoryMovement(
   input: RecordInventoryMovementInput,
 ): Promise<{ item: InventoryItem; movement: InventoryMovement | null }> {
-  const companyId = requireCompanyId(input.companyId);
+  const companyId = await resolveCompanyIdForWrite(input.companyId);
 
   const { item, movement } = await applyStockChange({
     companyId,
@@ -718,23 +658,9 @@ export async function getInventoryMovementsForItem(params: {
   itemId: string;
   limit?: number;
 }): Promise<InventoryMovement[]> {
-  const tenant = requireCompanyId(params.companyId);
-
-  const { data, error } = await db
-    .inventory()
-    .from(MOVEMENTS_TABLE)
-    .select('*')
-    .eq('company_id', tenant)
-    .eq('inventory_item_id', params.itemId)
-    .order('created_at', { ascending: false })
-    .limit(params.limit ?? 100)
-    .returns<DbInventoryMovementRow[]>();
-
-  if (error) {
-    throw error;
-  }
-
-  return (data ?? []).map(mapRowToMovement);
+  requireCompanyId(params.companyId);
+  // No movements table in schema; return empty list until implemented.
+  return [];
 }
 
 export async function getInventoryAuditLogs(params: {
