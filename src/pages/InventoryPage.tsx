@@ -33,9 +33,9 @@ export default function InventoryPage() {
   const [supplierId, setSupplierId] = useState<string | undefined>(undefined);
   const [stockStatus, setStockStatus] = useState<'all' | 'ok' | 'low' | 'out'>('all');
 
-  const { categories, isLoading: categoriesLoading } = useInventoryCategories(companyId);
+  const { categories: allCategories, isLoading: categoriesLoading } = useInventoryCategories(companyId);
   const {
-    data: suppliers = [],
+    data: allSuppliers = [],
     isLoading: suppliersLoading,
   } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId ?? 'none'],
@@ -44,9 +44,20 @@ export default function InventoryPage() {
     staleTime: 60_000,
   });
 
+  // Get ALL items (unfiltered) to derive available filter options
+  const {
+    items: allStockItems,
+    isLoading: allStockLoading,
+  } = useInventoryStock({
+    companyId,
+  });
+
+  // Get filtered items based on current filter selections
   const {
     items: stockItems,
     isLoading: stockLoading,
+    refetch: refetchStock,
+    invalidateAll: invalidateStockQueries,
   } = useInventoryStock({
     companyId,
     search,
@@ -55,10 +66,41 @@ export default function InventoryPage() {
     stockStatus,
   });
 
+  // Derive categories that actually have items
+  const categoriesWithItems = useMemo(() => {
+    const categoryIds = new Set(allStockItems.map(item => item.category).filter(Boolean));
+    return allCategories.filter(cat => categoryIds.has(cat.id));
+  }, [allStockItems, allCategories]);
+
+  // Derive suppliers that actually have items
+  const suppliersWithItems = useMemo(() => {
+    const supplierIds = new Set(allStockItems.map(item => item.supplier_id).filter(Boolean));
+    return allSuppliers.filter(s => supplierIds.has(s.id));
+  }, [allStockItems, allSuppliers]);
+
+  const handleInventoryChange = () => {
+    refetchStock();
+    invalidateStockQueries();
+  };
+
   // Legacy items are used only as a fallback for stats until all data is migrated to Supabase.
   const { items: legacyItems } = useInventoryItems(companyId);
 
   const totalItems = stockItems.length || legacyItems.length;
+
+  const parseNumeric = (value: unknown): number => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : NaN;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return NaN;
+      const normalized = trimmed.replace(/,/g, '');
+      const num = Number(normalized);
+      return Number.isFinite(num) ? num : NaN;
+    }
+    return NaN;
+  };
   const lowStockCount = useMemo(
     () =>
       stockItems.filter(
@@ -79,14 +121,13 @@ export default function InventoryPage() {
   );
   const totalInventoryValue = useMemo(
     () =>
-      stockItems.reduce(
-        (sum, i) =>
-          sum +
-          (typeof i.total_value === 'number'
-            ? i.total_value
-            : (i.current_stock || 0) * (i.average_cost || 0)),
-        0,
-      ),
+      stockItems.reduce((sum, i) => {
+        const unitCost = parseNumeric(i.average_cost as any);
+        if (!Number.isFinite(unitCost)) {
+          return sum;
+        }
+        return sum + unitCost;
+      }, 0),
     [stockItems],
   );
 
@@ -100,7 +141,7 @@ export default function InventoryPage() {
     null,
   );
 
-  const isLoading = stockLoading || categoriesLoading || suppliersLoading;
+  const isLoading = stockLoading || categoriesLoading || suppliersLoading || allStockLoading;
 
   const handleViewDetails = (itemId: string) => {
     navigate(`/inventory/item/${itemId}`);
@@ -147,8 +188,8 @@ export default function InventoryPage() {
         onSupplierChange={setSupplierId}
         stockStatus={stockStatus}
         onStockStatusChange={setStockStatus}
-        categories={categories}
-        suppliers={suppliers}
+        categories={categoriesWithItems}
+        suppliers={suppliersWithItems}
       />
 
       <InventoryTable
@@ -170,9 +211,10 @@ export default function InventoryPage() {
           open={addOpen}
           onOpenChange={setAddOpen}
           companyId={effectiveCompanyId ?? ''}
-          categories={categories}
-          suppliers={suppliers}
+          categories={allCategories}
+          suppliers={allSuppliers}
           createdBy={user?.id}
+          onCreated={handleInventoryChange}
         />
       )}
 
@@ -184,7 +226,8 @@ export default function InventoryPage() {
         }}
         companyId={effectiveCompanyId ?? ''}
         item={selectedItemForStock ?? stockItems[0] ?? null}
-        suppliers={suppliers}
+        suppliers={allSuppliers}
+        onRecorded={handleInventoryChange}
       />
 
       <RecordUsageModal
@@ -196,6 +239,7 @@ export default function InventoryPage() {
         companyId={effectiveCompanyId ?? ''}
         item={selectedItemForUsage ?? stockItems[0] ?? null}
         projects={activeProject ? [activeProject] : []}
+        onRecorded={handleInventoryChange}
       />
     </div>
   );

@@ -9,8 +9,6 @@ interface InventoryStatsCardsProps {
   totalInventoryValue: number;
 }
 
-const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
-
 export function InventoryStatsCards({
   totalItems,
   lowStockCount,
@@ -24,24 +22,28 @@ export function InventoryStatsCards({
         value={totalItems}
         icon={Package}
         iconVariant="default"
+        layout="mobile-compact"
       />
       <SimpleStatCard
         title="Low Stock"
         value={lowStockCount}
         icon={AlertTriangle}
         iconVariant="warning"
+        layout="mobile-compact"
       />
       <SimpleStatCard
         title="Out of Stock"
         value={outOfStockCount}
         icon={XCircle}
         iconVariant="destructive"
+        layout="mobile-compact"
       />
       <SimpleStatCard
-        title="Total Inventory Value"
-        value={formatCurrency(totalInventoryValue)}
+        title="Total Value"
+        value={`KES ${totalInventoryValue.toLocaleString()}`}
         icon={Wallet}
         iconVariant="info"
+        layout="mobile-compact"
       />
     </div>
   );
