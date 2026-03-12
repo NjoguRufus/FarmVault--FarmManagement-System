@@ -1,14 +1,30 @@
 import { db, requireCompanyId } from '@/lib/db';
 
-export type WorkCardStatus = 'planned' | 'submitted' | 'approved' | 'rejected' | 'paid';
+// New simplified status model: no approval workflow
+export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
 
 export interface WorkCardPayment {
   isPaid: boolean;
   amount?: number | null;
   method?: 'cash' | 'mpesa' | 'bank' | 'other' | null;
-  paidAt?: string | null; // ISO string from Supabase
+  paidAt?: string | null;
   paidByUserId?: string | null;
   paidByName?: string | null;
+  notes?: string | null;
+}
+
+export interface InputUsed {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
+}
+
+export interface EditHistoryEntry {
+  timestamp: string;
+  actorId: string;
+  actorName: string | null;
+  changes: Record<string, { oldValue: unknown; newValue: unknown }>;
 }
 
 export interface WorkCard {
@@ -25,50 +41,66 @@ export interface WorkCard {
   workTitle: string;
   workCategory: string;
 
-  plannedDate: string | null; // ISO date string
+  // Planned section
+  plannedDate: string | null;
   plannedWorkers: number;
   plannedRatePerPerson: number;
   plannedTotal: number;
   notes: string | null;
 
+  // Actual work section (filled when logged)
   actualDate: string | null;
   actualWorkers: number | null;
   actualRatePerPerson: number | null;
   actualTotal: number | null;
   executionNotes: string | null;
-  managerId: string | null;
-  managerName: string | null;
+  workDone: string | null;
 
+  // Worker who logged the work
+  loggedByUserId: string | null;
+  loggedByName: string | null;
+  loggedAt: string | null;
+
+  // Allocated worker (who should record work)
   allocatedManagerId: string | null;
+  allocatedWorkerName: string | null;
 
+  // Workers involved in the work
+  workerIds: string[];
+  workerNames: string[];
+
+  // Inputs used (inventory items)
+  inputsUsed: InputUsed[];
+
+  // Edit history for transparency
+  editHistory: EditHistoryEntry[];
+
+  // Payment info
   payment: WorkCardPayment;
 
+  // Status
   status: WorkCardStatus;
 
+  // Creator info
   createdByAdminId: string;
   createdByAdminName: string | null;
   createdByManagerId: string | null;
 
   createdAt: string;
   updatedAt: string | null;
-
-  approvedByUserId: string | null;
-  approvedByName: string | null;
-  approvedAt: string | null;
-
-  rejectionReason: string | null;
-  rejectedByUserId: string | null;
-  rejectedByName: string | null;
-  rejectedAt: string | null;
 }
 
 type WorkCardRow = {
   id: string;
   company_id: string;
   project_id: string | null;
+  title: string | null;
   status: string | null;
   allocated_manager_id: string | null;
   payload: any;
+  inputs_used: any;
+  edit_history: any;
+  worker_ids: string[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,6 +120,7 @@ export type CreateWorkCardInput = {
   plannedRatePerPerson: number;
   notes?: string | null;
   allocatedManagerId: string | null;
+  allocatedWorkerName?: string | null;
   createdByAdminId: string;
   createdByAdminName?: string | null;
   createdByManagerId?: string | null;
@@ -109,68 +142,73 @@ export type UpdateWorkCardInput = {
   blockId?: string | null;
   blockName?: string | null;
   allocatedManagerId?: string | null;
+  allocatedWorkerName?: string | null;
   actorUserId: string;
   actorUserName?: string | null;
 };
 
-export type SubmitExecutionInput = {
+export type RecordWorkInput = {
   id: string;
   actualDate: string;
   actualWorkers: number;
   actualRatePerPerson: number;
+  workDone: string;
   executionNotes?: string | null;
-  managerId: string;
-  managerName: string;
+  workerIds?: string[];
+  workerNames?: string[];
+  inputsUsed?: InputUsed[];
   actorUserId: string;
   actorUserName?: string | null;
 };
 
-export type ApproveWorkCardInput = {
+export type EditWorkInput = {
   id: string;
-  actorUserId: string;
-  actorUserName?: string | null;
-};
-
-export type RejectWorkCardInput = {
-  id: string;
-  rejectionReason: string;
+  actualDate?: string;
+  actualWorkers?: number;
+  actualRatePerPerson?: number;
+  workDone?: string;
+  executionNotes?: string | null;
+  workerIds?: string[];
+  workerNames?: string[];
+  inputsUsed?: InputUsed[];
   actorUserId: string;
   actorUserName?: string | null;
 };
 
 export type MarkWorkCardPaidInput = {
   id: string;
-  amount?: number;
-  method: 'cash' | 'mpesa' | 'bank' | 'other';
-  paidAt: string;
+  amount: number;
+  method?: 'cash' | 'mpesa' | 'bank' | 'other';
+  notes?: string | null;
   actorUserId: string;
   actorUserName?: string | null;
 };
 
 const WORK_CARDS_TABLE = 'work_cards';
 const AUDIT_LOGS_TABLE = 'audit_logs';
+const INVENTORY_USAGE_TABLE = 'work_card_inventory_usage';
 
-type AuditAction =
+export type AuditAction =
   | 'WORK_CREATED'
   | 'WORK_UPDATED'
-  | 'WORK_SUBMITTED'
-  | 'WORK_APPROVED'
-  | 'WORK_REJECTED'
-  | 'WORK_PAID';
+  | 'WORK_LOGGED'
+  | 'WORK_EDITED'
+  | 'WORK_PAID'
+  | 'INVENTORY_USED';
 
 const AUDIT_ACTION_MESSAGES: Record<AuditAction, string> = {
   WORK_CREATED: 'Work card created',
   WORK_UPDATED: 'Work card updated',
-  WORK_SUBMITTED: 'Work card submitted',
-  WORK_APPROVED: 'Work card approved',
-  WORK_REJECTED: 'Work card rejected',
-  WORK_PAID: 'Work card paid',
+  WORK_LOGGED: 'Work logged',
+  WORK_EDITED: 'Work edited',
+  WORK_PAID: 'Work marked as paid',
+  INVENTORY_USED: 'Inventory used',
 };
 
-async function logAuditEvent(params: {
+export async function logAuditEvent(params: {
   companyId: string;
   workCardId: string;
-  projectId?: string | null; // currently unused but kept for future schema evolution
+  projectId?: string | null;
   action: AuditAction;
   userId: string;
   userName?: string | null;
@@ -186,13 +224,13 @@ async function logAuditEvent(params: {
     company_id: companyId,
     work_card_id: params.workCardId,
     actor_id: params.userId,
+    actor_name: params.userName ?? null,
     event_type: params.action,
     message,
     payload: metadataPayload,
   };
 
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.log('ops.audit_logs payload', auditPayload);
   }
 
@@ -202,8 +240,6 @@ async function logAuditEvent(params: {
     .insert(auditPayload);
 
   if (error) {
-    // Audit failures should not break main flow but should be visible in logs.
-    // eslint-disable-next-line no-console
     console.error('[operations] Failed to log audit event', params.action, error);
   }
 }
@@ -212,7 +248,6 @@ function computePlannedTotal(workers: number, rate: number): number {
   return Math.max(0, workers) * Math.max(0, rate);
 }
 
-/** Ensure optional UUID is never the string "undefined" or "null" sent to Postgres. */
 function normalizeOptionalUuid(v: string | null | undefined): string | null {
   if (v == null) return null;
   if (typeof v !== 'string') return null;
@@ -229,6 +264,10 @@ function computeActualTotal(workers: number | null, rate: number | null): number
 
 function mapRowToWorkCard(row: WorkCardRow): WorkCard {
   const payload = row.payload ?? {};
+  const inputsUsed: InputUsed[] = Array.isArray(row.inputs_used) ? row.inputs_used : [];
+  const editHistory: EditHistoryEntry[] = Array.isArray(row.edit_history) ? row.edit_history : [];
+  const workerIds: string[] = Array.isArray(row.worker_ids) ? row.worker_ids : [];
+
   const payment: WorkCardPayment = {
     isPaid: Boolean(payload.payment?.isPaid),
     amount: payload.payment?.amount ?? null,
@@ -236,6 +275,7 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
     paidAt: payload.payment?.paidAt ?? null,
     paidByUserId: payload.payment?.paidByUserId ?? null,
     paidByName: payload.payment?.paidByName ?? null,
+    notes: payload.payment?.notes ?? null,
   };
 
   return {
@@ -249,7 +289,7 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
     blockId: payload.blockId ?? null,
     blockName: payload.blockName ?? null,
 
-    workTitle: payload.workTitle ?? '',
+    workTitle: payload.workTitle ?? row.title ?? '',
     workCategory: payload.workCategory ?? '',
 
     plannedDate: payload.plannedDate ?? null,
@@ -263,10 +303,20 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
     actualRatePerPerson: payload.actualRatePerPerson ?? null,
     actualTotal: payload.actualTotal ?? null,
     executionNotes: payload.executionNotes ?? null,
-    managerId: payload.managerId ?? null,
-    managerName: payload.managerName ?? null,
+    workDone: payload.workDone ?? null,
+
+    loggedByUserId: payload.loggedByUserId ?? null,
+    loggedByName: payload.loggedByName ?? null,
+    loggedAt: payload.loggedAt ?? null,
 
     allocatedManagerId: row.allocated_manager_id,
+    allocatedWorkerName: payload.allocatedWorkerName ?? null,
+
+    workerIds,
+    workerNames: payload.workerNames ?? [],
+
+    inputsUsed,
+    editHistory,
 
     payment,
 
@@ -278,15 +328,6 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
 
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? null,
-
-    approvedByUserId: payload.approvedByUserId ?? null,
-    approvedByName: payload.approvedByName ?? null,
-    approvedAt: payload.approvedAt ?? null,
-
-    rejectionReason: payload.rejectionReason ?? null,
-    rejectedByUserId: payload.rejectedByUserId ?? null,
-    rejectedByName: payload.rejectedByName ?? null,
-    rejectedAt: payload.rejectedAt ?? null,
   };
 }
 
@@ -294,7 +335,7 @@ async function getRowById(id: string): Promise<WorkCardRow | null> {
   const { data, error } = await db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .eq('id', id)
     .maybeSingle<WorkCardRow>();
 
@@ -336,8 +377,14 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
     actualRatePerPerson: null,
     actualTotal: null,
     executionNotes: null,
-    managerId: null,
-    managerName: null,
+    workDone: null,
+
+    loggedByUserId: null,
+    loggedByName: null,
+    loggedAt: null,
+
+    allocatedWorkerName: input.allocatedWorkerName ?? null,
+    workerNames: [],
 
     payment: {
       isPaid: false,
@@ -346,20 +393,12 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
       paidAt: null,
       paidByUserId: null,
       paidByName: null,
+      notes: null,
     } as WorkCardPayment,
 
     createdByAdminId: input.createdByAdminId,
     createdByAdminName: input.createdByAdminName ?? null,
     createdByManagerId: input.createdByManagerId ?? null,
-
-    approvedByUserId: null,
-    approvedByName: null,
-    approvedAt: null,
-
-    rejectionReason: null,
-    rejectedByUserId: null,
-    rejectedByName: null,
-    rejectedAt: null,
   };
 
   const { data, error } = await db
@@ -370,10 +409,13 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
       project_id: input.projectId,
       title: input.workTitle,
       status: 'planned',
-      allocated_manager_id: input.allocatedManagerId,
+      allocated_manager_id: normalizeOptionalUuid(input.allocatedManagerId),
       payload,
+      inputs_used: [],
+      edit_history: [],
+      worker_ids: [],
     })
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .single<WorkCardRow>();
 
   if (error) {
@@ -381,7 +423,6 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
   }
 
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.log('[operationsWorkCardService] createWorkCard insert result', {
       id: data.id,
       project_id: data.project_id,
@@ -400,6 +441,7 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
     metadata: {
       workTitle: input.workTitle,
       projectId: input.projectId,
+      allocatedWorkerName: input.allocatedWorkerName,
     },
   });
 
@@ -415,7 +457,7 @@ export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCa
   const card = mapRowToWorkCard(row);
 
   if (card.status !== 'planned') {
-    throw new Error('Only planned cards can be edited in Phase 1');
+    throw new Error('Only planned cards can be edited');
   }
 
   const payload = {
@@ -435,6 +477,7 @@ export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCa
     stageName: input.stageName ?? card.stageName,
     blockId: input.blockId ?? card.blockId,
     blockName: input.blockName ?? card.blockName,
+    allocatedWorkerName: input.allocatedWorkerName ?? card.allocatedWorkerName,
   };
 
   const allocatedManagerId = normalizeOptionalUuid(
@@ -445,12 +488,12 @@ export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCa
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
-      status: card.status,
+      title: input.workTitle ?? card.workTitle,
       allocated_manager_id: allocatedManagerId,
       payload,
     })
     .eq('id', input.id)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .single<WorkCardRow>();
 
   if (error) {
@@ -486,7 +529,7 @@ export async function deleteWorkCard(params: { id: string; actorUserId: string }
   if (error) throw error;
 }
 
-export async function submitExecution(input: SubmitExecutionInput): Promise<WorkCard> {
+export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
   const row = await getRowById(input.id);
   if (!row) {
     throw new Error('Work card not found');
@@ -495,18 +538,17 @@ export async function submitExecution(input: SubmitExecutionInput): Promise<Work
   const card = mapRowToWorkCard(row);
 
   if (card.status !== 'planned') {
-    throw new Error('Only planned cards can be submitted');
-  }
-
-  if (card.allocatedManagerId && card.allocatedManagerId !== input.managerId) {
-    throw new Error('You are not allowed to submit this work card');
+    throw new Error('Only planned cards can have work recorded');
   }
 
   if (input.actualWorkers <= 0 || input.actualRatePerPerson <= 0) {
-    throw new Error('Actual workers and rate must be greater than zero');
+    throw new Error('Workers and rate must be greater than zero');
   }
 
   const actualTotal = computeActualTotal(input.actualWorkers, input.actualRatePerPerson);
+  const inputsUsed = input.inputsUsed ?? [];
+  const workerIds = input.workerIds ?? [];
+  const workerNames = input.workerNames ?? [];
 
   const payload = {
     ...row.payload,
@@ -514,20 +556,25 @@ export async function submitExecution(input: SubmitExecutionInput): Promise<Work
     actualWorkers: input.actualWorkers,
     actualRatePerPerson: input.actualRatePerPerson,
     actualTotal,
+    workDone: input.workDone,
     executionNotes: input.executionNotes ?? null,
-    managerId: input.managerId,
-    managerName: input.managerName,
+    loggedByUserId: input.actorUserId,
+    loggedByName: input.actorUserName ?? null,
+    loggedAt: new Date().toISOString(),
+    workerNames,
   };
 
   const { data, error } = await db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
-      status: 'submitted',
+      status: 'logged',
       payload,
+      inputs_used: inputsUsed,
+      worker_ids: workerIds,
     })
     .eq('id', input.id)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .single<WorkCardRow>();
 
   if (error) {
@@ -538,15 +585,21 @@ export async function submitExecution(input: SubmitExecutionInput): Promise<Work
     companyId: card.companyId,
     workCardId: card.id,
     projectId: card.projectId,
-    action: 'WORK_SUBMITTED',
+    action: 'WORK_LOGGED',
     userId: input.actorUserId,
     userName: input.actorUserName,
+    metadata: {
+      workDone: input.workDone,
+      actualWorkers: input.actualWorkers,
+      actualTotal,
+      inputsUsed: inputsUsed.map(i => `${i.quantity} ${i.unit} ${i.itemName}`).join(', '),
+    },
   });
 
   return mapRowToWorkCard(data);
 }
 
-export async function approveWorkCard(input: ApproveWorkCardInput): Promise<WorkCard> {
+export async function editWork(input: EditWorkInput): Promise<WorkCard> {
   const row = await getRowById(input.id);
   if (!row) {
     throw new Error('Work card not found');
@@ -554,30 +607,76 @@ export async function approveWorkCard(input: ApproveWorkCardInput): Promise<Work
 
   const card = mapRowToWorkCard(row);
 
-  if (card.status !== 'submitted') {
-    throw new Error('Only submitted cards can be approved');
+  if (card.status !== 'logged' && card.status !== 'edited') {
+    throw new Error('Only logged or edited cards can be edited');
   }
 
-  if (!card.actualWorkers || !card.actualRatePerPerson || card.actualWorkers <= 0 || card.actualRatePerPerson <= 0) {
-    throw new Error('Cannot approve card without valid actual workers and rate');
+  const changes: Record<string, { oldValue: unknown; newValue: unknown }> = {};
+
+  if (input.actualDate !== undefined && input.actualDate !== card.actualDate) {
+    changes.actualDate = { oldValue: card.actualDate, newValue: input.actualDate };
   }
+  if (input.actualWorkers !== undefined && input.actualWorkers !== card.actualWorkers) {
+    changes.actualWorkers = { oldValue: card.actualWorkers, newValue: input.actualWorkers };
+  }
+  if (input.actualRatePerPerson !== undefined && input.actualRatePerPerson !== card.actualRatePerPerson) {
+    changes.actualRatePerPerson = { oldValue: card.actualRatePerPerson, newValue: input.actualRatePerPerson };
+  }
+  if (input.workDone !== undefined && input.workDone !== card.workDone) {
+    changes.workDone = { oldValue: card.workDone, newValue: input.workDone };
+  }
+  if (input.executionNotes !== undefined && input.executionNotes !== card.executionNotes) {
+    changes.executionNotes = { oldValue: card.executionNotes, newValue: input.executionNotes };
+  }
+  if (input.inputsUsed !== undefined) {
+    const oldInputs = card.inputsUsed.map(i => `${i.quantity} ${i.unit} ${i.itemName}`).join(', ');
+    const newInputs = input.inputsUsed.map(i => `${i.quantity} ${i.unit} ${i.itemName}`).join(', ');
+    if (oldInputs !== newInputs) {
+      changes.inputsUsed = { oldValue: oldInputs, newValue: newInputs };
+    }
+  }
+
+  const editHistoryEntry: EditHistoryEntry = {
+    timestamp: new Date().toISOString(),
+    actorId: input.actorUserId,
+    actorName: input.actorUserName ?? null,
+    changes,
+  };
+
+  const existingHistory = Array.isArray(row.edit_history) ? row.edit_history : [];
+  const newEditHistory = [...existingHistory, editHistoryEntry];
+
+  const actualWorkers = input.actualWorkers ?? card.actualWorkers;
+  const actualRatePerPerson = input.actualRatePerPerson ?? card.actualRatePerPerson;
+  const actualTotal = computeActualTotal(actualWorkers, actualRatePerPerson);
+
+  const inputsUsed = input.inputsUsed ?? card.inputsUsed;
+  const workerIds = input.workerIds ?? card.workerIds;
+  const workerNames = input.workerNames ?? card.workerNames;
 
   const payload = {
     ...row.payload,
-    approvedByUserId: input.actorUserId,
-    approvedByName: input.actorUserName ?? null,
-    approvedAt: new Date().toISOString(),
+    actualDate: input.actualDate ?? card.actualDate,
+    actualWorkers,
+    actualRatePerPerson,
+    actualTotal,
+    workDone: input.workDone ?? card.workDone,
+    executionNotes: input.executionNotes ?? card.executionNotes,
+    workerNames,
   };
 
   const { data, error } = await db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
-      status: 'approved',
+      status: 'edited',
       payload,
+      inputs_used: inputsUsed,
+      edit_history: newEditHistory,
+      worker_ids: workerIds,
     })
     .eq('id', input.id)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .single<WorkCardRow>();
 
   if (error) {
@@ -588,61 +687,12 @@ export async function approveWorkCard(input: ApproveWorkCardInput): Promise<Work
     companyId: card.companyId,
     workCardId: card.id,
     projectId: card.projectId,
-    action: 'WORK_APPROVED',
+    action: 'WORK_EDITED',
     userId: input.actorUserId,
     userName: input.actorUserName,
-  });
-
-  return mapRowToWorkCard(data);
-}
-
-export async function rejectWorkCard(input: RejectWorkCardInput): Promise<WorkCard> {
-  const row = await getRowById(input.id);
-  if (!row) {
-    throw new Error('Work card not found');
-  }
-
-  const card = mapRowToWorkCard(row);
-
-  if (card.status !== 'submitted') {
-    throw new Error('Only submitted cards can be rejected');
-  }
-
-  if (!input.rejectionReason || input.rejectionReason.trim().length === 0) {
-    throw new Error('Rejection reason is required');
-  }
-
-  const payload = {
-    ...row.payload,
-    rejectionReason: input.rejectionReason,
-    rejectedByUserId: input.actorUserId,
-    rejectedByName: input.actorUserName ?? null,
-    rejectedAt: new Date().toISOString(),
-  };
-
-  const { data, error } = await db
-    .ops()
-    .from(WORK_CARDS_TABLE)
-    .update({
-      status: 'rejected',
-      payload,
-    })
-    .eq('id', input.id)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
-    .single<WorkCardRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  await logAuditEvent({
-    companyId: card.companyId,
-    workCardId: card.id,
-    projectId: card.projectId,
-    action: 'WORK_REJECTED',
-    userId: input.actorUserId,
-    userName: input.actorUserName,
-    metadata: { rejectionReason: input.rejectionReason },
+    metadata: {
+      changes,
+    },
   });
 
   return mapRowToWorkCard(data);
@@ -656,31 +706,26 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
 
   const card = mapRowToWorkCard(row);
 
-  if (card.status !== 'approved') {
-    throw new Error('Only approved cards can be marked as paid');
+  if (card.status !== 'logged' && card.status !== 'edited') {
+    throw new Error('Only logged or edited cards can be marked as paid');
   }
 
   if (card.payment.isPaid) {
     throw new Error('Card is already marked as paid');
   }
 
-  const baseAmount =
-    input.amount ??
-    card.actualTotal ??
-    computeActualTotal(card.actualWorkers ?? null, card.actualRatePerPerson ?? null) ??
-    card.plannedTotal;
-
-  if (!baseAmount || baseAmount <= 0) {
+  if (!input.amount || input.amount <= 0) {
     throw new Error('Payment amount must be greater than zero');
   }
 
   const payment: WorkCardPayment = {
     isPaid: true,
-    amount: baseAmount,
-    method: input.method,
-    paidAt: input.paidAt,
+    amount: input.amount,
+    method: input.method ?? 'cash',
+    paidAt: new Date().toISOString(),
     paidByUserId: input.actorUserId,
     paidByName: input.actorUserName ?? null,
+    notes: input.notes ?? null,
   };
 
   const payload = {
@@ -696,7 +741,7 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
       payload,
     })
     .eq('id', input.id)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .single<WorkCardRow>();
 
   if (error) {
@@ -710,22 +755,63 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
     action: 'WORK_PAID',
     userId: input.actorUserId,
     userName: input.actorUserName,
-    metadata: { amount: baseAmount, method: input.method },
+    metadata: { amount: input.amount, method: input.method ?? 'cash' },
   });
 
   return mapRowToWorkCard(data);
 }
 
+export async function recordInventoryUsageForWorkCard(params: {
+  workCardId: string;
+  companyId: string;
+  inputsUsed: InputUsed[];
+  actorUserId: string;
+  actorUserName?: string | null;
+}): Promise<void> {
+  if (!params.inputsUsed.length) return;
+
+  const records = params.inputsUsed.map(input => ({
+    work_card_id: params.workCardId,
+    inventory_item_id: input.itemId,
+    inventory_item_name: input.itemName,
+    quantity: input.quantity,
+    unit: input.unit,
+    recorded_by_user_id: params.actorUserId,
+    recorded_by_name: params.actorUserName ?? null,
+  }));
+
+  const { error } = await db
+    .ops()
+    .from(INVENTORY_USAGE_TABLE)
+    .insert(records);
+
+  if (error) {
+    console.error('[operations] Failed to record inventory usage', error);
+  }
+
+  await logAuditEvent({
+    companyId: params.companyId,
+    workCardId: params.workCardId,
+    action: 'INVENTORY_USED',
+    userId: params.actorUserId,
+    userName: params.actorUserName,
+    metadata: {
+      items: params.inputsUsed.map(i => `${i.quantity} ${i.unit} ${i.itemName}`),
+    },
+  });
+}
+
 export async function getWorkCardsForCompany(params: {
   companyId: string;
   projectId?: string | null;
+  status?: WorkCardStatus | WorkCardStatus[];
 }): Promise<WorkCard[]> {
   const companyId = requireCompanyId(params.companyId);
 
   let query = db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
@@ -733,25 +819,32 @@ export async function getWorkCardsForCompany(params: {
     query = query.eq('project_id', params.projectId);
   }
 
+  if (params.status) {
+    if (Array.isArray(params.status)) {
+      query = query.in('status', params.status);
+    } else {
+      query = query.eq('status', params.status);
+    }
+  }
+
   const { data, error } = await query.returns<WorkCardRow[]>();
   if (error) throw error;
 
   const cards = (data ?? []).map(mapRowToWorkCard);
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.log('[operationsWorkCardService] getWorkCardsForCompany', {
       companyId,
       projectId: params.projectId ?? 'all',
+      status: params.status ?? 'all',
       count: cards.length,
-      ids: cards.map((c) => c.id),
     });
   }
   return cards;
 }
 
-export async function getWorkCardsForManager(params: {
+export async function getWorkCardsForWorker(params: {
   companyId: string;
-  managerId: string;
+  workerId: string;
   projectId?: string | null;
 }): Promise<WorkCard[]> {
   const companyId = requireCompanyId(params.companyId);
@@ -759,9 +852,9 @@ export async function getWorkCardsForManager(params: {
   let query = db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, status, allocated_manager_id, payload, created_at, updated_at')
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
     .eq('company_id', companyId)
-    .eq('allocated_manager_id', params.managerId)
+    .eq('allocated_manager_id', params.workerId)
     .order('created_at', { ascending: false });
 
   if (params.projectId) {
@@ -774,19 +867,76 @@ export async function getWorkCardsForManager(params: {
   return (data ?? []).map(mapRowToWorkCard);
 }
 
-export function canManagerSubmit(card: WorkCard, managerIds: string[]): boolean {
-  if (card.status !== 'planned') return false;
-  if (!card.allocatedManagerId) return false;
-  if (!managerIds || managerIds.length === 0) return false;
-  return managerIds.includes(card.allocatedManagerId);
+export async function getTodayWorkCards(companyId: string): Promise<WorkCard[]> {
+  const today = new Date().toISOString().split('T')[0];
+  
+  const { data, error } = await db
+    .ops()
+    .from(WORK_CARDS_TABLE)
+    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .eq('company_id', companyId)
+    .gte('created_at', `${today}T00:00:00`)
+    .order('created_at', { ascending: false })
+    .returns<WorkCardRow[]>();
+
+  if (error) throw error;
+
+  return (data ?? []).map(mapRowToWorkCard);
 }
 
-export function canAdminApproveOrReject(card: WorkCard): boolean {
-  return card.status === 'submitted';
+export async function getTodayInventoryUsage(companyId: string): Promise<{
+  itemId: string;
+  itemName: string;
+  totalQuantity: number;
+  unit: string;
+}[]> {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data, error } = await db
+    .ops()
+    .from(INVENTORY_USAGE_TABLE)
+    .select('inventory_item_id, inventory_item_name, quantity, unit')
+    .gte('recorded_at', `${today}T00:00:00`);
+
+  if (error) {
+    console.error('[operations] Failed to get today inventory usage', error);
+    return [];
+  }
+
+  const usageMap = new Map<string, { itemId: string; itemName: string; totalQuantity: number; unit: string }>();
+  
+  for (const row of data ?? []) {
+    const key = row.inventory_item_id;
+    const existing = usageMap.get(key);
+    if (existing) {
+      existing.totalQuantity += Number(row.quantity);
+    } else {
+      usageMap.set(key, {
+        itemId: row.inventory_item_id,
+        itemName: row.inventory_item_name ?? 'Unknown',
+        totalQuantity: Number(row.quantity),
+        unit: row.unit ?? '',
+      });
+    }
+  }
+
+  return Array.from(usageMap.values());
+}
+
+export function canRecordWork(card: WorkCard): boolean {
+  return card.status === 'planned';
+}
+
+export function canEditWork(card: WorkCard): boolean {
+  return card.status === 'logged' || card.status === 'edited';
 }
 
 export function canMarkAsPaid(card: WorkCard): boolean {
-  return card.status === 'approved' && !card.payment.isPaid;
+  return (card.status === 'logged' || card.status === 'edited') && !card.payment.isPaid;
+}
+
+export function isEdited(card: WorkCard): boolean {
+  return card.status === 'edited' || (card.editHistory && card.editHistory.length > 0);
 }
 
 export type WorkCardAuditLog = {
@@ -795,6 +945,7 @@ export type WorkCardAuditLog = {
   workCardId: string;
   eventType: string;
   actorId: string | null;
+  actorName: string | null;
   message: string | null;
   payload: Record<string, unknown> | null;
   createdAt: string;
@@ -804,7 +955,7 @@ export async function getAuditLogsForWorkCard(workCardId: string): Promise<WorkC
   const { data, error } = await db
     .ops()
     .from(AUDIT_LOGS_TABLE)
-    .select('id, company_id, work_card_id, event_type, actor_id, message, payload, created_at')
+    .select('id, company_id, work_card_id, event_type, actor_id, actor_name, message, payload, created_at')
     .eq('work_card_id', workCardId)
     .order('created_at', { ascending: true });
 
@@ -816,10 +967,52 @@ export async function getAuditLogsForWorkCard(workCardId: string): Promise<WorkC
     workCardId: row.work_card_id,
     eventType: row.event_type,
     actorId: row.actor_id,
+    actorName: row.actor_name,
     message: row.message,
     payload: row.payload,
     createdAt: row.created_at,
   }));
 }
 
+export async function getRecentAuditLogs(companyId: string, limit = 50): Promise<WorkCardAuditLog[]> {
+  const { data, error } = await db
+    .ops()
+    .from(AUDIT_LOGS_TABLE)
+    .select('id, company_id, work_card_id, event_type, actor_id, actor_name, message, payload, created_at')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
 
+  if (error) throw error;
+
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    companyId: row.company_id,
+    workCardId: row.work_card_id,
+    eventType: row.event_type,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    message: row.message,
+    payload: row.payload,
+    createdAt: row.created_at,
+  }));
+}
+
+// Legacy compatibility exports
+export const getWorkCardsForManager = getWorkCardsForWorker;
+export function canManagerSubmit(card: WorkCard, managerIds: string[]): boolean {
+  if (card.status !== 'planned') return false;
+  if (!card.allocatedManagerId) return false;
+  if (!managerIds || managerIds.length === 0) return false;
+  return managerIds.includes(card.allocatedManagerId);
+}
+export function canAdminApproveOrReject(_card: WorkCard): boolean {
+  return false;
+}
+export const submitExecution = recordWork;
+export const approveWorkCard = async (_input: any): Promise<WorkCard> => {
+  throw new Error('Approval workflow removed - use recordWork instead');
+};
+export const rejectWorkCard = async (_input: any): Promise<WorkCard> => {
+  throw new Error('Rejection workflow removed');
+};

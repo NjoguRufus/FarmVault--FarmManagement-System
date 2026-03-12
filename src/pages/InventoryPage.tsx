@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, FileText } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -19,11 +18,11 @@ import { RecordUsageModal } from '@/components/inventory/RecordUsageModal';
 import { InventoryAuditDrawer } from '@/components/inventory/InventoryAuditDrawer';
 import { DeductStockModal } from '@/components/inventory/DeductStockModal';
 import { ArchiveConfirmDialog } from '@/components/inventory/ArchiveConfirmDialog';
+import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer';
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 
 export default function InventoryPage() {
-  const navigate = useNavigate();
   const { activeProject } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -192,6 +191,10 @@ export default function InventoryPage() {
   const [selectedItemForArchive, setSelectedItemForArchive] = useState<InventoryStockRow | null>(
     null,
   );
+  const [selectedItemForDetails, setSelectedItemForDetails] = useState<InventoryStockRow | null>(
+    null,
+  );
+  const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
 
   const { auditLogs, isLoading: auditLoading, refetch: refetchAudit } = useInventoryAuditLogs(companyId, null, 100);
   const { deductStock, archiveItem, restoreItem } = useInventoryActions({
@@ -203,7 +206,11 @@ export default function InventoryPage() {
   const isLoading = stockLoading || categoriesLoading || suppliersLoading || allStockLoading;
 
   const handleViewDetails = (itemId: string) => {
-    navigate(`/inventory/item/${itemId}`);
+    const item = stockItems.find(i => i.id === itemId);
+    if (item) {
+      setSelectedItemForDetails(item);
+      setDetailsDrawerOpen(true);
+    }
   };
 
   // IMPORTANT for RLS: use the active auth company id only (no project fallback).
@@ -274,7 +281,8 @@ export default function InventoryPage() {
           setUsageOpen(true);
         }}
         onEditItem={(item) => {
-          navigate(`/inventory/item/${item.id}`);
+          setSelectedItemForDetails(item);
+          setDetailsDrawerOpen(true);
         }}
         onDeductStock={(item) => {
           setSelectedItemForDeduct(item);
@@ -358,6 +366,28 @@ export default function InventoryPage() {
         companyId={effectiveCompanyId ?? ''}
         onArchived={handleInventoryChange}
         onArchive={handleArchiveItem}
+      />
+
+      <InventoryItemDrawer
+        open={detailsDrawerOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedItemForDetails(null);
+          setDetailsDrawerOpen(open);
+        }}
+        item={selectedItemForDetails}
+        onRecordStockIn={() => {
+          if (selectedItemForDetails) {
+            setSelectedItemForStock(selectedItemForDetails);
+            setStockInOpen(true);
+          }
+        }}
+        onRecordUsage={() => {
+          if (selectedItemForDetails) {
+            setSelectedItemForUsage(selectedItemForDetails);
+            setUsageOpen(true);
+          }
+        }}
+        onNotesUpdated={handleInventoryChange}
       />
     </div>
   );

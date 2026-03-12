@@ -22,6 +22,8 @@ import ProjectPlanningPage from "@/pages/ProjectPlanningPage";
 import CropStagesPage from "@/pages/CropStagesPage";
 import ExpensesPage from "@/pages/ExpensesPage";
 import OperationsPage from "@/pages/OperationsPage";
+import AdminOperationsPage from "@/pages/AdminOperationsPage";
+import StaffOperationsPage from "@/pages/StaffOperationsPage";
 import InventoryPage from "@/pages/InventoryPage";
 import InventoryItemDetailsPage from "@/pages/InventoryItemDetailsPage";
 import InventoryCategoriesPage from "@/pages/InventoryCategoriesPage";
@@ -255,7 +257,8 @@ const App = () => (
                 <Route path="/projects/:projectId/planning" element={<PermissionRoute module="planning"><RequireNotBroker><ProjectPlanningPage /></RequireNotBroker></PermissionRoute>} />
                 <Route path="/crop-stages" element={<PermissionRoute module="planning"><CropStagesPage /></PermissionRoute>} />
                 <Route path="/expenses" element={<PermissionRoute module="expenses"><ExpensesPage /></PermissionRoute>} />
-                <Route path="/operations" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
+                <Route path="/operations" element={<PermissionRoute module="operations"><AdminOperationsPage /></PermissionRoute>} />
+                <Route path="/operations/legacy" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
                 <Route path="/inventory" element={<PermissionRoute module="inventory"><InventoryPage /></PermissionRoute>} />
                 <Route path="/inventory/item/:itemId" element={<PermissionRoute module="inventory"><InventoryItemDetailsPage /></PermissionRoute>} />
                 <Route path="/inventory/categories" element={<PermissionRoute module="inventory"><InventoryCategoriesPage /></PermissionRoute>} />
@@ -338,7 +341,7 @@ const App = () => (
                   path="operations"
                   element={
                     <PermissionRoute module="operations">
-                      <OperationsPage />
+                      <StaffOperationsPage />
                     </PermissionRoute>
                   }
                 />

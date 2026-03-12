@@ -886,84 +886,91 @@ export interface CodeRedMessage {
   createdAt: Date;
 }
 
-// --- Operations Work Cards (Admin creates, Manager submits execution only) ---
+// --- Operations Work Cards (simplified flow: planned → logged → edited → paid) ---
 
-export type WorkCardStatus = 'planned' | 'submitted' | 'approved' | 'rejected' | 'paid';
+export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
 
-export interface WorkCardPlanned {
-  date: Date | unknown;
-  workers: number;
-  inputs?: string;
-  fuel?: string;
-  chemicals?: string;
-  fertilizer?: string;
-  estimatedCost?: number;
+export interface InputUsed {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
 }
 
-export interface WorkCardActual {
-  submitted: boolean;
-  managerId?: string;
-  managerName?: string;
-  actualDate?: Date | unknown;
-  actualWorkers?: number;
-  /** Price per person (KES). Total labour = actualWorkers * ratePerPerson; expense created when marked as paid. */
-  ratePerPerson?: number;
-  actualInputsUsed?: string;
-  actualFuelUsed?: string;
-  actualChemicalsUsed?: string;
-  actualFertilizerUsed?: string;
-  notes?: string;
-  /** For inventory deduction on approve: item and quantities used (one resource per card) */
-  actualResourceItemId?: string;
-  actualResourceQuantity?: number;
-  actualResourceQuantitySecondary?: number;
-  submittedAt?: Date | unknown;
-  /** Optional: version history entries for resubmissions */
-  actualHistory?: Array<{
-    actualWorkers?: number;
-    actualInputsUsed?: string;
-    actualFuelUsed?: string;
-    actualChemicalsUsed?: string;
-    actualFertilizerUsed?: string;
-    notes?: string;
-    submittedAt: Date | unknown;
-  }>;
+export interface EditHistoryEntry {
+  timestamp: string;
+  actorId: string;
+  actorName: string | null;
+  changes: Record<string, { oldValue: unknown; newValue: unknown }>;
 }
 
 export interface WorkCardPayment {
   isPaid: boolean;
-  paidAt?: Date | unknown;
-  paidBy?: string;
+  amount?: number | null;
+  method?: 'cash' | 'mpesa' | 'bank' | 'other' | null;
+  paidAt?: string | null;
+  paidByUserId?: string | null;
+  paidByName?: string | null;
+  notes?: string | null;
 }
 
 export interface OperationsWorkCard {
   id: string;
   companyId: string;
-  projectId: string;
-  stageId: string;
-  stageName?: string;
-  /** When project uses blocks, optional block this work is planned for. */
+  projectId: string | null;
+  stageId: string | null;
+  stageName?: string | null;
   blockId?: string | null;
   blockName?: string | null;
   workTitle: string;
   workCategory: string;
 
-  planned: WorkCardPlanned;
-  actual: WorkCardActual;
+  // Planned section
+  plannedDate: string | null;
+  plannedWorkers: number;
+  plannedRatePerPerson: number;
+  plannedTotal: number;
+  notes: string | null;
+
+  // Actual work section (filled when logged)
+  actualDate: string | null;
+  actualWorkers: number | null;
+  actualRatePerPerson: number | null;
+  actualTotal: number | null;
+  executionNotes: string | null;
+  workDone: string | null;
+
+  // Worker who logged the work
+  loggedByUserId: string | null;
+  loggedByName: string | null;
+  loggedAt: string | null;
+
+  // Allocated worker (who should record work)
+  allocatedManagerId: string | null;
+  allocatedWorkerName: string | null;
+
+  // Workers involved in the work
+  workerIds: string[];
+  workerNames: string[];
+
+  // Inputs used (inventory items)
+  inputsUsed: InputUsed[];
+
+  // Edit history for transparency
+  editHistory: EditHistoryEntry[];
+
+  // Payment info
   payment: WorkCardPayment;
+
+  // Status
   status: WorkCardStatus;
 
-  allocatedManagerId: string | null;
-  /** Admin-created cards set this; manager-created cards may leave it empty. */
+  // Creator info
   createdByAdminId: string;
-  /** Optional flag for cards that originate from a manager "Log Daily Work" submission. */
+  createdByAdminName: string | null;
   createdByManagerId?: string | null;
-  createdAt: Date | unknown;
-  /** Set when status = approved */
-  approvedBy?: string;
-  approvedAt?: Date | unknown;
-  /** Set when status = rejected */
-  rejectionReason?: string;
+  createdAt: string;
+  updatedAt?: string | null;
 }
 
 // --- Field Cash Harvest Collection (French Beans: pickers + weigh + buyer) ---
