@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useInventoryStock, useInventoryCategories } from '@/hooks/useInventoryReadModels';
 import { useInventoryItems } from '@/hooks/useInventory';
+import { useInventoryAuditLogs, useInventoryActions, useInventoryNotifications } from '@/hooks/useInventoryAudit';
 import { listSuppliers } from '@/services/suppliersService';
 import type { Supplier } from '@/types';
 import { InventoryStatsCards } from '@/components/inventory/InventoryStatsCards';
@@ -14,6 +16,9 @@ import { InventoryTable } from '@/components/inventory/InventoryTable';
 import { AddInventoryItemModal } from '../components/inventory/AddInventoryItemModal';
 import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import { RecordUsageModal } from '@/components/inventory/RecordUsageModal';
+import { InventoryAuditDrawer } from '@/components/inventory/InventoryAuditDrawer';
+import { DeductStockModal } from '@/components/inventory/DeductStockModal';
+import { ArchiveConfirmDialog } from '@/components/inventory/ArchiveConfirmDialog';
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 
@@ -81,6 +86,43 @@ export default function InventoryPage() {
   const handleInventoryChange = () => {
     refetchStock();
     invalidateStockQueries();
+    refetchAudit();
+  };
+
+  const handleDeductStock = async (params: {
+    companyId: string;
+    itemId: string;
+    quantity: number;
+    reason?: string;
+  }) => {
+    const item = stockItems.find(i => i.id === params.itemId);
+    await deductStock({
+      itemId: params.itemId,
+      quantity: params.quantity,
+      reason: params.reason,
+      itemName: item?.name,
+    });
+  };
+
+  const handleArchiveItem = async (params: {
+    companyId: string;
+    itemId: string;
+  }) => {
+    const item = stockItems.find(i => i.id === params.itemId);
+    await archiveItem({
+      itemId: params.itemId,
+      itemName: item?.name,
+    });
+  };
+
+  const handleRestoreItem = async (itemId: string, itemName: string) => {
+    try {
+      await restoreItem({ itemId, itemName });
+      toast.success(`${itemName} has been restored`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to restore item';
+      toast.error(message);
+    }
   };
 
   // Legacy items are used only as a fallback for stats until all data is migrated to Supabase.
@@ -134,12 +176,28 @@ export default function InventoryPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [stockInOpen, setStockInOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [deductOpen, setDeductOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [selectedItemForStock, setSelectedItemForStock] = useState<InventoryStockRow | null>(
     null,
   );
   const [selectedItemForUsage, setSelectedItemForUsage] = useState<InventoryStockRow | null>(
     null,
   );
+  const [selectedItemForDeduct, setSelectedItemForDeduct] = useState<InventoryStockRow | null>(
+    null,
+  );
+  const [selectedItemForArchive, setSelectedItemForArchive] = useState<InventoryStockRow | null>(
+    null,
+  );
+
+  const { auditLogs, isLoading: auditLoading, refetch: refetchAudit } = useInventoryAuditLogs(companyId, null, 100);
+  const { deductStock, archiveItem, restoreItem } = useInventoryActions({
+    companyId,
+    onSuccess: handleInventoryChange,
+  });
+  const { notifyUsageRecorded } = useInventoryNotifications();
 
   const isLoading = stockLoading || categoriesLoading || suppliersLoading || allStockLoading;
 
@@ -159,7 +217,7 @@ export default function InventoryPage() {
             Track your farm inputs, current stock, and usage across projects.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between w-full sm:w-auto sm:justify-end gap-2">
           <button
             type="button"
             className="fv-btn fv-btn--primary"
@@ -168,6 +226,14 @@ export default function InventoryPage() {
           >
             <Plus className="h-4 w-4" />
             Add Item
+          </button>
+          <button
+            type="button"
+            className="fv-btn fv-btn--outline"
+            onClick={() => setAuditOpen(true)}
+          >
+            <FileText className="h-4 w-4" />
+            Inventory Audit
           </button>
         </div>
       </div>
@@ -204,6 +270,17 @@ export default function InventoryPage() {
           setSelectedItemForUsage(item);
           setUsageOpen(true);
         }}
+        onEditItem={(item) => {
+          navigate(`/inventory/item/${item.id}`);
+        }}
+        onDeductStock={(item) => {
+          setSelectedItemForDeduct(item);
+          setDeductOpen(true);
+        }}
+        onArchiveItem={(item) => {
+          setSelectedItemForArchive(item);
+          setArchiveOpen(true);
+        }}
       />
 
       {canAddInventoryItem && (
@@ -239,7 +316,45 @@ export default function InventoryPage() {
         companyId={effectiveCompanyId ?? ''}
         item={selectedItemForUsage ?? stockItems[0] ?? null}
         projects={activeProject ? [activeProject] : []}
-        onRecorded={handleInventoryChange}
+        onRecorded={() => {
+          handleInventoryChange();
+          if (selectedItemForUsage) {
+            notifyUsageRecorded(selectedItemForUsage.name, 0);
+          }
+        }}
+      />
+
+      <InventoryAuditDrawer
+        open={auditOpen}
+        onOpenChange={setAuditOpen}
+        auditLogs={auditLogs}
+        isLoading={auditLoading}
+        onRestoreItem={handleRestoreItem}
+        canRestore={can('inventory', 'addItem')}
+      />
+
+      <DeductStockModal
+        open={deductOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedItemForDeduct(null);
+          setDeductOpen(open);
+        }}
+        item={selectedItemForDeduct}
+        companyId={effectiveCompanyId ?? ''}
+        onDeducted={handleInventoryChange}
+        onDeduct={handleDeductStock}
+      />
+
+      <ArchiveConfirmDialog
+        open={archiveOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedItemForArchive(null);
+          setArchiveOpen(open);
+        }}
+        item={selectedItemForArchive}
+        companyId={effectiveCompanyId ?? ''}
+        onArchived={handleInventoryChange}
+        onArchive={handleArchiveItem}
       />
     </div>
   );

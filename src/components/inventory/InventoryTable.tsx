@@ -11,7 +11,9 @@ import {
   Box,
   Plus,
   Minus,
-  Eye
+  Eye,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import type { InventoryStockRow, PackagingType } from '@/services/inventoryReadModelService';
 import { LowStockBadge } from './LowStockBadge';
@@ -20,6 +22,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 
 interface InventoryTableProps {
@@ -28,6 +31,9 @@ interface InventoryTableProps {
   onViewDetails?: (itemId: string) => void;
   onRecordStockIn?: (item: InventoryStockRow) => void;
   onRecordUsage?: (item: InventoryStockRow) => void;
+  onEditItem?: (item: InventoryStockRow) => void;
+  onDeductStock?: (item: InventoryStockRow) => void;
+  onArchiveItem?: (item: InventoryStockRow) => void;
 }
 
 const packagingConfig: Record<PackagingType, { 
@@ -243,7 +249,10 @@ function ListView({
   items, 
   onViewDetails, 
   onRecordStockIn, 
-  onRecordUsage 
+  onRecordUsage,
+  onEditItem,
+  onDeductStock,
+  onArchiveItem,
 }: Omit<InventoryTableProps, 'isLoading'>) {
   return (
     <div className="w-full bg-card rounded-xl border border-border/50 overflow-hidden">
@@ -314,10 +323,23 @@ function ListView({
                         View details
                       </DropdownMenuItem>
                     )}
+                    {onEditItem && (
+                      <DropdownMenuItem onClick={() => onEditItem(item)}>
+                        <Edit3 className="h-4 w-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuSeparator />
                     {onRecordStockIn && (
                       <DropdownMenuItem onClick={() => onRecordStockIn(item)}>
-                        <Plus className="h-4 w-4 mr-2" />
+                        <Plus className="h-4 w-4 mr-2 text-emerald-600" />
                         Stock in
+                      </DropdownMenuItem>
+                    )}
+                    {onDeductStock && (
+                      <DropdownMenuItem onClick={() => onDeductStock(item)}>
+                        <Minus className="h-4 w-4 mr-2 text-orange-600" />
+                        Deduct
                       </DropdownMenuItem>
                     )}
                     {onRecordUsage && (
@@ -325,6 +347,18 @@ function ListView({
                         <Minus className="h-4 w-4 mr-2" />
                         Record usage
                       </DropdownMenuItem>
+                    )}
+                    {onArchiveItem && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem 
+                          onClick={() => onArchiveItem(item)}
+                          className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </>
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -341,7 +375,10 @@ function CardView({
   items, 
   onViewDetails, 
   onRecordStockIn, 
-  onRecordUsage 
+  onRecordUsage,
+  onEditItem,
+  onDeductStock,
+  onArchiveItem,
 }: Omit<InventoryTableProps, 'isLoading'>) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -352,13 +389,51 @@ function CardView({
         return (
           <div
             key={item.id}
-            className="bg-card rounded-xl border border-border/50 p-3 cursor-pointer hover:shadow-md hover:border-primary/20 transition-all"
+            className="bg-card rounded-xl border border-border/50 p-3 cursor-pointer hover:shadow-md hover:border-primary/20 transition-all relative group"
             onClick={() => onViewDetails?.(item.id)}
           >
+            {/* Actions Menu - top right */}
+            <div 
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger className="p-1.5 rounded-md bg-background/80 hover:bg-muted border border-border/50 focus:outline-none">
+                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {onEditItem && (
+                    <DropdownMenuItem onClick={() => onEditItem(item)}>
+                      <Edit3 className="h-4 w-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                  )}
+                  {onDeductStock && (
+                    <DropdownMenuItem onClick={() => onDeductStock(item)}>
+                      <Minus className="h-4 w-4 mr-2 text-orange-600" />
+                      Deduct
+                    </DropdownMenuItem>
+                  )}
+                  {onArchiveItem && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem 
+                        onClick={() => onArchiveItem(item)}
+                        className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
             {/* Row 1: Icon + Name + Category */}
             <div className="flex items-start gap-3 mb-3">
               <ItemIcon item={item} size="md" />
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 pr-8">
                 <p className="font-semibold text-foreground truncate leading-tight" title={item.name}>
                   {item.name}
                 </p>
@@ -416,6 +491,9 @@ export function InventoryTable({
   onViewDetails,
   onRecordStockIn,
   onRecordUsage,
+  onEditItem,
+  onDeductStock,
+  onArchiveItem,
 }: InventoryTableProps) {
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
 
@@ -482,6 +560,9 @@ export function InventoryTable({
           onViewDetails={onViewDetails}
           onRecordStockIn={onRecordStockIn}
           onRecordUsage={onRecordUsage}
+          onEditItem={onEditItem}
+          onDeductStock={onDeductStock}
+          onArchiveItem={onArchiveItem}
         />
       ) : (
         <CardView
@@ -489,6 +570,9 @@ export function InventoryTable({
           onViewDetails={onViewDetails}
           onRecordStockIn={onRecordStockIn}
           onRecordUsage={onRecordUsage}
+          onEditItem={onEditItem}
+          onDeductStock={onDeductStock}
+          onArchiveItem={onArchiveItem}
         />
       )}
     </div>
