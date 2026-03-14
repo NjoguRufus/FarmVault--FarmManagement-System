@@ -24,6 +24,7 @@ import {
   HelpCircle,
   Check,
   X,
+  AlertTriangle,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -104,6 +105,9 @@ const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 
 type ViewMode = 'list' | 'intake' | 'pay' | 'buyer';
 
+/** Threshold above which a crate weight is considered unusual and triggers a confirmation */
+const UNUSUAL_WEIGHT_THRESHOLD_KG = 25;
+
 export default function HarvestCollectionsPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const navigate = useNavigate();
@@ -159,6 +163,10 @@ export default function HarvestCollectionsPage() {
   const [editingWeighPickerName, setEditingWeighPickerName] = useState('');
   const [editingWeighPickerSaving, setEditingWeighPickerSaving] = useState(false);
   const editingWeighPickerNameRef = useRef<HTMLInputElement>(null);
+  const [isSavingWeight, setIsSavingWeight] = useState(false);
+  const weighKgInputRef = useRef<HTMLInputElement>(null);
+  // Unusual weight confirmation dialog
+  const [unusualWeightConfirm, setUnusualWeightConfirm] = useState<{ kg: number; mode: 'close' | 'stay' | 'next' } | null>(null);
   const [recentPickerIds, setRecentPickerIds] = useState<string[]>([]);
   const [lastWeighPickerId, setLastWeighPickerId] = useState<string | null>(null);
   const [quickPayOpen, setQuickPayOpen] = useState(false);
@@ -191,9 +199,12 @@ export default function HarvestCollectionsPage() {
   const [quickMode, setQuickMode] = useState(false);
   const [quickIntakePickerNumber, setQuickIntakePickerNumber] = useState('');
   const [quickIntakeKg, setQuickIntakeKg] = useState('');
+  const [isSavingQuickIntake, setIsSavingQuickIntake] = useState(false);
   const quickIntakePickerNumberRef = useRef<HTMLInputElement>(null);
   const quickIntakeKgRef = useRef<HTMLInputElement>(null);
   const quickIntakeContainerRef = useRef<HTMLDivElement>(null);
+  // Unusual weight confirmation for quick intake
+  const [unusualQuickWeightConfirm, setUnusualQuickWeightConfirm] = useState<{ kg: number; saveAndStay: boolean } | null>(null);
   const [editIntakeEntry, setEditIntakeEntry] = useState<{
     id: string;
     pickerId: string;
@@ -1389,7 +1400,9 @@ export default function HarvestCollectionsPage() {
 
   type SaveWeighMode = 'close' | 'stay' | 'next';
 
-  const handleAddWeigh = (saveMode: SaveWeighMode = 'close') => {
+  const handleAddWeigh = async (saveMode: SaveWeighMode = 'close', bypassWeightCheck = false) => {
+    if (isSavingWeight) return; // Prevent double submission
+
     if (!canManageIntake) {
       toast({
         title: 'Permission denied',
@@ -1406,70 +1419,85 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
+    // Check for unusual weight and show confirmation if needed
+    if (kg > UNUSUAL_WEIGHT_THRESHOLD_KG && !bypassWeightCheck) {
+      setUnusualWeightConfirm({ kg, mode: saveMode });
+      return;
+    }
+
     const suggestedTrip = nextTripForPicker[weighPickerId] ?? 1;
     const tripOverridden = trip !== suggestedTrip;
     const savedPickerId = weighPickerId;
 
-    setLastWeighPickerId(savedPickerId);
-    setRecentPickerIds((prev) => {
-      const next = [savedPickerId, ...prev.filter((id) => id !== savedPickerId)].slice(0, 10);
-      return next;
-    });
+    setIsSavingWeight(true);
 
-    if (saveMode === 'close') {
-      setAddWeighOpen(false);
-      setWeighPickerId('');
-      setWeighKg('');
-      setWeighTrip('1');
-      setWeighOpenedFromCard(false);
-    } else {
-      setWeighKg('');
-      const nextTrip = nextTripForPicker[savedPickerId] ?? 1;
-      setWeighTrip(String(saveMode === 'stay' ? nextTrip + 1 : nextTrip));
-      if (saveMode === 'next') {
-        const idx = filteredPickers.findIndex((p) => p.id === savedPickerId);
-        const nextPicker = idx >= 0 && idx < filteredPickers.length - 1 ? filteredPickers[idx + 1] : null;
-        if (nextPicker) {
-          setWeighPickerId(nextPicker.id);
-          setWeighTrip(String(nextTripForPicker[nextPicker.id] ?? 1));
-          setWeighOpenedFromCard(true);
+    try {
+      await addPickerWeighEntry({
+        companyId,
+        pickerId: savedPickerId,
+        collectionId: selectedCollectionId,
+        weightKg: kg,
+        tripNumber: trip,
+        ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
+      });
+
+      if (import.meta.env.DEV) console.log('[Harvest] Intake save success', { pickerId: savedPickerId, kg, collectionId: selectedCollectionId });
+
+      setLastWeighPickerId(savedPickerId);
+      setRecentPickerIds((prev) => {
+        const next = [savedPickerId, ...prev.filter((id) => id !== savedPickerId)].slice(0, 10);
+        return next;
+      });
+
+      if (saveMode === 'close') {
+        setAddWeighOpen(false);
+        setWeighPickerId('');
+        setWeighKg('');
+        setWeighTrip('1');
+        setWeighOpenedFromCard(false);
+      } else {
+        setWeighKg('');
+        const nextTrip = nextTripForPicker[savedPickerId] ?? 1;
+        setWeighTrip(String(saveMode === 'stay' ? nextTrip + 1 : nextTrip));
+        if (saveMode === 'next') {
+          const idx = filteredPickers.findIndex((p) => p.id === savedPickerId);
+          const nextPicker = idx >= 0 && idx < filteredPickers.length - 1 ? filteredPickers[idx + 1] : null;
+          if (nextPicker) {
+            setWeighPickerId(nextPicker.id);
+            setWeighTrip(String(nextTripForPicker[nextPicker.id] ?? 1));
+            setWeighOpenedFromCard(true);
+          } else {
+            setAddWeighOpen(false);
+            setWeighPickerId('');
+            setWeighOpenedFromCard(false);
+          }
         } else {
-          setAddWeighOpen(false);
-          setWeighPickerId('');
-          setWeighOpenedFromCard(false);
+          // saveMode === 'stay' - auto-focus the kg input for next entry
+          requestAnimationFrame(() => {
+            weighKgInputRef.current?.focus();
+          });
         }
       }
-    }
 
-    requestAnimationFrame(() => {
       toast({ title: 'Saved' });
-    });
-
-    addPickerWeighEntry({
-      companyId,
-      pickerId: savedPickerId,
-      collectionId: selectedCollectionId,
-      weightKg: kg,
-      tripNumber: trip,
-      ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
-    })
-      .then(() => {
-        if (import.meta.env.DEV) console.log('[Harvest] Intake save success', { pickerId: savedPickerId, kg, collectionId: selectedCollectionId });
-        queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
-      })
-      .catch((e: any) => {
-        const msg = e?.message ?? 'Could not save weight';
-        toast({ title: 'Save failed', description: msg, variant: 'destructive' });
-        if (import.meta.env.DEV) console.warn('[Harvest] Intake save failed', msg);
-      });
+      queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+    } catch (e: any) {
+      const msg = e?.message ?? 'Could not save weight';
+      toast({ title: 'Save failed', description: msg, variant: 'destructive' });
+      if (import.meta.env.DEV) console.warn('[Harvest] Intake save failed', msg);
+    } finally {
+      setIsSavingWeight(false);
+    }
   };
 
   const scrollQuickIntakeIntoView = () => {
     quickIntakeContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const handleQuickIntakeNextPicker = (saveAndStay: boolean) => {
+  const handleQuickIntakeNextPicker = async (saveAndStay: boolean, bypassWeightCheck = false) => {
+    if (isSavingQuickIntake) return; // Prevent double submission
+
     if (!canManageIntake || !companyId || !selectedCollectionId || !selectedCollection) return;
     const numStr = (quickIntakePickerNumber || '').trim();
     const kg = Number((quickIntakeKg || '').replace(',', '.'));
@@ -1483,6 +1511,13 @@ export default function HarvestCollectionsPage() {
       quickIntakeKgRef.current?.focus();
       return;
     }
+
+    // Check for unusual weight and show confirmation if needed
+    if (kg > UNUSUAL_WEIGHT_THRESHOLD_KG && !bypassWeightCheck) {
+      setUnusualQuickWeightConfirm({ kg, saveAndStay });
+      return;
+    }
+
     const pickerNum = parseInt(numStr, 10);
     if (Number.isNaN(pickerNum) || pickerNum < 1) {
       toast({ title: 'Invalid picker number', variant: 'destructive' });
@@ -1495,30 +1530,36 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Picker not found', description: `No picker #${numStr} in this collection.`, variant: 'destructive' });
       return;
     }
-    addPickerWeighEntry({
-      companyId,
-      collectionId: selectedCollectionId,
-      pickerId: picker.id,
-      weightKg: kg,
-      recordedBy: user?.id ?? undefined,
-      pricePerKg: selectedCollection?.pricePerKgPicker,
-    })
-      .then(() => {
-        queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
-        queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
-        if (!saveAndStay) {
-          setQuickIntakePickerNumber('');
-          setQuickIntakeKg('');
-          requestAnimationFrame(() => quickIntakePickerNumberRef.current?.focus());
-        } else {
-          setQuickIntakeKg('');
-          requestAnimationFrame(() => quickIntakeKgRef.current?.focus());
-        }
-        toast({ title: 'Saved' });
-      })
-      .catch((e: any) => {
-        toast({ title: 'Save failed', description: e?.message ?? 'Could not save intake', variant: 'destructive' });
+
+    setIsSavingQuickIntake(true);
+
+    try {
+      await addPickerWeighEntry({
+        companyId,
+        collectionId: selectedCollectionId,
+        pickerId: picker.id,
+        weightKg: kg,
+        recordedBy: user?.id ?? undefined,
+        pricePerKg: selectedCollection?.pricePerKgPicker,
       });
+
+      queryClient.invalidateQueries({ queryKey: ['pickerIntake'] });
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+
+      if (!saveAndStay) {
+        setQuickIntakePickerNumber('');
+        setQuickIntakeKg('');
+        requestAnimationFrame(() => quickIntakePickerNumberRef.current?.focus());
+      } else {
+        setQuickIntakeKg('');
+        requestAnimationFrame(() => quickIntakeKgRef.current?.focus());
+      }
+      toast({ title: 'Saved' });
+    } catch (e: any) {
+      toast({ title: 'Save failed', description: e?.message ?? 'Could not save intake', variant: 'destructive' });
+    } finally {
+      setIsSavingQuickIntake(false);
+    }
   };
 
   const handleSaveEditIntake = async () => {
@@ -2824,6 +2865,7 @@ export default function HarvestCollectionsPage() {
                                     placeholder="e.g. 5"
                                     className="min-h-12 text-lg font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 transition-colors"
                                     autoFocus
+                                    disabled={isSavingQuickIntake}
                                   />
                                   {quickIntakePickerNumber.trim() !== '' && (
                                     <div className="mt-1.5">
@@ -2861,17 +2903,19 @@ export default function HarvestCollectionsPage() {
                                     onChange={(e) => setQuickIntakeKg(e.target.value)}
                                     onFocus={scrollQuickIntakeIntoView}
                                     onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleQuickIntakeNextPicker(false);
+                                      if (e.key === 'Enter' && !isSavingQuickIntake) void handleQuickIntakeNextPicker(false);
                                     }}
                                     placeholder="e.g. 4.5"
                                     className="min-h-12 text-xl font-bold tabular-nums touch-manipulation rounded-md border border-input focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 bg-sky-50/50 dark:bg-sky-950/20 transition-colors"
+                                    disabled={isSavingQuickIntake}
                                   />
                                 </div>
                               </div>
                               <div className="flex flex-col sm:flex-row gap-2">
                                 <Button
-                                  onClick={() => handleQuickIntakeNextPicker(false)}
+                                  onClick={() => void handleQuickIntakeNextPicker(false)}
                                   disabled={
+                                    isSavingQuickIntake ||
                                     !quickIntakePickerNumber.trim() ||
                                     !quickIntakeKg.trim() ||
                                     selectedCollection?.status === 'closed' ||
@@ -2879,12 +2923,14 @@ export default function HarvestCollectionsPage() {
                                   }
                                   className="min-h-12 w-full font-bold text-sm bg-sky-600 hover:bg-sky-700 active:scale-[0.99] rounded-md shadow-sm touch-manipulation"
                                 >
+                                  {isSavingQuickIntake ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                   Next Picker
                                 </Button>
                                 <Button
                                   variant="outline"
-                                  onClick={() => handleQuickIntakeNextPicker(true)}
+                                  onClick={() => void handleQuickIntakeNextPicker(true)}
                                   disabled={
+                                    isSavingQuickIntake ||
                                     !quickIntakePickerNumber.trim() ||
                                     !quickIntakeKg.trim() ||
                                     selectedCollection?.status === 'closed' ||
@@ -2892,6 +2938,7 @@ export default function HarvestCollectionsPage() {
                                   }
                                   className="min-h-10 sm:min-h-12 sm:flex-shrink-0 font-medium rounded-md border-sky-300 text-sky-800 dark:border-sky-700 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-950/30 touch-manipulation"
                                 >
+                                  {isSavingQuickIntake ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                                   Save & Stay
                                 </Button>
                               </div>
@@ -4102,6 +4149,7 @@ export default function HarvestCollectionsPage() {
               <div>
                 <Label>Weight (kg)</Label>
                 <Input
+                  ref={weighKgInputRef}
                   type="number"
                   inputMode="decimal"
                   min="0.1"
@@ -4111,6 +4159,7 @@ export default function HarvestCollectionsPage() {
                   placeholder="e.g. 5.2"
                   className="mt-1 min-h-14 rounded-xl text-lg font-semibold tabular-nums touch-manipulation"
                   autoFocus
+                  disabled={isSavingWeight}
                 />
               </div>
               <div>
@@ -4121,15 +4170,26 @@ export default function HarvestCollectionsPage() {
                   value={weighTrip}
                   onChange={(e) => setWeighTrip(e.target.value)}
                   className="mt-1 min-h-11 rounded-xl"
+                  disabled={isSavingWeight}
                 />
               </div>
 
               {(weighPickerId && weighKg.trim()) && (
                 <div className="flex gap-2 w-full">
-                  <Button onClick={() => handleAddWeigh('stay')} className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation">
+                  <Button 
+                    onClick={() => void handleAddWeigh('stay')} 
+                    disabled={isSavingWeight}
+                    className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation"
+                  >
+                    {isSavingWeight ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                     Save & Stay
                   </Button>
-                  <Button onClick={() => handleAddWeigh('next')} className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation">
+                  <Button 
+                    onClick={() => void handleAddWeigh('next')} 
+                    disabled={isSavingWeight}
+                    className="min-h-12 flex-1 font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 touch-manipulation"
+                  >
+                    {isSavingWeight ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                     Save & Next
                   </Button>
                 </div>
@@ -4244,6 +4304,82 @@ export default function HarvestCollectionsPage() {
         stepIndex={harvestTourStepIndex}
         onCallback={handleHarvestTourCallback}
       />
+
+      {/* Unusual Weight Confirmation Dialog - Add Weight Form */}
+      <Dialog open={unusualWeightConfirm !== null} onOpenChange={(open) => !open && setUnusualWeightConfirm(null)}>
+        <DialogContent className="w-[90vw] max-w-sm rounded-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Unusual crate weight
+            </DialogTitle>
+            <DialogDescription>
+              This crate weight ({unusualWeightConfirm?.kg}kg) is above the expected range ({UNUSUAL_WEIGHT_THRESHOLD_KG}kg). Please confirm before saving.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUnusualWeightConfirm(null);
+                requestAnimationFrame(() => weighKgInputRef.current?.focus());
+              }}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Edit Weight
+            </Button>
+            <Button
+              onClick={() => {
+                if (unusualWeightConfirm) {
+                  void handleAddWeigh(unusualWeightConfirm.mode, true);
+                }
+                setUnusualWeightConfirm(null);
+              }}
+              className="min-h-11 w-full sm:w-auto bg-amber-600 hover:bg-amber-700"
+            >
+              Save Anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unusual Weight Confirmation Dialog - Quick Intake Form */}
+      <Dialog open={unusualQuickWeightConfirm !== null} onOpenChange={(open) => !open && setUnusualQuickWeightConfirm(null)}>
+        <DialogContent className="w-[90vw] max-w-sm rounded-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Unusual crate weight
+            </DialogTitle>
+            <DialogDescription>
+              This crate weight ({unusualQuickWeightConfirm?.kg}kg) is above the expected range ({UNUSUAL_WEIGHT_THRESHOLD_KG}kg). Please confirm before saving.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUnusualQuickWeightConfirm(null);
+                requestAnimationFrame(() => quickIntakeKgRef.current?.focus());
+              }}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Edit Weight
+            </Button>
+            <Button
+              onClick={() => {
+                if (unusualQuickWeightConfirm) {
+                  void handleQuickIntakeNextPicker(unusualQuickWeightConfirm.saveAndStay, true);
+                }
+                setUnusualQuickWeightConfirm(null);
+              }}
+              className="min-h-11 w-full sm:w-auto bg-amber-600 hover:bg-amber-700"
+            >
+              Save Anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

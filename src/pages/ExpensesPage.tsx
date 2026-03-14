@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt } from 'lucide-react';
+import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt, Loader2 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -23,6 +23,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -41,8 +47,7 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
-// Budget deduction removed — was Firebase-based. Budget tracking is now in Supabase.
-import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
+import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, getHarvestCollection, listHarvestCollections, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
@@ -210,6 +215,7 @@ export default function ExpensesPage() {
   const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   // Group picker labour expenses by harvest collection for "Recent Expenses" (one row per collection)
+  // Note: This is used as a fallback; recentPayouts from picker_payment_entries is preferred
   const pickerPaymentGroups = useMemo(() => {
     const pickerExpenses = filteredExpenses.filter(
       (e) => (e.meta?.source === 'harvest_wallet_picker_payment' && e.meta?.harvestCollectionId)
@@ -221,14 +227,12 @@ export default function ExpensesPage() {
     pickerExpenses.forEach((e) => {
       const cid = e.meta!.harvestCollectionId!;
       const existing = byCollection.get(cid);
-      const collectionName = e.description.replace(/^Picker labour –\s*/i, '').trim() || cid;
-      const displayName = `${collectionName} Picker Payments`;
       const d = toDate(e.date);
       const t = d ? d.getTime() : 0;
       if (!existing) {
         byCollection.set(cid, {
           collectionId: cid,
-          displayName,
+          displayName: '', // Will be resolved later with collectionNameMap
           totalAmount: e.amount,
           latestDate: d || new Date(0),
           expenses: [e],
@@ -248,6 +252,26 @@ export default function ExpensesPage() {
     enabled: Boolean(companyId),
     staleTime: 60000,
   });
+
+  // Fetch harvest collections for friendly labels on picker payouts
+  const { data: harvestCollections = [] } = useQuery({
+    queryKey: ['harvestCollections', companyId ?? '', activeProject?.id ?? ''],
+    queryFn: () => listHarvestCollections(companyId ?? '', activeProject?.id ?? null),
+    enabled: Boolean(companyId),
+    staleTime: 60000,
+  });
+  
+  // Map collection IDs to friendly names
+  const collectionNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    harvestCollections.forEach((c) => {
+      const name = (c.name ?? '').trim();
+      const date = c.harvestDate ? formatDate(toDate(c.harvestDate)) : '';
+      const friendlyName = name || (date ? `Collection ${date}` : c.id.slice(0, 8));
+      map.set(c.id, friendlyName);
+    });
+    return map;
+  }, [harvestCollections]);
 
   const [payoutDetailCollectionId, setPayoutDetailCollectionId] = useState<string | null>(null);
   const { data: payoutDetail, isLoading: payoutDetailLoading } = useQuery({
@@ -276,11 +300,15 @@ export default function ExpensesPage() {
     }));
     const groupRows = pickerPaymentGroups
       .filter((g) => !payoutCollectionIds.has(g.collectionId))
-      .map((g) => ({
-        type: 'picker_group' as const,
-        key: `picker-${g.collectionId}`,
-        ...g,
-      }));
+      .map((g) => {
+        const friendlyName = collectionNameMap.get(g.collectionId) || `Collection ${g.collectionId.slice(0, 8)}`;
+        return {
+          type: 'picker_group' as const,
+          key: `picker-${g.collectionId}`,
+          ...g,
+          displayName: friendlyName,
+        };
+      });
     const expenseRows = others.map((e) => ({ type: 'expense' as const, key: e.id, expense: e }));
     const combined = [...harvestPayoutRows, ...groupRows, ...expenseRows];
     combined.sort((a, b) => {
@@ -295,7 +323,7 @@ export default function ExpensesPage() {
       return tB - tA;
     });
     return combined;
-  }, [filteredExpenses, pickerPaymentGroups, recentPayouts]);
+  }, [filteredExpenses, pickerPaymentGroups, recentPayouts, collectionNameMap]);
 
   // Broker expense categories (for admin view)
   const brokerCategoryValues = useMemo(
@@ -346,6 +374,15 @@ export default function ExpensesPage() {
     latestDate: Date;
     expenses: ExpenseWithSyncState[];
   } | null>(null);
+  
+  // Labor payout drawer state
+  const [laborPayoutDrawerCollectionId, setLaborPayoutDrawerCollectionId] = useState<string | null>(null);
+  const { data: laborPayoutDetail, isLoading: laborPayoutDetailLoading } = useQuery({
+    queryKey: ['laborPayoutDetail', laborPayoutDrawerCollectionId],
+    queryFn: () => getCollectionPayoutDetail(laborPayoutDrawerCollectionId!),
+    enabled: Boolean(laborPayoutDrawerCollectionId),
+  });
+  
   const canCreateExpense = can('expenses', 'create');
   const canApproveExpense = can('expenses', 'approve');
   const canExportExpenseReport = can('reports', 'export');
@@ -925,47 +962,70 @@ export default function ExpensesPage() {
                   );
                 }
                 const expense = row.expense;
+                const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
+                const collectionId = expense.meta?.harvestCollectionId;
+                const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
+                
                 return (
-                  <tr key={row.key}>
+                  <tr 
+                    key={row.key}
+                    className={isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''}
+                    onClick={isPickerPayout && collectionId ? () => setLaborPayoutDrawerCollectionId(collectionId) : undefined}
+                  >
                     <td>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-foreground">{expense.description}</span>
-                        {expense.pending && (
-                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                            Syncing...
-                          </span>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-foreground">{expense.description}</span>
+                          {expense.pending && (
+                            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                              Syncing...
+                            </span>
+                          )}
+                        </div>
+                        {isPickerPayout && collectionLabel && (
+                          <span className="text-xs text-muted-foreground">Collection: {collectionLabel}</span>
                         )}
                       </div>
                     </td>
                     <td>
                       <span className={cn('fv-badge', getCategoryColor(expense.category))}>
-                        {expense.category}
+                        {expense.category === 'picker_payout' ? 'labour' : expense.category}
                       </span>
                     </td>
                     <td className="font-medium">{formatCurrency(expense.amount)}</td>
                     <td className="text-muted-foreground">{formatDate(expense.date)}</td>
-                    <td>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="p-2 hover:bg-muted rounded-lg transition-colors"
-                          >
-                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            className="cursor-pointer"
-                            onClick={() => {
-                              const msg = `${expense.description}\nCategory: ${expense.category}\nAmount: ${formatCurrency(expense.amount)}\nDate: ${formatDate(expense.date)}`;
-                              alert(msg);
-                            }}
-                          >
-                            View details
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <td onClick={(ev) => ev.stopPropagation()}>
+                      {isPickerPayout && collectionId ? (
+                        <button
+                          type="button"
+                          className="p-2 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setLaborPayoutDrawerCollectionId(collectionId)}
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="p-2 hover:bg-muted rounded-lg transition-colors"
+                            >
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() => {
+                                const msg = `${expense.description}\nCategory: ${expense.category}\nAmount: ${formatCurrency(expense.amount)}\nDate: ${formatDate(expense.date)}`;
+                                alert(msg);
+                              }}
+                            >
+                              View details
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1022,8 +1082,22 @@ export default function ExpensesPage() {
               );
             }
             const expense = row.expense;
+            const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
+            const collectionId = expense.meta?.harvestCollectionId;
+            const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
+            
             return (
-              <div key={row.key} className="p-4 bg-muted/30 rounded-lg">
+              <div 
+                key={row.key} 
+                role={isPickerPayout && collectionId ? 'button' : undefined}
+                tabIndex={isPickerPayout && collectionId ? 0 : undefined}
+                className={cn(
+                  'p-4 bg-muted/30 rounded-lg',
+                  isPickerPayout && collectionId && 'cursor-pointer hover:bg-muted/50 active:scale-[0.99]'
+                )}
+                onClick={isPickerPayout && collectionId ? () => setLaborPayoutDrawerCollectionId(collectionId) : undefined}
+                onKeyDown={isPickerPayout && collectionId ? (ev) => ev.key === 'Enter' && setLaborPayoutDrawerCollectionId(collectionId) : undefined}
+              >
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1034,12 +1108,15 @@ export default function ExpensesPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground">{formatDate(expense.date)}</p>
+                    {isPickerPayout && collectionLabel && (
+                      <p className="text-xs text-muted-foreground">Collection: {collectionLabel}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-0.5">{formatDate(expense.date)}</p>
                   </div>
                   <span className="font-semibold">{formatCurrency(expense.amount)}</span>
                 </div>
-                <span className={cn('fv-badge', getCategoryColor(expense.category))}>
-                  {expense.category}
+                <span className={cn('fv-badge', getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category))}>
+                  {expense.category === 'picker_payout' ? 'labour' : expense.category}
                 </span>
               </div>
             );
@@ -1143,6 +1220,69 @@ export default function ExpensesPage() {
           </DialogContent>
         </Dialog>
       )}
+      {/* Labor Payout Drawer - shows picker breakdown for a collection */}
+      <Sheet open={!!laborPayoutDrawerCollectionId} onOpenChange={(open) => !open && setLaborPayoutDrawerCollectionId(null)}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              French Beans Picker Payout
+            </SheetTitle>
+            {laborPayoutDetail && (
+              <p className="text-sm text-muted-foreground">
+                Collection: {laborPayoutDetail.collectionName}
+              </p>
+            )}
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            {laborPayoutDetailLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : laborPayoutDetail ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-muted-foreground">Total Kg</p>
+                    <p className="text-lg font-semibold">{laborPayoutDetail.totalKg.toFixed(1)} kg</p>
+                  </div>
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-muted-foreground">Total Paid</p>
+                    <p className="text-lg font-semibold">{formatCurrency(laborPayoutDetail.totalPaid)}</p>
+                  </div>
+                </div>
+                
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium mb-3">Pickers ({laborPayoutDetail.pickers.length})</h4>
+                  <div className="space-y-2">
+                    {laborPayoutDetail.pickers.map((picker) => (
+                      <div 
+                        key={picker.pickerId}
+                        className="flex items-center justify-between p-3 bg-muted/20 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
+                            {picker.pickerNumber ?? '?'}
+                          </div>
+                          <div>
+                            <p className="font-medium text-sm">{picker.pickerName || `Picker #${picker.pickerNumber}`}</p>
+                            <p className="text-xs text-muted-foreground">{picker.totalKg.toFixed(1)} kg</p>
+                          </div>
+                        </div>
+                        <span className="font-semibold text-sm">{formatCurrency(picker.totalPaid)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No payout details available for this collection.
+              </p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <UpgradeModal
         open={upgradeOpen}
         onOpenChange={setUpgradeOpen}
