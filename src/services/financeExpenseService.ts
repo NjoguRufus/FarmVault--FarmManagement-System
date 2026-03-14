@@ -1,10 +1,10 @@
 /**
- * Read finance.expenses from Supabase (canonical schema).
- * Real columns: id, company_id, project_id, category, amount, currency, expense_date, note, created_by, created_at.
- * No item_name, no notes (use note), no payment_method.
+ * Finance expenses — Supabase canonical schema.
+ * Table: finance.expenses
+ * Columns: id, company_id, project_id, category, amount, currency, expense_date, note, created_by, created_at.
  */
 
-import { db } from '@/lib/db';
+import { db, requireCompanyId } from '@/lib/db';
 
 export type FinanceExpenseRow = {
   id: string;
@@ -69,4 +69,51 @@ export async function getFinanceExpenses(
       meta: isPickerPayout ? { source: 'harvest_wallet_picker_payment' } : undefined,
     };
   });
+}
+
+export interface CreateExpenseInput {
+  companyId: string;
+  projectId?: string | null;
+  category: string;
+  amount: number;
+  note?: string | null;
+  expenseDate?: string | null;
+  createdBy?: string | null;
+}
+
+/**
+ * Insert a new expense into finance.expenses (Supabase).
+ * Returns the created row mapped to ExpenseLike.
+ */
+export async function createFinanceExpense(input: CreateExpenseInput): Promise<ExpenseLike> {
+  const tenant = requireCompanyId(input.companyId);
+  const expenseDate = input.expenseDate ?? new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await db
+    .finance()
+    .from('expenses')
+    .insert({
+      company_id: tenant,
+      project_id: input.projectId ?? null,
+      category: input.category,
+      amount: input.amount,
+      currency: 'KES',
+      expense_date: expenseDate,
+      note: input.note ?? null,
+      created_by: input.createdBy ?? null,
+    })
+    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at')
+    .single();
+
+  if (error) throw error;
+  const row = data as FinanceExpenseRow;
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    projectId: row.project_id ?? undefined,
+    category: row.category,
+    description: (row.note || row.category || 'Expense').trim() || 'Expense',
+    amount: Number(row.amount ?? 0),
+    date: row.expense_date,
+  };
 }

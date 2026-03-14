@@ -6,11 +6,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from '@/lib/firestore-stub';
-import { useCollection } from '@/hooks/useCollection';
 import { useQuery } from '@tanstack/react-query';
-import { getFinanceExpenses } from '@/services/financeExpenseService';
+import { getFinanceExpenses, createFinanceExpense } from '@/services/financeExpenseService';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
@@ -44,7 +41,7 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { exportToExcel } from '@/lib/exportUtils';
 import { usePermissions } from '@/hooks/usePermissions';
-import { applyExpenseDeduction } from '@/services/expenseBudgetService';
+// Budget deduction removed — was Firebase-based. Budget tracking is now in Supabase.
 import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
@@ -151,44 +148,19 @@ export default function ExpensesPage() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
-  const isDeveloper = user?.role === 'developer';
-  const scope = { companyScoped: true, companyId, isDeveloper };
   const [searchParams, setSearchParams] = useSearchParams();
-  const expensesCollection = useCollection<ExpenseWithSyncState>('expenses', 'expenses', scope);
-  const allExpensesFirestore = expensesCollection.data ?? [];
-  const loadingFirestore = expensesCollection.isLoading;
-  const stagesCollection = useCollection<CropStage>('projectStages', 'projectStages', scope);
-  const allStages = stagesCollection.data ?? [];
-  const workLogsCollection = useCollection<WorkLog>('workLogs', 'workLogs', scope);
-  const allWorkLogs = workLogsCollection.data ?? [];
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date } | undefined>();
-  const { data: allExpensesSupabase = [], isLoading: loadingSupabase } = useQuery({
+  const { data: allExpenses = [], isLoading } = useQuery({
     queryKey: ['financeExpenses', companyId ?? '', activeProject?.id ?? ''],
     queryFn: () => getFinanceExpenses(companyId ?? '', activeProject?.id ?? null),
     enabled: Boolean(companyId),
   });
 
-  const allExpenses = useMemo(() => {
-    const firestore = allExpensesFirestore ?? [];
-    const supabase = (allExpensesSupabase ?? []) as (ExpenseWithSyncState & { date: Date | string })[];
-    return [...firestore, ...supabase];
-  }, [allExpensesFirestore, allExpensesSupabase]);
-
-  const isLoading = loadingFirestore || loadingSupabase;
-
-  useEffect(() => {
-    if (import.meta.env.DEV && companyId) {
-      console.log('[Expenses Page Query]', {
-        companyId,
-        projectId: activeProject?.id,
-        firestoreCount: allExpensesFirestore.length,
-        supabaseCount: (allExpensesSupabase ?? []).length,
-        rowCount: allExpenses.length,
-      });
-    }
-  }, [companyId, activeProject?.id, allExpensesFirestore.length, allExpensesSupabase?.length, allExpenses.length]);
+  // Stages and work logs still used for stage detection in expense form
+  const allStages: CropStage[] = [];
+  const allWorkLogs: WorkLog[] = [];
 
   // Filter expenses based on user role
   // Brokers should only see expenses they incurred (related to their sales activities)
@@ -443,35 +415,26 @@ export default function ExpensesPage() {
           ? customCategory.trim()
           : category;
       const amountNum = Number(amount || '0');
-      await addDoc(collection(db, 'expenses'), {
-        description,
-        amount: amountNum,
-        category: categoryToSave,
-        projectId: activeProject.id,
+
+      await createFinanceExpense({
         companyId: activeProject.companyId,
-        cropType: activeProject.cropType,
-        date: serverTimestamp(),
-        stageIndex: currentStage?.stageIndex,
-        stageName: currentStage?.stageName,
-        synced: false,
-        paid: false,
-        createdAt: serverTimestamp(),
+        projectId: activeProject.id,
+        category: categoryToSave,
+        amount: amountNum,
+        note: description || null,
+        expenseDate: new Date().toISOString().slice(0, 10),
+        createdBy: user?.id ?? null,
       });
-      await applyExpenseDeduction(activeProject.companyId, activeProject.id, amountNum);
 
       // Invalidate queries to refresh data immediately
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
 
       setDescription('');
       setAmount('');
       setCategory('labour');
       setCustomCategory('');
-      toast.success(
-        isOffline
-          ? 'Expense saved offline. It will sync when online.'
-          : 'Expense added.',
-      );
+      toast.success('Expense added.');
     } catch (error) {
       console.error('Failed to add expense:', error);
       toast.error('Failed to add expense.');
@@ -492,48 +455,21 @@ export default function ExpensesPage() {
     if (!activeProject || !user || !log.id || !log.totalPrice) return;
     setMarkingPaid(log.id);
     try {
-      const batch = writeBatch(db);
-      
-      // Update work log to paid
-      const workLogRef = doc(db, 'workLogs', log.id);
-      batch.update(workLogRef, {
-        paid: true,
-        paidAt: serverTimestamp(),
-        paidBy: user.id,
-        paidByName: user.name,
-      });
-
-      // Create expense entry
-      const expenseRef = doc(collection(db, 'expenses'));
-      batch.set(expenseRef, {
+      // Create labour expense in Supabase
+      await createFinanceExpense({
         companyId: activeProject.companyId,
         projectId: activeProject.id,
-        cropType: activeProject.cropType,
-        category: 'labour' as ExpenseCategory,
-        description: `Labour - ${log.workCategory} on ${formatDate(log.date)}`,
+        category: 'labour',
         amount: log.totalPrice,
-        date: log.date,
-        stageIndex: log.stageIndex,
-        stageName: log.stageName,
-        syncedFromWorkLogId: log.id,
-        synced: true,
-        paid: true,
-        paidAt: serverTimestamp(),
-        paidBy: user.id,
-        paidByName: user.name,
-        createdAt: serverTimestamp(),
+        note: `Labour - ${log.workCategory} on ${formatDate(log.date)}`,
+        expenseDate: log.date ? new Date(log.date as any).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        createdBy: user.id,
       });
 
-      await batch.commit();
-      await applyExpenseDeduction(activeProject.companyId, activeProject.id, log.totalPrice);
-
       // Invalidate queries to refresh data immediately
-      queryClient.invalidateQueries({ queryKey: ['workLogs'] });
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
-      
-      // Close dialog if no more unpaid work logs
-      // Note: This will happen automatically when the query refetches and unpaidWorkLogs updates
+
       toast.success('Work log marked as paid.');
     } catch (error) {
       console.error('Failed to mark work log as paid:', error);
