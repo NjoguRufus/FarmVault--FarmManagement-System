@@ -22,8 +22,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { markWorkCardPaid, type WorkCard } from '@/services/operationsWorkCardService';
 import { createAdminAlert } from '@/services/adminAlertService';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
+import { createFinanceExpense } from '@/services/financeExpenseService';
 
 interface MarkPaidModalProps {
   open: boolean;
@@ -74,32 +73,26 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
         actorUserName: user?.name ?? null,
       });
 
-      // Create expense entry in Firestore
+      // Create labor expense in Supabase
       try {
-        await addDoc(collection(db, 'expenses'), {
-          companyId: companyId,
+        await createFinanceExpense({
+          companyId: companyId!,
           projectId: workCard.projectId,
           category: 'labour',
-          description: `Labor: ${workCard.workTitle}`,
           amount: formData.amount,
-          date: new Date().toISOString(),
-          workCardId: workCard.id,
-          paid: true,
-          paidAt: new Date().toISOString(),
-          paidBy: user?.id,
-          paidByName: user?.name,
-          synced: false,
-          meta: {
-            source: 'work_card',
-            workCardTitle: workCard.workTitle,
-            workCategory: workCard.workCategory,
-            actualWorkers: workCard.actualWorkers,
-            paymentMethod: formData.method,
-          },
-          createdAt: serverTimestamp(),
+          note: `Labor: ${workCard.workTitle} (${workCard.workCategory})`,
+          expenseDate: new Date().toISOString().slice(0, 10),
+          createdBy: user?.id ?? null,
         });
+        if (import.meta.env.DEV) {
+          console.log('[MarkPaid] Labor expense created in Supabase', {
+            amount: formData.amount,
+            workCardId: workCard.id,
+            category: 'labour',
+          });
+        }
       } catch (expenseError) {
-        console.error('Failed to create expense entry:', expenseError);
+        console.error('Failed to create labor expense:', expenseError);
       }
 
       // Create admin alert

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node_modules/.bin/tsc --noEmit --skipLibCheck)",
+      "Bash(where node:*)",
+      "Bash(where npm:*)",
+      "Bash(cmd.exe /c \"where node\")",
+      "Bash(grep -l \"inventory_item_master\\\\|inventory_stock_view\" \"c:/Users/NJOGU/Desktop/FarmV V1/FarmVault--FarmManagement-System/supabase/migrations\"/*.sql)",
+      "Bash(grep -v \"^//\")",
+      "Bash(grep -l \"inventory_item_master\\\\|inventory_stock_view\\\\|inventory_categories.*description\" \"c:/Users/NJOGU/Desktop/FarmV V1/FarmVault--FarmManagement-System/supabase/migrations\"/*.sql)",
+      "Bash(done)",
+      "Bash(grep -n \"ALTER TABLE inventory_categories\" \"c:/Users/NJOGU/Desktop/FarmV V1/FarmVault--FarmManagement-System/supabase/migrations\"/*.sql)"
+    ]
+  }
+}

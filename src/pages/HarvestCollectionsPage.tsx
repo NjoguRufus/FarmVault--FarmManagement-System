@@ -22,6 +22,8 @@ import {
   Pencil,
   Trash2,
   HelpCircle,
+  Check,
+  X,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -445,11 +447,14 @@ export default function HarvestCollectionsPage() {
       const totalPay = Math.round(totalKg * pricePerKg);
       const paid = paidByPicker.get(p.id) ?? 0;
       /**
-       * Treat pickers with zero payable amount as settled/non-blocking:
-       * - totalPay <= 0 means there is no payable balance for this picker.
-       * - Such pickers should not be counted as pending obligations or block buyer payment.
+       * Picker is "Paid" only when:
+       * 1. They have a positive payable amount (totalPay > 0), AND
+       * 2. Their paid amount covers the total (paid >= totalPay).
+       * 
+       * Pickers with zero kg or zero totalPay are NOT marked as paid - they simply have no payment due yet.
+       * This prevents false "PAID" badges on new pickers before weights are added.
        */
-      const isPaid = totalPay <= 0 || paid >= totalPay;
+      const isPaid = totalPay > 0 && paid >= totalPay;
       return mapPicker(p, totalKg, totalPay, isPaid) as HarvestPicker;
     });
   }, [pickersRaw, intakeRaw, paymentsRaw, collectionsRaw]);
@@ -4013,20 +4018,48 @@ export default function HarvestCollectionsPage() {
                     {isEditingWeighPickerName ? '' : pickersForCollection.find((x) => x.id === weighPickerId)?.pickerName}
                   </p>
                   {isEditingWeighPickerName ? (
-                    <Input
-                      ref={editingWeighPickerNameRef}
-                      value={editingWeighPickerName}
-                      onChange={(e) => setEditingWeighPickerName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          void handleSaveWeighPickerName();
-                        }
-                      }}
-                      placeholder="Edit name"
-                      className="h-8 w-40 rounded-lg text-sm"
-                      disabled={editingWeighPickerSaving}
-                    />
+                    <>
+                      <Input
+                        ref={editingWeighPickerNameRef}
+                        value={editingWeighPickerName}
+                        onChange={(e) => setEditingWeighPickerName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void handleSaveWeighPickerName();
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setIsEditingWeighPickerName(false);
+                          }
+                        }}
+                        placeholder="Edit name"
+                        className="h-8 w-32 rounded-lg text-sm"
+                        disabled={editingWeighPickerSaving}
+                      />
+                      <button
+                        type="button"
+                        className="inline-flex h-7 px-2 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+                        onClick={() => void handleSaveWeighPickerName()}
+                        disabled={editingWeighPickerSaving || !editingWeighPickerName.trim()}
+                        title="Save picker name"
+                      >
+                        {editingWeighPickerSaving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 px-2 items-center justify-center rounded-md border border-border bg-background text-muted-foreground text-xs font-medium hover:bg-muted disabled:opacity-50"
+                        onClick={() => setIsEditingWeighPickerName(false)}
+                        disabled={editingWeighPickerSaving}
+                        title="Cancel editing"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"

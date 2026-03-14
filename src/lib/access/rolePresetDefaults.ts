@@ -93,7 +93,7 @@ export const ROLE_PRESET_DEFAULT_PERMISSIONS: Record<RolePresetKey, PermissionMa
   operations_manager: {
     ...minimal(),
     operations: { view: true, createWorkCard: true, assignWork: true, recordDailyWork: true, approveWorkLog: true, markPaid: true, viewCost: true },
-    inventory: { view: true, addItem: false, editItem: false, deleteItem: false, restock: true, deduct: false, categories: false, purchases: false },
+    inventory: { view: true, addItem: true, editItem: false, deleteItem: false, restock: true, deduct: true, categories: false, purchases: false },
     projects: { view: true, create: false, edit: false, delete: false, accessTabs: { overview: true, planning: false, expenses: false, inventory: true, operations: true, harvest: false, reports: false } },
   },
   inventory_staff: {

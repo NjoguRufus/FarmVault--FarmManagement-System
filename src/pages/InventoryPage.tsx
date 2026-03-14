@@ -226,15 +226,16 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-between w-full sm:w-auto sm:justify-end gap-2">
+          {canAddInventoryItem && (
           <button
             type="button"
             className="fv-btn fv-btn--primary"
             onClick={() => setAddOpen(true)}
-            disabled={!canAddInventoryItem}
           >
             <Plus className="h-4 w-4" />
             Add Item
           </button>
+          )}
           {canViewAudit && (
             <button
               type="button"
