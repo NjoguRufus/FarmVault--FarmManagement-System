@@ -260,6 +260,100 @@ export function CompanyDashboard() {
       (s) => s.companyId === companyId && s.projectId === activeProject.id && hasProjectAccess(s.projectId)
     );
   }, [allStages, companyId, activeProject, hasProjectAccess]);
+
+  // Compute stages from plantingDate + crop timeline when Firestore stages are empty
+  const computedStagesFromTimeline = useMemo(() => {
+    if (!activeProject?.plantingDate) return [];
+    const timeline = getCropTimeline(activeProject.cropTypeKey ?? activeProject.cropType);
+    if (!timeline?.stages?.length) return [];
+    
+    const plantingDate = toDate(activeProject.plantingDate);
+    if (!plantingDate) return [];
+    
+    const daysSincePlanting = calculateDaysSince(plantingDate);
+    const today = new Date();
+    
+    return timeline.stages.map((stage, index) => {
+      const stageStartDate = new Date(plantingDate);
+      stageStartDate.setDate(stageStartDate.getDate() + stage.dayStart);
+      
+      const stageEndDate = new Date(plantingDate);
+      stageEndDate.setDate(stageEndDate.getDate() + stage.dayEnd);
+      
+      let status: 'pending' | 'in-progress' | 'completed' = 'pending';
+      if (daysSincePlanting > stage.dayEnd) {
+        status = 'completed';
+      } else if (daysSincePlanting >= stage.dayStart && daysSincePlanting <= stage.dayEnd) {
+        status = 'in-progress';
+      }
+      
+      return {
+        id: `computed-${activeProject.id}-${stage.key}`,
+        name: stage.label,
+        stageName: stage.label,
+        startDate: stageStartDate,
+        endDate: stageEndDate,
+        stageIndex: index,
+        projectId: activeProject.id,
+        status,
+      };
+    });
+  }, [activeProject?.plantingDate, activeProject?.cropType, activeProject?.cropTypeKey, activeProject?.id]);
+
+  // Use Firestore stages if available, otherwise use computed stages from timeline
+  const effectiveActiveProjectStages = useMemo(() => {
+    if (activeProjectStages.length > 0) return activeProjectStages;
+    return computedStagesFromTimeline;
+  }, [activeProjectStages, computedStagesFromTimeline]);
+
+  // Same logic for all projects when no specific project is selected
+  const computedAllProjectsStages = useMemo(() => {
+    if (filteredStages.length > 0) return filteredStages;
+    
+    // Generate computed stages for all projects with planting dates
+    const projectsWithPlanting = companyProjects.filter(p => p.plantingDate);
+    const computedStages: typeof filteredStages = [];
+    
+    projectsWithPlanting.forEach(project => {
+      const timeline = getCropTimeline(project.cropTypeKey ?? project.cropType);
+      if (!timeline?.stages?.length) return;
+      
+      const plantingDate = toDate(project.plantingDate);
+      if (!plantingDate) return;
+      
+      const daysSincePlanting = calculateDaysSince(plantingDate);
+      
+      timeline.stages.forEach((stage, index) => {
+        const stageStartDate = new Date(plantingDate);
+        stageStartDate.setDate(stageStartDate.getDate() + stage.dayStart);
+        
+        const stageEndDate = new Date(plantingDate);
+        stageEndDate.setDate(stageEndDate.getDate() + stage.dayEnd);
+        
+        let status: 'pending' | 'in-progress' | 'completed' = 'pending';
+        if (daysSincePlanting > stage.dayEnd) {
+          status = 'completed';
+        } else if (daysSincePlanting >= stage.dayStart && daysSincePlanting <= stage.dayEnd) {
+          status = 'in-progress';
+        }
+        
+        computedStages.push({
+          id: `computed-${project.id}-${stage.key}`,
+          name: stage.label,
+          stageName: stage.label,
+          startDate: stageStartDate,
+          endDate: stageEndDate,
+          stageIndex: index,
+          projectId: project.id,
+          companyId: project.companyId,
+          status,
+        } as CropStage);
+      });
+    });
+    
+    return computedStages;
+  }, [filteredStages, companyProjects]);
+
   const activeProjectKnowledge = useMemo(
     () => findCropKnowledgeByTypeKey(cropCatalog, activeProject?.cropTypeKey || activeProject?.cropType),
     [cropCatalog, activeProject?.cropType, activeProject?.cropTypeKey],
@@ -772,7 +866,7 @@ export function CompanyDashboard() {
                 )}
                 <CropStageProgressCard
                   projectName={activeProject?.name}
-                  stages={activeProjectStages}
+                  stages={effectiveActiveProjectStages}
                   activeStageOverride={activeStageOverride}
                   knowledgeDetection={activeProjectKnowledgeDetection}
                   recentActivityLogs={activityLogs}
@@ -944,7 +1038,7 @@ export function CompanyDashboard() {
 
       {/* Bottom Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <CropStageSection stages={activeProject ? activeProjectStages : filteredStages} />
+        <CropStageSection stages={activeProject ? effectiveActiveProjectStages : computedAllProjectsStages} />
         <div data-tour="inventory-overview">
           <InventoryOverview inventoryItems={filteredInventory} />
         </div>

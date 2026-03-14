@@ -28,7 +28,11 @@ export type ExpenseLike = {
   description: string;
   amount: number;
   date: Date | string;
-  meta?: { source: string };
+  meta?: {
+    source?: string;
+    harvestCollectionId?: string;
+    pickerId?: string;
+  };
 };
 
 /**
@@ -56,8 +60,28 @@ export async function getFinanceExpenses(
   const rows = (data ?? []) as FinanceExpenseRow[];
 
   return rows.map((row) => {
-    const description = (row.note || row.category || 'Expense').trim() || 'Expense';
-    const isPickerPayout = row.category === 'picker_payout' || (row.note != null && row.note.includes('picker payout'));
+    const note = row.note ?? '';
+    const isPickerPayout = row.category === 'picker_payout' || note.toLowerCase().includes('picker payout');
+    
+    // Parse collection and picker IDs from note format: "... | collection:UUID | picker:UUID"
+    let harvestCollectionId: string | undefined;
+    let pickerId: string | undefined;
+    if (isPickerPayout && note) {
+      const collectionMatch = note.match(/collection:([a-f0-9-]{36})/i);
+      const pickerMatch = note.match(/picker:([a-f0-9-]{36})/i);
+      if (collectionMatch) harvestCollectionId = collectionMatch[1];
+      if (pickerMatch) pickerId = pickerMatch[1];
+    }
+    
+    // Create clean description for picker payouts
+    let description: string;
+    if (isPickerPayout) {
+      // Clean up the note - remove collection/picker UUIDs for display
+      description = 'French Beans Picker Payout';
+    } else {
+      description = (note || row.category || 'Expense').trim() || 'Expense';
+    }
+    
     return {
       id: row.id,
       companyId: row.company_id,
@@ -66,7 +90,11 @@ export async function getFinanceExpenses(
       description,
       amount: Number(row.amount ?? 0),
       date: row.expense_date,
-      meta: isPickerPayout ? { source: 'harvest_wallet_picker_payment' } : undefined,
+      meta: isPickerPayout ? {
+        source: 'harvest_wallet_picker_payment',
+        harvestCollectionId,
+        pickerId,
+      } : undefined,
     };
   });
 }
