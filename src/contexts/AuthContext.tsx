@@ -381,6 +381,13 @@ export function AuthProvider({
   });
   const [isEmergencySession, setIsEmergencySession] = useState<boolean>(() => clerkState === null && !!readEmergencySession());
   const clerkLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Track whether we've ever confirmed the user was signed in during this session.
+   * This prevents clearing the cached user during Clerk's initial hydration phase,
+   * which can briefly report isSignedIn=false before the session token is restored.
+   * Only clear cache when transitioning from confirmed-signed-in to signed-out.
+   */
+  const confirmedSignedInRef = useRef<boolean>(false);
 
   // When emergency session is created from the Emergency Access page, pick it up so RequireAuth sees the user.
   useEffect(() => {
@@ -462,6 +469,29 @@ export function AuthProvider({
         setAuthReady(true);
         return;
       }
+      
+      // Check if we have a cached user. If Clerk hasn't confirmed sign-in yet (initial load),
+      // keep the cached user to avoid logging out the user during hydration.
+      // Only clear the cache if we previously confirmed the user was signed in (explicit logout).
+      const cachedUser = readCachedUser();
+      if (cachedUser && !confirmedSignedInRef.current) {
+        // Clerk loaded but says not signed in, and we haven't confirmed sign-in yet.
+        // This could be Clerk hydrating - keep the cached user briefly.
+        // Set authReady so the app can render, but don't clear the cache yet.
+        // If this is a real logged-out state, Clerk will stay isSignedIn=false
+        // and the user can proceed to sign-in page.
+        if (import.meta.env.DEV) {
+          console.warn('[AuthContext] Clerk says not signed in, but cached user exists and no prior confirmation. Preserving session.');
+        }
+        setUser(cachedUser);
+        setPermissions(buildEffectivePermissions(cachedUser, null));
+        setAuthReady(true);
+        setActivationResolved(true);
+        return;
+      }
+      
+      // Confirmed logout: either we never had a cached user, or we previously confirmed sign-in
+      // and now Clerk says signed out (explicit logout action).
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
@@ -471,6 +501,7 @@ export function AuthProvider({
       setIsDeveloper(false);
       setIsEmergencySession(false);
       setActivationResolved(true);
+      confirmedSignedInRef.current = false;
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('fv:isDeveloper', '0');
       }
@@ -567,6 +598,7 @@ export function AuthProvider({
           setPermissions(getFullAccessPermissions());
           setSetupIncomplete(false);
           writeCachedUser(devUser);
+          confirmedSignedInRef.current = true;
 
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -766,6 +798,7 @@ export function AuthProvider({
           setSetupIncomplete(true);
           writeCachedUser(null);
           setActivationResolved(true);
+          confirmedSignedInRef.current = true;
           setAuthReady(true);
           return;
         }
@@ -845,6 +878,7 @@ export function AuthProvider({
         writeCachedUser(userWithDisplayName);
         setSetupIncomplete(false);
         setActivationResolved(true);
+        confirmedSignedInRef.current = true;
         setAuthReady(true);
       } catch (error) {
         const cached = readCachedUser();
@@ -855,6 +889,7 @@ export function AuthProvider({
           writeCachedUser(cached);
           setSetupIncomplete(false);
           setActivationResolved(true);
+          confirmedSignedInRef.current = true;
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
           const fallbackName = clerkUser?.fullName ?? 'User';

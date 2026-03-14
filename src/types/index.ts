@@ -466,12 +466,7 @@ export type InventoryCategory =
   | 'fertilizer'
   | 'chemical'
   | 'fuel'
-  | 'diesel'
-  | 'materials'
-  | 'sacks'
-  | 'ropes'
-  | 'wooden-crates'
-  | 'seeds';
+  | 'tying-ropes-sacks';
 
 /** Chemical: box (with units per box) or single products */
 export type ChemicalPackagingType = 'box' | 'single';

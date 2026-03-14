@@ -183,8 +183,9 @@ export function AddInventoryItemModal({
   const predefinedCategories = useMemo(
     () => [
       { value: 'template:fertilizer', label: 'Fertilizer', defaultUnit: 'kg' as UnitType },
-      { value: 'template:chemical', label: 'Chemical', defaultUnit: 'ml' as UnitType },
+      { value: 'template:chemical', label: 'Chemical / Pesticide', defaultUnit: 'ml' as UnitType },
       { value: 'template:fuel', label: 'Fuel', defaultUnit: 'litres' as UnitType },
+      { value: 'template:tying-ropes-sacks', label: 'Tying Ropes / Sacks', defaultUnit: 'pieces' as UnitType },
       { value: 'add_new', label: '+ Add new category…', defaultUnit: null },
     ],
     [],
@@ -210,6 +211,7 @@ export function AddInventoryItemModal({
     if (name.includes('fertilizer') || name.includes('fertiliser')) return 'kg';
     if (name.includes('chemical') || name.includes('pesticide') || name.includes('herbicide') || name.includes('fungicide')) return 'ml';
     if (name.includes('fuel') || name.includes('diesel') || name.includes('petrol')) return 'litres';
+    if (name.includes('rope') || name.includes('sack') || name.includes('tying')) return 'pieces';
     if (name.includes('seed')) return 'g';
     
     return null;

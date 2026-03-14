@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff, User as UserIcon } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff, User as UserIcon, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db, authEmployeeCreate } from '@/lib/firebase';
 import { serverTimestamp, doc, setDoc, updateDoc } from '@/lib/firestore-stub';
@@ -248,6 +248,32 @@ export default function EmployeesPage() {
   const [section, setSection] = useState<EmployeeSection>('active');
 
   const [currentDraftEmployeeId, setCurrentDraftEmployeeId] = useState<string | null>(null);
+
+  // Deactivate/delete confirmation
+  const [deactivateTarget, setDeactivateTarget] = useState<Employee | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+  const handleDeactivateEmployee = async () => {
+    if (!deactivateTarget || !companyId || !isEmployeesSupabase) return;
+    setDeactivating(true);
+    try {
+      await setEmployeeStatus(deactivateTarget.id, 'archived');
+      await logActivity({
+        companyId,
+        employeeId: deactivateTarget.id,
+        action: 'Employee deactivated',
+        module: 'employees',
+        metadata: { updated_by: user?.id },
+      });
+      await refetchSupabaseEmployees();
+      toast.success(`${getEmployeeName(deactivateTarget)} has been deactivated`);
+    } catch (err: unknown) {
+      const message = (err as { message?: string })?.message ?? 'Failed to deactivate employee';
+      toast.error('Deactivate failed', { description: message });
+    } finally {
+      setDeactivating(false);
+      setDeactivateTarget(null);
+    }
+  };
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
@@ -1730,27 +1756,11 @@ export default function EmployeesPage() {
                                 Edit
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                className="cursor-pointer"
-                                onClick={async () => {
-                                  if (!companyId || !isEmployeesSupabase) return;
-                                  try {
-                                    await setEmployeeStatus(employee.id, 'archived');
-                                    await logActivity({
-                                      companyId,
-                                      employeeId: employee.id,
-                                      action: 'Employee archived',
-                                      module: 'employees',
-                                      metadata: { updated_by: user?.id },
-                                    });
-                                    await refetchSupabaseEmployees();
-                                    toast.success('Employee archived');
-                                  } catch (err: unknown) {
-                                    const message = (err as { message?: string })?.message ?? 'Failed to archive employee';
-                                    toast.error('Archive failed', { description: message });
-                                  }
-                                }}
+                                className="cursor-pointer text-destructive focus:text-destructive"
+                                onClick={() => setDeactivateTarget(employee)}
                               >
-                                Archive
+                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                Deactivate
                               </DropdownMenuItem>
                             </>
                           )}
@@ -2100,9 +2110,18 @@ export default function EmployeesPage() {
                           View details
                         </DropdownMenuItem>
                         {canEditEmployees && (
+                          <>
                           <DropdownMenuItem className="cursor-pointer" onClick={() => openEdit(employee)}>
                             Edit
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="cursor-pointer text-destructive focus:text-destructive"
+                            onClick={() => setDeactivateTarget(employee)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Deactivate
+                          </DropdownMenuItem>
+                          </>
                         )}
                       </DropdownMenuContent>
                       </DropdownMenu>
@@ -2444,6 +2463,40 @@ export default function EmployeesPage() {
         isExpired={isExpired}
         daysRemaining={daysRemaining}
       />
+
+      {/* Deactivate Employee Confirmation */}
+      <Dialog open={!!deactivateTarget} onOpenChange={(open) => { if (!open) setDeactivateTarget(null); }}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Deactivate Employee</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Are you sure you want to deactivate{' '}
+            <span className="font-medium text-foreground">
+              {deactivateTarget ? getEmployeeName(deactivateTarget) : ''}
+            </span>
+            ? They will lose access and be moved to the Archived section. You can restore them later.
+          </p>
+          <DialogFooter>
+            <button
+              type="button"
+              className="fv-btn fv-btn--outline"
+              onClick={() => setDeactivateTarget(null)}
+              disabled={deactivating}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="fv-btn bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeactivateEmployee}
+              disabled={deactivating}
+            >
+              {deactivating ? 'Deactivating…' : 'Deactivate'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

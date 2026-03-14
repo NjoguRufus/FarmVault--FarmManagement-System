@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle } from 'lucide-react';
+import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle, AlertTriangle, Activity } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { CropStageProgressCard } from '@/components/dashboard/CropStageProgressCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
@@ -53,9 +54,11 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
 import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
 import { useNavigate } from 'react-router-dom';
-import { AdminAlertCenter } from '@/components/alerts/AdminAlertCenter';
+import { listAdminAlerts, type StoredAdminAlert } from '@/services/adminAlertService';
 import { useQuery } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
+import { getFinanceExpenses, type ExpenseLike } from '@/services/financeExpenseService';
+import { listInventoryStock, type InventoryStockRow } from '@/services/inventoryReadModelService';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -90,11 +93,25 @@ export function CompanyDashboard() {
       isDeveloper,
     },
   );
-  const { data: allExpenses = [] } = useCollection<Expense>('dashboard-expenses', 'expenses', {
-    companyScoped: true,
-    companyId,
-    isDeveloper,
+  // Expenses from Supabase (canonical source)
+  const { data: allExpensesSupa = [] } = useQuery({
+    queryKey: ['dashboard-expenses-supa', companyId ?? ''],
+    queryFn: () => getFinanceExpenses(companyId ?? ''),
+    enabled: Boolean(companyId),
   });
+  // Map to shape compatible with existing dashboard computations
+  const allExpenses = useMemo(() =>
+    allExpensesSupa.map((e) => ({
+      ...e,
+      id: e.id,
+      companyId: e.companyId,
+      projectId: e.projectId ?? '',
+      description: e.description,
+      amount: e.amount,
+      category: e.category as any,
+      date: e.date,
+    })) as Expense[],
+  [allExpensesSupa]);
   const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests', {
     companyScoped: true,
     companyId,
@@ -105,11 +122,24 @@ export function CompanyDashboard() {
     companyId,
     isDeveloper,
   });
-  const { data: allInventory = [] } = useCollection<InventoryItem>(
-    'dashboard-inventory',
-    'inventoryItems',
-    { companyScoped: true, companyId, isDeveloper }
-  );
+  // Inventory from Supabase
+  const { data: inventoryStockRows = [] } = useQuery({
+    queryKey: ['dashboard-inventory-supa', companyId ?? ''],
+    queryFn: () => listInventoryStock({ companyId: companyId! }),
+    enabled: Boolean(companyId),
+  });
+  // Map InventoryStockRow to InventoryItem shape for dashboard widgets
+  const allInventory = useMemo(() =>
+    inventoryStockRows.map((row) => ({
+      id: row.id,
+      companyId: row.company_id,
+      name: row.name,
+      category: (row.category_name ?? row.category ?? 'other') as any,
+      quantity: row.current_stock ?? 0,
+      unit: row.unit,
+      pricePerUnit: row.average_cost ?? 0,
+    })) as InventoryItem[],
+  [inventoryStockRows]);
   const { data: allStages = [] } = useCollection<CropStage>(
     'dashboard-stages',
     'projectStages',
@@ -156,6 +186,17 @@ export function CompanyDashboard() {
       if (unsubscribe) unsubscribe();
     };
   }, [companyId, activeProject?.id]);
+
+  // Fetch admin alerts for the unified Recent Activities feed
+  const [adminAlerts, setAdminAlerts] = useState<StoredAdminAlert[]>([]);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    listAdminAlerts(companyId, 15).then((list) => {
+      if (!cancelled) setAdminAlerts(list);
+    });
+    return () => { cancelled = true; };
+  }, [companyId]);
 
   const companyProjects = useMemo(
     () => {
@@ -711,8 +752,6 @@ export function CompanyDashboard() {
         </div>
       </div>
 
-      <AdminAlertCenter />
-
       {/* Stats Grid */}
       <div className="space-y-3" data-tour="dashboard-stats">
         {!isHarvestActive ? (
@@ -913,6 +952,82 @@ export function CompanyDashboard() {
           <RecentTransactions transactions={recentTransactions} />
         </div>
       </div>
+
+      {/* Recent Activities — merged stream of activity logs + admin alerts */}
+      {(activityLogs.length > 0 || adminAlerts.length > 0) && (
+        <div className="fv-card">
+          <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Recent Activities
+          </h3>
+          <ul className="space-y-2 max-h-[320px] overflow-y-auto scrollbar-thin pr-1">
+            {(() => {
+              // Merge activity logs and alerts into a single sorted stream
+              type FeedItem = { id: string; time: number; kind: 'activity' | 'alert'; data: any };
+              const items: FeedItem[] = [];
+              activityLogs.forEach((log) => {
+                const t = log.createdAt ? new Date(log.createdAt).getTime() : (log.clientCreatedAt ?? 0);
+                items.push({ id: `act-${log.id}`, time: t, kind: 'activity', data: log });
+              });
+              adminAlerts.forEach((alert) => {
+                const t = new Date(alert.createdAt).getTime();
+                items.push({ id: `alert-${alert.id}`, time: t, kind: 'alert', data: alert });
+              });
+              items.sort((a, b) => b.time - a.time);
+              return items.slice(0, 15).map((item) => {
+                if (item.kind === 'activity') {
+                  const log = item.data as ActivityLogDoc;
+                  const statusColor =
+                    log.status === 'success' ? 'text-green-600' :
+                    log.status === 'warning' ? 'text-amber-600' :
+                    log.status === 'danger' ? 'text-red-600' : 'text-muted-foreground';
+                  return (
+                    <li key={item.id} className="flex items-start gap-2 rounded-md px-2 py-1.5 text-sm">
+                      <span className={cn('shrink-0 mt-0.5 h-2 w-2 rounded-full', {
+                        'bg-green-500': log.status === 'success',
+                        'bg-amber-500': log.status === 'warning',
+                        'bg-red-500': log.status === 'danger',
+                        'bg-muted-foreground': log.status === 'info' || !log.status,
+                      })} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate">{log.message}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {log.actorName ?? 'System'}
+                          {log.projectName ? ` · ${log.projectName}` : ''}
+                          {log.createdAt ? ` · ${formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}` : ''}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                }
+                // Alert item
+                const alert = item.data as StoredAdminAlert;
+                const sevStyle =
+                  alert.severity === 'critical' ? 'bg-red-500/15 text-red-700 dark:text-red-400' :
+                  alert.severity === 'high' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400' :
+                  'bg-muted text-muted-foreground';
+                return (
+                  <li key={item.id} className={cn('flex items-start gap-2 rounded-md px-2 py-1.5 text-sm', !alert.read && 'bg-muted/50')}>
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate">
+                        <span className={cn('inline-block rounded px-1.5 py-0.5 text-xs font-medium mr-1.5', sevStyle)}>
+                          {alert.severity}
+                        </span>
+                        {alert.module}: {alert.action}
+                        {alert.targetLabel && <span className="text-muted-foreground font-normal"> — {alert.targetLabel}</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {alert.actorName ?? 'System'} · {formatDistanceToNow(new Date(alert.createdAt), { addSuffix: true })}
+                      </p>
+                    </div>
+                  </li>
+                );
+              });
+            })()}
+          </ul>
+        </div>
+      )}
 
       {/* Projects Table */}
       <ProjectsTable projects={filteredProjects} compact />

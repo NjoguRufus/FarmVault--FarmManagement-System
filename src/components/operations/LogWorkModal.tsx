@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Calendar as CalendarIcon, Plus, Trash2, Package, MapPin, Briefcase } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Calendar as CalendarIcon, Plus, Trash2, Package, MapPin, Briefcase, AlertCircle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +54,22 @@ const WORK_TYPES = [
   'Other',
 ];
 
+/**
+ * Maps work types to allowed inventory category keywords.
+ * Matches against both `category` (ID or enum) and `category_name` fields
+ * using case-insensitive substring matching for resilience against
+ * different naming conventions in the database.
+ */
+const WORK_TYPE_CATEGORY_FILTER: Record<string, string[] | null> = {
+  'Fertilizer Application': ['fertilizer'],
+  'Spraying': ['chemical', 'pesticide'],
+  'Pest Control': ['chemical', 'pesticide'],
+  'Watering': ['fuel', 'diesel', 'petrol'],
+  'Planting': ['seed'],
+  'Tying': ['tying', 'rope', 'sack'],
+  'Harvesting': ['tying', 'rope', 'sack'],
+};
+
 interface InputItem {
   itemId: string;
   itemName: string;
@@ -88,7 +104,38 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
     enabled: !!companyId,
   });
 
+  // Filter inventory items based on selected work type
+  const filteredInventoryItems = useMemo(() => {
+    const keywords = WORK_TYPE_CATEGORY_FILTER[formData.workCategory] ?? null;
+    // null means no filter — show all items (General Maintenance, Other, etc.)
+    if (!keywords) return inventoryItems;
+
+    return inventoryItems.filter((item) => {
+      const cat = (item.category ?? '').toLowerCase();
+      const catName = (item.category_name ?? '').toLowerCase();
+      return keywords.some(
+        (kw) => cat.includes(kw) || catName.includes(kw)
+      );
+    });
+  }, [inventoryItems, formData.workCategory]);
+
   const actualTotal = formData.actualWorkers * formData.actualRatePerPerson;
+
+  // When work type changes, clear any previously selected inputs
+  // since they may no longer match the new category filter
+  const handleWorkCategoryChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, workCategory: value }));
+    setInputs(prev =>
+      prev.map(input => ({
+        ...input,
+        itemId: '',
+        itemName: '',
+        unit: '',
+        currentStock: 0,
+        quantity: 0,
+      }))
+    );
+  }, []);
 
   const addInput = () => {
     setInputs(prev => [...prev, { itemId: '', itemName: '', quantity: 0, unit: '', currentStock: 0 }]);
@@ -260,98 +307,86 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Project Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="project">Farm / Project *</Label>
-            <Select
-              value={formData.projectId}
-              onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      {p.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Row 1: Farm/Project + Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="project">Farm / Project *</Label>
+              <Select
+                value={formData.projectId}
+                onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-muted-foreground" />
+                        {p.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Date *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      'w-full justify-start text-left font-normal',
+                      !formData.workDate && 'text-muted-foreground'
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formData.workDate ? format(formData.workDate, 'PPP') : 'Pick a date'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={formData.workDate}
+                    onSelect={(date) => date && setFormData(prev => ({ ...prev, workDate: date }))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
-          {/* Work Name */}
-          <div className="space-y-2">
-            <Label htmlFor="workTitle">Work Name *</Label>
-            <Input
-              id="workTitle"
-              placeholder="e.g., Applied DAP fertilizer to Field A"
-              value={formData.workTitle}
-              onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
-            />
+          {/* Row 2: Work Name + Work Type */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="workTitle">Work Name *</Label>
+              <Input
+                id="workTitle"
+                placeholder="e.g., Applied DAP fertilizer"
+                value={formData.workTitle}
+                onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="workCategory">Work Type *</Label>
+              <Select
+                value={formData.workCategory}
+                onValueChange={handleWorkCategoryChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select work type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {WORK_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          {/* Work Type */}
-          <div className="space-y-2">
-            <Label htmlFor="workCategory">Work Type *</Label>
-            <Select
-              value={formData.workCategory}
-              onValueChange={(v) => setFormData(prev => ({ ...prev, workCategory: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select work type" />
-              </SelectTrigger>
-              <SelectContent>
-                {WORK_TYPES.map((type) => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Date */}
-          <div className="space-y-2">
-            <Label>Date *</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    'w-full justify-start text-left font-normal',
-                    !formData.workDate && 'text-muted-foreground'
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {formData.workDate ? format(formData.workDate, 'PPP') : 'Pick a date'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={formData.workDate}
-                  onSelect={(date) => date && setFormData(prev => ({ ...prev, workDate: date }))}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Work Done */}
-          <div className="space-y-2">
-            <Label htmlFor="workDone">Work Done *</Label>
-            <Textarea
-              id="workDone"
-              placeholder="Describe what was accomplished..."
-              value={formData.workDone}
-              onChange={(e) => setFormData(prev => ({ ...prev, workDone: e.target.value }))}
-              rows={3}
-            />
-          </div>
-
-          {/* Workers and Rate */}
+          {/* Row 3: Workers + Rate per Person */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="actualWorkers">Workers</Label>
@@ -360,9 +395,9 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
                 type="number"
                 min={1}
                 value={formData.actualWorkers}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  actualWorkers: parseInt(e.target.value) || 1 
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  actualWorkers: parseInt(e.target.value) || 1
                 }))}
               />
             </div>
@@ -373,9 +408,9 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
                 type="number"
                 min={0}
                 value={formData.actualRatePerPerson}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  actualRatePerPerson: parseFloat(e.target.value) || 0 
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  actualRatePerPerson: parseFloat(e.target.value) || 0
                 }))}
               />
             </div>
@@ -389,7 +424,7 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
             </div>
           )}
 
-          {/* Inputs Used */}
+          {/* Row 4: Inputs Used */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label>Inputs Used (Optional)</Label>
@@ -411,14 +446,21 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Select item</SelectItem>
-                      {inventoryItems.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          <div className="flex items-center gap-2">
-                            <Package className="h-4 w-4 text-muted-foreground" />
-                            {item.name} ({item.current_stock} {item.unit})
-                          </div>
-                        </SelectItem>
-                      ))}
+                      {filteredInventoryItems.length > 0 ? (
+                        filteredInventoryItems.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            <div className="flex items-center gap-2">
+                              <Package className="h-4 w-4 text-muted-foreground" />
+                              {item.name} ({item.current_stock} {item.unit})
+                            </div>
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                          No matching inventory items for this work type
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                   <div className="flex gap-2">
@@ -462,15 +504,15 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
             </Alert>
           )}
 
-          {/* Notes */}
+          {/* Row 5: Work Done */}
           <div className="space-y-2">
-            <Label htmlFor="notes">Additional Notes</Label>
+            <Label htmlFor="workDone">Work Done *</Label>
             <Textarea
-              id="notes"
-              placeholder="Any additional notes..."
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={2}
+              id="workDone"
+              placeholder="Describe what was accomplished..."
+              value={formData.workDone}
+              onChange={(e) => setFormData(prev => ({ ...prev, workDone: e.target.value }))}
+              rows={3}
             />
           </div>
         </div>
