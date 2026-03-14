@@ -105,7 +105,7 @@ const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 
 type ViewMode = 'list' | 'intake' | 'pay' | 'buyer';
 
-/** Threshold above which a crate weight is considered unusual and triggers a confirmation */
+/** Threshold above which a crate weight is consigggered unusual and triggers a confirmation */
 const UNUSUAL_WEIGHT_THRESHOLD_KG = 25;
 
 export default function HarvestCollectionsPage() {
