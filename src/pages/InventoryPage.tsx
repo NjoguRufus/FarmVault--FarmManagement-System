@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { Plus, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -8,6 +8,7 @@ import { useInventoryStock, useInventoryCategories } from '@/hooks/useInventoryR
 import { useInventoryItems } from '@/hooks/useInventory';
 import { useInventoryAuditLogs, useInventoryActions, useInventoryNotifications } from '@/hooks/useInventoryAudit';
 import { listSuppliers } from '@/services/suppliersService';
+import { updateInventoryItem } from '@/services/inventoryService';
 import type { Supplier } from '@/types';
 import { InventoryStatsCards } from '@/components/inventory/InventoryStatsCards';
 import { InventoryFilters } from '@/components/inventory/InventoryFilters';
@@ -29,6 +30,8 @@ export default function InventoryPage() {
   const companyId = user?.companyId ?? null;
   const canAddInventoryItem = can('inventory', 'addItem');
   const canViewAudit = can('inventory', 'viewAudit');
+  // editItem permission - fallback to addItem if editItem is not explicitly set
+  const canEditInventoryItem = can('inventory', 'editItem') || can('inventory', 'addItem');
   // Farmers start with "Add Item". Other actions are contextual (row/details).
   const canRestockInventory = can('inventory', 'restock');
   const canDeductInventory = can('inventory', 'deduct');
@@ -213,6 +216,30 @@ export default function InventoryPage() {
     }
   };
 
+  // Quick edit item name handler
+  const handleQuickEditName = useCallback(async (itemId: string, newName: string) => {
+    if (!companyId || !user?.id) {
+      toast.error('Unable to update item');
+      throw new Error('Missing company or user');
+    }
+    try {
+      await updateInventoryItem({
+        companyId,
+        id: itemId,
+        name: newName,
+        actorUserId: user.id,
+        actorName: user.name ?? user.email ?? 'Unknown',
+      });
+      toast.success('Item name updated');
+      // Update the selected item in drawer immediately so user sees the change
+      setSelectedItemForDetails((prev) => prev ? { ...prev, name: newName } : null);
+      handleInventoryChange();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to update item name');
+      throw err;
+    }
+  }, [companyId, user?.id, user?.name, user?.email]);
+
   // IMPORTANT for RLS: use the active auth company id only (no project fallback).
   const effectiveCompanyId = companyId;
 
@@ -389,6 +416,8 @@ export default function InventoryPage() {
           }
         }}
         onNotesUpdated={handleInventoryChange}
+        onUpdateName={handleQuickEditName}
+        canEditName={canEditInventoryItem}
       />
     </div>
   );

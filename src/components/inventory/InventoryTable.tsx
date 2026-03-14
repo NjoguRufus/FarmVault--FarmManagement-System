@@ -13,7 +13,7 @@ import {
   Minus,
   Eye,
   Edit3,
-  Trash2
+  Trash2,
 } from 'lucide-react';
 import type { InventoryStockRow, PackagingType } from '@/services/inventoryReadModelService';
 import { LowStockBadge } from './LowStockBadge';
@@ -245,6 +245,7 @@ function ItemIcon({ item, size = 'md' }: { item: InventoryStockRow; size?: 'sm' 
   );
 }
 
+
 function ListView({ 
   items, 
   onViewDetails, 
@@ -295,7 +296,7 @@ function ListView({
                         <ItemIcon item={item} size="sm" />
                       </div>
                       <div>
-                        <p className="font-medium text-foreground text-sm leading-tight whitespace-nowrap">
+                        <p className="text-sm font-medium text-foreground leading-tight whitespace-nowrap">
                           {item.name}
                         </p>
                         <p className="text-[11px] text-muted-foreground leading-tight whitespace-nowrap">
@@ -448,7 +449,7 @@ function CardView({
             <div className="flex items-start gap-3 mb-3">
               <ItemIcon item={item} size="md" />
               <div className="flex-1 min-w-0 pr-8">
-                <p className="font-semibold text-foreground leading-tight break-words" title={item.name}>
+                <p className="text-base font-medium text-foreground leading-tight">
                   {item.name}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5 break-words">

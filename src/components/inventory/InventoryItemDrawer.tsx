@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Package, 
   Wheat, 
@@ -10,7 +10,10 @@ import {
   Minus,
   Save,
   Loader2,
-  StickyNote
+  StickyNote,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   Drawer,
@@ -21,6 +24,7 @@ import {
 } from '@/components/ui/drawer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { useInventoryTransactions, useInventoryUsage } from '@/hooks/useInventoryReadModels';
 import { InventoryTransactionTimeline } from './InventoryTransactionTimeline';
@@ -39,6 +43,10 @@ interface InventoryItemDrawerProps {
   onRecordStockIn?: () => void;
   onRecordUsage?: () => void;
   onNotesUpdated?: () => void;
+  /** Optional callback to update item name - if provided, shows edit button */
+  onUpdateName?: (itemId: string, newName: string) => Promise<void>;
+  /** Whether the user can edit the item name */
+  canEditName?: boolean;
 }
 
 const formatCurrency = (amount: number | null | undefined) =>
@@ -127,6 +135,8 @@ export function InventoryItemDrawer({
   onRecordStockIn,
   onRecordUsage,
   onNotesUpdated,
+  onUpdateName,
+  canEditName,
 }: InventoryItemDrawerProps) {
   const { user } = useAuth();
   const companyId = user?.companyId ?? null;
@@ -146,17 +156,73 @@ export function InventoryItemDrawer({
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesChanged, setNotesChanged] = useState(false);
 
+  // Name editing state
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (item) {
       const notes = item.farm_usage_notes || item.description || '';
       setFarmNotes(notes);
       setNotesChanged(false);
+      // Reset name editing state when item changes
+      setIsEditingName(false);
+      setEditNameValue('');
     }
   }, [item]);
+
+  // Focus name input when editing starts
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
 
   const handleNotesChange = (value: string) => {
     setFarmNotes(value);
     setNotesChanged(value !== (item?.farm_usage_notes || item?.description || ''));
+  };
+
+  const handleStartEditName = () => {
+    if (item) {
+      setEditNameValue(item.name);
+      setIsEditingName(true);
+    }
+  };
+
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditNameValue('');
+  };
+
+  const handleSaveName = async () => {
+    if (!item || !onUpdateName) return;
+    const trimmed = editNameValue.trim();
+    if (!trimmed || trimmed === item.name) {
+      handleCancelEditName();
+      return;
+    }
+    setSavingName(true);
+    try {
+      await onUpdateName(item.id, trimmed);
+      setIsEditingName(false);
+    } catch {
+      // Error already handled by parent - keep editing
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void handleSaveName();
+    } else if (e.key === 'Escape') {
+      handleCancelEditName();
+    }
   };
 
   const [isMobile, setIsMobile] = useState(false);
@@ -271,7 +337,50 @@ export function InventoryItemDrawer({
               <Icon className={`w-6 h-6 ${config.color}`} strokeWidth={1.5} />
             </div>
             <div className="flex-1 min-w-0">
-              <DrawerTitle className="text-left text-lg">{item.name}</DrawerTitle>
+              {isEditingName ? (
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <Input
+                    ref={nameInputRef}
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    onKeyDown={handleNameKeyDown}
+                    className="h-8 text-base font-semibold px-2"
+                    disabled={savingName}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveName}
+                    disabled={savingName || !editNameValue.trim()}
+                    className="h-7 w-7 inline-flex items-center justify-center rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shrink-0"
+                    title="Save"
+                  >
+                    {savingName ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditName}
+                    disabled={savingName}
+                    className="h-7 w-7 inline-flex items-center justify-center rounded border border-border bg-background hover:bg-muted disabled:opacity-50 shrink-0"
+                    title="Cancel"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <DrawerTitle className="text-left text-lg">{item.name}</DrawerTitle>
+                  {canEditName && onUpdateName && (
+                    <button
+                      type="button"
+                      onClick={handleStartEditName}
+                      className="h-6 w-6 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                      title="Edit name"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               <p className="text-sm text-muted-foreground mt-0.5">
                 {item.category_name ?? item.category} • {config.label}
               </p>
