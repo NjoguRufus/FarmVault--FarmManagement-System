@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
 
 export interface SimpleStatCardProps {
-  title: string;
+  title: React.ReactNode;
   value: string | number;
   icon?: LucideIcon;
   iconVariant?: "success" | "warning" | "info" | "destructive" | "primary" | "muted" | "gold";
