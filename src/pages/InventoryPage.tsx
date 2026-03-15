@@ -26,15 +26,31 @@ import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 export default function InventoryPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, permissions } = usePermissions();
   const companyId = user?.companyId ?? null;
-  const canAddInventoryItem = can('inventory', 'addItem');
+  // Add Item: support both permission keys - "addItem" (PermissionEditor/rolePresetDefaults) and "create" (Access & Permissions / accessControl PERMISSION_KEYS)
+  const canAddByAddItem = can('inventory', 'addItem');
+  const canAddByCreate = can('inventory', 'create');
+  const canAddInventoryItem = canAddByAddItem || canAddByCreate;
   const canViewAudit = can('inventory', 'viewAudit');
-  // editItem permission - fallback to addItem if editItem is not explicitly set
-  const canEditInventoryItem = can('inventory', 'editItem') || can('inventory', 'addItem');
+  // editItem permission - fallback to addItem/create if editItem is not explicitly set
+  const canEditInventoryItem = can('inventory', 'editItem') || can('inventory', 'addItem') || can('inventory', 'create');
   // Farmers start with "Add Item". Other actions are contextual (row/details).
   const canRestockInventory = can('inventory', 'restock');
   const canDeductInventory = can('inventory', 'deduct');
+
+  // Temporary debug logs for staff inventory Add Item visibility (remove after verifying)
+  if (import.meta.env.DEV) {
+    const inv = (permissions?.inventory ?? {}) as Record<string, unknown>;
+    // eslint-disable-next-line no-console
+    console.log('[InventoryPage] permission state', {
+      inventoryCreate: inv.create,
+      inventoryAddItem: inv.addItem,
+      canAddByAddItem,
+      canAddByCreate,
+      canAddInventoryItem,
+    });
+  }
 
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
