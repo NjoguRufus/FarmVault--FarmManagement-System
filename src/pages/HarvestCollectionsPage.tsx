@@ -25,6 +25,7 @@ import {
   Check,
   X,
   AlertTriangle,
+  Users,
 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -923,6 +924,15 @@ export default function HarvestCollectionsPage() {
 
     return totals;
   }, [weighEntriesForCollection, selectedCollection?.pricePerKgPicker]);
+
+  /** Avg Kg per Picker: totalKg and active picker count for the selected collection. Active = total collected weight > 0. */
+  const avgKgPerPickerStats = useMemo(() => {
+    const totalKg = Object.values(pickerTotalsById).reduce((sum, t) => sum + t.totalKg, 0);
+    const activePickers = Object.values(pickerTotalsById).filter((t) => t.totalKg > 0).length;
+    const avgKgPerPicker =
+      activePickers > 0 ? Math.round((totalKg / activePickers) * 10) / 10 : 0;
+    return { totalKg, activePickers, avgKgPerPicker };
+  }, [pickerTotalsById]);
 
   const getPickerTotals = (pickerId: string): { totalKg: number; totalPay: number } => {
     return pickerTotalsById[pickerId] ?? { totalKg: 0, totalPay: 0 };
@@ -2164,7 +2174,7 @@ export default function HarvestCollectionsPage() {
       >
         {/* Header */}
         <div
-          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0"
+          className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between min-w-0 w-full"
           data-tour="staff-harvest-header"
         >
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
@@ -2172,7 +2182,7 @@ export default function HarvestCollectionsPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-9 rounded-lg gap-1 text-sm"
+                className="h-9 rounded-lg gap-1 text-sm shrink-0"
                 onClick={() => {
                   setSelectedCollectionId(null);
                   setViewMode('list');
@@ -2183,7 +2193,7 @@ export default function HarvestCollectionsPage() {
                 Back
               </Button>
             ) : null}
-            <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate" data-tour="harvest-collections-title">
+            <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate min-w-0" data-tour="harvest-collections-title">
               {selectedCollectionId ? (selectedCollection?.name ?? 'Collection') : 'Harvest Collections'}
             </h1>
             <Button
@@ -2198,8 +2208,7 @@ export default function HarvestCollectionsPage() {
               <HelpCircle className="h-5 w-5" />
             </Button>
           </div>
-          {/* Mobile project selector inside page */}
-          <div className="mt-2 w-full max-w-xs sm:max-w-sm md:hidden">
+          <div className="w-full min-w-0 md:hidden">
             <p className="text-xs text-muted-foreground mb-1.5">Project</p>
             <UiSelect
               value={effectiveProject?.id ?? undefined}
@@ -2631,21 +2640,17 @@ export default function HarvestCollectionsPage() {
             <div className="space-y-2">
               {statsExpanded && (
                 <div className="min-w-0 space-y-2" data-tour="harvest-stats">
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 py-2 px-2 sm:px-3 rounded-xl bg-muted/40">
-                    <span className="font-semibold text-foreground text-sm sm:text-base">
-                      {selectedCollection.name?.trim() || formatDate(selectedCollection.harvestDate)}
-                    </span>
-                    {canViewPaymentAmounts && selectedCollection.pricePerKgPicker != null && (
-                      <span className="text-xs text-muted-foreground">@{selectedCollection.pricePerKgPicker}/kg</span>
-                    )}
-                  </div>
                   <div
                     className={cn(
                       'grid gap-2 sm:gap-3',
                       (() => {
-                        const statCount = 1 + (canViewPaymentAmounts ? 1 : 0) + (showBuyerSale ? 1 : 0);
+                        const statCount =
+                          2 +
+                          (canViewPaymentAmounts ? 1 : 0) +
+                          (showBuyerSale ? 1 : 0);
                         if (statCount <= 1) return 'grid-cols-1';
                         if (statCount === 2) return 'grid-cols-2';
+                        if (statCount === 3) return 'grid-cols-2 sm:grid-cols-3';
                         return 'grid-cols-2 sm:grid-cols-3';
                       })()
                     )}
@@ -2653,9 +2658,28 @@ export default function HarvestCollectionsPage() {
                     <div data-tour="harvest-total-kg">
                       <SimpleStatCard
                         layout="mobile-compact"
-                        title="Total kg"
+                        title={
+                          <>
+                            Total kg
+                            {selectedCollection?.pricePerKgPicker != null && (
+                              <span className="text-[9px] sm:text-[10px] text-muted-foreground font-normal normal-case tracking-normal ml-0.5">
+                                (@{selectedCollection.pricePerKgPicker}/kg)
+                              </span>
+                            )}
+                          </>
+                        }
                         value={(collectionFinancials.totalHarvestQty ?? 0).toFixed(1)}
                         icon={Scale}
+                        iconVariant="primary"
+                        className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+                      />
+                    </div>
+                    <div data-tour="harvest-avg-kg-per-picker">
+                      <SimpleStatCard
+                        layout="mobile-compact"
+                        title="Avg Kg / Picker"
+                        value={`${avgKgPerPickerStats.avgKgPerPicker} kg`}
+                        icon={Users}
                         iconVariant="primary"
                         className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
                       />
