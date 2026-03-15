@@ -73,6 +73,16 @@ import {
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -217,6 +227,8 @@ export default function HarvestCollectionsPage() {
   const [editIntakeKg, setEditIntakeKg] = useState('');
   const [editIntakeSaving, setEditIntakeSaving] = useState(false);
   const [expandedQuickIntakePickerId, setExpandedQuickIntakePickerId] = useState<string | null>(null);
+  const [deleteIntakeConfirm, setDeleteIntakeConfirm] = useState<{ entryId: string; collectionId: string } | null>(null);
+  const [deletingIntakeEntry, setDeletingIntakeEntry] = useState(false);
 
   const [harvestTourRun, setHarvestTourRun] = useState(false);
   const [harvestTourStepIndex, setHarvestTourStepIndex] = useState(0);
@@ -231,12 +243,26 @@ export default function HarvestCollectionsPage() {
     can('harvest', 'recordIntake') ||
     can('harvest', 'edit') ||
     can('harvest', 'create');
+  const canDeleteIntakeEntry =
+    canKey('harvest_collections.delete') || can('harvest', 'edit') || canManageIntake;
   const canPayPickers = canKey('harvest_collections.pay') || can('harvest', 'payPickers');
   const canViewBuyerSection = can('harvest', 'viewBuyerSection');
   const canCloseHarvest = can('harvest', 'close');
   const canViewFinancials = canKey('harvest_collections.financials') || can('harvest', 'viewFinancials');
   const canViewPaymentAmounts = canViewFinancials;
-  
+
+  if (import.meta.env.DEV && user) {
+    // eslint-disable-next-line no-console
+    console.log('[HarvestCollections] edit/delete visibility', {
+      canManageIntake,
+      canDeleteIntakeEntry,
+      byKeyEdit: canKey('harvest_collections.edit'),
+      byKeyDelete: canKey('harvest_collections.delete'),
+      byLegacyEdit: can('harvest', 'edit'),
+      byLegacyRecordIntake: can('harvest', 'recordIntake'),
+    });
+  }
+
   const detailModes = useMemo<ViewMode[]>(() => {
     const modes: ViewMode[] = [];
     if (canManageIntake) modes.push('intake');
@@ -1594,11 +1620,17 @@ export default function HarvestCollectionsPage() {
     }
   };
 
-  const handleDeleteIntakeEntry = async (params: { id: string; collectionId: string }) => {
-    if (!canManageIntake || selectedCollection?.status === 'closed') return;
-    if (!window.confirm('Delete this intake entry? Picker and collection totals will update.')) return;
+  const handleDeleteIntakeEntryClick = (params: { id: string; collectionId: string }) => {
+    if (!canDeleteIntakeEntry || selectedCollection?.status === 'closed') return;
+    setDeleteIntakeConfirm({ entryId: params.id, collectionId: params.collectionId });
+  };
+
+  const handleDeleteIntakeEntryConfirm = async () => {
+    if (!deleteIntakeConfirm) return;
+    setDeletingIntakeEntry(true);
     try {
-      await deletePickerIntakeEntry({ entryId: params.id, collectionId: params.collectionId });
+      await deletePickerIntakeEntry({ entryId: deleteIntakeConfirm.entryId, collectionId: deleteIntakeConfirm.collectionId });
+      setDeleteIntakeConfirm(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['pickerIntake'] }),
         queryClient.invalidateQueries({ queryKey: ['harvestCollections'] }),
@@ -1606,6 +1638,8 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Entry deleted', description: 'Totals recalculated.' });
     } catch (e: any) {
       toast({ title: 'Delete failed', description: e?.message ?? 'Could not delete entry', variant: 'destructive' });
+    } finally {
+      setDeletingIntakeEntry(false);
     }
   };
 
@@ -3007,43 +3041,47 @@ export default function HarvestCollectionsPage() {
                                                     <span className="tabular-nums text-foreground">KES {price}</span>
                                                   )}
                                                   <span className="text-xs text-muted-foreground tabular-nums">{timeStr}</span>
-                                                  {canManageIntake && selectedCollection?.status !== 'closed' ? (
+                                                  {(canManageIntake || canDeleteIntakeEntry) && selectedCollection?.status !== 'closed' ? (
                                                     <div className="flex items-center justify-end gap-0.5 w-14">
-                                                      <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                                                        onClick={(ev) => {
-                                                          ev.stopPropagation();
-                                                          setEditIntakeEntry({
-                                                            id: entry.id,
-                                                            pickerId: entry.pickerId,
-                                                            pickerNumber: entry.pickerNumber,
-                                                            pickerName: entry.pickerName,
-                                                            kg: entry.kg,
-                                                            collectionId: entry.collectionId,
-                                                          });
-                                                          setEditIntakePickerId(entry.pickerId);
-                                                          setEditIntakeKg(String(entry.kg));
-                                                        }}
-                                                        aria-label="Edit entry"
-                                                      >
-                                                        <Pencil className="h-3 w-3" />
-                                                      </Button>
-                                                      <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                                                        onClick={(ev) => {
-                                                          ev.stopPropagation();
-                                                          void handleDeleteIntakeEntry({ id: entry.id, collectionId: entry.collectionId });
-                                                        }}
-                                                        aria-label="Delete entry"
-                                                      >
-                                                        <Trash2 className="h-3 w-3" />
-                                                      </Button>
+                                                      {canManageIntake && (
+                                                        <Button
+                                                          type="button"
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                                                          onClick={(ev) => {
+                                                            ev.stopPropagation();
+                                                            setEditIntakeEntry({
+                                                              id: entry.id,
+                                                              pickerId: entry.pickerId,
+                                                              pickerNumber: entry.pickerNumber,
+                                                              pickerName: entry.pickerName,
+                                                              kg: entry.kg,
+                                                              collectionId: entry.collectionId,
+                                                            });
+                                                            setEditIntakePickerId(entry.pickerId);
+                                                            setEditIntakeKg(String(entry.kg));
+                                                          }}
+                                                          aria-label="Edit entry"
+                                                        >
+                                                          <Pencil className="h-3 w-3" />
+                                                        </Button>
+                                                      )}
+                                                      {canDeleteIntakeEntry && (
+                                                        <Button
+                                                          type="button"
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                                                          onClick={(ev) => {
+                                                            ev.stopPropagation();
+                                                            handleDeleteIntakeEntryClick({ id: entry.id, collectionId: entry.collectionId });
+                                                          }}
+                                                          aria-label="Delete entry"
+                                                        >
+                                                          <Trash2 className="h-3 w-3" />
+                                                        </Button>
+                                                      )}
                                                     </div>
                                                   ) : (
                                                     <span className="w-14" />
@@ -3445,39 +3483,43 @@ export default function HarvestCollectionsPage() {
                                                 {e.timeStr}
                                               </span>
                                               <span className="flex-1 min-w-0" />
-                                              {canManageIntake && selectedCollection?.status !== 'closed' && (
+                                              {(canManageIntake || canDeleteIntakeEntry) && selectedCollection?.status !== 'closed' && (
                                                 <>
-                                                  <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                                                    onClick={() => {
-                                                      setEditIntakeEntry({
-                                                        id: e.entryId,
-                                                        pickerId: e.pickerId,
-                                                        pickerNumber: picker?.pickerNumber ?? '?',
-                                                        pickerName: picker?.pickerName ?? '—',
-                                                        kg: e.kg,
-                                                        collectionId: e.collectionId,
-                                                      });
-                                                      setEditIntakePickerId(e.pickerId);
-                                                      setEditIntakeKg(String(e.kg));
-                                                    }}
-                                                    aria-label="Edit entry"
-                                                  >
-                                                    <Pencil className="h-3 w-3" />
-                                                  </Button>
-                                                  <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                                                    onClick={() => void handleDeleteIntakeEntry({ id: e.entryId, collectionId: e.collectionId })}
-                                                    aria-label="Delete entry"
-                                                  >
-                                                    <Trash2 className="h-3 w-3" />
-                                                  </Button>
+                                                  {canManageIntake && (
+                                                    <Button
+                                                      type="button"
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                                                      onClick={() => {
+                                                        setEditIntakeEntry({
+                                                          id: e.entryId,
+                                                          pickerId: e.pickerId,
+                                                          pickerNumber: picker?.pickerNumber ?? '?',
+                                                          pickerName: picker?.pickerName ?? '—',
+                                                          kg: e.kg,
+                                                          collectionId: e.collectionId,
+                                                        });
+                                                        setEditIntakePickerId(e.pickerId);
+                                                        setEditIntakeKg(String(e.kg));
+                                                      }}
+                                                      aria-label="Edit entry"
+                                                    >
+                                                      <Pencil className="h-3 w-3" />
+                                                    </Button>
+                                                  )}
+                                                  {canDeleteIntakeEntry && (
+                                                    <Button
+                                                      type="button"
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                                                      onClick={() => handleDeleteIntakeEntryClick({ id: e.entryId, collectionId: e.collectionId })}
+                                                      aria-label="Delete entry"
+                                                    >
+                                                      <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                  )}
                                                 </>
                                               )}
                                             </div>
@@ -4239,40 +4281,44 @@ export default function HarvestCollectionsPage() {
                                 )}
                                 <span className="text-muted-foreground tabular-nums text-xs">{timeStr}</span>
                                 <div className="flex items-center justify-end gap-0.5 w-14">
-                                  {canManageIntake && selectedCollection?.status !== 'closed' && (
+                                  {(canManageIntake || canDeleteIntakeEntry) && selectedCollection?.status !== 'closed' && (
                                     <>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                          setEditIntakeEntry({
-                                            id: e.id ?? '',
-                                            pickerId: e.pickerId,
-                                            pickerNumber: picker?.pickerNumber ?? '?',
-                                            pickerName: picker?.pickerName ?? '—',
-                                            kg,
-                                            collectionId: e.collectionId,
-                                          });
-                                          setEditIntakePickerId(e.pickerId);
-                                          setEditIntakeKg(String(kg));
-                                          setAddWeighOpen(false);
-                                        }}
-                                        aria-label="Edit"
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                                        onClick={() => void handleDeleteIntakeEntry({ id: e.id ?? '', collectionId: e.collectionId })}
-                                        aria-label="Delete"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
+                                      {canManageIntake && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                          onClick={() => {
+                                            setEditIntakeEntry({
+                                              id: e.id ?? '',
+                                              pickerId: e.pickerId,
+                                              pickerNumber: picker?.pickerNumber ?? '?',
+                                              pickerName: picker?.pickerName ?? '—',
+                                              kg,
+                                              collectionId: e.collectionId,
+                                            });
+                                            setEditIntakePickerId(e.pickerId);
+                                            setEditIntakeKg(String(kg));
+                                            setAddWeighOpen(false);
+                                          }}
+                                          aria-label="Edit"
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                      {canDeleteIntakeEntry && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                          onClick={() => handleDeleteIntakeEntryClick({ id: e.id ?? '', collectionId: e.collectionId })}
+                                          aria-label="Delete"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      )}
                                     </>
                                   )}
                                 </div>
@@ -4380,6 +4426,40 @@ export default function HarvestCollectionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete intake entry confirmation - system UI modal */}
+      <AlertDialog open={!!deleteIntakeConfirm} onOpenChange={(open) => !open && !deletingIntakeEntry && setDeleteIntakeConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete intake entry</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove this weight entry? Picker and collection totals will update after delete.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingIntakeEntry} className="min-h-10">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteIntakeEntryConfirm();
+              }}
+              disabled={deletingIntakeEntry}
+              className="min-h-10 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingIntakeEntry ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Deleting…
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

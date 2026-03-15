@@ -88,8 +88,13 @@ export function useEmployeeAccess(): UseEmployeeAccessResult {
   const can = useCallback(
     (permissionKey: string): boolean => {
       if (isAdminOrDev) return true;
-      if (!employeeId) return legacyCan(mapKeyToModuleAction(permissionKey).module, mapKeyToModuleAction(permissionKey).action);
-      return canByKeys(effectivePermissionKeys, permissionKey);
+      const mapped = mapKeyToModuleAction(permissionKey);
+      if (!employeeId) return legacyCan(mapped.module, mapped.action);
+      // Prefer flat keys from employee access (e.g. harvest_collections.edit)
+      if (canByKeys(effectivePermissionKeys, permissionKey)) return true;
+      // Fallback: respect legacy permission map (e.g. harvest.edit from role preset) so staff
+      // with edit/delete in Access & Permissions or role presets can edit/delete.
+      return legacyCan(mapped.module, mapped.action);
     },
     [isAdminOrDev, employeeId, effectivePermissionKeys, legacyCan]
   );
