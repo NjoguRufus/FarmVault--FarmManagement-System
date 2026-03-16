@@ -32,7 +32,7 @@ export function AboutSection() {
         </div>
         <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} className="text-center">
           <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-12">
-            <Link to="/setup-company" className="inline-flex items-center">Join FarmVault <ArrowRight className="ml-2 h-4 w-4" /></Link>
+            <a href="https://app.farmvault.africa/signup" className="inline-flex items-center">Join FarmVault <ArrowRight className="ml-2 h-4 w-4" /></a>
           </Button>
         </motion.div>
       </div>

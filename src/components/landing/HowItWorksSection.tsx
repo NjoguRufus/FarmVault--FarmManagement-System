@@ -156,17 +156,17 @@ export function HowItWorksSection() {
               asChild
               className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-12 shadow-[0_18px_40px_rgba(9,35,24,0.35)]"
             >
-              <Link to="/setup-company" className="inline-flex items-center">
+              <a href="https://app.farmvault.africa/signup" className="inline-flex items-center">
                 Start Free Trial
                 <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </a>
             </Button>
-            <Link
-              to="/dashboard"
+            <a
+              href="https://app.farmvault.africa"
               className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
             >
-              See Dashboard Preview
-            </Link>
+              Open Dashboard
+            </a>
           </div>
         </motion.div>
       </div>

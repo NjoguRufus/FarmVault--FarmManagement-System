@@ -51,7 +51,7 @@ export function HomeTestimonialsSection() {
             Case studies and detailed success stories coming soon.
           </p>
           <Button asChild size="lg" className="rounded-xl">
-            <Link to="/setup-company">Start Free Trial</Link>
+            <a href="https://app.farmvault.africa/signup">Start Free Trial</a>
           </Button>
         </div>
       </div>
