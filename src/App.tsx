@@ -86,6 +86,7 @@ import OnboardingPage from "@/pages/OnboardingPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireOnboarding } from "@/components/auth/RequireOnboarding";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
+import { DeveloperRoute } from "@/components/auth/DeveloperRoute";
 import { DevRoute } from "@/components/auth/DevRoute";
 import { RequireManager } from "@/components/auth/RequireManager";
 import { RequireBroker } from "@/components/auth/RequireBroker";
@@ -124,6 +125,19 @@ import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
 import DevBootstrapPage from "@/pages/dev/DevBootstrap";
 import DevDiagnosticsPage from "@/pages/dev/DevDiagnosticsPage";
+import { DeveloperLayout } from "@/components/layout/DeveloperLayout";
+import DeveloperCompaniesPage from "@/pages/developer/DeveloperCompaniesPage";
+import DeveloperUsersPage from "@/pages/developer/DeveloperUsersPage";
+import DeveloperBillingConfirmationPage from "@/pages/developer/DeveloperBillingConfirmationPage";
+import DeveloperFinancesPage from "@/pages/developer/DeveloperFinancesPage";
+import DeveloperSubscriptionAnalyticsPage from "@/pages/developer/DeveloperSubscriptionAnalyticsPage";
+import DeveloperExpensesPage from "@/pages/developer/DeveloperExpensesPage";
+import DeveloperBackupsPage from "@/pages/developer/DeveloperBackupsPage";
+import DeveloperCodeRedPage from "@/pages/developer/DeveloperCodeRedPage";
+import DeveloperFeedbackInboxPage from "@/pages/developer/DeveloperFeedbackInboxPage";
+import DeveloperAuditLogsPage from "@/pages/developer/DeveloperAuditLogsPage";
+import DeveloperHomePage from "@/pages/developer/DeveloperHomePage";
+import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 
 const queryClient = new QueryClient();
@@ -289,6 +303,14 @@ const App = () => (
                     </PermissionRoute>
                   }
                 />
+                <Route
+                  path="/records/view/:recordId"
+                  element={
+                    <PermissionRoute module="notes">
+                      <AdminRecordDetailPage />
+                    </PermissionRoute>
+                  }
+                />
               </Route>
 
               {/* Staff workspace routes */}
@@ -372,11 +394,12 @@ const App = () => (
               >
                 {/* Default developer entrypoint – /dev → /dev/dashboard */}
                 <Route path="/dev" element={<Navigate to="/dev/dashboard" replace />} />
-                {/* Backwards-compatible redirect from old /developer path */}
-                <Route path="/developer" element={<Navigate to="/admin" replace />} />
+                {/* Backwards-compatible redirect from old /developer path (now canonical) */}
+                <Route path="/admin" element={<Navigate to="/developer" replace />} />
                 {/* Canonical developer dashboard path */}
                 <Route path="/dev/dashboard" element={<AdminDashboard />} />
                 <Route path="/dev/diagnostics" element={<DevDiagnosticsPage />} />
+                {/* Keep legacy /admin routes working but prefer /developer as canonical */}
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/companies" element={<AdminCompaniesPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
@@ -395,6 +418,32 @@ const App = () => (
                 <Route path="/developer/records/:cropId" element={<DeveloperCropRecordsPage />} />
                 <Route path="/developer/records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
                 <Route path="/admin/records" element={<Navigate to="/developer/records" replace />} />
+              </Route>
+
+              {/* New developer console under /developer with nested routes */}
+              <Route
+                path="/developer"
+                element={
+                  <DeveloperRoute>
+                    <DeveloperLayout />
+                  </DeveloperRoute>
+                }
+              >
+                <Route index element={<DeveloperHomePage />} />
+                <Route path="companies" element={<DeveloperCompaniesPage />} />
+                <Route path="users" element={<DeveloperUsersPage />} />
+                <Route path="billing-confirmation" element={<DeveloperBillingConfirmationPage />} />
+                <Route path="finances" element={<DeveloperFinancesPage />} />
+                <Route path="subscription-analytics" element={<DeveloperSubscriptionAnalyticsPage />} />
+                <Route path="farmvault-expenses" element={<DeveloperExpensesPage />} />
+                <Route path="backups" element={<DeveloperBackupsPage />} />
+                <Route path="code-red" element={<DeveloperCodeRedPage />} />
+                <Route path="feedback-inbox" element={<DeveloperFeedbackInboxPage />} />
+                <Route path="audit-logs" element={<DeveloperAuditLogsPage />} />
+                <Route path="records" element={<DeveloperRecordsPage />} />
+                <Route path="records/:cropId" element={<DeveloperCropRecordsPage />} />
+                <Route path="records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
+                <Route path="records/view/:recordId" element={<DeveloperRecordViewPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

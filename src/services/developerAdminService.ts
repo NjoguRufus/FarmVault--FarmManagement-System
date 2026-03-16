@@ -12,18 +12,37 @@ export interface DevDashboardKpis {
   [key: string]: unknown;
 }
 
-export interface DevCompanyRow {
-  company_id: string;
+export type DeveloperCompanyRow = {
+  company_id?: string;
+  id?: string;
   company_name: string | null;
-  subscription_status: string | null;
-  plan_code: string | null;
-  billing_mode: string | null;
-  billing_cycle: string | null;
-  is_trial: boolean | null;
-  trial_ends_at: string | null;
-  active_until: string | null;
+  created_at?: string | null;
+  users_count?: number | null;
+  employees_count?: number | null;
+  pending_payments_count?: number | null;
+  subscription_status?: string | null;
+  plan_code?: string | null;
+  billing_mode?: string | null;
+  billing_cycle?: string | null;
+  is_trial?: boolean | null;
+  trial_ends_at?: string | null;
+  active_until?: string | null;
+  subscription?: {
+    id?: string | null;
+    plan?: string | null;
+    status?: string | null;
+    trial_start?: string | null;
+    trial_end?: string | null;
+    period_start?: string | null;
+    period_end?: string | null;
+  } | null;
   [key: string]: unknown;
-}
+};
+
+export type ListCompaniesRpcResponse = {
+  rows: DeveloperCompanyRow[];
+  total: number;
+};
 
 export type OverrideMode =
   | 'start_trial'
@@ -55,12 +74,20 @@ export async function getDevDashboardKpis(): Promise<DevDashboardKpis> {
   return (data as DevDashboardKpis) ?? {};
 }
 
-export async function listCompanies(): Promise<DevCompanyRow[]> {
-  const { data, error } = await supabase.rpc('list_companies');
+export async function listCompanies(): Promise<ListCompaniesRpcResponse> {
+  const { data, error } = await supabase.rpc('list_companies', {
+    p_search: null,
+    p_limit: 200,
+    p_offset: 0,
+  });
   if (error) {
     throw new Error(error.message ?? 'Failed to load companies');
   }
-  return (data as DevCompanyRow[]) ?? [];
+  const payload = (data as ListCompaniesRpcResponse | null) ?? { rows: [], total: 0 };
+  return {
+    rows: payload.rows ?? [],
+    total: payload.total ?? 0,
+  };
 }
 
 export async function overrideSubscription(input: OverrideSubscriptionInput): Promise<void> {
