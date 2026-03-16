@@ -57,6 +57,7 @@ import {
   mapPicker,
   computeCollectionFinancials,
   updateHarvestPicker,
+  getCompanyCollectionFinancialsAggregate,
 } from '@/services/harvestCollectionsService';
 import {
   computeWalletSummary,
@@ -512,6 +513,16 @@ export default function HarvestCollectionsPage() {
   const isFrenchBeansProject =
     String(effectiveProject?.cropType ?? '').toLowerCase().replace('_', '-') === 'french-beans';
 
+  const { data: collectionsFinancialTotals } = useQuery({
+    queryKey: ['harvestCollectionsFinancialTotals', companyId ?? '', effectiveProjectId ?? ''],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', effectiveProjectId ?? null),
+    enabled: Boolean(companyId && isFrenchBeansProject),
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+  });
+
   const { data: financeWalletTotals } = useQuery({
     queryKey: ['projectWalletTotals', companyId ?? '', effectiveProjectId ?? ''],
     queryFn: () => getFinanceWalletTotals(effectiveProjectId!, companyId!),
@@ -564,17 +575,67 @@ export default function HarvestCollectionsPage() {
   }, [allCollections, effectiveProject]);
 
   const collectionsSummary = useMemo(() => {
+    if (isFrenchBeansProject && collectionsFinancialTotals) {
+      const totalKg = Number(collectionsFinancialTotals.totalHarvestKg ?? 0) || 0;
+      const totalRevenue = Number(collectionsFinancialTotals.totalRevenue ?? collectionsFinancialTotals.totalSales ?? 0) || 0;
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[HarvestCollections] summary (Supabase aggregate)', {
+          companyId,
+          projectId: effectiveProjectId,
+          totalKg,
+          totalRevenue,
+          rawTotals: collectionsFinancialTotals,
+        });
+      }
+
+      return {
+        totalKg,
+        totalRevenue,
+        totalCollections: collectionsFinancialTotals.collections.length,
+      };
+    }
+
     const onlyFrench = collections.filter(
       (c) => String(c.cropType).toLowerCase().replace('_', '-') === 'french-beans'
     );
     const totalKg = onlyFrench.reduce((sum, c) => sum + Number(c.totalHarvestKg ?? 0), 0);
-    const totalRevenue = onlyFrench.reduce((sum, c) => sum + Number(c.totalRevenue ?? 0), 0);
+    const totalRevenue = onlyFrench.reduce((sum, c) => {
+      const qty = Number(c.totalHarvestKg ?? 0) || 0;
+      const buyerPrice = Number((c as any).pricePerKgBuyer ?? 0) || 0;
+      return sum + qty * buyerPrice;
+    }, 0);
+
+    if (import.meta.env.DEV) {
+      const debugRows = onlyFrench.map((c) => {
+        const qty = Number(c.totalHarvestKg ?? 0) || 0;
+        const buyerPrice = Number((c as any).pricePerKgBuyer ?? 0) || 0;
+        const revenue = qty * buyerPrice;
+        return {
+          id: c.id,
+          harvestDate: c.harvestDate,
+          totalHarvestKg: qty,
+          pricePerKgBuyer: buyerPrice,
+          revenue,
+        };
+      });
+      // eslint-disable-next-line no-console
+      console.log('[HarvestCollections] summary (fallback from collections)', {
+        companyId,
+        projectId: effectiveProjectId,
+        totalKg,
+        totalRevenue,
+        rows: debugRows,
+      });
+    }
+
     return {
       totalKg,
       totalRevenue,
       totalCollections: onlyFrench.length,
     };
-  }, [collections]);
+  }, [collections, isFrenchBeansProject, collectionsFinancialTotals, companyId, effectiveProjectId]);
 
   /** Pending = buyer not yet marked as paid (harvest not completed). */
   const pendingCollections = useMemo(

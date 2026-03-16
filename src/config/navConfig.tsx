@@ -53,17 +53,17 @@ export const companyNavConfig: NavItem[] = [
 
 /** Developer/Admin nav. All items in main for sidebar; mobile gets simplified. */
 export const developerNavConfig: NavItem[] = [
-  { label: 'Admin Home', path: '/admin', icon: LayoutDashboard, group: 'main' },
-  { label: 'Companies', path: '/admin/companies', icon: Building2, group: 'main' },
-  { label: 'Users', path: '/admin/users', icon: Users, group: 'main' },
-  { label: 'Billing Confirmation', path: '/admin/users/pending', icon: Users, group: 'main' },
-  { label: 'Finances', path: '/admin/finances', icon: CreditCard, group: 'main' },
-  { label: 'Subscription Analytics', path: '/admin/analytics/subscriptions', icon: BarChart3, group: 'main' },
-  { label: 'FarmVault Expenses', path: '/admin/expenses', icon: Receipt, group: 'main' },
-  { label: 'Backups', path: '/admin/backups', icon: Database, group: 'main' },
-  { label: 'Code Red', path: '/admin/code-red', icon: AlertTriangle, group: 'main' },
-  { label: 'Feedback inbox', path: '/admin/feedback', icon: MessageSquare, group: 'main' },
-  { label: 'Audit Logs', path: '/admin/audit-logs', icon: FileText, group: 'main' },
+  { label: 'Developer Home', path: '/developer', icon: LayoutDashboard, group: 'main' },
+  { label: 'Companies', path: '/developer/companies', icon: Building2, group: 'main' },
+  { label: 'Users', path: '/developer/users', icon: Users, group: 'main' },
+  { label: 'Billing Confirmation', path: '/developer/billing-confirmation', icon: Users, group: 'main' },
+  { label: 'Finances', path: '/developer/finances', icon: CreditCard, group: 'main' },
+  { label: 'Subscription Analytics', path: '/developer/subscription-analytics', icon: BarChart3, group: 'main' },
+  { label: 'FarmVault Expenses', path: '/developer/farmvault-expenses', icon: Receipt, group: 'main' },
+  { label: 'Backups', path: '/developer/backups', icon: Database, group: 'main' },
+  { label: 'Code Red', path: '/developer/code-red', icon: AlertTriangle, group: 'main' },
+  { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'main' },
+  { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'main' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'main' },
 ];
 
