@@ -19,6 +19,7 @@ import {
   Settings,
   BarChart3,
   ArrowRightLeft,
+  Shield,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -57,6 +58,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Developer Home', path: '/developer', icon: LayoutDashboard, group: 'main' },
   { label: 'Companies', path: '/developer/companies', icon: Building2, group: 'main' },
   { label: 'Users', path: '/developer/users', icon: Users, group: 'main' },
+  { label: 'Developer Settings', path: '/developer/settings', icon: Shield, group: 'main' },
   { label: 'Billing Confirmation', path: '/developer/billing-confirmation', icon: Users, group: 'main' },
   { label: 'Finances', path: '/developer/finances', icon: CreditCard, group: 'main' },
   { label: 'Subscription Analytics', path: '/developer/subscription-analytics', icon: BarChart3, group: 'main' },
