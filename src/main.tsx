@@ -65,6 +65,11 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 
 // Use only env; no custom Clerk JS host or domain overrides (avoids CORS/origin issues).
 const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+if (import.meta.env.DEV) {
+  const pkPrefix = pk ? pk.slice(0, 8) : "none";
+  // eslint-disable-next-line no-console
+  console.log("[Clerk] Using publishable key prefix:", pkPrefix);
+}
 const emergencyAccess = import.meta.env.VITE_EMERGENCY_ACCESS === "true" || import.meta.env.VITE_EMERGENCY_ACCESS === "1";
 
 if (!pk && !emergencyAccess) {
