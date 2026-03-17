@@ -22,21 +22,12 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
   try {
     if (clerkTokenGetter) {
       const token = await clerkTokenGetter();
-      console.log('[Supabase Token]', token);
       if (token) return token;
     }
-    const w = window as Window & {
-      Clerk?: {
-        session?: {
-          getToken: (options?: { template?: string }) => Promise<string | null>;
-        };
-        user?: unknown;
-      };
-    };
+    const w = window as Window & { Clerk?: { session?: { getToken: () => Promise<string | null> }; user?: unknown } };
     const session = w.Clerk?.session;
     if (session?.getToken) {
-      const token = await session.getToken({ template: 'supabase' });
-      console.log('[Supabase Token]', token);
+      const token = await session.getToken();
       return token ?? null;
     }
     return null;

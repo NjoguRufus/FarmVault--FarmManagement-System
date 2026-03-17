@@ -39,23 +39,13 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
     return <Navigate to="/admin" replace />;
   }
 
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('[RequireOnboarding debug]', {
-      authReady,
-      userId: user.id,
-      userCompanyId: user.companyId,
-      userRole: user.role,
-      isDeveloper,
-      setupIncomplete,
-      hasEmployeeProfile: !!employeeProfile,
-      location: location.pathname,
-    });
-  }
-
   // If this session has an employee profile (from RPC activation or existing membership),
-  // skip owner onboarding and go straight to app.
+  // skip owner onboarding and go straight to app. No client-side employees lookup here.
   if (employeeProfile) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Auth] Redirecting employee to /dashboard');
+    }
     return children;
   }
 
