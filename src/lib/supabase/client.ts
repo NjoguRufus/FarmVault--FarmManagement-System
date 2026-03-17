@@ -1,6 +1,9 @@
 /**
  * Supabase client factory that uses Clerk session token.
  * Use this when you need a client that injects the Clerk JWT (no Supabase Auth).
+ * 
+ * IMPORTANT: The getToken callback MUST request the 'supabase' JWT template.
+ * Caller is responsible for passing: () => clerkGetToken({ template: 'supabase' })
  */
 import { createClient } from '@supabase/supabase-js';
 
