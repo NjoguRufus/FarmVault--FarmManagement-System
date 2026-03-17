@@ -2,15 +2,14 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Building2, AlertTriangle, Trash2, Loader2, Lock, Save, User, Upload, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { doc, getDoc } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
 import { deleteAllCompanyData } from '@/services/companyDataService';
-import { updateCompany } from '@/services/companyService';
+import { getCompany, updateCompany } from '@/services/companyService';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useTour } from '@/tour/TourProvider';
 import { UserAvatar } from '@/components/UserAvatar';
 import { uploadAvatar, clearAvatar } from '@/services/avatarService';
 import { NotificationSettings } from '@/components/notifications/NotificationSettings';
+import { db } from '@/lib/db';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -25,7 +24,7 @@ const STATUSES = [
 ] as const;
 
 export default function SettingsPage() {
-  const { user, refreshUserAvatar } = useAuth();
+  const { user, refreshUserAvatar, refreshUserProfile } = useAuth();
   const queryClient = useQueryClient();
   const { addNotification } = useNotifications();
   const { startTour } = useTour();
@@ -39,20 +38,163 @@ export default function SettingsPage() {
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Profile state
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileName, setProfileName] = useState('');
+  const [originalProfileName, setOriginalProfileName] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
   const deletePasswordRequired = import.meta.env.VITE_COMPANY_DELETE_PASSWORD ?? '';
 
   const isCompanyAdmin = user?.role === 'company-admin' || (user as any)?.role === 'company_admin';
+  const isDeveloper = user?.role === 'developer';
+  const canEditCompany = isCompanyAdmin || isDeveloper;
   const companyId = user?.companyId ?? null;
 
-  const { data: company, isLoading: companyLoading } = useQuery({
+  // Load profile name from database on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user?.id) {
+        setProfileLoading(false);
+        return;
+      }
+      try {
+        const { data, error } = await db
+          .core()
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('clerk_user_id', user.id)
+          .maybeSingle();
+        
+        if (error) throw error;
+        if (cancelled) return;
+        
+        const fullName =
+          data?.full_name != null && String(data.full_name).trim().length > 0
+            ? String(data.full_name)
+            : user.name ?? user.email ?? '';
+        
+        setProfileName(fullName);
+        setOriginalProfileName(fullName);
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn('[SettingsPage] Profile load failed', e);
+        }
+        setProfileName(user.name ?? user.email ?? '');
+        setOriginalProfileName(user.name ?? user.email ?? '');
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.name, user?.email]);
+
+  // Check if profile has unsaved changes
+  const profileHasChanges = profileName.trim() !== originalProfileName.trim();
+  const profileNameIsValid = profileName.trim().length > 0;
+
+  // Handle profile save
+  const handleSaveProfile = async () => {
+    if (!user?.id) return;
+    
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+      setProfileError('Display name cannot be empty');
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileError(null);
+    
+    try {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Settings/ProfileSave] Updating profile', {
+          schema: 'core',
+          table: 'profiles',
+          where: { clerk_user_id: user.id },
+          updates: {
+            full_name: trimmedName,
+          },
+        });
+      }
+
+      // Update the profile in the database and return the updated row
+      const { data: updatedRow, error } = await db
+        .core()
+        .from('profiles')
+        .update({ 
+          full_name: trimmedName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('clerk_user_id', user.id)
+        .select('clerk_user_id, full_name, avatar_url, active_company_id')
+        .maybeSingle();
+      
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Settings/ProfileSave] Supabase update response', {
+          data: updatedRow,
+          error,
+        });
+      }
+
+      if (error) {
+        throw error;
+      }
+
+      // Verification read-back: fetch the profile again to ensure it persisted
+      const { data: verifyRow, error: verifyError } = await db
+        .core()
+        .from('profiles')
+        .select('clerk_user_id, full_name, avatar_url, active_company_id')
+        .eq('clerk_user_id', user.id)
+        .maybeSingle();
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Settings/ProfileSave] Verification query', {
+          data: verifyRow,
+          error: verifyError,
+        });
+      }
+
+      if (verifyError) {
+        throw verifyError;
+      }
+
+      if (verifyRow && verifyRow.full_name !== trimmedName) {
+        throw new Error('Verification failed: saved profile name does not match expected value');
+      }
+
+      // Refresh the auth context to update user.name everywhere
+      await refreshUserProfile?.();
+
+      // Update local state
+      setOriginalProfileName(trimmedName);
+      
+      addNotification({ 
+        title: 'Profile updated', 
+        message: 'Your display name has been saved and updated everywhere.', 
+        type: 'success' 
+      });
+    } catch (e: any) {
+      setProfileError(e?.message || 'Failed to save profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const { data: company, isLoading: companyLoading, refetch: refetchCompany } = useQuery({
     queryKey: ['company', companyId],
     enabled: !!companyId,
     queryFn: async () => {
       if (!companyId) return null;
-      const snap = await getDoc(doc(db, 'companies', companyId));
-      if (!snap.exists()) return null;
-      return { id: snap.id, ...snap.data() } as { id: string; name?: string; email?: string; status?: string; plan?: string };
+      return getCompany(companyId);
     },
+    staleTime: 30_000,
   });
 
   const [editName, setEditName] = useState('');
@@ -69,21 +211,88 @@ export default function SettingsPage() {
     }
   }, [company]);
 
+  // Check if there are unsaved changes
+  const hasChanges =
+    (editName.trim() !== (company?.name ?? '').trim()) ||
+    (editEmail.trim() !== (company?.email ?? '').trim()) ||
+    (editPlan !== (company?.plan ?? 'starter')) ||
+    (editStatus !== (company?.status ?? 'active'));
+
+  // Validate company name
+  const nameIsValid = editName.trim().length > 0;
+
   const handleSaveCompany = async () => {
-    if (!companyId || !isCompanyAdmin) return;
+    if (!companyId || !canEditCompany) return;
+    
+    // Validate before saving
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      setSaveError('Company name cannot be empty');
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
     try {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Settings/CompanySave] Updating company', {
+          schema: 'core',
+          table: 'companies',
+          companyId,
+          payload: {
+            name: trimmedName,
+            email: editEmail.trim() || undefined,
+            plan: editPlan || undefined,
+            status: editStatus || undefined,
+          },
+        });
+      }
+
       await updateCompany(companyId, {
-        name: editName || undefined,
-        email: editEmail || undefined,
+        name: trimmedName,
+        email: editEmail.trim() || undefined,
         plan: editPlan || undefined,
         status: editStatus || undefined,
       });
-      await queryClient.invalidateQueries({ queryKey: ['company', companyId] });
+      
+      // Invalidate all company-related queries to refresh company name everywhere
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['company', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['staffCompany', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['companies'] }),
+      ]);
+      
+      // Refetch to ensure local state is updated and log verification result
+      const { data: verifiedCompany, error: verifyError } = await db
+        .core()
+        .from('companies')
+        .select('id, name, email, plan, status')
+        .eq('id', companyId)
+        .maybeSingle();
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Settings/CompanySave] Verification query', {
+          data: verifiedCompany,
+          error: verifyError,
+        });
+      }
+
+      if (verifyError) {
+        throw verifyError;
+      }
+
+      if (verifiedCompany && verifiedCompany.name !== trimmedName) {
+        throw new Error('Verification failed: saved company name does not match expected value');
+      }
+
+      // Also let React Query refetch to keep hooks in sync
+      await refetchCompany();
+      
       addNotification({ title: 'Company updated', message: 'Your company details have been saved.', type: 'success' });
     } catch (e: any) {
-      setSaveError(e?.message || 'Failed to save');
+      setSaveError(e?.message || 'Failed to save company details');
     } finally {
       setSaving(false);
     }
@@ -120,95 +329,143 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Edit your company details and preferences
+          Manage your profile and company settings
         </p>
       </div>
 
-      {/* Profile / Account: avatar upload (email/password or Google; custom overrides Google) */}
+      {/* Profile section - name and avatar editing */}
       <div className="fv-card">
         <div className="flex items-center gap-2 mb-4">
           <User className="h-5 w-5 text-primary" />
           <h3 className="text-lg font-semibold text-foreground">Profile</h3>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <UserAvatar
-            avatarUrl={user?.avatar}
-            name={user?.name}
-            size="lg"
-            className="h-20 w-20 shrink-0 rounded-full border-2 border-border"
-          />
-          <div className="flex-1 space-y-2">
-            <p className="text-sm text-muted-foreground">
-              {user?.avatar
-                ? 'Custom avatar or Google photo. Upload a new image to replace it, or remove to use default.'
-                : 'Upload a profile photo. Google sign-in users can override their Google photo with a custom avatar.'}
-            </p>
-            {avatarError && (
-              <p className="text-sm text-destructive">{avatarError}</p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/jpg,image/png,image/webp"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (!file || !user?.id) return;
-                  setAvatarError(null);
-                  setAvatarUploading(true);
-                  try {
-                    await uploadAvatar({
-                      file,
-                      clerkUserId: user.id,
-                      companyId: user.companyId ?? null,
-                    });
-                    await refreshUserAvatar?.();
-                    addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', type: 'success' });
-                  } catch (err: any) {
-                    setAvatarError(err?.message ?? 'Upload failed');
-                  } finally {
-                    setAvatarUploading(false);
-                  }
-                }}
-              />
-              <button
-                type="button"
-                disabled={avatarUploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5"
-              >
-                {avatarUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {avatarUploading ? 'Uploading…' : 'Upload photo'}
-              </button>
-              {user?.avatar && (
-                <button
-                  type="button"
-                  disabled={avatarUploading}
-                  onClick={async () => {
-                    if (!user?.id) return;
-                    setAvatarError(null);
-                    setAvatarUploading(true);
-                    try {
-                      await clearAvatar(user.id);
-                      await refreshUserAvatar?.();
-                      addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', type: 'success' });
-                    } catch (err: any) {
-                      setAvatarError(err?.message ?? 'Failed to remove');
-                    } finally {
-                      setAvatarUploading(false);
-                    }
-                  }}
-                  className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                  Remove photo
-                </button>
-              )}
-            </div>
+        
+        {profileLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Loading profile...</span>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-4">
+            {profileError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {profileError}
+              </div>
+            )}
+            
+            {/* Avatar section */}
+            <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+              <UserAvatar
+                avatarUrl={user?.avatar}
+                name={profileName || user?.name}
+                size="lg"
+                className="h-20 w-20 shrink-0 rounded-full border-2 border-border"
+              />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {user?.avatar
+                    ? 'Custom avatar or Google photo. Upload a new image to replace it, or remove to use default.'
+                    : 'Upload a profile photo. Google sign-in users can override their Google photo with a custom avatar.'}
+                </p>
+                {avatarError && (
+                  <p className="text-sm text-destructive">{avatarError}</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file || !user?.id) return;
+                      setAvatarError(null);
+                      setAvatarUploading(true);
+                      try {
+                        await uploadAvatar({
+                          file,
+                          clerkUserId: user.id,
+                          companyId: user.companyId ?? null,
+                        });
+                        await refreshUserAvatar?.();
+                        addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', type: 'success' });
+                      } catch (err: any) {
+                        setAvatarError(err?.message ?? 'Upload failed');
+                      } finally {
+                        setAvatarUploading(false);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={avatarUploading}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5"
+                  >
+                    {avatarUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {avatarUploading ? 'Uploading…' : 'Upload photo'}
+                  </button>
+                  {user?.avatar && (
+                    <button
+                      type="button"
+                      disabled={avatarUploading}
+                      onClick={async () => {
+                        if (!user?.id) return;
+                        setAvatarError(null);
+                        setAvatarUploading(true);
+                        try {
+                          await clearAvatar(user.id);
+                          await refreshUserAvatar?.();
+                          addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', type: 'success' });
+                        } catch (err: any) {
+                          setAvatarError(err?.message ?? 'Failed to remove');
+                        } finally {
+                          setAvatarUploading(false);
+                        }
+                      }}
+                      className="fv-btn fv-btn--secondary inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                      Remove photo
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Display name input */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">
+                Display name <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={profileName}
+                onChange={(e) => { setProfileName(e.target.value); setProfileError(null); }}
+                className={`fv-input w-full max-w-md ${!profileNameIsValid && profileName.length > 0 ? 'border-destructive' : ''}`}
+                placeholder="Your display name"
+              />
+              {!profileNameIsValid && profileName.length > 0 && (
+                <p className="mt-1 text-xs text-destructive">Display name is required</p>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                This name is displayed in the dashboard, navbar, and throughout the app.
+              </p>
+            </div>
+
+            {/* Save profile button */}
+            <button
+              type="button"
+              disabled={profileSaving || !profileHasChanges || !profileNameIsValid}
+              onClick={handleSaveProfile}
+              className="fv-btn fv-btn--primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <span className="ml-1">{profileSaving ? 'Saving…' : profileHasChanges ? 'Save profile' : 'No changes'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="fv-card">
@@ -233,15 +490,18 @@ export default function SettingsPage() {
       {/* Notification settings */}
       <NotificationSettings />
 
-      {/* Company settings - editable */}
+      {/* Company settings - editable by admins/developers, read-only for staff */}
       <div className="fv-card">
         <div className="flex items-center gap-2 mb-4">
           <Building2 className="h-5 w-5 text-primary" />
           <h3 className="text-lg font-semibold text-foreground">Company</h3>
         </div>
         {companyLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : company && isCompanyAdmin ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Loading company data...</span>
+          </div>
+        ) : company && canEditCompany ? (
           <div className="space-y-4">
             {saveError && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -249,14 +509,19 @@ export default function SettingsPage() {
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1">Company name</label>
+              <label className="block text-sm font-medium text-foreground mb-1">
+                Company name <span className="text-destructive">*</span>
+              </label>
               <input
                 type="text"
                 value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="fv-input w-full"
+                onChange={(e) => { setEditName(e.target.value); setSaveError(null); }}
+                className={`fv-input w-full ${!nameIsValid && editName.length > 0 ? 'border-destructive' : ''}`}
                 placeholder="Company name"
               />
+              {!nameIsValid && editName.length > 0 && (
+                <p className="mt-1 text-xs text-destructive">Company name is required</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">Company email</label>
@@ -294,28 +559,58 @@ export default function SettingsPage() {
             </div>
             <button
               type="button"
-              disabled={saving}
+              disabled={saving || !hasChanges || !nameIsValid}
               onClick={handleSaveCompany}
-              className="fv-btn fv-btn--primary"
+              className="fv-btn fv-btn--primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span className="ml-1">Save changes</span>
+              <span className="ml-1">{saving ? 'Saving…' : hasChanges ? 'Save changes' : 'No changes'}</span>
             </button>
           </div>
         ) : company ? (
-          <dl className="space-y-2 text-sm">
-            <div><dt className="text-muted-foreground">Company name</dt><dd className="font-medium text-foreground">{company.name ?? '—'}</dd></div>
-            <div><dt className="text-muted-foreground">Company email</dt><dd className="font-medium text-foreground">{company.email ?? '—'}</dd></div>
-            <div><dt className="text-muted-foreground">Plan</dt><dd className="font-medium text-foreground capitalize">{company.plan ?? '—'}</dd></div>
-            <div><dt className="text-muted-foreground">Status</dt><dd className="font-medium text-foreground capitalize">{company.status ?? '—'}</dd></div>
-          </dl>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground mb-3">
+              Only company admins can edit these details.
+            </p>
+            <dl className="space-y-3 text-sm">
+              <div>
+                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Company name</dt>
+                <dd className="font-medium text-foreground mt-0.5">{company.name ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Company email</dt>
+                <dd className="font-medium text-foreground mt-0.5">{company.email ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Plan</dt>
+                <dd className="font-medium text-foreground capitalize mt-0.5">{company.plan ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Status</dt>
+                <dd className="font-medium text-foreground capitalize mt-0.5">{company.status ?? '—'}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : companyId ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">Unable to load company data.</p>
+            <button
+              type="button"
+              onClick={() => refetchCompany()}
+              className="fv-btn fv-btn--secondary text-sm"
+            >
+              Try again
+            </button>
+          </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No company data found.</p>
+          <p className="text-sm text-muted-foreground">
+            No company associated with your account. Please complete onboarding or contact support.
+          </p>
         )}
       </div>
 
       {/* Danger zone */}
-      {isCompanyAdmin && companyId && (
+      {canEditCompany && companyId && (
         <div className="fv-card border-destructive/40 border">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />

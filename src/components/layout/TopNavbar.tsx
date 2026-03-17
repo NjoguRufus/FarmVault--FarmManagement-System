@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Search, ChevronDown, Settings, LogOut, User, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown } from 'lucide-react';
+import { Bell, Search, ChevronDown, Settings, LogOut, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -260,10 +260,6 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/profile')}>
-                <User className="mr-2 h-4 w-4" />
-                My Profile
-              </DropdownMenuItem>
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/billing')}>
                 <Crown className="mr-2 h-4 w-4" />
                 Billing
@@ -271,14 +267,6 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => startTour()}
-                data-tour="take-tour-menu-item"
-              >
-                <HelpCircle className="mr-2 h-4 w-4" />
-                Take a Tour
               </DropdownMenuItem>
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/support')}>
                 <HelpCircle className="mr-2 h-4 w-4" />

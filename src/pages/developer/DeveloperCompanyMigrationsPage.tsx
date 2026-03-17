@@ -64,10 +64,24 @@ export default function DeveloperCompanyMigrationsPage() {
     isLoading: companiesLoading,
     isFetching: companiesFetching,
     refetch: refetchCompanies,
+    error: companiesError,
   } = useQuery({
     queryKey: ['developer', 'companies-for-migration'],
     queryFn: listCompaniesForMigration,
   });
+
+  // Debug logging for companies fetch
+  React.useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[CompanyMigrationsPage] Companies state:', {
+      isLoading: companiesLoading,
+      isFetching: companiesFetching,
+      hasError: !!companiesError,
+      errorMessage: companiesError instanceof Error ? companiesError.message : String(companiesError),
+      companiesCount: companies?.length ?? 0,
+      companies: companies?.map(c => ({ id: c.company_id, name: c.company_name })),
+    });
+  }, [companies, companiesLoading, companiesFetching, companiesError]);
 
   // Fetch migration history
   const {
@@ -217,6 +231,41 @@ export default function DeveloperCompanyMigrationsPage() {
 
       {activeTab === 'migrate' && (
         <div className="space-y-6">
+          {/* Companies fetch error */}
+          {companiesError && (
+            <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive text-sm space-y-2">
+              <div className="flex items-center gap-2 font-medium">
+                <XCircle className="h-5 w-5" />
+                Failed to load companies
+              </div>
+              <p>{companiesError instanceof Error ? companiesError.message : 'Unknown error loading companies'}</p>
+              <Button variant="outline" size="sm" onClick={() => refetchCompanies()} className="mt-2">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {/* Empty state when no companies */}
+          {!companiesLoading && !companiesError && (!companies || companies.length === 0) && (
+            <div className="fv-card border-yellow-500/40 bg-yellow-500/5 text-yellow-700 text-sm space-y-2">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-5 w-5" />
+                No companies found
+              </div>
+              <p>The company list is empty. This could mean:</p>
+              <ul className="list-disc list-inside text-xs space-y-1 ml-2">
+                <li>No companies exist in the database yet</li>
+                <li>The RPC function may not be returning data correctly</li>
+                <li>There may be a permission issue with the developer access</li>
+              </ul>
+              <Button variant="outline" size="sm" onClick={() => refetchCompanies()} className="mt-2">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </div>
+          )}
+
           {/* Company selection */}
           <div className="fv-card space-y-6">
             <div className="grid md:grid-cols-[1fr,auto,1fr] gap-4 items-end">
