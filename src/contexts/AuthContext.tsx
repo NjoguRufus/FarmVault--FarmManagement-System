@@ -238,14 +238,10 @@ function getAppRoleFromEmployeeRole(employeeRole?: string | null): UserRole {
 }
 
 function getPermissionRole(user: User | null, employeeProfile: Employee | null): string | null {
-  if (!user) return null;
-  // Company admin is authoritative app role; do not let employee role override it.
-  if (user.role === 'company-admin' || (user as any).role === 'company_admin') {
-    return 'company-admin';
-  }
   if (employeeProfile?.employeeRole) return employeeProfile.employeeRole;
   if (employeeProfile?.role) return employeeProfile.role;
-  if (user.employeeRole) return user.employeeRole;
+  if (user?.employeeRole) return user.employeeRole;
+  if (!user) return null;
   if (user.role === 'manager') return 'operations-manager';
   if (user.role === 'broker') return 'sales-broker';
   if ((user.role as any) === 'driver') return 'logistics-driver';
@@ -254,13 +250,11 @@ function getPermissionRole(user: User | null, employeeProfile: Employee | null):
 
 function buildEffectivePermissions(user: User | null, employeeProfile: Employee | null): PermissionMap {
   if (!user) return getDefaultPermissions();
-  // Developers and company admins always receive full platform access; employee profile
-  // can exist for data/display but must not downgrade their permissions.
-  if (user.role === 'developer') {
-    return getFullAccessPermissions();
-  }
-  const isCompanyAdmin = user.role === 'company-admin' || (user as any).role === 'company_admin';
-  if (isCompanyAdmin) {
+  // When an employee profile exists, always derive permissions from employee role/overrides,
+  // even if user.role is company-admin. This prevents invited employees from getting
+  // owner-level permissions while still allowing real company owners (without employeeProfile)
+  // to have full access.
+  if (!employeeProfile && (user.role === 'developer' || user.role === 'company-admin' || (user as any).role === 'company_admin')) {
     return getFullAccessPermissions();
   }
   const permissionRole = getPermissionRole(user, employeeProfile);
@@ -299,9 +293,9 @@ function buildEffectiveAccess(
   permissions: PermissionMap
 ): EffectiveAccess {
   if (!user) return DEFAULT_EFFECTIVE_ACCESS;
+  const legacyRole = getPermissionRole(user, employeeProfile);
   const isCompanyAdmin =
     user.role === 'company-admin' || (user as { role?: string }).role === 'company_admin';
-  const legacyRole = isCompanyAdmin ? 'company-admin' : getPermissionRole(user, employeeProfile);
   return resolveEffectiveAccess({
     permissions,
     employeeId: employeeProfile?.id ?? null,
@@ -685,8 +679,6 @@ export function AuthProvider({
             role: contextRole,
             normalizedRole,
             setupIncomplete: setupIncompleteFlag,
-            raw: contextRows,
-            contextError: contextError ?? null,
           });
         }
 
@@ -789,8 +781,7 @@ export function AuthProvider({
         if (cancelled) return;
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
-        // Only trigger owner onboarding when current_context succeeded and truly reports no company/role.
-        if (!contextError && setupIncompleteFlag && !hasEffectiveCompany) {
+        if (setupIncompleteFlag && !hasEffectiveCompany) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.log('[Auth] Owner onboarding path (no company, no invite/membership match)', {
@@ -850,10 +841,7 @@ export function AuthProvider({
           fallbackEmail ||
           'User';
 
-        const isCompanyAdminUser =
-          mappedWithCompany.role === 'company-admin' ||
-          (mappedWithCompany as { role?: string }).role === 'company_admin';
-        // Keep employee role for display, but company-admin app role must not be downgraded.
+        // Canonical: when user has an employee profile, their dashboard/sidebar/route role is employees.role (DB).
         const employeeRoleForUser = employee?.role ?? employee?.employeeRole ?? undefined;
         const userWithDisplayName: User = {
           ...mappedWithCompany,
@@ -868,12 +856,6 @@ export function AuthProvider({
             currentUserId: userId,
             companyRole: mappedWithCompany.role,
             latestEmployeeRole: employeeRoleForUser,
-            isCompanyAdminUser,
-            permissionsSource: isCompanyAdminUser
-              ? 'company-admin'
-              : employee
-              ? 'employeeProfile'
-              : 'userRole',
             resolvedPermissionsModules: Object.keys(effectivePermissions).filter((k) => (effectivePermissions as any)[k]?.view === true).slice(0, 8),
           });
           // eslint-disable-next-line no-console
@@ -901,7 +883,6 @@ export function AuthProvider({
       } catch (error) {
         const cached = readCachedUser();
         if (cached && cached.id === userId && cached.companyId) {
-          // When we have a cached user with a company, prefer that over forcing onboarding.
           setUser(cached);
           setEmployeeProfile(null);
           setPermissions(buildEffectivePermissions(cached, null));
@@ -909,14 +890,6 @@ export function AuthProvider({
           setSetupIncomplete(false);
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn('[Auth] Activation error; falling back to cached user with company', {
-              uid: userId,
-              companyId: cached.companyId,
-              error: String(error),
-            });
-          }
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
           const fallbackName = clerkUser?.fullName ?? 'User';
@@ -931,19 +904,12 @@ export function AuthProvider({
             avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
-          // Do NOT force setupIncomplete=true here; we don't know for sure that the user has no company.
           setUser(fallbackUser);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
+          setSetupIncomplete(true);
           writeCachedUser(null);
           setActivationResolved(true);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn('[Auth] Activation error; using minimal fallback user without marking setupIncomplete', {
-              uid: userId,
-              error: String(error),
-            });
-          }
         }
         const errMsg = (error as Error)?.message ?? String(error);
         if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
@@ -1000,14 +966,6 @@ export function AuthProvider({
   };
 
   const logout = () => {
-    if (import.meta.env.DEV) {
-      try {
-        // eslint-disable-next-line no-console
-        console.log('[Auth] Debug logout/reset invoked; clearing local auth state and Clerk session if present');
-      } catch {
-        // ignore
-      }
-    }
     if (isEmergencySession) {
       writeEmergencySession(null);
       setUser(null);
@@ -1037,14 +995,6 @@ export function AuthProvider({
       setSetupIncomplete(false);
       setIsDeveloper(false);
       writeCachedUser(null);
-      writeEmergencySession(null);
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.removeItem('fv:isDeveloper');
-        } catch {
-          // ignore
-        }
-      }
     }
   };
 
@@ -1127,16 +1077,6 @@ export function AuthProvider({
         console.log('[Auth] refreshAuthState applied', {
           uid: userId,
           employeeRole: employeeRoleForUser,
-          isCompanyAdminUser:
-            nextUser.role === 'company-admin' ||
-            (nextUser as { role?: string }).role === 'company_admin',
-          permissionsSource:
-            nextUser.role === 'company-admin' ||
-            (nextUser as { role?: string }).role === 'company_admin'
-              ? 'company-admin'
-              : employee
-              ? 'employeeProfile'
-              : 'userRole',
           landingPage: access.landingPage,
           allowedModules: access.allowedModules,
         });

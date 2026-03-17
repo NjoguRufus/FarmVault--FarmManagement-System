@@ -193,6 +193,8 @@ const App = () => (
               {/* Public routes – no RequireAuth or onboarding; Clerk handles auth UI */}
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<Navigate to="/sign-in" replace />} />
+              <Route path="/signin" element={<Navigate to="/sign-in" replace />} />
+              <Route path="/signup" element={<Navigate to="/sign-up" replace />} />
               <Route path="/sign-in" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
               <Route path="/sign-in/*" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
               <Route path="/sign-up" element={<SignUpPage />} />
