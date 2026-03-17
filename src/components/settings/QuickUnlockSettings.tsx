@@ -1,0 +1,318 @@
+/**
+ * Quick Unlock Settings component.
+ * Allows users to enable/disable PIN-based quick unlock on their device.
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Shield, Lock, Fingerprint, Smartphone, Loader2, Check, X, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import {
+  enableQuickUnlock,
+  disableQuickUnlock,
+  getDeviceAppLockStatus,
+  checkBiometricCapabilities,
+  type DeviceAppLockStatus,
+} from '@/services/appLockService';
+import { cn } from '@/lib/utils';
+
+export function QuickUnlockSettings() {
+  const [status, setStatus] = useState<DeviceAppLockStatus | null>(null);
+  const [biometricCapabilities, setBiometricCapabilities] = useState<{
+    available: boolean;
+    fingerprint: boolean;
+    face: boolean;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  const { toast } = useToast();
+
+  // Load current status
+  useEffect(() => {
+    async function loadStatus() {
+      try {
+        const [appLockStatus, bioCaps] = await Promise.all([
+          getDeviceAppLockStatus(),
+          checkBiometricCapabilities(),
+        ]);
+        setStatus(appLockStatus);
+        setBiometricCapabilities(bioCaps);
+      } catch (err) {
+        console.error('[QuickUnlock] Failed to load status:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadStatus();
+  }, []);
+
+  const handleEnableQuickUnlock = async () => {
+    setPinError(null);
+
+    // Validate PIN
+    if (pin.length < 4 || pin.length > 6) {
+      setPinError('PIN must be 4-6 digits');
+      return;
+    }
+    if (!/^\d+$/.test(pin)) {
+      setPinError('PIN must only contain numbers');
+      return;
+    }
+    if (pin !== confirmPin) {
+      setPinError('PINs do not match');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await enableQuickUnlock(pin);
+      const newStatus = await getDeviceAppLockStatus();
+      setStatus(newStatus);
+      setShowPinSetup(false);
+      setPin('');
+      setConfirmPin('');
+      toast({
+        title: 'Quick unlock enabled',
+        description: 'You can now use your PIN to unlock FarmVault on this device.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Failed to enable quick unlock',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisableQuickUnlock = async () => {
+    setSaving(true);
+    try {
+      await disableQuickUnlock();
+      setStatus({
+        hasPin: false,
+        fingerprintEnabled: false,
+        faceEnabled: false,
+        passkeyEnabled: false,
+        isLocked: false,
+        lockedUntil: null,
+      });
+      toast({
+        title: 'Quick unlock disabled',
+        description: 'PIN unlock has been removed from this device.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Failed to disable quick unlock',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="fv-card animate-pulse">
+        <div className="h-24 bg-muted/50 rounded-lg" />
+      </div>
+    );
+  }
+
+  const isEnabled = status?.hasPin ?? false;
+
+  return (
+    <section className="fv-card space-y-4">
+      {/* Header */}
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+          <Shield className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">Quick Unlock</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Mark this device as trusted and use a PIN to unlock FarmVault faster.
+            Password login is always available as fallback.
+          </p>
+        </div>
+      </div>
+
+      {/* Status indicator */}
+      <div className="flex items-center gap-2 text-sm">
+        <div
+          className={cn(
+            'h-2 w-2 rounded-full',
+            isEnabled ? 'bg-green-500' : 'bg-muted-foreground/40'
+          )}
+        />
+        <span className={cn(isEnabled ? 'text-green-600' : 'text-muted-foreground')}>
+          {isEnabled ? 'Enabled on this device' : 'Not enabled'}
+        </span>
+      </div>
+
+      {/* PIN Setup Form */}
+      {showPinSetup && !isEnabled && (
+        <div className="space-y-4 p-4 bg-muted/30 rounded-lg border border-border/60">
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Choose a 4-6 digit PIN
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="\d*"
+                maxLength={6}
+                className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, ''));
+                  setPinError(null);
+                }}
+                placeholder="• • • •"
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Confirm PIN
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="\d*"
+                maxLength={6}
+                className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                value={confirmPin}
+                onChange={(e) => {
+                  setConfirmPin(e.target.value.replace(/\D/g, ''));
+                  setPinError(null);
+                }}
+                placeholder="• • • •"
+                autoComplete="off"
+              />
+            </div>
+
+            {pinError && (
+              <div className="flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {pinError}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleEnableQuickUnlock}
+              disabled={saving || pin.length < 4}
+              className="gap-2"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Enable Quick Unlock
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setShowPinSetup(false);
+                setPin('');
+                setConfirmPin('');
+                setPinError(null);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      {!showPinSetup && (
+        <div className="flex flex-col gap-3">
+          {!isEnabled ? (
+            <Button
+              onClick={() => setShowPinSetup(true)}
+              className="gap-2 w-full sm:w-auto"
+            >
+              <Lock className="h-4 w-4" />
+              Set up PIN unlock
+            </Button>
+          ) : (
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowPinSetup(true)}
+                className="gap-2"
+              >
+                <Lock className="h-4 w-4" />
+                Change PIN
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleDisableQuickUnlock}
+                disabled={saving}
+                className="gap-2 text-muted-foreground hover:text-destructive"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <X className="h-4 w-4" />
+                )}
+                Disable quick unlock
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Biometric placeholder */}
+      <div className="pt-3 border-t border-border/60 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <Fingerprint className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">Fingerprint / Face ID</span>
+          </div>
+          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
+            Coming soon
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <Smartphone className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">Passkey</span>
+          </div>
+          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
+            Coming soon
+          </span>
+        </div>
+
+        {biometricCapabilities?.available && (
+          <p className="text-[11px] text-muted-foreground">
+            Your device supports biometric authentication. This feature will be available soon.
+          </p>
+        )}
+      </div>
+
+      {/* Info note */}
+      <p className="text-[11px] text-muted-foreground pt-2 border-t border-border/60">
+        Quick unlock is per user and per device. If you clear browser data or use a new device,
+        you&apos;ll need to log in with your password first.
+      </p>
+    </section>
+  );
+}

@@ -15,3 +15,13 @@ export {
   getLandingPageFromPermissions,
 } from './effectiveAccess';
 export type { EffectiveAccess } from './effectiveAccess';
+export {
+  getEffectivePlanAccessFromSubscription,
+  checkBasicLimitsExceeded,
+  getEffectivePlanLabel,
+} from './subscriptionAccess';
+export type {
+  EffectivePlan,
+  EffectiveStatus,
+  EffectivePlanAccess,
+} from './subscriptionAccess';

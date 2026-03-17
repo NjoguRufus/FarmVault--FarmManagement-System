@@ -48,7 +48,10 @@ export type OverrideMode =
   | 'start_trial'
   | 'free_until'
   | 'free_forever'
-  | 'paid_active';
+  | 'paid_active'
+  | 'pilot'
+  | 'collaborator'
+  | 'remove_override';
 
 export interface OverrideSubscriptionInput {
   companyId: string;
