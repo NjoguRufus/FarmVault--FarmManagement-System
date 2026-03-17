@@ -67,6 +67,33 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const emergencyAccess = import.meta.env.VITE_EMERGENCY_ACCESS === "true" || import.meta.env.VITE_EMERGENCY_ACCESS === "1";
 
+// Runtime diagnostic logs for Clerk configuration (helps debug dev vs live instance issues)
+if (pk) {
+  const keyPrefix = pk.substring(0, 7); // pk_test or pk_live
+  const isLiveKey = pk.startsWith('pk_live_');
+  const isTestKey = pk.startsWith('pk_test_');
+  
+  // Decode the base64 portion to extract the Clerk frontend API domain
+  let clerkDomain = 'unknown';
+  try {
+    const base64Part = pk.replace('pk_test_', '').replace('pk_live_', '');
+    const decoded = atob(base64Part);
+    clerkDomain = decoded.replace(/\$$/, ''); // Remove trailing $ if present
+  } catch {
+    clerkDomain = 'could not decode';
+  }
+  
+  // eslint-disable-next-line no-console
+  console.log(`[Clerk Config] Key prefix: ${keyPrefix}, Live: ${isLiveKey}, Test: ${isTestKey}`);
+  // eslint-disable-next-line no-console
+  console.log(`[Clerk Config] Frontend API domain: ${clerkDomain}`);
+  
+  if (isTestKey && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    // eslint-disable-next-line no-console
+    console.warn('[Clerk Config] ⚠️ USING TEST KEY IN NON-LOCALHOST ENVIRONMENT! Production should use pk_live_');
+  }
+}
+
 if (!pk && !emergencyAccess) {
   throw new Error(
     "Missing Clerk configuration. Set VITE_CLERK_PUBLISHABLE_KEY in your environment, or enable VITE_EMERGENCY_ACCESS for fallback.",
