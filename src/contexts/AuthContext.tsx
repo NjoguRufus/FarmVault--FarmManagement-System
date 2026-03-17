@@ -679,6 +679,8 @@ export function AuthProvider({
             role: contextRole,
             normalizedRole,
             setupIncomplete: setupIncompleteFlag,
+            raw: contextRows,
+            contextError: contextError ?? null,
           });
         }
 
@@ -781,7 +783,8 @@ export function AuthProvider({
         if (cancelled) return;
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
-        if (setupIncompleteFlag && !hasEffectiveCompany) {
+        // Only trigger owner onboarding when current_context succeeded and truly reports no company/role.
+        if (!contextError && setupIncompleteFlag && !hasEffectiveCompany) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.log('[Auth] Owner onboarding path (no company, no invite/membership match)', {
@@ -883,6 +886,7 @@ export function AuthProvider({
       } catch (error) {
         const cached = readCachedUser();
         if (cached && cached.id === userId && cached.companyId) {
+          // When we have a cached user with a company, prefer that over forcing onboarding.
           setUser(cached);
           setEmployeeProfile(null);
           setPermissions(buildEffectivePermissions(cached, null));
@@ -890,6 +894,14 @@ export function AuthProvider({
           setSetupIncomplete(false);
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] Activation error; falling back to cached user with company', {
+              uid: userId,
+              companyId: cached.companyId,
+              error: String(error),
+            });
+          }
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
           const fallbackName = clerkUser?.fullName ?? 'User';
@@ -904,12 +916,19 @@ export function AuthProvider({
             avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
+          // Do NOT force setupIncomplete=true here; we don't know for sure that the user has no company.
           setUser(fallbackUser);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
-          setSetupIncomplete(true);
           writeCachedUser(null);
           setActivationResolved(true);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] Activation error; using minimal fallback user without marking setupIncomplete', {
+              uid: userId,
+              error: String(error),
+            });
+          }
         }
         const errMsg = (error as Error)?.message ?? String(error);
         if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
