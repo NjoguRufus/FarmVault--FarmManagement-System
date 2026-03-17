@@ -124,12 +124,25 @@ export async function fetchDeveloperUsers(params?: {
 }): Promise<ListUsersRpcResponse> {
   const { search = null, limit = 100, offset = 0 } = params ?? {};
 
-  const { data, error } = await supabase.rpc('list_users', {
+  // eslint-disable-next-line no-console
+  console.log('[DevService] Calling list_users RPC...');
+  const { data, error, status, statusText } = await supabase.rpc('list_users', {
     p_search: search,
     p_limit: limit,
     p_offset: offset,
   });
+  
+  // eslint-disable-next-line no-console
+  console.log('[DevService] list_users response:', { status, statusText, hasData: !!data, error });
+  
   if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevService] list_users FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     throw new Error(error.message ?? 'Failed to load platform users');
   }
 
@@ -300,13 +313,20 @@ export interface SeasonChallengesIntelligence {
  */
 export async function getSeasonChallengesIntelligence(): Promise<SeasonChallengesIntelligence> {
   try {
-    const { data, error } = await supabase
+    // eslint-disable-next-line no-console
+    console.log('[DevService] Querying season_challenges table...');
+    const { data, error, status, statusText } = await supabase
       .from('season_challenges')
       .select('id, company_id, project_id, crop_type, title, severity, status, stage_name, created_at')
       .order('created_at', { ascending: false })
       .limit(500);
 
+    // eslint-disable-next-line no-console
+    console.log('[DevService] season_challenges response:', { status, statusText, rowCount: data?.length ?? 0, error });
+
     if (error || !data) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevService] season_challenges query failed or empty:', error);
       return {
         totalChallenges: 0,
         byCrop: [],
