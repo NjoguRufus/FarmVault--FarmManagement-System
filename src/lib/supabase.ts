@@ -17,71 +17,93 @@ export function setClerkTokenGetter(getter: (() => Promise<string | null>) | nul
   clerkTokenGetter = getter;
 }
 
+/**
+ * Get the Supabase access token from Clerk.
+ * ONLY uses the 'supabase' JWT template - no fallbacks to default Clerk tokens.
+ * This ensures proper authentication with Supabase RLS policies.
+ */
 export async function getSupabaseAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
+
   try {
+    // Priority 1: Use the React hook bridge (most reliable)
     if (clerkTokenGetter) {
       const token = await clerkTokenGetter();
-      if (token) {
-        if (import.meta.env.DEV) {
-          // Debug: decode and log JWT claims (don't log the full token in production!)
-          try {
-            const parts = token.split('.');
-            if (parts.length === 3) {
-              const payload = JSON.parse(atob(parts[1]));
-              // eslint-disable-next-line no-console
-              console.log('[Supabase] JWT token claims:', {
-                aud: payload.aud,
-                role: payload.role,
-                sub: payload.sub,
-                user_id: payload.user_id,
-                email: payload.email,
-                exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
-                iat: payload.iat ? new Date(payload.iat * 1000).toISOString() : null,
-              });
-            }
-          } catch {
-            // Ignore decode errors
-          }
-        }
-        return token;
-      }
-    }
-    // Fallback to window.Clerk if React hook isn't available yet
-    const w = window as Window & { Clerk?: { session?: { getToken: (opts?: { template?: string }) => Promise<string | null> }; user?: unknown } };
-    const session = w.Clerk?.session;
-    if (session?.getToken) {
-      // Try supabase template first
-      try {
-        const token = await session.getToken({ template: 'supabase' });
-        if (token) {
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.log('[Supabase] Got token via window.Clerk (supabase template)');
-          }
-          return token;
-        }
-      } catch {
-        // Template might not exist, try default
-      }
-      const token = await session.getToken();
-      if (import.meta.env.DEV && token) {
+      if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Supabase] Got token via window.Clerk (default)');
+        console.log('[Supabase] Token from bridge:', !!token ? 'exists' : 'null');
+        if (token) {
+          logJwtClaims(token, 'bridge');
+        }
       }
       return token ?? null;
     }
+
+    // Priority 2: Fallback to window.Clerk (before React mounts)
+    const w = window as Window & {
+      Clerk?: {
+        session?: {
+          getToken: (opts?: { template?: string }) => Promise<string | null>;
+        };
+      };
+    };
+
+    const session = w.Clerk?.session;
+    if (!session?.getToken) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[Supabase] No Clerk session available - user may not be signed in');
+      }
+      return null;
+    }
+
+    // ONLY use the 'supabase' template - NO fallback to default token
+    const token = await session.getToken({ template: 'supabase' });
+
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.warn('[Supabase] No token available - user may not be signed in');
+      console.log('[Supabase] Token from window.Clerk:', !!token ? 'exists' : 'null');
+      if (token) {
+        logJwtClaims(token, 'window.Clerk');
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[Supabase] No "supabase" template token returned. Ensure the JWT template exists in Clerk Dashboard.');
+      }
     }
-    return null;
+
+    return token ?? null;
   } catch (err) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.error('[Supabase] Error getting access token:', err);
     }
     return null;
+  }
+}
+
+/**
+ * Log JWT claims for debugging (development only).
+ * Does NOT log the full token string for security.
+ */
+function logJwtClaims(token: string, source: string): void {
+  if (!import.meta.env.DEV) return;
+  try {
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      const payload = JSON.parse(atob(parts[1]));
+      // eslint-disable-next-line no-console
+      console.log(`[Supabase] JWT claims (from ${source}):`, {
+        aud: payload.aud,
+        role: payload.role,
+        sub: payload.sub,
+        user_id: payload.user_id,
+        email: payload.email,
+        exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
+      });
+    }
+  } catch {
+    // eslint-disable-next-line no-console
+    console.warn('[Supabase] Could not decode JWT payload');
   }
 }
 
