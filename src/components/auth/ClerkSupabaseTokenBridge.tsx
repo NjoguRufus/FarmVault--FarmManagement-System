@@ -17,8 +17,7 @@ export function ClerkSupabaseTokenBridge() {
     }
     setClerkTokenGetter(async () => {
       try {
-        // Use default session token (no template). Only use template if you created "supabase" in Clerk Dashboard → JWT Templates.)
-        return (await getToken()) ?? null;
+        return (await getToken({ template: 'supabase' })) ?? null;
       } catch {
         return null;
       }

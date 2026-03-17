@@ -12,7 +12,7 @@ export function useSupabaseClerk() {
   const supabase = useMemo(() => {
     return createSupabaseClientWithClerkToken(async () => {
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'supabase' });
         return token ?? null;
       } catch {
         return null;
