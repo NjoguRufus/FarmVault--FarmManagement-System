@@ -113,8 +113,12 @@ export async function fetchDeveloperKpis(): Promise<DeveloperDashboardKpis> {
   return getDevDashboardKpis();
 }
 
-export async function fetchDeveloperCompanies(): Promise<ListCompaniesRpcResponse> {
-  return listCompanies();
+export async function fetchDeveloperCompanies(params?: {
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ListCompaniesRpcResponse> {
+  return listCompanies(params);
 }
 
 export async function fetchDeveloperUsers(params?: {

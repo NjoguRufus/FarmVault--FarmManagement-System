@@ -33,7 +33,7 @@ export default function DeveloperHomePage() {
     data: companiesData,
   } = useQuery({
     queryKey: ['developer', 'companies', 'overview'],
-    queryFn: fetchDeveloperCompanies,
+    queryFn: () => fetchDeveloperCompanies({ limit: 200, offset: 0 }),
   });
 
   const {
@@ -49,7 +49,7 @@ export default function DeveloperHomePage() {
     error: challengesError,
   } = useSeasonChallengesIntelligence();
 
-  const companyRows = companiesData?.rows ?? [];
+  const companyRows = companiesData?.items ?? [];
   const totalCompanies = companiesData?.total ?? companyRows.length;
   const userRows = usersData?.rows ?? [];
   const totalUsers = usersData?.total ?? userRows.length;

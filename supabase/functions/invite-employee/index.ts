@@ -405,15 +405,18 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("FARMVAULT_APP_URL") ??
       "";
 
-    // Resolve base URL for Clerk invite redirects.
+    // Resolve base URL for Clerk invite redirects (used in invitation emails).
+    // IMPORTANT for production: Set APP_BASE_URL in Supabase Edge Function secrets
+    // so invite emails use your production domain, not dev branding.
     // Priority:
-    // 1) APP_BASE_URL / FARMVAULT_APP_URL when set
-    // 2) Hard-coded production domain when in production and no env configured
+    // 1) APP_BASE_URL / FARMVAULT_APP_URL when set (use for production)
+    // 2) Production domain when denoEnv is production and no env configured
     // 3) Localhost:8088 for local development
     let appBaseUrlRaw = (appBaseUrlEnv || "").trim();
     if (!appBaseUrlRaw) {
       if (denoEnv === "production") {
-        appBaseUrlRaw = "https://farmvaultco.vercel.app";
+        // Production fallback: use main FarmVault domain
+        appBaseUrlRaw = "https://farmvault.africa";
       } else {
         appBaseUrlRaw = "http://localhost:8088";
       }

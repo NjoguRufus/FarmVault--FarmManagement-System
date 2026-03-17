@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { fetchDeveloperCompanies } from '@/services/developerService';
-import { overrideSubscription, type OverrideMode } from '@/services/developerAdminService';
+import { overrideSubscription, deleteCompanySafely, type OverrideMode } from '@/services/developerAdminService';
+import { useActiveCompany } from '@/hooks/useActiveCompany';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -30,6 +31,8 @@ import {
   XCircle,
   Crown,
   Loader2,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -37,7 +40,8 @@ import { cn } from '@/lib/utils';
 type CompanyRow = {
   company_id?: string;
   id?: string;
-  company_name: string | null;
+  company_name?: string | null;
+  name?: string | null;
   created_at?: string | null;
   users_count?: number | null;
   employees_count?: number | null;
@@ -99,6 +103,12 @@ function formatDate(dateStr: string | null | undefined): string {
 
 export default function DeveloperCompaniesPage() {
   const [search, setSearch] = useState('');
+  const { activeCompanyId } = useActiveCompany();
+  const [deleteModal, setDeleteModal] = useState<{
+    open: boolean;
+    company: CompanyRow | null;
+    confirmValue: string;
+  }>({ open: false, company: null, confirmValue: '' });
   const [overrideModal, setOverrideModal] = useState<{
     open: boolean;
     company: CompanyRow | null;
@@ -126,16 +136,16 @@ export default function DeveloperCompaniesPage() {
     refetch,
   } = useQuery({
     queryKey: ['developer', 'companies'],
-    queryFn: fetchDeveloperCompanies,
+    queryFn: () => fetchDeveloperCompanies({ limit: 200, offset: 0 }),
   });
 
-  const companies = (data?.rows ?? []) as CompanyRow[];
+  const companies = (data?.items ?? []) as CompanyRow[];
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return companies;
     return companies.filter((c) => {
-      const name = (c.company_name ?? '').toLowerCase();
+      const name = (c.company_name ?? c.name ?? '').toLowerCase();
       const plan = (c.plan_code ?? '').toLowerCase();
       const status = (c.subscription_status ?? '').toLowerCase();
       const id = (c.company_id ?? c.id ?? '').toLowerCase();
@@ -147,6 +157,30 @@ export default function DeveloperCompaniesPage() {
       );
     });
   }, [companies, search]);
+
+  const deleteMutation = useMutation({
+    mutationFn: (companyId: string) => deleteCompanySafely(companyId),
+    onSuccess: (result) => {
+      if (result.success) {
+        toast({ title: 'Company deleted', description: 'Company has been removed.' });
+        queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+        setDeleteModal({ open: false, company: null, confirmValue: '' });
+      } else {
+        toast({
+          title: 'Deletion blocked',
+          description: result.reason ?? 'Company could not be deleted.',
+          variant: 'destructive',
+        });
+      }
+    },
+    onError: (err: Error) => {
+      toast({
+        title: 'Delete failed',
+        description: err.message,
+        variant: 'destructive',
+      });
+    },
+  });
 
   const overrideMutation = useMutation({
     mutationFn: async (params: {
@@ -268,11 +302,19 @@ export default function DeveloperCompaniesPage() {
                 const id = c.company_id ?? c.id ?? '';
                 const { label, variant } = getEffectiveLabel(c);
                 const hasOverride = c.override?.enabled;
+                const displayName = c.company_name ?? c.name ?? '—';
+                const lowerName = displayName.trim().toLowerCase();
+                const isProtectedCompany =
+                  // KeyFarm is always protected
+                  id === 'fa61d13d-3466-48db-a39c-4a474ccfed58' ||
+                  lowerName === 'keyfarm' ||
+                  // Any company that is currently active in this session
+                  (activeCompanyId != null && id === activeCompanyId);
 
                 return (
                   <tr key={id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
                     <td className="py-3 pr-4">
-                      <div className="font-medium text-foreground">{c.company_name ?? '—'}</div>
+                      <div className="font-medium text-foreground">{displayName}</div>
                       <div className="text-[11px] text-muted-foreground font-mono">{id.slice(0, 8)}…</div>
                     </td>
                     <td className="py-3 pr-4">
@@ -397,6 +439,18 @@ export default function DeveloperCompaniesPage() {
                               </DropdownMenuItem>
                             </>
                           )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => setDeleteModal({ open: true, company: c, confirmValue: '' })}
+                            className="gap-2 text-destructive"
+                            disabled={
+                              (activeCompanyId != null && id === activeCompanyId) ||
+                              isProtectedCompany
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete Company
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -407,6 +461,78 @@ export default function DeveloperCompaniesPage() {
           </table>
         </div>
       )}
+
+      {/* Delete Company confirmation modal */}
+      <Dialog
+        open={deleteModal.open}
+        onOpenChange={(open) => !deleteMutation.isPending && setDeleteModal((p) => ({ ...p, open }))}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Company
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete the company and related platform records. This action cannot be undone.
+              Only empty/test companies without linked data can be deleted; others will be blocked safely.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteModal.company && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm space-y-1">
+                <div><span className="text-muted-foreground">Company:</span> {deleteModal.company.company_name ?? deleteModal.company.name ?? '—'}</div>
+                <div><span className="text-muted-foreground">ID:</span> <code className="text-xs">{deleteModal.company.company_id ?? deleteModal.company.id ?? '—'}</code></div>
+                <div><span className="text-muted-foreground">Users / Employees:</span> {deleteModal.company.users_count ?? 0} / {deleteModal.company.employees_count ?? 0}</div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Type the exact company name to confirm: <span className="font-mono text-foreground">{deleteModal.company.company_name ?? deleteModal.company.name ?? ''}</span>
+                </label>
+                <input
+                  type="text"
+                  className="fv-input w-full"
+                  value={deleteModal.confirmValue}
+                  onChange={(e) => setDeleteModal((p) => ({ ...p, confirmValue: e.target.value }))}
+                  placeholder="Enter company name to confirm"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteModal({ open: false, company: null, confirmValue: '' })}
+              disabled={deleteMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const c = deleteModal.company;
+                const companyId = c?.company_id ?? c?.id ?? '';
+                const expectedName = (c?.company_name ?? c?.name ?? '').trim().toLowerCase();
+                const typed = deleteModal.confirmValue.trim().toLowerCase();
+                if (companyId && expectedName && typed === expectedName) {
+                  deleteMutation.mutate(companyId);
+                }
+              }}
+              disabled={
+                deleteMutation.isPending ||
+                !deleteModal.company ||
+                deleteModal.confirmValue.trim().toLowerCase() !==
+                  (deleteModal.company?.company_name ?? deleteModal.company?.name ?? '').trim().toLowerCase()
+              }
+              className="gap-2"
+            >
+              {deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Override configuration modal */}
       <Dialog

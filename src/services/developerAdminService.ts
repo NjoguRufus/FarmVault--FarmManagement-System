@@ -15,7 +15,8 @@ export interface DevDashboardKpis {
 export type DeveloperCompanyRow = {
   company_id?: string;
   id?: string;
-  company_name: string | null;
+  company_name?: string | null;
+  name?: string | null;
   created_at?: string | null;
   users_count?: number | null;
   employees_count?: number | null;
@@ -40,8 +41,10 @@ export type DeveloperCompanyRow = {
 };
 
 export type ListCompaniesRpcResponse = {
-  rows: DeveloperCompanyRow[];
+  items: DeveloperCompanyRow[];
   total: number;
+  limit: number;
+  offset: number;
 };
 
 export type OverrideMode =
@@ -90,18 +93,26 @@ export async function getDevDashboardKpis(): Promise<DevDashboardKpis> {
   return (data as DevDashboardKpis) ?? {};
 }
 
-export async function listCompanies(): Promise<ListCompaniesRpcResponse> {
+export async function listCompanies(params?: {
+  search?: string | null;
+  limit?: number;
+  offset?: number;
+}): Promise<ListCompaniesRpcResponse> {
+  const { search = null, limit = 200, offset = 0 } = params ?? {};
+
   // eslint-disable-next-line no-console
   console.log('[DevAdmin] Calling list_companies RPC...');
   const { data, error, status, statusText } = await supabase.rpc('list_companies', {
-    p_search: null,
-    p_limit: 200,
-    p_offset: 0,
+    p_limit: limit,
+    p_offset: offset,
+    p_search: search,
   });
-  
+
   // eslint-disable-next-line no-console
   console.log('[DevAdmin] list_companies response:', { status, statusText, hasData: !!data, error });
-  
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] companies RPC raw:', data);
+
   if (error) {
     // eslint-disable-next-line no-console
     console.error('[DevAdmin] list_companies FAILED:', {
@@ -112,10 +123,19 @@ export async function listCompanies(): Promise<ListCompaniesRpcResponse> {
     });
     throw new Error(error.message ?? 'Failed to load companies');
   }
-  const payload = (data as ListCompaniesRpcResponse | null) ?? { rows: [], total: 0 };
+
+  const payload = (data as { items?: DeveloperCompanyRow[]; total?: number; limit?: number; offset?: number } | null) ?? {
+    items: [],
+    total: 0,
+    limit,
+    offset,
+  };
+
   return {
-    rows: payload.rows ?? [],
-    total: payload.total ?? 0,
+    items: (payload.items ?? []) as DeveloperCompanyRow[],
+    total: Number(payload.total ?? 0),
+    limit: Number(payload.limit ?? limit),
+    offset: Number(payload.offset ?? offset),
   };
 }
 
@@ -135,5 +155,44 @@ export async function overrideSubscription(input: OverrideSubscriptionInput): Pr
   if (error) {
     throw new Error(error.message ?? 'Failed to override subscription');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Safe developer delete actions
+// ---------------------------------------------------------------------------
+
+export interface DeleteUserResult {
+  success: boolean;
+  blocked?: boolean;
+  reason?: string | null;
+  dependency_counts?: Record<string, number>;
+  note?: string | null;
+}
+
+export interface DeleteCompanyResult {
+  success: boolean;
+  blocked?: boolean;
+  reason?: string | null;
+  dependency_counts?: Record<string, number>;
+}
+
+export async function deleteUserSafely(clerkUserId: string): Promise<DeleteUserResult> {
+  const { data, error } = await supabase.rpc('delete_user_safely', {
+    p_clerk_user_id: clerkUserId,
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to delete user');
+  }
+  return (data as DeleteUserResult) ?? { success: false, blocked: true, reason: 'Unknown error' };
+}
+
+export async function deleteCompanySafely(companyId: string): Promise<DeleteCompanyResult> {
+  const { data, error } = await supabase.rpc('delete_company_safely', {
+    p_company_id: companyId,
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to delete company');
+  }
+  return (data as DeleteCompanyResult) ?? { success: false, blocked: true, reason: 'Unknown error' };
 }
 

@@ -21,6 +21,12 @@ Also required (usually already set):
 - **SUPABASE_URL** – Project URL
 - **SUPABASE_SERVICE_ROLE_KEY** – Service role key for DB writes
 
+**For production email branding** (invite redirect URLs and correct domain in emails):
+
+- **APP_BASE_URL** or **FARMVAULT_APP_URL** – Your production app URL (e.g. `https://farmvault.africa`). If not set, production falls back to `https://farmvault.africa`.
+
+**Clerk email sender branding** (sender name, from address, templates) is configured in **Clerk Dashboard → Configure → Email**. Use your production Clerk instance and set production sender name/domain there. Dev branding in production emails usually means the wrong Clerk instance (test vs live) or Clerk Email settings not configured for production.
+
 ## Flow
 
 1. Caller sends `POST` with `Authorization: Bearer <Clerk session token>` and JSON body.

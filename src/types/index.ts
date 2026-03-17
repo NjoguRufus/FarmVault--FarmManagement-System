@@ -743,6 +743,7 @@ export interface Employee {
   permissions?: PermissionMap;
   joinDate?: Date | unknown;
   createdAt?: Date | unknown;
+  inviteSentAt?: Date | unknown; // when invite email was sent (for status=invited)
   createdBy?: string;
   authUserId?: string;
   avatarUrl?: string;
