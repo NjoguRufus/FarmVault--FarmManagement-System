@@ -1,18 +1,15 @@
 /**
  * Bridges Clerk authentication to Supabase.
  * 
- * ONLY uses the 'supabase' JWT template - NO fallback to default Clerk tokens.
- * This ensures Supabase receives a properly formatted JWT with the required claims.
+ * Uses the NATIVE Clerk-Supabase integration (no JWT template required).
+ * This is the modern approach as of April 2025 - simpler and more reliable.
  *
- * REQUIRED: Create a JWT Template named "supabase" in Clerk Dashboard with these claims:
- * {
- *   "aud": "authenticated",
- *   "role": "authenticated",
- *   "email": "{{user.primary_email_address}}",
- *   "user_id": "{{user.id}}"
- * }
- *
- * Then register your Clerk domain in Supabase: Dashboard → Auth → Third-party Auth
+ * REQUIRED: Register your Clerk domain in Supabase Dashboard → Auth → Third-party Auth
+ * 
+ * The native integration uses Clerk's standard session token which:
+ * - Is signed with Clerk's JWKS (verifiable via Clerk's public keys)
+ * - Automatically includes the "role": "authenticated" claim when the integration is enabled
+ * - No need to share Supabase JWT secret with Clerk
  */
 import { useEffect } from 'react';
 import { useAuth, useClerk } from '@clerk/react';
@@ -48,24 +45,25 @@ export function ClerkSupabaseTokenBridge() {
       return;
     }
 
-    // Set up the token getter - ONLY uses 'supabase' template, NO fallback
+    // Set up the token getter using NATIVE integration (no template)
     setClerkTokenGetter(async () => {
       try {
-        // ONLY request the 'supabase' template - do NOT fall back to default token
-        const token = await getToken({ template: 'supabase' });
+        // Use standard session token - no template needed with native Supabase integration
+        // Clerk automatically adds "role": "authenticated" when Supabase integration is enabled
+        const token = await getToken();
 
         // eslint-disable-next-line no-console
         console.log('[ClerkBridge] Token request result:', !!token ? 'success (token exists)' : 'null (no token)');
         
         if (!token) {
           // eslint-disable-next-line no-console
-          console.warn('[ClerkBridge] No token returned. Ensure "supabase" JWT template exists in Clerk Dashboard for this instance (dev vs live).');
+          console.warn('[ClerkBridge] No token returned. User may not be fully authenticated.');
         }
 
         return token ?? null;
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error('[ClerkBridge] Failed to get supabase token:', err);
+        console.error('[ClerkBridge] Failed to get session token:', err);
         return null;
       }
     });

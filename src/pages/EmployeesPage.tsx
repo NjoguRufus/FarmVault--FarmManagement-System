@@ -656,6 +656,14 @@ export default function EmployeesPage() {
           toast.error('Employee already exists', { description: description || 'This email is already an active user. Use a different email or edit the existing employee.' });
           return;
         }
+        if (code === 'AUTH_FAILED') {
+          // Surface the real auth error for easier debugging
+          toast.error('Authentication failed', { 
+            description: description || 'Could not verify your session. The invite service may be misconfigured. Check that CLERK_SECRET_KEY matches your Clerk instance.',
+            duration: 10000,
+          });
+          return;
+        }
         if (code === 'CLERK_INVITE_FAILED') {
           toast.error('Invitation failed', { description: description || 'Could not send invitation email. Check Clerk configuration.' });
           return;

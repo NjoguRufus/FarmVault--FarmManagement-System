@@ -264,10 +264,35 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
     }
     const errMsg = data?.error ?? data?.detail ?? (res.ok ? null : res.statusText || `Request failed (${res.status})`);
     if (!res.ok) {
-      const err = new Error(errMsg ?? 'Invite request failed') as Error & { detail?: string; details?: unknown; code?: string };
+      // Surface the real backend error for debugging
+      const detailMsg = data?.detail 
+        ? `${data.error ?? 'Error'}: ${data.detail}`
+        : errMsg;
+      
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('[inviteEmployee] Backend error', {
+          status: res.status,
+          error: data?.error,
+          detail: data?.detail,
+          details: data?.details,
+          statusText: res.statusText,
+        });
+      }
+      
+      const err = new Error(detailMsg ?? 'Invite request failed') as Error & { detail?: string; details?: unknown; code?: string; status?: number };
       err.detail = data?.detail ?? undefined;
       err.details = data?.details;
-      err.code = res.status === 409 ? 'ALREADY_INVITED' : 'CLERK_INVITE_FAILED';
+      err.status = res.status;
+      // Provide more specific error codes for different failure modes
+      if (res.status === 401) {
+        err.code = 'AUTH_FAILED';
+        err.detail = data?.detail ?? 'Authentication failed. The server could not verify your session token.';
+      } else if (res.status === 409) {
+        err.code = 'ALREADY_INVITED';
+      } else {
+        err.code = 'CLERK_INVITE_FAILED';
+      }
       throw err;
     }
     if (data?.error) {
