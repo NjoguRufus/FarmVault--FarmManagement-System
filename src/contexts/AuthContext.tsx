@@ -71,7 +71,7 @@ function readEmergencySession(): User | null {
   try {
     const raw = window.localStorage.getItem(EMERGENCY_SESSION_KEY);
     if (!raw) return null;
-    const data = JSON.parse(raw) as { email?: string; userId?: string; companyId?: string; role?: string };
+    const data = JSON.parse(raw) as { email?: string; userId?: string; companyId?: string; role?: string; name?: string };
     if (data.email?.toLowerCase() !== config.email || data.userId !== config.userId) return null;
     return {
       id: config.userId,
@@ -248,19 +248,52 @@ function getPermissionRole(user: User | null, employeeProfile: Employee | null):
   return null;
 }
 
-function buildEffectivePermissions(user: User | null, employeeProfile: Employee | null): PermissionMap {
+/**
+ * Build effective permissions with proper role priority:
+ * 1. Developer → full access
+ * 2. Company admin (from current_context) → full access (even if employee profile exists)
+ * 3. Employee → role-based permissions
+ *
+ * The key fix: company admins always get full access regardless of employee profile.
+ * This prevents owners/admins from being downgraded to staff permissions.
+ */
+function buildEffectivePermissions(
+  user: User | null,
+  employeeProfile: Employee | null,
+  options?: { forceCompanyAdmin?: boolean }
+): PermissionMap {
   if (!user) return getDefaultPermissions();
-  // When an employee profile exists, always derive permissions from employee role/overrides,
-  // even if user.role is company-admin. This prevents invited employees from getting
-  // owner-level permissions while still allowing real company owners (without employeeProfile)
-  // to have full access.
-  if (!employeeProfile && (user.role === 'developer' || user.role === 'company-admin' || (user as any).role === 'company_admin')) {
+
+  // Priority 1: Developer always gets full access
+  if (user.role === 'developer') {
     return getFullAccessPermissions();
   }
+
+  // Priority 2: Company admin gets full access even if employee profile exists
+  // This is the key fix - company admins should NOT be downgraded by employee profiles
+  const isCompanyAdmin =
+    user.role === 'company-admin' ||
+    (user as { role?: string }).role === 'company_admin' ||
+    options?.forceCompanyAdmin === true;
+
+  if (isCompanyAdmin) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Auth] buildEffectivePermissions: company-admin → full access', {
+        uid: user.id,
+        role: user.role,
+        hasEmployeeProfile: !!employeeProfile,
+        forceCompanyAdmin: options?.forceCompanyAdmin,
+      });
+    }
+    return getFullAccessPermissions();
+  }
+
+  // Priority 3: Employee permissions from role/overrides
   const permissionRole = getPermissionRole(user, employeeProfile);
   const rawOverrides = employeeProfile?.permissions ?? (user as any)?.permissions ?? null;
 
-  // employees.permissions is stored as flat keys (e.g. \"harvest.view\").
+  // employees.permissions is stored as flat keys (e.g. "harvest.view").
   // Convert flat JSON into nested PermissionMap overrides before resolving.
   let permissionOverrides: PermissionMap | null = null;
   if (rawOverrides && typeof rawOverrides === 'object') {
@@ -287,22 +320,49 @@ const DEFAULT_EFFECTIVE_ACCESS: EffectiveAccess = {
   isDriver: false,
 };
 
+/**
+ * Build effective access with proper role priority for landing page determination.
+ * Priority: developer → company-admin → employee role
+ *
+ * Company admins should NEVER land on staff dashboard.
+ */
 function buildEffectiveAccess(
   user: User | null,
   employeeProfile: Employee | null,
-  permissions: PermissionMap
+  permissions: PermissionMap,
+  options?: { forceCompanyAdmin?: boolean }
 ): EffectiveAccess {
   if (!user) return DEFAULT_EFFECTIVE_ACCESS;
-  const legacyRole = getPermissionRole(user, employeeProfile);
+
+  const isDeveloper = user.role === 'developer';
   const isCompanyAdmin =
-    user.role === 'company-admin' || (user as { role?: string }).role === 'company_admin';
+    user.role === 'company-admin' ||
+    (user as { role?: string }).role === 'company_admin' ||
+    options?.forceCompanyAdmin === true;
+
+  // For company admins, don't use employee role for routing - they should get admin landing
+  const legacyRole = isCompanyAdmin ? null : getPermissionRole(user, employeeProfile);
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[Auth] buildEffectiveAccess', {
+      uid: user.id,
+      role: user.role,
+      isDeveloper,
+      isCompanyAdmin,
+      legacyRole,
+      hasEmployeeProfile: !!employeeProfile,
+      forceCompanyAdmin: options?.forceCompanyAdmin,
+    });
+  }
+
   return resolveEffectiveAccess({
     permissions,
     employeeId: employeeProfile?.id ?? null,
     companyId: user.companyId ?? null,
     legacyRole: legacyRole ?? undefined,
     isCompanyAdmin,
-    isDeveloper: user.role === 'developer',
+    isDeveloper,
   });
 }
 
@@ -349,7 +409,7 @@ export function AuthProvider({
   /** When null, emergency-only mode (no Clerk). When undefined, caller must be ClerkAuthBridge which passes state. */
   clerkState?: ClerkStateSnapshot | null;
 }) {
-  const toast = useToast();
+  const { toast } = useToast();
   const clerkLoaded = clerkState === null ? true : clerkState?.isLoaded ?? false;
   const isSignedIn = clerkState === null ? false : clerkState?.isSignedIn ?? false;
   const userId = clerkState === null ? null : clerkState?.userId ?? null;
@@ -365,10 +425,22 @@ export function AuthProvider({
   });
   const [employeeProfile, setEmployeeProfile] = useState<Employee | null>(null);
   const [permissions, setPermissions] = useState<PermissionMap>(() => getDefaultPermissions());
-  const effectiveAccess = React.useMemo(
-    () => buildEffectiveAccess(user, employeeProfile, permissions),
-    [user, employeeProfile, permissions]
-  );
+  
+  // Compute effectiveAccess with proper role priority
+  // Company admins should NOT be routed based on employee profile
+  const effectiveAccess = React.useMemo(() => {
+    const isCompanyAdmin =
+      user?.role === 'company-admin' ||
+      (user as { role?: string } | null)?.role === 'company_admin';
+
+    // For company admins, don't use employee profile for access computation
+    return buildEffectiveAccess(
+      user,
+      isCompanyAdmin ? null : employeeProfile,
+      permissions,
+      { forceCompanyAdmin: isCompanyAdmin }
+    );
+  }, [user, employeeProfile, permissions]);
   const [authReady, setAuthReady] = useState(() => {
     if (clerkState === null) return true;
     return false;
@@ -713,70 +785,100 @@ export function AuthProvider({
           createdAt: new Date(),
         };
 
-        // 5) Activate invited employee via SECURITY DEFINER RPC only. No client-side employees lookup.
-        // Routing: (1) activation RPC result, (2) existing membership, (3) owner onboarding.
+        // 5) CRITICAL FIX: Role priority for routing
+        // Priority: (1) developer, (2) company-admin/owner, (3) employee/staff
+        //
+        // Company admins should NEVER go through employee linking or be routed to staff dashboard.
+        // Only run employee activation when user has NO valid company context.
+        const isContextCompanyAdmin =
+          normalizedRole === 'company-admin' ||
+          contextRole === 'company_admin' ||
+          contextRole === 'company-admin' ||
+          contextRole === 'admin';
+
         let effectiveCompanyId = contextCompanyId;
         let employeeFromRpc: Employee | null = null;
-        try {
-          const linkResult = await linkCurrentUserToInvitedEmployee({
-            clerk_user_id: userId,
-            email: fallbackEmail,
-          });
+        let employeeLinkingSkipped = false;
+
+        // Only attempt employee invite activation if user does NOT already have a valid company admin context
+        if (!isContextCompanyAdmin && (!hasCompanyId || !hasRole)) {
+          try {
+            const linkResult = await linkCurrentUserToInvitedEmployee({
+              clerk_user_id: userId,
+              email: fallbackEmail,
+            });
             if (linkResult.matched) {
-            effectiveCompanyId = linkResult.company_id ?? effectiveCompanyId;
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.log('[Auth] Skipping onboarding for invited employee');
-            }
-            // Build minimal employee from RPC so we never depend on client-side employees query for invite matching.
-            // Name/fullName will be filled from DB via loadEmployeeProfile when available.
-            if (linkResult.employee_id && linkResult.company_id) {
-              employeeFromRpc = {
-                id: linkResult.employee_id,
-                companyId: linkResult.company_id,
-                name: null as any,
-                fullName: null as any,
-                email: fallbackEmail,
-                role: linkResult.role ?? null,
-                employeeRole: linkResult.role ?? null,
-                status: (linkResult.status as Employee['status']) ?? 'active',
-              };
-            }
-            const nowIso = new Date().toISOString();
-            if (effectiveCompanyId) {
-              const { error: profileUpdateError } = await db
-                .core()
-                .from('profiles')
-                .update({ active_company_id: effectiveCompanyId, updated_at: nowIso })
-                .eq('clerk_user_id', userId);
+              effectiveCompanyId = linkResult.company_id ?? effectiveCompanyId;
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
-                console.log('[Auth] Active company set from RPC-activated employee', {
-                  clerk_user_id: userId,
-                  companyId: effectiveCompanyId,
-                  error: profileUpdateError ?? null,
+                console.log('[Auth] Employee invite activation matched', {
+                  company_id: linkResult.company_id,
+                  employee_id: linkResult.employee_id,
+                  role: linkResult.role,
                 });
               }
-              try {
-                const { data: ensureAfterData, error: ensureAfterError } = await supabase.rpc('ensure_current_membership');
+              // Build minimal employee from RPC so we never depend on client-side employees query for invite matching.
+              if (linkResult.employee_id && linkResult.company_id) {
+                employeeFromRpc = {
+                  id: linkResult.employee_id,
+                  companyId: linkResult.company_id,
+                  name: null as any,
+                  fullName: null as any,
+                  email: fallbackEmail,
+                  role: linkResult.role ?? null,
+                  employeeRole: linkResult.role ?? null,
+                  status: (linkResult.status as Employee['status']) ?? 'active',
+                };
+              }
+              const nowIso = new Date().toISOString();
+              if (effectiveCompanyId) {
+                const { error: profileUpdateError } = await db
+                  .core()
+                  .from('profiles')
+                  .update({ active_company_id: effectiveCompanyId, updated_at: nowIso })
+                  .eq('clerk_user_id', userId);
                 if (import.meta.env.DEV) {
                   // eslint-disable-next-line no-console
-                  console.log('[Auth] Membership ensure result (post-activation)', {
-                    error: ensureAfterError,
-                    data: ensureAfterData,
+                  console.log('[Auth] Active company set from RPC-activated employee', {
+                    clerk_user_id: userId,
                     companyId: effectiveCompanyId,
+                    error: profileUpdateError ?? null,
                   });
                 }
-              } catch (membershipError) {
-                if (import.meta.env.DEV) {
-                  // eslint-disable-next-line no-console
-                  console.warn('[Auth] ensure_current_membership (post-activation) failed (non-blocking):', membershipError);
+                try {
+                  const { data: ensureAfterData, error: ensureAfterError } = await supabase.rpc('ensure_current_membership');
+                  if (import.meta.env.DEV) {
+                    // eslint-disable-next-line no-console
+                    console.log('[Auth] Membership ensure result (post-activation)', {
+                      error: ensureAfterError,
+                      data: ensureAfterData,
+                      companyId: effectiveCompanyId,
+                    });
+                  }
+                } catch (membershipError) {
+                  if (import.meta.env.DEV) {
+                    // eslint-disable-next-line no-console
+                    console.warn('[Auth] ensure_current_membership (post-activation) failed (non-blocking):', membershipError);
+                  }
                 }
               }
             }
+          } catch {
+            // Non-blocking; activation is best-effort but must not crash auth.
           }
-        } catch {
-          // Non-blocking; activation is best-effort but must not crash auth.
+        } else {
+          employeeLinkingSkipped = true;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] SKIPPED employee invite activation (user is company admin)', {
+              uid: userId,
+              contextRole,
+              normalizedRole,
+              isContextCompanyAdmin,
+              hasCompanyId,
+              hasRole,
+            });
+          }
         }
         if (cancelled) return;
 
@@ -804,23 +906,47 @@ export function AuthProvider({
         }
         const mappedWithCompany = hasEffectiveCompany ? { ...mapped, companyId: effectiveCompanyId } : mapped;
 
-        // Always prefer the real employees row from DB (now safe after membership is ensured).
-        // RPC result is used as a fallback when DB load fails.
-        let employee: Employee | null = await loadEmployeeProfile(userId);
-        if (!employee) {
-          employee = employeeFromRpc;
+        // Load employee profile, but for company admins it should NOT override their permissions/routing
+        let employee: Employee | null = null;
+        let employeeProfileLoaded = false;
+
+        // Only load employee profile for non-admin users
+        // Company admins may have an employee record (for display purposes) but it should NOT affect routing
+        if (!isContextCompanyAdmin) {
+          employee = await loadEmployeeProfile(userId);
+          if (!employee) {
+            employee = employeeFromRpc;
+          }
+          employeeProfileLoaded = !!employee;
+        } else {
+          // For company admins, we may still want their display name from profiles but NOT their employee role
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] SKIPPED employee profile loading for routing (user is company admin)', {
+              uid: userId,
+              role: normalizedRole,
+            });
+          }
         }
         if (cancelled) return;
+
         if (import.meta.env.DEV) {
-          if (employeeFromRpc) {
+          if (employeeFromRpc && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
             console.log('[Auth] Redirecting employee to /dashboard (invite matched via RPC)');
-          } else if (employee) {
+          } else if (employee && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
             console.log('[Auth] Employee session path', {
               uid: userId,
               employeeId: employee.id,
               companyId: mappedWithCompany.companyId,
+            });
+          } else if (isContextCompanyAdmin) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Company admin session path → /dashboard', {
+              uid: userId,
+              companyId: mappedWithCompany.companyId,
+              role: mappedWithCompany.role,
             });
           } else {
             // eslint-disable-next-line no-console
@@ -831,18 +957,29 @@ export function AuthProvider({
             });
           }
         }
-        const effectivePermissions = buildEffectivePermissions(mappedWithCompany, employee);
 
-        // Prefer real employee display name over generic Clerk fallback.
+        // Build permissions with proper priority: company-admin always gets full access
+        const effectivePermissions = buildEffectivePermissions(
+          mappedWithCompany,
+          isContextCompanyAdmin ? null : employee, // Don't use employee for company admins
+          { forceCompanyAdmin: isContextCompanyAdmin }
+        );
+
+        // Display name: prefer profile name, then employee name, then Clerk fallback
         const displayName =
-          (employee?.fullName && employee.fullName.trim()) ||
-          (employee?.name && employee.name.trim()) ||
+          (profileFullName && profileFullName.trim()) ||
+          (!isContextCompanyAdmin && employee?.fullName && employee.fullName.trim()) ||
+          (!isContextCompanyAdmin && employee?.name && employee.name.trim()) ||
           (fallbackName && fallbackName.trim()) ||
           fallbackEmail ||
           'User';
 
-        // Canonical: when user has an employee profile, their dashboard/sidebar/route role is employees.role (DB).
-        const employeeRoleForUser = employee?.role ?? employee?.employeeRole ?? undefined;
+        // Employee role: only set for non-admin users
+        // Company admins should NOT have employeeRole set (it would affect routing)
+        const employeeRoleForUser = isContextCompanyAdmin
+          ? undefined
+          : (employee?.role ?? employee?.employeeRole ?? undefined);
+
         const userWithDisplayName: User = {
           ...mappedWithCompany,
           name: displayName,
@@ -850,13 +987,27 @@ export function AuthProvider({
         };
 
         if (import.meta.env.DEV) {
-          // Temporary trace: canonical source of truth for role is employees.role (when profile exists) else company_members.role.
+          // Debug: Role resolution summary
+          const accessPreview = buildEffectiveAccess(
+            userWithDisplayName,
+            isContextCompanyAdmin ? null : employee,
+            effectivePermissions,
+            { forceCompanyAdmin: isContextCompanyAdmin }
+          );
           // eslint-disable-next-line no-console
-          console.log('[Auth] role trace', {
+          console.log('[Auth] === ROLE RESOLUTION SUMMARY ===', {
             currentUserId: userId,
-            companyRole: mappedWithCompany.role,
-            latestEmployeeRole: employeeRoleForUser,
-            resolvedPermissionsModules: Object.keys(effectivePermissions).filter((k) => (effectivePermissions as any)[k]?.view === true).slice(0, 8),
+            currentContextRole: contextRole,
+            currentContextCompanyId: contextCompanyId,
+            isContextCompanyAdmin,
+            employeeLinkingSkipped,
+            employeeProfileLoaded,
+            finalUserRole: userWithDisplayName.role,
+            finalEmployeeRole: employeeRoleForUser,
+            finalLandingPage: accessPreview.landingPage,
+            resolvedPermissionsModules: Object.keys(effectivePermissions)
+              .filter((k) => (effectivePermissions as any)[k]?.view === true)
+              .slice(0, 8),
           });
           // eslint-disable-next-line no-console
           console.log('[Employee Context] loaded employee', {
@@ -864,11 +1015,13 @@ export function AuthProvider({
             employeeFullName: employee?.fullName ?? null,
             employeeRole: employee?.employeeRole ?? employee?.role ?? null,
             companyId: userWithDisplayName.companyId,
+            usedForRouting: !isContextCompanyAdmin,
           });
           // eslint-disable-next-line no-console
           console.log('[Employee Context] loaded permissions', {
             rawPermissions: employee?.permissions ?? null,
             effectivePermissions,
+            isFullAccess: isContextCompanyAdmin,
           });
         }
 
@@ -1054,28 +1207,51 @@ export function AuthProvider({
   const refreshAuthState = async (): Promise<{ landingPage: string } | null> => {
     if (isEmergencySession || !userId || !user) return null;
     try {
-      const employee = await loadEmployeeProfile(userId);
-      const employeeRoleForUser = employee?.role ?? employee?.employeeRole ?? undefined;
+      // Check if user is company admin - they should NOT have their role overridden by employee profile
+      const isCompanyAdmin =
+        user.role === 'company-admin' ||
+        (user as { role?: string }).role === 'company_admin';
+
+      // Only load employee profile for non-admin users (for routing purposes)
+      const employee = isCompanyAdmin ? null : await loadEmployeeProfile(userId);
+      const employeeRoleForUser = isCompanyAdmin
+        ? undefined
+        : (employee?.role ?? employee?.employeeRole ?? undefined);
+
       const displayName =
-        (employee?.fullName && employee.fullName.trim()) ||
-        (employee?.name && employee.name.trim()) ||
+        (!isCompanyAdmin && employee?.fullName && employee.fullName.trim()) ||
+        (!isCompanyAdmin && employee?.name && employee.name.trim()) ||
         user.name ||
         'User';
+
       const nextUser: User = {
         ...user,
         name: displayName,
         employeeRole: employeeRoleForUser,
       };
-      const effectivePermissions = buildEffectivePermissions(nextUser, employee);
-      const access = buildEffectiveAccess(nextUser, employee, effectivePermissions);
+
+      const effectivePermissions = buildEffectivePermissions(
+        nextUser,
+        employee,
+        { forceCompanyAdmin: isCompanyAdmin }
+      );
+      const access = buildEffectiveAccess(
+        nextUser,
+        employee,
+        effectivePermissions,
+        { forceCompanyAdmin: isCompanyAdmin }
+      );
+
       setUser(nextUser);
       setEmployeeProfile(employee);
       setPermissions(effectivePermissions);
       writeCachedUser(nextUser);
+
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[Auth] refreshAuthState applied', {
           uid: userId,
+          isCompanyAdmin,
           employeeRole: employeeRoleForUser,
           landingPage: access.landingPage,
           allowedModules: access.allowedModules,

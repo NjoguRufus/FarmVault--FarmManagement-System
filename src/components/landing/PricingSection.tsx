@@ -69,7 +69,7 @@ export function PricingSection() {
                 ))}
               </ul>
               <Button size="lg" asChild className={plan.popular ? "gradient-primary text-primary-foreground btn-luxury rounded-2xl w-full h-12" : "rounded-2xl w-full h-12 border-2 border-primary text-primary hover:bg-primary/5"}>
-                <a href="https://app.farmvault.africa/signup" className="inline-flex items-center justify-center">Get Started <ArrowRight className="ml-2 h-4 w-4" /></a>
+                <a href="/sign-up" className="inline-flex items-center justify-center">Get Started <ArrowRight className="ml-2 h-4 w-4" /></a>
               </Button>
             </motion.div>
           ))}
