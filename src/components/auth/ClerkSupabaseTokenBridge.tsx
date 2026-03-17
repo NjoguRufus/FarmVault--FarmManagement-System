@@ -15,7 +15,7 @@
  * Then register your Clerk domain in Supabase: Dashboard → Auth → Third-party Auth
  */
 import { useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth } from '@clerk/react';
 import { setClerkTokenGetter } from '@/lib/supabase';
 
 export function ClerkSupabaseTokenBridge() {
