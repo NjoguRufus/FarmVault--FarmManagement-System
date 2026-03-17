@@ -137,6 +137,7 @@ import DeveloperAuditLogsPage from "@/pages/developer/DeveloperAuditLogsPage";
 import DeveloperHomePage from "@/pages/developer/DeveloperHomePage";
 import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
+import DeveloperSettingsPage from "@/pages/developer/DeveloperSettingsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 
 const queryClient = new QueryClient();
@@ -433,6 +434,7 @@ const App = () => (
                 <Route index element={<DeveloperHomePage />} />
                 <Route path="companies" element={<DeveloperCompaniesPage />} />
                 <Route path="users" element={<DeveloperUsersPage />} />
+                <Route path="settings" element={<DeveloperSettingsPage />} />
                 <Route path="billing-confirmation" element={<DeveloperBillingConfirmationPage />} />
                 <Route path="finances" element={<DeveloperFinancesPage />} />
                 <Route path="subscription-analytics" element={<DeveloperSubscriptionAnalyticsPage />} />

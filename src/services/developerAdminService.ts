@@ -196,3 +196,149 @@ export async function deleteCompanySafely(companyId: string): Promise<DeleteComp
   return (data as DeleteCompanyResult) ?? { success: false, blocked: true, reason: 'Unknown error' };
 }
 
+// ---------------------------------------------------------------------------
+// Developer settings (identity + company link management)
+// ---------------------------------------------------------------------------
+
+export interface DeveloperSettings {
+  developer_clerk_user_id: string | null;
+  developer_email: string | null;
+  developer_full_name: string | null;
+  developer_created_at: string | null;
+  active_company_id: string | null;
+  active_company_name: string | null;
+  active_company_created_at: string | null;
+  member_company_id: string | null;
+  member_company_name: string | null;
+  member_role: string | null;
+  member_created_at: string | null;
+}
+
+export async function getDeveloperSettings(): Promise<DeveloperSettings | null> {
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Calling get_developer_settings RPC...');
+  const { data, error, status, statusText } = await supabase.rpc('get_developer_settings');
+
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] get_developer_settings response:', {
+    status,
+    statusText,
+    hasData: !!data,
+    error,
+  });
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] get_developer_settings FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(error.message ?? 'Failed to load developer settings');
+  }
+
+  if (!data) return null;
+  if (Array.isArray(data)) {
+    return (data[0] as DeveloperSettings) ?? null;
+  }
+  return (data as DeveloperSettings) ?? null;
+}
+
+/**
+ * List companies for the Developer Settings page (shared list_companies RPC).
+ */
+export async function listCompaniesForDeveloperSettings(params?: {
+  search?: string | null;
+  limit?: number;
+  offset?: number;
+}): Promise<ListCompaniesRpcResponse> {
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] listCompaniesForDeveloperSettings()', params);
+  return listCompanies(params);
+}
+
+export async function linkDeveloperToCompany(companyId: string): Promise<void> {
+  if (!companyId) throw new Error('companyId is required');
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Linking developer to company', { companyId });
+  const { error } = await supabase.rpc('link_developer_to_company', {
+    p_company_id: companyId,
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] link_developer_to_company FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(error.message ?? 'Failed to link developer to company');
+  }
+}
+
+// Backwards-compatible alias (older callers may still use this)
+export async function updateDeveloperCompanyLink(companyId: string): Promise<void> {
+  return linkDeveloperToCompany(companyId);
+}
+
+export async function removeDeveloperCompanyLink(): Promise<void> {
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Removing developer company link...');
+  const { error } = await supabase.rpc('remove_developer_company_link');
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] remove_developer_company_link FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(error.message ?? 'Failed to remove developer company link');
+  }
+}
+
+export async function setDeveloperRole(role: string): Promise<void> {
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Setting developer role...', { role });
+  const { error } = await supabase.rpc('set_developer_role', {
+    p_role: role,
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] set_developer_role FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(error.message ?? 'Failed to update developer role');
+  }
+}
+
+// Backwards-compatible alias
+export async function updateDeveloperRole(role: string): Promise<void> {
+  return setDeveloperRole(role);
+}
+
+export async function renameCompany(companyId: string, name: string): Promise<void> {
+  if (!companyId) throw new Error('companyId is required');
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Renaming company safely...', { companyId, name });
+  const { error } = await supabase.rpc('rename_company_safely', {
+    p_company_id: companyId,
+    p_name: name,
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] rename_company_safely FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(error.message ?? 'Failed to rename company');
+  }
+}
+
+

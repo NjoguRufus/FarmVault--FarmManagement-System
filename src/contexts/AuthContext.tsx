@@ -43,6 +43,8 @@ interface AuthContextType {
   refreshUserProfile: () => Promise<void>;
   /** Refetch employee profile + context and recompute role/permissions. Returns new landingPage for redirect. */
   refreshAuthState: () => Promise<{ landingPage: string } | null>;
+  /** Force-refresh session as a platform developer when backend confirms admin.developers membership. */
+  forceDeveloperMode: () => Promise<{ landingPage: string } | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -1269,6 +1271,62 @@ export function AuthProvider({
     }
   };
 
+  const forceDeveloperMode = async (): Promise<{ landingPage: string } | null> => {
+    if (!userId || !user) return null;
+    try {
+      const { data: isDev, error } = await supabase.rpc('is_developer');
+      if (error) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] forceDeveloperMode is_developer RPC failed', error);
+        }
+        return null;
+      }
+      if (isDev !== true) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] forceDeveloperMode denied – user is not a platform developer');
+        }
+        return null;
+      }
+
+      const devUser: User = {
+        ...user,
+        role: 'developer',
+        employeeRole: undefined,
+        companyId: null,
+      };
+
+      const devPermissions = getFullAccessPermissions();
+      const access = buildEffectiveAccess(devUser, null, devPermissions);
+
+      setUser(devUser);
+      setEmployeeProfile(null);
+      setPermissions(devPermissions);
+      setIsDeveloper(true);
+      writeCachedUser(devUser);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('fv:isDeveloper', '1');
+      }
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Auth] forceDeveloperMode applied', {
+          uid: devUser.id,
+          landingPage: access.landingPage,
+        });
+      }
+
+      return { landingPage: access.landingPage };
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[Auth] forceDeveloperMode unexpected failure', err);
+      }
+      return null;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -1287,6 +1345,7 @@ export function AuthProvider({
         refreshUserAvatar,
         refreshUserProfile,
         refreshAuthState,
+        forceDeveloperMode,
       }}
     >
       {children}
