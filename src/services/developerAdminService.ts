@@ -63,8 +63,21 @@ export interface OverrideSubscriptionInput {
 }
 
 export async function getDevDashboardKpis(): Promise<DevDashboardKpis> {
-  const { data, error } = await supabase.rpc('dev_dashboard_kpis');
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Calling dev_dashboard_kpis RPC...');
+  const { data, error, status, statusText } = await supabase.rpc('dev_dashboard_kpis');
+  
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] dev_dashboard_kpis response:', { status, statusText, hasData: !!data, error });
+  
   if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] dev_dashboard_kpis FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     throw new Error(error.message ?? 'Failed to load developer dashboard KPIs');
   }
   // RPC may return a single row or an array; normalise to object.
@@ -75,12 +88,25 @@ export async function getDevDashboardKpis(): Promise<DevDashboardKpis> {
 }
 
 export async function listCompanies(): Promise<ListCompaniesRpcResponse> {
-  const { data, error } = await supabase.rpc('list_companies', {
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] Calling list_companies RPC...');
+  const { data, error, status, statusText } = await supabase.rpc('list_companies', {
     p_search: null,
     p_limit: 200,
     p_offset: 0,
   });
+  
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] list_companies response:', { status, statusText, hasData: !!data, error });
+  
   if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[DevAdmin] list_companies FAILED:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
     throw new Error(error.message ?? 'Failed to load companies');
   }
   const payload = (data as ListCompaniesRpcResponse | null) ?? { rows: [], total: 0 };

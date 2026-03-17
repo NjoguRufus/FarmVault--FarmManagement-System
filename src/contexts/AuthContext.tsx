@@ -682,6 +682,7 @@ export function AuthProvider({
             });
           }
 
+          setActivationResolved(true);
           setAuthReady(true);
           return;
         }

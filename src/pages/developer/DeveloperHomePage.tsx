@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { Building2, Users, DollarSign, AlertTriangle } from 'lucide-react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { fetchDeveloperCompanies, fetchDeveloperKpis, fetchDeveloperUsers } from '@/services/developerService';
@@ -7,6 +8,16 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { useSeasonChallengesIntelligence } from '@/hooks/developer/useSeasonChallengesIntelligence';
 
 export default function DeveloperHomePage() {
+  const location = useLocation();
+  
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[DeveloperHomePage] Component MOUNTED at route:', location.pathname);
+    return () => {
+      // eslint-disable-next-line no-console
+      console.log('[DeveloperHomePage] Component UNMOUNTED');
+    };
+  }, [location.pathname]);
   const {
     data: kpis,
     isLoading,

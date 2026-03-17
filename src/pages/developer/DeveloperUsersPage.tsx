@@ -72,15 +72,17 @@ export default function DeveloperUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u) => {
+              {filtered.map((u, idx) => {
                 const name = u.full_name || 'Unnamed User';
                 const email = u.email || '—';
                 const companyName = u.company_name || u.company?.company_name || 'No Company';
                 const role = u.role || u.company?.role || '—';
                 const createdAt = u.created_at || '—';
+                // Use compound key: user_id + company_id + index to handle users in multiple companies
+                const rowKey = `${u.user_id}-${u.company_id ?? 'no-company'}-${idx}`;
 
                 return (
-                  <tr key={u.user_id} className="border-b border-border/40 last:border-0">
+                  <tr key={rowKey} className="border-b border-border/40 last:border-0">
                     <td className="py-2 pr-4">
                       <div className="font-medium text-foreground">{name}</div>
                       <div className="text-[11px] text-muted-foreground break-all">
