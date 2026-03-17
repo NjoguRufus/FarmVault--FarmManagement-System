@@ -976,14 +976,18 @@ export function AuthProvider({
       return;
     }
     if (clerkSignOut) {
-      clerkSignOut().finally(() => {
-        setUser(null);
-        setEmployeeProfile(null);
-        setPermissions(getDefaultPermissions());
-        setSetupIncomplete(false);
-        setIsDeveloper(false);
-        writeCachedUser(null);
-      });
+      Promise.resolve(clerkSignOut())
+        .catch(() => {
+          // Ignore sign-out errors; proceed with local cleanup
+        })
+        .finally(() => {
+          setUser(null);
+          setEmployeeProfile(null);
+          setPermissions(getDefaultPermissions());
+          setSetupIncomplete(false);
+          setIsDeveloper(false);
+          writeCachedUser(null);
+        });
     } else {
       setUser(null);
       setEmployeeProfile(null);
