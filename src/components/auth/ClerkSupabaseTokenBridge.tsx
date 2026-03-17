@@ -1,60 +1,58 @@
 /**
- * Ensures the Supabase client gets the Clerk session token from React (useAuth),
- * so auth.jwt() is set in Supabase and RLS policies like current_clerk_id() work.
- * Must be mounted inside ClerkProvider.
+ * Bridges Clerk authentication to Supabase.
+ * 
+ * ONLY uses the 'supabase' JWT template - NO fallback to default Clerk tokens.
+ * This ensures Supabase receives a properly formatted JWT with the required claims.
  *
- * IMPORTANT: You must create a JWT Template in Clerk Dashboard:
- * 1. Go to Clerk Dashboard → JWT Templates
- * 2. Create a new template named "supabase"
- * 3. Use this template:
- *    {
- *      "aud": "authenticated",
- *      "role": "authenticated",
- *      "email": "{{user.primary_email_address}}",
- *      "user_id": "{{user.id}}"
- *    }
- * 4. Set the signing key to your Supabase JWT secret (from Supabase Dashboard → Settings → API → JWT Secret)
+ * REQUIRED: Create a JWT Template named "supabase" in Clerk Dashboard with these claims:
+ * {
+ *   "aud": "authenticated",
+ *   "role": "authenticated",
+ *   "email": "{{user.primary_email_address}}",
+ *   "user_id": "{{user.id}}"
+ * }
+ *
+ * Then register your Clerk domain in Supabase: Dashboard → Auth → Third-party Auth
  */
-import { useEffect, useRef } from 'react';
-import { useAuth } from '@clerk/react';
+import { useEffect } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { setClerkTokenGetter } from '@/lib/supabase';
 
 export function ClerkSupabaseTokenBridge() {
-  const { getToken, isSignedIn } = useAuth();
-  const lastTokenRef = useRef<string | null>(null);
+  const { getToken, isLoaded, isSignedIn } = useAuth();
 
   useEffect(() => {
-    if (!getToken) {
+    // Wait for Clerk to load before setting up the token getter
+    if (!isLoaded) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[ClerkBridge] Waiting for Clerk to load...');
+      }
+      return;
+    }
+
+    if (!isSignedIn) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[ClerkBridge] User not signed in, clearing token getter');
+      }
       setClerkTokenGetter(null);
       return;
     }
 
+    // Set up the token getter - ONLY uses 'supabase' template, NO fallback
     setClerkTokenGetter(async () => {
       try {
-        // Try the 'supabase' JWT template first (required for proper Supabase integration)
-        // Fall back to default token if template doesn't exist
-        let token: string | null = null;
+        // ONLY request the 'supabase' template - do NOT fall back to default token
+        const token = await getToken({ template: 'supabase' });
 
-        try {
-          token = await getToken({ template: 'supabase' });
-        } catch (templateErr) {
-          if (import.meta.env.DEV) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[ClerkBridge] Token request result:', !!token ? 'success' : 'null');
+          
+          if (!token) {
             // eslint-disable-next-line no-console
-            console.warn('[ClerkSupabaseTokenBridge] "supabase" JWT template not found, falling back to default token. Create a JWT template in Clerk Dashboard for proper Supabase integration.');
-          }
-          // Fall back to default session token
-          token = await getToken();
-        }
-
-        if (token && token !== lastTokenRef.current) {
-          lastTokenRef.current = token;
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.log('[ClerkSupabaseTokenBridge] Token acquired', {
-              hasToken: !!token,
-              tokenLength: token?.length,
-              isSignedIn,
-            });
+            console.warn('[ClerkBridge] No token returned. Ensure "supabase" JWT template exists in Clerk Dashboard.');
           }
         }
 
@@ -62,7 +60,7 @@ export function ClerkSupabaseTokenBridge() {
       } catch (err) {
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.error('[ClerkSupabaseTokenBridge] Failed to get token:', err);
+          console.error('[ClerkBridge] Failed to get supabase token:', err);
         }
         return null;
       }
@@ -70,9 +68,8 @@ export function ClerkSupabaseTokenBridge() {
 
     return () => {
       setClerkTokenGetter(null);
-      lastTokenRef.current = null;
     };
-  }, [getToken, isSignedIn]);
+  }, [isLoaded, isSignedIn, getToken]);
 
   return null;
 }
