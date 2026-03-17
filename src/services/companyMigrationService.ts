@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { listCompanies, type DeveloperCompanyRow } from '@/services/developerAdminService';
 
 // ============== TYPES ==============
 
@@ -122,15 +123,92 @@ export interface MigrationDetails {
 /**
  * Fetch all companies with admin info for migration UI.
  * Shows "new" badge for recently created companies without migrated data.
+ * 
+ * Falls back to list_companies RPC if list_companies_for_migration is not available.
  */
 export async function listCompaniesForMigration(): Promise<CompanyForMigration[]> {
-  const { data, error } = await supabase.rpc('list_companies_for_migration');
+  // eslint-disable-next-line no-console
+  console.log('[CompanyMigration] Calling list_companies_for_migration RPC...');
+  
+  const { data, error, status, statusText } = await supabase.rpc('list_companies_for_migration');
 
-  if (error) {
-    throw new Error(error.message ?? 'Failed to load companies for migration');
+  // eslint-disable-next-line no-console
+  console.log('[CompanyMigration] list_companies_for_migration response:', {
+    status,
+    statusText,
+    hasData: !!data,
+    dataLength: Array.isArray(data) ? data.length : 'not array',
+    rawData: data,
+    error,
+  });
+
+  // If the specialized RPC works, use it
+  if (!error && data) {
+    const companies = Array.isArray(data) ? data : [];
+    // eslint-disable-next-line no-console
+    console.log('[CompanyMigration] Using list_companies_for_migration data:', companies.length, 'companies');
+    return companies as CompanyForMigration[];
   }
 
-  return (data as CompanyForMigration[]) ?? [];
+  // Fallback: use the same list_companies RPC that the Companies page uses
+  // eslint-disable-next-line no-console
+  console.log('[CompanyMigration] Falling back to list_companies RPC...');
+  
+  try {
+    const fallbackResult = await listCompanies();
+    const rows = fallbackResult.rows ?? [];
+    
+    // eslint-disable-next-line no-console
+    console.log('[CompanyMigration] Fallback list_companies returned:', rows.length, 'companies');
+    
+    // Transform DeveloperCompanyRow to CompanyForMigration
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const transformed: CompanyForMigration[] = rows.map((row: DeveloperCompanyRow) => {
+      const companyId = row.company_id ?? row.id ?? '';
+      const createdAt = row.created_at ?? new Date().toISOString();
+      const isNew = new Date(createdAt) > sevenDaysAgo;
+      
+      return {
+        company_id: companyId,
+        company_name: row.company_name ?? 'Unnamed Company',
+        created_at: createdAt,
+        admin_user_id: null,
+        admin_email: '',
+        admin_full_name: '',
+        has_migrated_data: false,
+        migration_count: 0,
+        is_new: isNew,
+        record_counts: {
+          employees: row.employees_count ?? 0,
+          projects: 0,
+          expenses: 0,
+          harvests: 0,
+          harvest_collections: 0,
+          inventory_items: 0,
+          suppliers: 0,
+        },
+      };
+    });
+    
+    // eslint-disable-next-line no-console
+    console.log('[CompanyMigration] Transformed companies:', transformed.map(c => ({
+      company_id: c.company_id,
+      company_name: c.company_name,
+    })));
+    
+    return transformed;
+  } catch (fallbackError) {
+    // eslint-disable-next-line no-console
+    console.error('[CompanyMigration] Fallback also failed:', fallbackError);
+    
+    // If both fail, throw the original error
+    if (error) {
+      throw new Error(error.message ?? 'Failed to load companies for migration');
+    }
+    throw fallbackError;
+  }
 }
 
 /**
@@ -256,12 +334,14 @@ export function calculateTotalRecords(tableCounts: Record<string, number>): numb
 export function getTableDisplayName(tableName: string): string {
   const displayNames: Record<string, string> = {
     employees: 'Employees',
-    projects: 'Projects',
+    projects: 'Projects (projects.projects)',
     project_stages: 'Project Stages',
-    expenses: 'Expenses',
-    harvests: 'Harvests',
-    harvest_collections: 'Harvest Collections',
-    harvest_pickers: 'Picker Intake',
+    expenses: 'Expenses (finance.expenses)',
+    harvests: 'Harvests (harvest.harvests)',
+    harvest_collections: 'Harvest Collections (harvest schema)',
+    harvest_pickers: 'Harvest Pickers (harvest schema)',
+    picker_intake_entries: 'Picker Intake Entries (harvest schema)',
+    picker_payment_entries: 'Picker Payments (harvest schema)',
     picker_weigh_entries: 'Picker Weigh Entries',
     harvest_payment_batches: 'Payment Batches',
     suppliers: 'Suppliers',
@@ -316,6 +396,8 @@ export function groupTableCountsByCategory(tableCounts: Record<string, number>):
       'harvests',
       'harvest_collections',
       'harvest_pickers',
+      'picker_intake_entries',
+      'picker_payment_entries',
       'picker_weigh_entries',
       'harvest_payment_batches',
       'harvest_wallets',

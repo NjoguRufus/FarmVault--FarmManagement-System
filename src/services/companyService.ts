@@ -138,11 +138,37 @@ export async function updateCompany(
 ): Promise<void> {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (data.name !== undefined) updates.name = data.name;
+  if (data.email !== undefined) updates.email = data.email;
   if (data.plan !== undefined) updates.plan = data.plan;
   if (data.status !== undefined) updates.status = data.status;
   if (data.customWorkTypes !== undefined) updates.custom_work_types = data.customWorkTypes;
   if (Object.keys(updates).length <= 1) return;
-  await db.core().from('companies').update(updates).eq('id', companyId);
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[CompanyService/updateCompany] Payload', {
+      schema: 'core',
+      table: 'companies',
+      companyId,
+      updates,
+    });
+  }
+  const { data: updated, error } = await db
+    .core()
+    .from('companies')
+    .update(updates)
+    .eq('id', companyId)
+    .select('id, name, email, plan, status')
+    .maybeSingle();
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[CompanyService/updateCompany] Supabase response', {
+      data: updated,
+      error,
+    });
+  }
+  if (error) {
+    throw error;
+  }
 }
 
 export async function createCompany(

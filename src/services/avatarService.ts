@@ -46,6 +46,19 @@ export async function uploadAvatar(params: UploadAvatarParams): Promise<UploadAv
   const folder = companyId && companyId.trim() !== '' ? companyId : 'default';
   const path = `${folder}/${clerkUserId}.${safeExt}`;
 
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[AvatarUpload/profile] Uploading avatar', {
+      bucket: AVATARS_BUCKET,
+      path,
+      size: file.size,
+      type: file.type,
+      schema: 'core',
+      table: 'profiles',
+      where: { clerk_user_id: clerkUserId },
+    });
+  }
+
   const { error: uploadError } = await supabase.storage
     .from(AVATARS_BUCKET)
     .upload(path, file, { upsert: true, contentType: file.type });
@@ -57,11 +70,21 @@ export async function uploadAvatar(params: UploadAvatarParams): Promise<UploadAv
   const { data: urlData } = supabase.storage.from(AVATARS_BUCKET).getPublicUrl(path);
   const url = urlData?.publicUrl ?? '';
 
-  const { error: updateError } = await db
+  const { data: updatedRow, error: updateError } = await db
     .core()
     .from('profiles')
     .update({ avatar_url: url })
-    .eq('clerk_user_id', clerkUserId);
+    .eq('clerk_user_id', clerkUserId)
+    .select('clerk_user_id, avatar_url')
+    .maybeSingle();
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[AvatarUpload/profile] Supabase update response', {
+      data: updatedRow,
+      error: updateError,
+    });
+  }
 
   if (updateError) {
     throw new Error(updateError.message || 'Failed to save avatar URL to profile');
@@ -166,11 +189,31 @@ export async function clearEmployeeAvatar(companyId: string, employeeId: string)
  * Remove custom avatar: clear profile.avatar_url (storage object can remain for simplicity).
  */
 export async function clearAvatar(clerkUserId: string): Promise<void> {
-  const { error } = await db
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[AvatarUpload/profile] Clearing avatar', {
+      schema: 'core',
+      table: 'profiles',
+      where: { clerk_user_id: clerkUserId },
+      updates: { avatar_url: null },
+    });
+  }
+
+  const { data, error } = await db
     .core()
     .from('profiles')
     .update({ avatar_url: null })
-    .eq('clerk_user_id', clerkUserId);
+    .eq('clerk_user_id', clerkUserId)
+    .select('clerk_user_id, avatar_url')
+    .maybeSingle();
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[AvatarUpload/profile] Clear avatar response', {
+      data,
+      error,
+    });
+  }
 
   if (error) {
     throw new Error(error.message || 'Failed to clear avatar');

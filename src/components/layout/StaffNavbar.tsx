@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogOut, Menu, ChevronDown, User as UserIcon, HelpCircle } from 'lucide-react';
+import { LogOut, Menu, ChevronDown, HelpCircle, Settings } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -69,13 +69,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
       companyName,
       pageTitle,
     });
-    // eslint-disable-next-line no-console
-    console.log('[StaffProfileMenu] visible menu items', [
-      'My Profile',
-      'Take a Tour',
-      'Support',
-      'Logout',
-    ]);
   }
 
   return (
@@ -179,17 +172,10 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="cursor-pointer"
-                onClick={() => navigate('/staff/profile')}
+                onClick={() => navigate('/settings')}
               >
-                <UserIcon className="mr-2 h-4 w-4" />
-                My Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => startStaffTour()}
-              >
-                <HelpCircle className="mr-2 h-4 w-4" />
-                Take a Tour
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="cursor-pointer"

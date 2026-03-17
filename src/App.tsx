@@ -38,8 +38,6 @@ import SuppliersPage from "@/pages/SuppliersPage";
 import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
 import EmployeeProfilePage from "@/pages/EmployeeProfilePage";
-import StaffProfilePage from "@/pages/StaffProfilePage";
-import MyProfilePage from "@/pages/MyProfilePage";
 import ReportsPage from "@/pages/ReportsPage";
 import BillingPage from "@/pages/BillingPage";
 import SupportPage from "@/pages/SupportPage";
@@ -138,6 +136,7 @@ import DeveloperFeedbackInboxPage from "@/pages/developer/DeveloperFeedbackInbox
 import DeveloperAuditLogsPage from "@/pages/developer/DeveloperAuditLogsPage";
 import DeveloperHomePage from "@/pages/developer/DeveloperHomePage";
 import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
+import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 
 const queryClient = new QueryClient();
@@ -291,7 +290,7 @@ const App = () => (
                 <Route path="/employees/:employeeId" element={<PermissionRoute module="employees"><EmployeeProfilePage /></PermissionRoute>} />
                 <Route path="/reports" element={<PermissionRoute module="reports"><ReportsPage /></PermissionRoute>} />
                 <Route path="/billing" element={<PermissionRoute module="settings"><BillingPage /></PermissionRoute>} />
-                <Route path="/profile" element={<MyProfilePage />} />
+                <Route path="/profile" element={<Navigate to="/settings" replace />} />
                 <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
                 <Route path="/support" element={<SupportPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />
@@ -326,7 +325,7 @@ const App = () => (
               >
                 <Route index element={<Navigate to="/staff/staff-dashboard" replace />} />
                 <Route path="staff-dashboard" element={<StaffDashboard />} />
-                <Route path="profile" element={<StaffProfilePage />} />
+                <Route path="profile" element={<Navigate to="/settings" replace />} />
                 <Route path="support" element={<SupportPage />} />
                 <Route path="feedback" element={<FeedbackPage />} />
                 <Route
@@ -446,6 +445,7 @@ const App = () => (
                 <Route path="records/:cropId" element={<DeveloperCropRecordsPage />} />
                 <Route path="records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
                 <Route path="records/view/:recordId" element={<DeveloperRecordViewPage />} />
+                <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

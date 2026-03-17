@@ -688,6 +688,8 @@ export function AuthProvider({
         }
 
         // 3) Ensure profiles row exists so current_context can read active_company_id.
+        // IMPORTANT: Do NOT overwrite full_name here – it is user-editable from Settings.
+        // We only ensure the row + email exist; name is managed by core.profiles.full_name.
         const { error: upsertError } = await db
           .core()
           .from('profiles')
@@ -695,7 +697,6 @@ export function AuthProvider({
             {
               clerk_user_id: userId,
               email: fallbackEmail || null,
-              full_name: fallbackName || null,
             },
             { onConflict: 'clerk_user_id' },
           );

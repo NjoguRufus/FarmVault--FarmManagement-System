@@ -18,6 +18,7 @@ import {
   Database,
   Settings,
   BarChart3,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -65,6 +66,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'main' },
   { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'main' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'main' },
+  { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'main' },
 ];
 
 /** Manager nav. */
@@ -114,9 +116,9 @@ export const staffNavConfig: NavItem[] = [
   { label: 'Harvest & Collections', path: '/staff/harvest-collections', icon: TrendingUp, group: 'more' },
   { label: 'Expenses', path: '/staff/expenses', icon: Receipt, group: 'more' },
   { label: 'Reports', path: '/staff/reports', icon: FileText, group: 'more' },
+  { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
   { label: 'Support', path: '/staff/support', icon: HelpCircle, group: 'more' },
   { label: 'Feedback', path: '/staff/feedback', icon: MessageSquare, group: 'more' },
-  { label: 'Profile', path: '/staff/profile', icon: Users, group: 'more' },
 ];
 
 export type NavConfig = NavItem[];
