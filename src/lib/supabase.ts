@@ -22,16 +22,65 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
   try {
     if (clerkTokenGetter) {
       const token = await clerkTokenGetter();
-      if (token) return token;
+      if (token) {
+        if (import.meta.env.DEV) {
+          // Debug: decode and log JWT claims (don't log the full token in production!)
+          try {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              // eslint-disable-next-line no-console
+              console.log('[Supabase] JWT token claims:', {
+                aud: payload.aud,
+                role: payload.role,
+                sub: payload.sub,
+                user_id: payload.user_id,
+                email: payload.email,
+                exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
+                iat: payload.iat ? new Date(payload.iat * 1000).toISOString() : null,
+              });
+            }
+          } catch {
+            // Ignore decode errors
+          }
+        }
+        return token;
+      }
     }
-    const w = window as Window & { Clerk?: { session?: { getToken: () => Promise<string | null> }; user?: unknown } };
+    // Fallback to window.Clerk if React hook isn't available yet
+    const w = window as Window & { Clerk?: { session?: { getToken: (opts?: { template?: string }) => Promise<string | null> }; user?: unknown } };
     const session = w.Clerk?.session;
     if (session?.getToken) {
+      // Try supabase template first
+      try {
+        const token = await session.getToken({ template: 'supabase' });
+        if (token) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Supabase] Got token via window.Clerk (supabase template)');
+          }
+          return token;
+        }
+      } catch {
+        // Template might not exist, try default
+      }
       const token = await session.getToken();
+      if (import.meta.env.DEV && token) {
+        // eslint-disable-next-line no-console
+        console.log('[Supabase] Got token via window.Clerk (default)');
+      }
       return token ?? null;
     }
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[Supabase] No token available - user may not be signed in');
+    }
     return null;
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[Supabase] Error getting access token:', err);
+    }
     return null;
   }
 }
