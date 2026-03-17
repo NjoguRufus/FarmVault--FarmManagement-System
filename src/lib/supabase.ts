@@ -19,8 +19,8 @@ export function setClerkTokenGetter(getter: (() => Promise<string | null>) | nul
 
 /**
  * Get the Supabase access token from Clerk.
- * ONLY uses the 'supabase' JWT template - no fallbacks to default Clerk tokens.
- * This ensures proper authentication with Supabase RLS policies.
+ * Uses the NATIVE Clerk-Supabase integration (standard session token, no JWT template).
+ * This ensures proper authentication with Supabase RLS policies via Clerk's JWKS.
  */
 export async function getSupabaseAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
@@ -57,8 +57,8 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
       return null;
     }
 
-    // ONLY use the 'supabase' template - NO fallback to default token
-    const token = await session.getToken({ template: 'supabase' });
+    // Use standard session token - native Supabase integration (no template needed)
+    const token = await session.getToken();
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -67,7 +67,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
         logJwtClaims(token, 'window.Clerk');
       } else {
         // eslint-disable-next-line no-console
-        console.warn('[Supabase] No "supabase" template token returned. Ensure the JWT template exists in Clerk Dashboard.');
+        console.warn('[Supabase] No session token returned. User may not be authenticated.');
       }
     }
 

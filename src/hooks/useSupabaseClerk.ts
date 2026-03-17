@@ -2,7 +2,7 @@
  * Returns a Supabase client that injects the current Clerk session token on every request.
  * Use for data access; never use supabase.auth (identity comes from Clerk only).
  * 
- * IMPORTANT: ONLY uses the 'supabase' JWT template - no fallback to default Clerk tokens.
+ * Uses NATIVE Clerk-Supabase integration (standard session token, no JWT template).
  */
 import { useMemo } from 'react';
 import { useAuth } from '@clerk/react';
@@ -14,8 +14,8 @@ export function useSupabaseClerk() {
   const supabase = useMemo(() => {
     return createSupabaseClientWithClerkToken(async () => {
       try {
-        // ONLY use the 'supabase' template - NO fallback to default Clerk token
-        const token = await getToken({ template: 'supabase' });
+        // Use standard session token - native Supabase integration (no template needed)
+        const token = await getToken();
         return token ?? null;
       } catch {
         return null;

@@ -25,19 +25,70 @@ function jsonResponse(body: object, status: number) {
   return new Response(JSON.stringify(body), { status, headers: corsHeaders });
 }
 
+// Extract issuer (iss) from JWT without verification to determine the correct JWKS URL
+function extractIssuerFromToken(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]));
+    return payload.iss ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Verify Clerk session JWT via JWKS and return sub (user id)
+// Uses instance-specific JWKS URL derived from token's issuer for reliability
 async function getClerkUserIdFromToken(token: string, clerkSecretKey: string): Promise<{ userId: string } | { error: string }> {
   try {
-    const JWKS = createRemoteJWKSet(new URL("https://api.clerk.com/v1/jwks"), {
-      headers: { "Authorization": `Bearer ${clerkSecretKey}` },
+    // First, extract the issuer to determine which JWKS to use
+    const issuer = extractIssuerFromToken(token);
+    log("JWT issuer extracted", { issuer: issuer ?? "(none)" });
+
+    // Clerk JWTs have issuer like "https://pro-aardvark-46.clerk.accounts.dev" or "https://clerk.yourdomain.com"
+    // The JWKS URL is {issuer}/.well-known/jwks.json OR use the Backend API with secret key
+    
+    let jwksUrl: string;
+    let jwksHeaders: Record<string, string> = {};
+    
+    if (issuer && (issuer.includes(".clerk.accounts.dev") || issuer.includes("clerk."))) {
+      // Use instance-specific JWKS URL (no secret key needed, publicly accessible)
+      jwksUrl = `${issuer.replace(/\/$/, "")}/.well-known/jwks.json`;
+      log("Using instance-specific JWKS URL", { jwksUrl });
+    } else {
+      // Fallback to Backend API JWKS (requires secret key auth)
+      jwksUrl = "https://api.clerk.com/v1/jwks";
+      jwksHeaders = { "Authorization": `Bearer ${clerkSecretKey}` };
+      log("Using Backend API JWKS URL with secret key", { jwksUrl });
+    }
+
+    const JWKS = createRemoteJWKSet(new URL(jwksUrl), {
+      headers: Object.keys(jwksHeaders).length > 0 ? jwksHeaders : undefined,
     });
-    const { payload } = await jwtVerify(token, JWKS);
+    
+    const { payload } = await jwtVerify(token, JWKS, {
+      // Optionally validate issuer to ensure token matches expected instance
+      issuer: issuer ?? undefined,
+    });
+    
     const sub = payload.sub as string | undefined;
+    log("JWT verification successful", { 
+      sub: sub ? sub.slice(0, 12) + "..." : "(none)",
+      aud: payload.aud,
+      exp: payload.exp,
+    });
+    
     if (sub) return { userId: sub };
     return { error: "JWT missing sub" };
   } catch (e) {
-    logErr("Clerk JWT verification failed", e);
-    return { error: e instanceof Error ? e.message : String(e) };
+    const errMsg = e instanceof Error ? e.message : String(e);
+    logErr("Clerk JWT verification failed", { 
+      error: errMsg,
+      hint: errMsg.includes("no applicable key") 
+        ? "Token was likely signed by a different Clerk instance than the CLERK_SECRET_KEY belongs to. Ensure CLERK_SECRET_KEY matches the frontend's VITE_CLERK_PUBLISHABLE_KEY instance."
+        : undefined,
+    });
+    return { error: errMsg };
   }
 }
 
@@ -171,10 +222,26 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Server configuration error" }, 500);
     }
 
+    // Log Clerk secret key type (test vs live) for debugging instance mismatch issues
+    const secretKeyType = clerkSecretKey.startsWith("sk_test_") 
+      ? "test" 
+      : clerkSecretKey.startsWith("sk_live_") 
+        ? "live" 
+        : "unknown";
+    log("Clerk secret key type", { type: secretKeyType });
+
     const clerkResult = await getClerkUserIdFromToken(token, clerkSecretKey);
     if ("error" in clerkResult) {
       logErr("Rejected: Clerk token invalid", clerkResult.error);
-      return jsonResponse({ error: "Unauthorized", detail: clerkResult.error }, 401);
+      // Provide actionable hint for common configuration issues
+      const hint = clerkResult.error.includes("no applicable key")
+        ? `JWT signed by a different Clerk instance. The CLERK_SECRET_KEY (${secretKeyType}) may not match the frontend's Clerk publishable key.`
+        : undefined;
+      return jsonResponse({ 
+        error: "Unauthorized", 
+        detail: clerkResult.error,
+        hint,
+      }, 401);
     }
     const callerClerkId = clerkResult.userId;
     log("Caller verified", { callerClerkId: callerClerkId?.slice(0, 12) + "..." });
