@@ -200,6 +200,7 @@ export default function EmployeesPage() {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[EmployeesPage] refetchSupabaseEmployees', {
+          table: 'public.employees',
           companyId,
           total: list.length,
           byStatus: list.reduce<Record<string, number>>((acc, e) => {
@@ -209,11 +210,13 @@ export default function EmployeesPage() {
         });
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load employees';
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.error('[EmployeesPage] refetchSupabaseEmployees error', err);
+        console.error('[EmployeesPage] refetchSupabaseEmployees error', { companyId, error: err });
       }
       setEmployeesSupabase([]);
+      toast.error('Could not load employees', { description: message });
     } finally {
       setLoadingSupabase(false);
     }
@@ -593,6 +596,7 @@ export default function EmployeesPage() {
         setAddOpen(false);
         resetAddForm();
         setSaving(false);
+        setSection('invited');
         return;
       }
 
@@ -860,6 +864,7 @@ export default function EmployeesPage() {
       });
       toast.success('Draft saved');
       await refetchSupabaseEmployees();
+      setSection('draft');
     } catch (err: unknown) {
       const message = (err as { message?: string })?.message ?? 'Failed to save draft';
       toast.error('Draft not saved', { description: message });
@@ -2235,11 +2240,11 @@ export default function EmployeesPage() {
                       <span>{getEmployeeEmail(employee)}</span>
                     </div>
                   )}
-                  {employee.createdAt && (
+                  {(employee.inviteSentAt ?? employee.createdAt) && (
                     <div className="flex items-center gap-2">
                       <span>Invited:</span>
                       <span>
-                        {formatDate(employee.createdAt, {
+                        {formatDate(employee.inviteSentAt ?? employee.createdAt, {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',

@@ -48,10 +48,24 @@ function mapRowToEmployee(row: Record<string, unknown>): Employee {
     // UI legacy: treat join date as created_at for Supabase-backed employees
     joinDate: row.created_at,
     avatarUrl: row.avatar_url != null ? String(row.avatar_url) : undefined,
+    // For invited: use invite_sent_at when available, else created_at
+    inviteSentAt: row.invite_sent_at ?? row.created_at,
   };
 }
 
 export async function listEmployees(companyId: string): Promise<Employee[]> {
+  const table = 'public.employees';
+  const filters = { company_id: companyId };
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[employeesSupabaseService] listEmployees read', {
+      table,
+      filters,
+      select: EMPLOYEES_SELECT,
+    });
+  }
+
   const { data, error, status, statusText } = await db
     .public()
     .from('employees')
@@ -63,32 +77,30 @@ export async function listEmployees(companyId: string): Promise<Employee[]> {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.error('[employeesSupabaseService] listEmployees error', {
-        companyId,
-        error,
+        table,
+        filters,
+        error: error.message,
+        code: error.code,
         status,
         statusText,
       });
     }
     throw new Error(error.message ?? 'Failed to list employees');
   }
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] listEmployees raw', {
-      companyId,
-      rawCount: (data ?? []).length,
-      rawStatuses: Array.from(new Set((data ?? []).map((r: any) => r.status))),
-      sample: (data ?? []).slice(0, 3),
-    });
-  }
 
   const rows = (data ?? []).map(mapRowToEmployee);
+  const byStatus = rows.reduce<Record<string, number>>((acc, r) => {
+    acc[r.status] = (acc[r.status] || 0) + 1;
+    return acc;
+  }, {});
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] listEmployees', {
-      companyId,
-      count: rows.length,
-      statuses: Array.from(new Set(rows.map((r) => r.status))),
+    console.log('[employeesSupabaseService] listEmployees result', {
+      table,
+      filters,
+      total: rows.length,
+      byStatus,
     });
   }
 
@@ -143,7 +155,11 @@ export async function saveEmployeeDraft(input: SaveEmployeeDraftInput): Promise<
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] saveEmployeeDraft payload', { id: input.id, ...basePayload });
+    console.log('[employeesSupabaseService] saveEmployeeDraft write', {
+      table: 'public.employees',
+      operation: input.id ? 'update' : 'insert',
+      payload: { id: input.id, ...basePayload },
+    });
   }
 
   // If we have an explicit id, prefer updating that row.
@@ -238,6 +254,15 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
   const url = SUPABASE_URL
     ? `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/invite-employee`
     : null;
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[employeesSupabaseService] inviteEmployee request', {
+      url,
+      hasAuth: !!token,
+      payload: { companyId: body.companyId, email: body.email },
+    });
+  }
 
   if (url) {
     const res = await fetch(url, {
