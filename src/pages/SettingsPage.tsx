@@ -9,6 +9,7 @@ import { useTour } from '@/tour/TourProvider';
 import { UserAvatar } from '@/components/UserAvatar';
 import { uploadAvatar, clearAvatar } from '@/services/avatarService';
 import { NotificationSettings } from '@/components/notifications/NotificationSettings';
+import { QuickUnlockSettings } from '@/components/settings/QuickUnlockSettings';
 import { db } from '@/lib/db';
 
 const PLANS = [
@@ -489,6 +490,9 @@ export default function SettingsPage() {
 
       {/* Notification settings */}
       <NotificationSettings />
+
+      {/* Quick unlock / App lock settings */}
+      <QuickUnlockSettings />
 
       {/* Company settings - editable by admins/developers, read-only for staff */}
       <div className="fv-card">
