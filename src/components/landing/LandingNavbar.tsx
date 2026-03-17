@@ -52,10 +52,10 @@ export function LandingNavbar() {
             className={scrolled ? "rounded-xl font-medium" : "rounded-xl font-medium border-primary-foreground/40 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"}
           />
           <Button variant="ghost" size="sm" asChild className={scrolled ? "text-foreground hover:text-primary hover:bg-primary/5 font-medium" : "text-primary-foreground/90 hover:text-primary-foreground hover:bg-primary-foreground/10 font-medium"}>
-            <a href="https://app.farmvault.africa/login">Login</a>
+            <a href="/sign-in">Login</a>
           </Button>
           <Button size="sm" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-xl px-6 font-semibold">
-            <a href="https://app.farmvault.africa/signup">Get Started</a>
+            <a href="/sign-up">Get Started</a>
           </Button>
         </div>
 
@@ -79,10 +79,10 @@ export function LandingNavbar() {
               </ul>
               <div className="flex gap-3">
                 <Button variant="outline" size="sm" asChild className="flex-1 rounded-xl">
-                  <a href="https://app.farmvault.africa/login" onClick={() => setOpen(false)}>Login</a>
+                  <a href="/sign-in" onClick={() => setOpen(false)}>Login</a>
                 </Button>
                 <Button size="sm" asChild className="gradient-primary text-primary-foreground flex-1 rounded-xl btn-luxury">
-                  <a href="https://app.farmvault.africa/signup" onClick={() => setOpen(false)}>Get Started</a>
+                  <a href="/sign-up" onClick={() => setOpen(false)}>Get Started</a>
                 </Button>
               </div>
               <InstallFarmVault compact className="w-full rounded-xl mt-3" />

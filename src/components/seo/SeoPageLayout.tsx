@@ -31,7 +31,7 @@ export function SeoPageLayout({ children, showCta = true }: SeoPageLayoutProps) 
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground rounded-xl">
-                <a href="https://app.farmvault.africa/signup">
+                <a href="/sign-up">
                   Start Free Trial <ArrowRight className="ml-2 h-4 w-4" />
                 </a>
               </Button>

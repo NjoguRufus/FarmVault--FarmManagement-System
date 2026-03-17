@@ -57,13 +57,13 @@ export function ContactSection() {
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-12">
-                <a href="https://app.farmvault.africa/signup" className="inline-flex items-center justify-center">
+                <a href="/sign-up" className="inline-flex items-center justify-center">
                   Get Started
                   <Send className="ml-2 h-4 w-4" />
                 </a>
               </Button>
               <Button size="lg" variant="outline" asChild className="rounded-2xl px-8 h-12 border-2 border-primary text-primary hover:bg-primary/5">
-                <a href="https://app.farmvault.africa/login" className="inline-flex items-center justify-center">Login</a>
+                <a href="/sign-in" className="inline-flex items-center justify-center">Login</a>
               </Button>
             </div>
           </div>

@@ -55,7 +55,7 @@ export function HeroSection() {
 
               <div className="flex flex-wrap gap-4">
                 <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-14 text-base font-semibold">
-                  <a href="https://app.farmvault.africa/signup" className="inline-flex items-center">
+                  <a href="/sign-up" className="inline-flex items-center">
                     Get Started Now
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </a>
