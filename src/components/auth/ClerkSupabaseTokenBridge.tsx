@@ -17,8 +17,17 @@ export function ClerkSupabaseTokenBridge() {
     }
     setClerkTokenGetter(async () => {
       try {
-        return (await getToken({ template: 'supabase' })) ?? null;
-      } catch {
+        const token = await getToken({ template: 'supabase' });
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[ClerkSupabaseTokenBridge] getToken(supabase) result length', token ? token.length : 0);
+        }
+        return token ?? null;
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[ClerkSupabaseTokenBridge] getToken(supabase) failed', err);
+        }
         return null;
       }
     });

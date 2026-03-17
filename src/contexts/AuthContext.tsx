@@ -1000,6 +1000,14 @@ export function AuthProvider({
   };
 
   const logout = () => {
+    if (import.meta.env.DEV) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[Auth] Debug logout/reset invoked; clearing local auth state and Clerk session if present');
+      } catch {
+        // ignore
+      }
+    }
     if (isEmergencySession) {
       writeEmergencySession(null);
       setUser(null);
@@ -1029,6 +1037,14 @@ export function AuthProvider({
       setSetupIncomplete(false);
       setIsDeveloper(false);
       writeCachedUser(null);
+      writeEmergencySession(null);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.removeItem('fv:isDeveloper');
+        } catch {
+          // ignore
+        }
+      }
     }
   };
 
