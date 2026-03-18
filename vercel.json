@@ -1,6 +1,4 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "headers": [
     {
       "source": "/(.*)",
@@ -55,27 +53,6 @@
       ],
       "destination": "https://farmvault.africa/$1",
       "permanent": true
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/sitemap.xml",
-      "headers": { "Content-Type": "application/xml" }
-    },
-    {
-      "src": "/robots.txt",
-      "headers": { "Content-Type": "text/plain" }
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
     }
   ]
 }
