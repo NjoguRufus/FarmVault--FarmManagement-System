@@ -14,6 +14,11 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
+function log(...args: unknown[]) {
+  // eslint-disable-next-line no-console
+  console.log("[PWA Install Button]", ...args);
+}
+
 interface InstallFarmVaultProps {
   className?: string;
   /** Compact style for navbar (smaller button, rounded-xl). */
@@ -31,18 +36,32 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
   };
 
   const handleInstallClick = async () => {
+    log("=== Install button clicked ===");
+    log("Current state:", { canInstall, isInstalled, installState });
+    
     // If install prompt is available, trigger it directly
     if (canInstall) {
+      log("Native install prompt is available - triggering...");
       const result = await promptInstall();
+      log("Native install result:", result);
+      
       if (result === "accepted") {
         toast.success("FarmVault installed! Open it from your home screen.");
       } else if (result === "dismissed") {
         toast.info("Install cancelled. You can try again anytime.");
+      } else if (result === "unavailable") {
+        log("Prompt returned unavailable - showing fallback");
+        setShowFallback(true);
       }
       return;
     }
 
     // If not available, show fallback instructions
+    log("Native install NOT available - showing fallback instructions");
+    log("Possible reasons:");
+    log("  - Browser doesn't support beforeinstallprompt (iOS Safari, Firefox)");
+    log("  - App may already be installed");
+    log("  - PWA criteria not met (manifest, service worker, HTTPS)");
     setShowFallback(true);
   };
 

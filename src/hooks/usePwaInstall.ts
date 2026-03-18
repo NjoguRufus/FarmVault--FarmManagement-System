@@ -12,6 +12,11 @@ import {
 
 export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult } from "@/lib/pwa-install";
 
+function log(...args: unknown[]) {
+  // eslint-disable-next-line no-console
+  console.log("[PWA Install Hook]", ...args);
+}
+
 /**
  * React hook for PWA installation.
  * 
@@ -19,27 +24,53 @@ export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult } from
  * event early (before React mounts) to ensure we don't miss it.
  */
 export function usePwaInstall() {
-  const [installState, setInstallState] = useState<InstallState>(getInstallState);
-  const [canInstall, setCanInstall] = useState(checkCanInstall);
-  const [isInstalled, setIsInstalled] = useState(checkIsInstalled);
+  const [installState, setInstallState] = useState<InstallState>(() => {
+    const state = getInstallState();
+    log("Initial state:", state);
+    return state;
+  });
+  const [canInstall, setCanInstall] = useState(() => {
+    const can = checkCanInstall();
+    log("Initial canInstall:", can);
+    return can;
+  });
+  const [isInstalled, setIsInstalled] = useState(() => {
+    const installed = checkIsInstalled();
+    log("Initial isInstalled:", installed);
+    return installed;
+  });
 
   useEffect(() => {
+    log("Setting up state subscription...");
+    
     // Subscribe to state changes from the global module
     const unsubscribe = subscribeToInstallState((newState) => {
+      log("State change received:", newState);
       setInstallState(newState);
-      setCanInstall(checkCanInstall());
-      setIsInstalled(checkIsInstalled());
+      const newCanInstall = checkCanInstall();
+      const newIsInstalled = checkIsInstalled();
+      log("Updated values:", { newState, newCanInstall, newIsInstalled });
+      setCanInstall(newCanInstall);
+      setIsInstalled(newIsInstalled);
     });
 
     // Also update immediately in case state changed before subscription
-    setCanInstall(checkCanInstall());
-    setIsInstalled(checkIsInstalled());
+    const immediateCanInstall = checkCanInstall();
+    const immediateIsInstalled = checkIsInstalled();
+    log("Immediate check after mount:", { canInstall: immediateCanInstall, isInstalled: immediateIsInstalled });
+    setCanInstall(immediateCanInstall);
+    setIsInstalled(immediateIsInstalled);
 
-    return unsubscribe;
+    return () => {
+      log("Cleaning up subscription");
+      unsubscribe();
+    };
   }, []);
 
   const promptInstall = useCallback(async (): Promise<PromptInstallResult> => {
+    log("promptInstall() called from hook");
     const result = await triggerPromptInstall();
+    log("promptInstall() result:", result);
     // State will be updated via subscription
     return result;
   }, []);
