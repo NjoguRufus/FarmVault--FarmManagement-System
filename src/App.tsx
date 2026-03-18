@@ -183,9 +183,18 @@ const CompanyDashboardRoute = () => {
 const AppRoutesWithLock = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const { isEnabled, isLocked, isLoading, unlock } = useAppLock();
+  const { isEnabled, isLocked, isLoading, hasPotentialLock, unlock } = useAppLock();
 
-  if (isEnabled && !isLoading && isLocked) {
+  // CRITICAL: Show lock screen if EITHER:
+  // 1. Server confirmed PIN exists AND app is locked (isEnabled && isLocked)
+  // 2. OR local state indicates locked AND we haven't confirmed no PIN yet (hasPotentialLock)
+  // This prevents the app from briefly showing content before lock screen
+  //
+  // We check isLocked first (covers both manual lock and timeout-based lock)
+  // hasPotentialLock handles the case where we're locked but haven't verified PIN with server yet
+  const shouldShowLockScreen = isLocked && (isEnabled || hasPotentialLock || isLoading);
+
+  if (shouldShowLockScreen) {
     return (
       <QuickUnlockScreen
         userName={user?.fullName ?? user?.email ?? undefined}
@@ -198,6 +207,12 @@ const AppRoutesWithLock = () => {
         }}
       />
     );
+  }
+  
+  // If we're still loading and potentially locked, show nothing (prevents content flash)
+  // This handles the brief moment during page load before we verify lock state
+  if (isLoading && hasPotentialLock) {
+    return null;
   }
 
   return (
