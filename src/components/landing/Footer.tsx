@@ -66,7 +66,7 @@ export function Footer() {
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
                   <Mail className="h-3.5 w-3.5 text-primary-foreground/60" />
                 </div>
-                hello@farmvault.co.ke
+                hello@farmvault.africa
               </li>
               <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">

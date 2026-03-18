@@ -1,6 +1,24 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Domain Canonicalization: Block indexing on non-canonical domains -->
+    <script>
+      (function() {
+        var host = window.location.hostname;
+        if (host.indexOf('vercel.app') !== -1 || host.indexOf('localhost') !== -1) {
+          var meta = document.createElement('meta');
+          meta.name = 'robots';
+          meta.content = 'noindex, nofollow';
+          document.head.appendChild(meta);
+          
+          var canonical = document.querySelector('link[rel="canonical"]');
+          if (canonical) {
+            canonical.href = 'https://farmvault.africa' + window.location.pathname;
+          }
+        }
+      })();
+    </script>
+
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-5Q0HFTFWTY"></script>
     <script>
