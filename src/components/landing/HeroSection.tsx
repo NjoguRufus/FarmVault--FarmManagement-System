@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Play, ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -42,21 +41,23 @@ export function HeroSection() {
               className="max-w-xl"
             >
               <h1 className="text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-extrabold leading-[1.05] mb-6 text-primary-foreground tracking-tight">
-                Built for Farmers
+                <span className="text-gradient-gold">Farm Management</span>
                 <br />
-                <span className="text-gradient-gold">to Manage</span> Every
-                <br />
-                Part of Their Farm
+                System in Kenya
               </h1>
 
-              <p className="text-base md:text-lg text-primary-foreground/70 mb-10 leading-relaxed max-w-md font-light">
-                Manage Crops, Operations, Inventory, Expenses & Harvest Sales — all in one powerful system.
+              <p className="text-lg md:text-xl text-primary-foreground/80 mb-4 leading-relaxed max-w-lg font-medium">
+                Track harvest, labor, inventory, and farm expenses in real time.
+              </p>
+
+              <p className="text-base text-primary-foreground/60 mb-10 leading-relaxed max-w-md font-light">
+                Built from real farm experience, FarmVault helps farmers manage daily operations, reduce losses, and make better decisions using data.
               </p>
 
               <div className="flex flex-wrap gap-4">
                 <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-14 text-base font-semibold">
                   <a href="/sign-up" className="inline-flex items-center">
-                    Get Started Now
+                    Get Started
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </a>
                 </Button>
@@ -72,16 +73,25 @@ export function HeroSection() {
                     <span className="gradient-primary rounded-full p-2 mr-3 inline-flex">
                       <Play className="h-3 w-3 fill-primary-foreground text-primary-foreground" />
                     </span>
-                    Watch Demo
+                    View Demo
                   </span>
                 </Button>
               </div>
+
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6, duration: 0.5 }}
+                className="text-sm text-primary-foreground/50 mt-8 font-light"
+              >
+                Designed for modern farms in Kenya and across Africa.
+              </motion.p>
 
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.8, duration: 0.6 }}
-                className="flex gap-8 mt-12 pt-8 border-t border-primary-foreground/10"
+                className="flex gap-8 mt-8 pt-8 border-t border-primary-foreground/10"
               >
                 {[
                   { value: "10K+", label: "Farmers" },
@@ -107,7 +117,7 @@ export function HeroSection() {
                 <div className="absolute inset-0 -m-6 rounded-full bg-gradient-to-tr from-gold/10 to-primary/10 blur-[40px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
                 <OptimizedImage
                   src="/landing/landing%20page%20mock.png"
-                  alt="FarmVault on desktop, tablet and mobile"
+                  alt="FarmVault farm management system dashboard on desktop, tablet and mobile"
                   className="relative z-10 w-[20rem] md:w-[26rem] lg:w-[30rem] xl:w-[34rem] drop-shadow-2xl animate-float"
                 />
                 <motion.div

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Truck, Users, Package, Receipt, BarChart3, Bell } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   Dialog,
@@ -12,22 +12,52 @@ import { OptimizedImage } from "@/components/ui/OptimizedImage";
 
 const features = [
   {
-    title: "Crop & Farm Projects",
+    icon: Truck,
+    title: "Harvest Tracking",
     image: "/landing/farmer-card1.jpg",
     previewImage: "/landing/dashboard-examples/crop-farm-projects-dashboard.png",
-    items: ["Plan & Track Activities", "Monitor Growth", "View Crop Reports"],
+    description: "Record daily harvest collections, monitor output, and track picker contributions accurately.",
+    items: ["Daily harvest recording", "Per-picker tracking", "Output monitoring", "Harvest history"],
   },
   {
-    title: "Operations & Tasks",
+    icon: Users,
+    title: "Labor Management",
     image: "/landing/farmer-card2.jpg",
     previewImage: "/landing/dashboard-examples/operations-tasks-dashboard.png",
-    items: ["Assign Tasks", "Record Work Logs", "Manage Workers"],
+    description: "Track workers, measure productivity, and manage payouts accurately and fairly.",
+    items: ["Worker attendance", "Productivity tracking", "Payout management", "Performance reports"],
   },
   {
-    title: "Inventory & Inputs",
+    icon: Package,
+    title: "Inventory Management",
     image: "/landing/farmer-card3.jpg",
     previewImage: "/landing/dashboard-examples/inventory-inputs-dashboard.png",
-    items: ["Track Inputs & Supplies", "Low Stock Alerts", "Usage Reports"],
+    description: "Keep track of farm inputs like fertilizers, pesticides, fuel, and packaging materials.",
+    items: ["Stock tracking", "Low stock alerts", "Usage reports", "Input costs"],
+  },
+  {
+    icon: Receipt,
+    title: "Expense Tracking",
+    image: "/landing/farmer-card1.jpg",
+    previewImage: "/landing/dashboard-examples/crop-farm-projects-dashboard.png",
+    description: "Record and monitor farm-related spending in real time to control costs.",
+    items: ["Real-time recording", "Category tracking", "Budget vs actual", "Expense reports"],
+  },
+  {
+    icon: BarChart3,
+    title: "Reports & Insights",
+    image: "/landing/farmer-card2.jpg",
+    previewImage: "/landing/dashboard-examples/operations-tasks-dashboard.png",
+    description: "Understand farm performance using real data and actionable insights.",
+    items: ["Performance dashboards", "Profitability analysis", "Trend reports", "Data export"],
+  },
+  {
+    icon: Bell,
+    title: "Notifications & Audit",
+    image: "/landing/farmer-card3.jpg",
+    previewImage: "/landing/dashboard-examples/inventory-inputs-dashboard.png",
+    description: "Stay informed with alerts and maintain transparency with audit trails.",
+    items: ["Real-time alerts", "Activity logs", "Audit transparency", "Team notifications"],
   },
 ];
 
@@ -36,7 +66,7 @@ const cardVariants = {
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.15, duration: 0.6, ease: "easeOut" as const },
+    transition: { delay: i * 0.1, duration: 0.5, ease: "easeOut" as const },
   }),
 };
 
@@ -53,7 +83,7 @@ export function FeaturesSection() {
 
   return (
     <>
-      <section id="features" className="py-24 lg:py-32 bg-background relative overflow-hidden">
+      <section id="features" className="py-24 lg:py-32 bg-secondary/30 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-[120px]" />
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-gold/5 rounded-full blur-[100px]" />
 
@@ -63,62 +93,64 @@ export function FeaturesSection() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-100px" }}
             transition={{ duration: 0.6 }}
-            className="text-center mb-20"
+            className="text-center mb-16"
           >
             <span className="inline-block text-xs font-semibold tracking-widest uppercase text-primary mb-4">
-              Core Features
+              Features
             </span>
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-5 tracking-tight">
-              Everything a Farmer Needs —
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6 tracking-tight">
+              Powerful Features Built for
               <br className="hidden md:block" />
-              <span className="text-gradient-gold"> In One System</span>
+              <span className="text-gradient-gold"> Real Farm Operations</span>
             </h2>
-            <p className="text-muted-foreground max-w-xl mx-auto text-base font-light leading-relaxed">
-              From planting to harvest and sales, FarmVault keeps your entire operation organized and profitable.
+            <p className="text-muted-foreground max-w-2xl mx-auto text-lg font-light leading-relaxed">
+              FarmVault is designed to handle real farm workflows, from harvest collection to financial reporting.
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
             {features.map((feature, i) => (
-              <motion.div
+              <motion.article
                 key={feature.title}
                 custom={i}
                 initial="hidden"
                 whileInView="visible"
-                viewport={{ once: true, margin: "-80px" }}
+                viewport={{ once: true, margin: "-60px" }}
                 variants={cardVariants}
-                whileHover={{ y: -8, transition: { duration: 0.3 } }}
+                whileHover={{ y: -6, transition: { duration: 0.3 } }}
                 className="bg-card rounded-3xl overflow-hidden shadow-luxury hover:shadow-luxury-hover transition-all duration-500 group"
               >
-                <div className="relative h-56 overflow-hidden">
+                <div className="relative h-48 overflow-hidden">
                   <OptimizedImage
                     src={feature.image}
                     alt={feature.title}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-card via-card/50 to-transparent" />
+                  <div className="absolute top-4 left-4 w-12 h-12 rounded-xl gradient-primary flex items-center justify-center shadow-glow-green">
+                    <feature.icon className="h-6 w-6 text-primary-foreground" />
+                  </div>
                   <button
                     type="button"
                     onClick={() => openPreview(feature)}
                     className="absolute top-4 right-4 glass rounded-full px-3 py-1 text-xs font-semibold text-foreground hover:bg-background/80 transition-colors"
                   >
-                    View →
+                    Preview →
                   </button>
                 </div>
-                <div className="p-6 space-y-4">
-                  <h3 className="text-xl font-bold text-foreground tracking-tight">{feature.title}</h3>
-                  <div className="space-y-3">
+                <div className="p-6">
+                  <h3 className="text-xl font-bold text-foreground mb-2 tracking-tight">{feature.title}</h3>
+                  <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{feature.description}</p>
+                  <div className="grid grid-cols-2 gap-2">
                     {feature.items.map((item) => (
-                      <div key={item} className="flex items-center gap-3">
-                        <div className="gradient-primary rounded-full p-0.5">
-                          <CheckCircle2 className="h-4 w-4 text-primary-foreground" />
-                        </div>
-                        <span className="text-sm text-muted-foreground">{item}</span>
+                      <div key={item} className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                        <span className="text-xs text-muted-foreground">{item}</span>
                       </div>
                     ))}
                   </div>
                 </div>
-              </motion.div>
+              </motion.article>
             ))}
           </div>
         </div>
@@ -140,7 +172,7 @@ export function FeaturesSection() {
               <DialogHeader className="px-6 pt-6 pb-2">
                 <DialogTitle>{selectedFeature.title} Dashboard Preview</DialogTitle>
                 <DialogDescription>
-                  Example image for this dashboard card.
+                  {selectedFeature.description}
                 </DialogDescription>
               </DialogHeader>
 
@@ -151,16 +183,12 @@ export function FeaturesSection() {
                     alt={`${selectedFeature.title} dashboard preview`}
                     className="w-full rounded-xl border object-cover max-h-[70vh]"
                     onError={() => {
-                      if (!selectedFeature) {
-                        return;
-                      }
-
+                      if (!selectedFeature) return;
                       if (activeImageSrc !== selectedFeature.image) {
                         setActiveImageSrc(selectedFeature.image);
                         setIsFallbackPreview(true);
                         return;
                       }
-
                       setActiveImageSrc(null);
                     }}
                   />
@@ -171,8 +199,7 @@ export function FeaturesSection() {
                 )}
                 {isFallbackPreview && (
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Showing temporary image. Replace with your uploaded dashboard screenshot in
-                    `public/landing/dashboard-examples/`.
+                    Showing temporary image.
                   </p>
                 )}
               </div>
