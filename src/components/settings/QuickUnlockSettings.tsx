@@ -329,9 +329,10 @@ export function QuickUnlockSettings() {
               <Button
                 variant="default"
                 onClick={() => {
+                  // lockApp() sets localStorage AND dispatches a custom event
+                  // The useAppLock hook listens for this event and updates state immediately
+                  // No page reload needed - the lock screen appears instantly
                   lockApp();
-                  // Trigger a page reload to show the lock screen
-                  window.location.reload();
                 }}
                 className="gap-2"
               >

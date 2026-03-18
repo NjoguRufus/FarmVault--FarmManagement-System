@@ -302,18 +302,29 @@ export function isAppLocked(): boolean {
 }
 
 /**
+ * Custom event name for app lock state changes.
+ * Components can listen for this to react to lock/unlock.
+ */
+export const APP_LOCK_CHANGE_EVENT = 'fv-app-lock-change';
+
+/**
  * Set the explicit lock flag.
  * This marks the app as locked so the lock screen will show.
+ * Dispatches a custom event so React components can react immediately.
  */
 export function lockApp(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(LOCK_STATE_KEY, 'true');
   debugLog('App locked');
+  
+  // Dispatch custom event for React components to react immediately
+  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: true } }));
 }
 
 /**
  * Clear the lock flag and record the unlock timestamp.
  * This is called after successful PIN verification.
+ * Dispatches a custom event so React components can react immediately.
  */
 export function unlockApp(): void {
   if (typeof window === 'undefined') return;
@@ -321,6 +332,9 @@ export function unlockApp(): void {
   window.localStorage.removeItem(LAST_ACTIVE_KEY);
   recordUnlockedAt();
   debugLog('App unlocked');
+  
+  // Dispatch custom event for React components to react immediately
+  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: false } }));
 }
 
 /**
