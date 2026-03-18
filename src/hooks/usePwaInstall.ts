@@ -1,16 +1,20 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   type InstallState,
   type PromptInstallResult,
+  type BrowserInfo,
+  type FallbackInstructions,
   canInstall as checkCanInstall,
   isInstalled as checkIsInstalled,
+  needsFallback as checkNeedsFallback,
   promptInstall as triggerPromptInstall,
   subscribeToInstallState,
   getInstallState,
   getFallbackInstructions,
+  getBrowserInfo,
 } from "@/lib/pwa-install";
 
-export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult } from "@/lib/pwa-install";
+export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult, BrowserInfo, FallbackInstructions } from "@/lib/pwa-install";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -22,6 +26,12 @@ function log(...args: unknown[]) {
  * 
  * Uses the global pwa-install module which captures the beforeinstallprompt
  * event early (before React mounts) to ensure we don't miss it.
+ * 
+ * Provides:
+ * - canInstall: true if native install prompt is available
+ * - needsFallback: true if fallback instructions should be shown
+ * - isInstalled: true if app is already installed
+ * - browserInfo: detected browser and platform info
  */
 export function usePwaInstall() {
   const [installState, setInstallState] = useState<InstallState>(() => {
@@ -39,6 +49,18 @@ export function usePwaInstall() {
     log("Initial isInstalled:", installed);
     return installed;
   });
+  const [needsFallback, setNeedsFallback] = useState(() => {
+    const needs = checkNeedsFallback();
+    log("Initial needsFallback:", needs);
+    return needs;
+  });
+
+  // Browser info is static, so we can memoize it
+  const browserInfo = useMemo<BrowserInfo>(() => {
+    const info = getBrowserInfo();
+    log("Browser info:", info);
+    return info;
+  }, []);
 
   useEffect(() => {
     log("Setting up state subscription...");
@@ -49,17 +71,21 @@ export function usePwaInstall() {
       setInstallState(newState);
       const newCanInstall = checkCanInstall();
       const newIsInstalled = checkIsInstalled();
-      log("Updated values:", { newState, newCanInstall, newIsInstalled });
+      const newNeedsFallback = checkNeedsFallback();
+      log("Updated values:", { newState, newCanInstall, newIsInstalled, newNeedsFallback });
       setCanInstall(newCanInstall);
       setIsInstalled(newIsInstalled);
+      setNeedsFallback(newNeedsFallback);
     });
 
     // Also update immediately in case state changed before subscription
     const immediateCanInstall = checkCanInstall();
     const immediateIsInstalled = checkIsInstalled();
-    log("Immediate check after mount:", { canInstall: immediateCanInstall, isInstalled: immediateIsInstalled });
+    const immediateNeedsFallback = checkNeedsFallback();
+    log("Immediate check after mount:", { canInstall: immediateCanInstall, isInstalled: immediateIsInstalled, needsFallback: immediateNeedsFallback });
     setCanInstall(immediateCanInstall);
     setIsInstalled(immediateIsInstalled);
+    setNeedsFallback(immediateNeedsFallback);
 
     return () => {
       log("Cleaning up subscription");
@@ -76,15 +102,19 @@ export function usePwaInstall() {
   }, []);
 
   return {
-    /** Whether the install prompt is available and can be triggered */
+    /** Whether the native install prompt is available and can be triggered */
     canInstall,
+    /** Whether fallback instructions should be shown (browser doesn't support native install) */
+    needsFallback,
     /** Whether the app is installed (running as standalone PWA) */
     isInstalled,
     /** Current install state for UI feedback */
     installState,
-    /** Trigger the install prompt. Returns the user's choice. */
+    /** Detected browser and platform info */
+    browserInfo,
+    /** Trigger the native install prompt. Returns the user's choice. */
     promptInstall,
-    /** Get device-specific fallback instructions when direct install isn't available */
+    /** Get browser-specific fallback instructions */
     getFallbackInstructions,
   };
 }
