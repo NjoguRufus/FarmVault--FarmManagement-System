@@ -182,26 +182,53 @@ const CompanyDashboardRoute = () => {
 };
 
 const AppRoutesWithLock = () => {
-  const { user, signOut } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { hasPinOnServer, isLocked, isLoading, showPrompt, unlock, refresh } = useAppLock();
 
-  // CRITICAL: Only show lock screen if:
-  // 1. Server has CONFIRMED a PIN exists (hasPinOnServer = true)
-  // 2. AND the app is in locked state (isLocked = true)
-  // 3. AND we're not loading
-  const shouldShowLockScreen = hasPinOnServer && isLocked && !isLoading;
+  // Debug logs for lock state
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[AppRoutesWithLock] Lock state:', {
+      hasPinOnServer,
+      isLocked,
+      isLoading,
+      showPrompt,
+      userId: user?.id,
+    });
+  }
+
+  // CRITICAL: Block initial render while loading if we potentially have a lock
+  // This prevents bypassing the lock screen on reload
+  if (isLoading && hasPinOnServer && isLocked) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[AppRoutesWithLock] Blocking render - loading with potential lock');
+    }
+    // Return null or a minimal loading state to prevent app content flash
+    return null;
+  }
+
+  // CRITICAL: Show lock screen if:
+  // 1. PIN exists (from server or localStorage)
+  // 2. AND the app is in locked state
+  const shouldShowLockScreen = hasPinOnServer && isLocked;
+
+  if (import.meta.env.DEV && shouldShowLockScreen) {
+    // eslint-disable-next-line no-console
+    console.log('[AppRoutesWithLock] Showing lock screen');
+  }
 
   // Show lock screen first (takes priority)
   if (shouldShowLockScreen) {
     return (
       <QuickUnlockScreen
-        userName={user?.fullName ?? user?.email ?? undefined}
+        userName={user?.name ?? user?.email ?? undefined}
         onUnlocked={() => {
           unlock();
         }}
-        onSwitchToPassword={async () => {
-          await signOut();
+        onSwitchToPassword={() => {
+          logout();
           navigate("/sign-in", { replace: true });
         }}
       />
@@ -224,10 +251,6 @@ const AppRoutesWithLock = () => {
       </>
     );
   }
-  
-  // While loading, show nothing to prevent content flash
-  // But we don't want to block forever - only brief moment while checking server
-  // Note: We removed hasPotentialLock - we don't assume locked state from localStorage anymore
 
   return (
     <Routes>
