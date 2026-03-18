@@ -24,6 +24,7 @@ import {
   lockApp,
   checkBiometricCapabilities,
   clearPinSetupSkipped,
+  dismissPrompt,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
 import { cn } from '@/lib/utils';
@@ -103,9 +104,9 @@ export function QuickUnlockSettings() {
       }
     }
 
-    // Validate new PIN
-    if (pin.length < 4 || pin.length > 6) {
-      setPinError('PIN must be 4-6 digits');
+    // Validate new PIN (must be exactly 4 digits)
+    if (pin.length !== 4) {
+      setPinError('PIN must be exactly 4 digits');
       return;
     }
     if (!/^\d+$/.test(pin)) {
@@ -125,8 +126,9 @@ export function QuickUnlockSettings() {
       } else {
         log('Enabling quick unlock with new PIN...');
         await enableQuickUnlock(pin);
-        // Clear the "skipped setup" flag since user is now setting up PIN
+        // Clear the "skipped setup" flag and dismiss prompt since user is now setting up PIN
         clearPinSetupSkipped();
+        dismissPrompt();
       }
       const newStatus = await getDeviceAppLockStatus();
       log('New status after save:', newStatus);

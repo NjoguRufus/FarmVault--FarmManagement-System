@@ -30,9 +30,10 @@ const LOCK_TIMEOUT_KEY = 'fv_app_lock_timeout';
 const LAST_ACTIVE_KEY = 'fv_app_last_active';
 const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
 const PIN_SETUP_SKIPPED_KEY = 'fv_pin_setup_skipped';
+const PROMPT_DISMISSED_KEY = 'fv_app_lock_prompt_dismissed';
 // Version key to track migrations - increment when we need to reset state
 const STATE_VERSION_KEY = 'fv_quick_unlock_version';
-const CURRENT_STATE_VERSION = '2'; // Increment this to force reset of broken states
+const CURRENT_STATE_VERSION = '3'; // Increment this to force reset of broken states
 
 export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
 
@@ -68,6 +69,7 @@ export function migrateQuickUnlockState(): void {
     window.localStorage.removeItem(LAST_ACTIVE_KEY);
     window.localStorage.removeItem(UNLOCKED_AT_KEY);
     window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
+    window.localStorage.removeItem(PROMPT_DISMISSED_KEY);
     // Keep device ID and timeout preference
     
     // Mark migration as complete
@@ -122,6 +124,37 @@ export function clearPinSetupSkipped(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
   debugLog('PIN setup skipped flag cleared');
+}
+
+/**
+ * Check if the first-time App Lock prompt has been dismissed.
+ */
+export function isPromptDismissed(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(PROMPT_DISMISSED_KEY) === 'true';
+}
+
+/**
+ * Mark the first-time prompt as dismissed.
+ * Called when user either creates a PIN or skips.
+ */
+export function dismissPrompt(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PROMPT_DISMISSED_KEY, 'true');
+  debugLog('App Lock prompt dismissed');
+}
+
+/**
+ * Check if we should show the first-time App Lock prompt.
+ * Returns true if:
+ * - The prompt hasn't been dismissed
+ * - AND no PIN exists yet
+ */
+export function shouldShowAppLockPrompt(): boolean {
+  if (typeof window === 'undefined') return false;
+  const dismissed = isPromptDismissed();
+  debugLog('shouldShowAppLockPrompt: dismissed =', dismissed);
+  return !dismissed;
 }
 
 /**
