@@ -1,6 +1,10 @@
 /**
  * App Lock Service
  * Handles per-device, per-user PIN-based quick unlock.
+ * 
+ * IMPORTANT: Quick Unlock is an OPTIONAL local security layer on top of normal login.
+ * It does NOT replace cloud/account authentication.
+ * 
  * Secure: PIN is hashed before storage, never stored in plain text.
  *
  * Storage keys (all in localStorage, device-specific):
@@ -9,6 +13,13 @@
  * - fv_app_lock_timeout: Auto-lock timeout in seconds (10, 30, 60, 300)
  * - fv_app_last_active: Timestamp when user last left the app
  * - fv_app_unlocked_at: Timestamp when PIN was last successfully entered
+ * - fv_pin_setup_skipped: User skipped PIN setup for this session
+ * 
+ * CRITICAL RULE: The PIN lock screen should ONLY appear when:
+ * 1. A PIN has been created and verified on the server
+ * 2. The app is in a locked state (manual lock or timeout)
+ * 
+ * If no PIN exists on the server, NEVER show the PIN lock screen.
  */
 
 import { supabase } from '@/lib/supabase';
@@ -18,17 +29,99 @@ const LOCK_STATE_KEY = 'fv_app_locked';
 const LOCK_TIMEOUT_KEY = 'fv_app_lock_timeout';
 const LAST_ACTIVE_KEY = 'fv_app_last_active';
 const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
+const PIN_SETUP_SKIPPED_KEY = 'fv_pin_setup_skipped';
+// Version key to track migrations - increment when we need to reset state
+const STATE_VERSION_KEY = 'fv_quick_unlock_version';
+const CURRENT_STATE_VERSION = '2'; // Increment this to force reset of broken states
 
 export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
 
-// Debug flag - set to true to see lock logic in console
-const DEBUG_LOCK = import.meta.env.DEV;
+// Debug flag - always log for now to help debug issues
+const DEBUG_LOCK = true;
 
 function debugLog(...args: unknown[]): void {
   if (DEBUG_LOCK) {
     // eslint-disable-next-line no-console
     console.log('[AppLock]', ...args);
   }
+}
+
+/**
+ * MIGRATION: Reset broken Quick Unlock state.
+ * This clears stale localStorage data that causes the PIN screen to appear
+ * when no PIN was ever properly set up.
+ * 
+ * Call this ONCE at app startup before any other Quick Unlock logic runs.
+ */
+export function migrateQuickUnlockState(): void {
+  if (typeof window === 'undefined') return;
+  
+  const currentVersion = window.localStorage.getItem(STATE_VERSION_KEY);
+  
+  if (currentVersion !== CURRENT_STATE_VERSION) {
+    debugLog('=== MIGRATING QUICK UNLOCK STATE ===');
+    debugLog('Old version:', currentVersion, '-> New version:', CURRENT_STATE_VERSION);
+    
+    // Clear all lock-related state to start fresh
+    // This fixes users who got stuck with broken lock state
+    window.localStorage.removeItem(LOCK_STATE_KEY);
+    window.localStorage.removeItem(LAST_ACTIVE_KEY);
+    window.localStorage.removeItem(UNLOCKED_AT_KEY);
+    window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
+    // Keep device ID and timeout preference
+    
+    // Mark migration as complete
+    window.localStorage.setItem(STATE_VERSION_KEY, CURRENT_STATE_VERSION);
+    
+    debugLog('Quick Unlock state reset complete - users will start fresh');
+  }
+}
+
+/**
+ * Reset ALL Quick Unlock state including device preferences.
+ * Use this for debugging or when user explicitly wants to start fresh.
+ */
+export function resetAllQuickUnlockState(): void {
+  if (typeof window === 'undefined') return;
+  
+  debugLog('=== RESETTING ALL QUICK UNLOCK STATE ===');
+  
+  window.localStorage.removeItem(LOCK_STATE_KEY);
+  window.localStorage.removeItem(LAST_ACTIVE_KEY);
+  window.localStorage.removeItem(UNLOCKED_AT_KEY);
+  window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
+  window.localStorage.removeItem(LOCK_TIMEOUT_KEY);
+  window.localStorage.removeItem(STATE_VERSION_KEY);
+  // Keep device ID to maintain server association
+  
+  debugLog('All Quick Unlock state cleared');
+}
+
+/**
+ * Check if user skipped PIN setup for this session.
+ */
+export function isPinSetupSkipped(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(PIN_SETUP_SKIPPED_KEY) === 'true';
+}
+
+/**
+ * Mark that user skipped PIN setup.
+ * They can still set it up later from Settings.
+ */
+export function skipPinSetup(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PIN_SETUP_SKIPPED_KEY, 'true');
+  debugLog('PIN setup skipped by user');
+}
+
+/**
+ * Clear the skipped flag (e.g., when user wants to set up PIN later).
+ */
+export function clearPinSetupSkipped(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
+  debugLog('PIN setup skipped flag cleared');
 }
 
 /**

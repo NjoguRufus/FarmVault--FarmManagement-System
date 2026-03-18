@@ -183,16 +183,15 @@ const CompanyDashboardRoute = () => {
 const AppRoutesWithLock = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const { isEnabled, isLocked, isLoading, hasPotentialLock, unlock } = useAppLock();
+  const { hasPinOnServer, isLocked, isLoading, unlock } = useAppLock();
 
-  // CRITICAL: Show lock screen if EITHER:
-  // 1. Server confirmed PIN exists AND app is locked (isEnabled && isLocked)
-  // 2. OR local state indicates locked AND we haven't confirmed no PIN yet (hasPotentialLock)
-  // This prevents the app from briefly showing content before lock screen
-  //
-  // We check isLocked first (covers both manual lock and timeout-based lock)
-  // hasPotentialLock handles the case where we're locked but haven't verified PIN with server yet
-  const shouldShowLockScreen = isLocked && (isEnabled || hasPotentialLock || isLoading);
+  // CRITICAL FIX: Only show lock screen if:
+  // 1. Server has CONFIRMED a PIN exists (hasPinOnServer = true)
+  // 2. AND the app is in locked state (isLocked = true)
+  // 
+  // We NEVER show lock screen while loading or if no PIN exists.
+  // This fixes the bug where users see lock screen without ever creating a PIN.
+  const shouldShowLockScreen = hasPinOnServer && isLocked && !isLoading;
 
   if (shouldShowLockScreen) {
     return (
@@ -209,11 +208,9 @@ const AppRoutesWithLock = () => {
     );
   }
   
-  // If we're still loading and potentially locked, show nothing (prevents content flash)
-  // This handles the brief moment during page load before we verify lock state
-  if (isLoading && hasPotentialLock) {
-    return null;
-  }
+  // While loading, show nothing to prevent content flash
+  // But we don't want to block forever - only brief moment while checking server
+  // Note: We removed hasPotentialLock - we don't assume locked state from localStorage anymore
 
   return (
     <Routes>

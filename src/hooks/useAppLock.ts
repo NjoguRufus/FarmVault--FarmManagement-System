@@ -2,14 +2,13 @@
  * useAppLock hook.
  * Manages app lock state and determines if the app should show the lock screen.
  *
- * This hook handles:
- * - Loading Quick Unlock status from the server
- * - Determining if the app should be locked on initial load
- * - Tracking visibility changes and backgrounding
- * - Recording last active time for timeout-based locking
+ * IMPORTANT: Quick Unlock is an OPTIONAL security layer on top of normal login.
+ * The PIN lock screen should ONLY appear when:
+ * 1. Server has confirmed a PIN exists for this device
+ * 2. The app is in a locked state (manual lock or timeout)
  *
- * IMPORTANT: Lock state is checked SYNCHRONOUSLY from localStorage on mount
- * to prevent the app from briefly showing content before the lock screen.
+ * If no PIN exists on the server, we should NEVER show the PIN lock screen.
+ * Instead, we might show a setup flow if the user wants to enable Quick Unlock.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -21,20 +20,19 @@ import {
   unlockApp,
   recordLastActive,
   shouldLockNow,
+  clearQuickUnlockState,
   APP_LOCK_CHANGE_EVENT,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
 
 export interface UseAppLockResult {
-  /** Whether quick unlock is enabled for this device (from server) */
-  isEnabled: boolean;
-  /** Whether the app is currently locked (local state) */
+  /** Whether a PIN exists for this device (confirmed from server) */
+  hasPinOnServer: boolean;
+  /** Whether the app is currently locked and should show lock screen */
   isLocked: boolean;
   /** Whether we're still loading the server status */
   isLoading: boolean;
-  /** Whether we have a potential lock (local localStorage check, before server confirms PIN exists) */
-  hasPotentialLock: boolean;
-  /** Lock the app immediately */
+  /** Lock the app immediately (only works if PIN exists) */
   lock: () => void;
   /** Unlock the app */
   unlock: () => void;
@@ -44,77 +42,35 @@ export interface UseAppLockResult {
   refresh: () => Promise<void>;
 }
 
-// Debug logging for development
-const DEBUG_LOCK = import.meta.env.DEV;
+// Debug logging
 function debugLog(...args: unknown[]): void {
-  if (DEBUG_LOCK) {
-    // eslint-disable-next-line no-console
-    console.log('[useAppLock]', ...args);
-  }
-}
-
-/**
- * Check synchronously if we should show lock screen based on local state.
- * This is called BEFORE any async operations to prevent content flash.
- */
-function getInitialLockState(): boolean {
-  if (typeof window === 'undefined') return false;
-  
-  // Check explicit lock flag first
-  const explicitlyLocked = isAppLocked();
-  if (explicitlyLocked) {
-    debugLog('Initial check: explicitly locked');
-    return true;
-  }
-  
-  // Check if timeout has expired (requires PIN check later, but we can check timeout now)
-  // We'll assume hasPin=true for initial check since we can't know without server
-  const shouldLock = shouldLockNow(true);
-  if (shouldLock) {
-    debugLog('Initial check: timeout expired, should lock');
-    // Set the lock flag so it persists
-    lockApp();
-    return true;
-  }
-  
-  debugLog('Initial check: not locked');
-  return false;
+  // eslint-disable-next-line no-console
+  console.log('[useAppLock]', ...args);
 }
 
 /**
  * Hook to manage app lock state.
  * Call this at the app level to determine if lock screen should be shown.
  *
- * CRITICAL: The `isLocked` state is initialized SYNCHRONOUSLY from localStorage
- * to prevent the app from briefly showing content before the lock screen.
+ * CRITICAL: We do NOT initialize lock state from localStorage.
+ * We wait for server confirmation that a PIN exists before showing lock screen.
+ * This prevents the bug where users see a lock screen without ever setting up a PIN.
  */
 export function useAppLock(): UseAppLockResult {
   const { user } = useAuth();
   const [status, setStatus] = useState<DeviceAppLockStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [locked, setLocked] = useState(false);
   
-  // CRITICAL: Initialize locked state synchronously from localStorage
-  // This prevents the app from briefly showing content before lock screen
-  const [locked, setLocked] = useState(() => {
-    const initialLocked = getInitialLockState();
-    debugLog('Initializing locked state:', initialLocked);
-    return initialLocked;
-  });
-
-  // Track if we've verified PIN exists on server
-  const pinVerified = useRef(false);
-  // Track if we've done initial load
-  const initialLoadDone = useRef(false);
+  // Track if we've fetched status from server
+  const hasFetchedStatus = useRef(false);
 
   const refresh = useCallback(async () => {
     debugLog('refresh() called, user:', user?.id ? 'present' : 'not present');
     
-    // If no user yet, don't clear lock state - just wait
-    // The lock state from localStorage should persist until we can verify
+    // If no user yet, wait for auth
     if (!user?.id) {
-      debugLog('No user yet, keeping current lock state, waiting for auth');
-      // Don't set isLoading to false yet - we're still waiting for auth
-      // Don't change locked state - preserve the localStorage state
+      debugLog('No user yet, waiting for auth');
       return;
     }
 
@@ -122,45 +78,43 @@ export function useAppLock(): UseAppLockResult {
       debugLog('Fetching device status for user:', user.id);
       const deviceStatus = await getDeviceAppLockStatus();
       setStatus(deviceStatus);
-      debugLog('Device status:', deviceStatus);
-
-      // Now we know if PIN exists on server
-      pinVerified.current = true;
+      hasFetchedStatus.current = true;
+      debugLog('Device status from server:', deviceStatus);
 
       if (!deviceStatus.hasPin) {
-        // No PIN set up - unlock and clear any stale lock state
-        debugLog('No PIN on server, clearing lock state');
-        unlockApp();
+        // No PIN on server - this is the key fix!
+        // Clear any stale local lock state and DO NOT show lock screen
+        debugLog('No PIN on server - clearing stale local state, no lock screen');
+        clearQuickUnlockState();
         setLocked(false);
-        initialLoadDone.current = true;
         setIsLoading(false);
         return;
       }
 
       // PIN exists on server, now check if we should be locked
-      let nextLocked = false;
+      let shouldBeLocked = false;
 
-      // Check explicit lock flag
+      // Check explicit lock flag (set by "Lock now" button)
       if (isAppLocked()) {
         debugLog('Explicit lock flag is set');
-        nextLocked = true;
+        shouldBeLocked = true;
       }
 
-      // Check timeout-based locking
-      if (!nextLocked && shouldLockNow(true)) {
-        debugLog('Timeout elapsed, locking app');
+      // Check timeout-based locking (only if PIN exists)
+      if (!shouldBeLocked && shouldLockNow(true)) {
+        debugLog('Timeout elapsed, should lock');
         lockApp();
-        nextLocked = true;
+        shouldBeLocked = true;
       }
 
-      debugLog('Final lock state after refresh:', nextLocked);
-      setLocked(nextLocked);
-      initialLoadDone.current = true;
+      debugLog('Final lock state:', shouldBeLocked);
+      setLocked(shouldBeLocked);
     } catch (err) {
       console.error('[useAppLock] Failed to get status:', err);
-      // On error, preserve current lock state for security
-      // If we were locked, stay locked
-      debugLog('Error fetching status, preserving current lock state');
+      // On error, assume no PIN and don't lock
+      // This is safer than locking user out
+      debugLog('Error fetching status - assuming no PIN, not locking');
+      setLocked(false);
     } finally {
       setIsLoading(false);
     }
@@ -169,6 +123,8 @@ export function useAppLock(): UseAppLockResult {
   // Load status on mount and when user changes
   useEffect(() => {
     debugLog('User effect triggered');
+    hasFetchedStatus.current = false;
+    setIsLoading(true);
     refresh();
   }, [refresh]);
 
@@ -177,46 +133,34 @@ export function useAppLock(): UseAppLockResult {
     const handleLockChange = (event: Event) => {
       const customEvent = event as CustomEvent<{ locked: boolean }>;
       debugLog('Lock change event received:', customEvent.detail);
-      if (customEvent.detail?.locked) {
-        setLocked(true);
+      
+      // Only respond to lock events if we have a PIN on the server
+      if (status?.hasPin) {
+        setLocked(customEvent.detail?.locked ?? false);
       } else {
-        setLocked(false);
+        debugLog('Ignoring lock event - no PIN on server');
       }
     };
 
     window.addEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
-    debugLog('Listening for lock change events');
+    return () => window.removeEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
+  }, [status?.hasPin]);
 
-    return () => {
-      window.removeEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
-    };
-  }, []);
-
-  // Track when the user leaves/returns to the app to support timeout-based locking.
+  // Track visibility changes for timeout-based locking
   useEffect(() => {
-    // Enable visibility tracking if we have a PIN (confirmed from server)
-    // OR if we're in a potentially locked state (local check)
-    const shouldTrack = status?.hasPin || locked;
-    
-    if (!shouldTrack) {
-      debugLog('Not tracking visibility - no PIN and not locked');
+    // Only track if we have a PIN on server
+    if (!status?.hasPin) {
+      debugLog('Not tracking visibility - no PIN on server');
       return;
     }
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Record when the user left the app
         debugLog('App hidden, recording last active');
         recordLastActive();
       } else {
-        // On return, check if timeout has elapsed
         debugLog('App visible, checking if should lock');
-        
-        // Only lock if we know a PIN exists (server confirmed)
-        // OR if we're already locked (don't need server confirmation)
-        const hasPin = status?.hasPin ?? false;
-        
-        if (hasPin && shouldLockNow(true)) {
+        if (shouldLockNow(true)) {
           debugLog('Timeout elapsed on return, locking');
           lockApp();
           setLocked(true);
@@ -224,24 +168,19 @@ export function useAppLock(): UseAppLockResult {
       }
     };
 
-    // Handle page unload (browser close, tab close, navigation away)
     const handleBeforeUnload = () => {
       debugLog('beforeunload, recording last active');
       recordLastActive();
     };
 
-    // Handle window blur (switching to another app on mobile)
     const handleWindowBlur = () => {
       debugLog('Window blur, recording last active');
       recordLastActive();
     };
 
-    // Handle window focus (returning to app)
     const handleWindowFocus = () => {
       debugLog('Window focus, checking if should lock');
-      const hasPin = status?.hasPin ?? false;
-      
-      if (hasPin && shouldLockNow(true)) {
+      if (shouldLockNow(true)) {
         debugLog('Timeout elapsed on focus, locking');
         lockApp();
         setLocked(true);
@@ -253,7 +192,7 @@ export function useAppLock(): UseAppLockResult {
     window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('focus', handleWindowFocus);
 
-    debugLog('Visibility tracking enabled');
+    debugLog('Visibility tracking enabled (PIN exists on server)');
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -261,31 +200,30 @@ export function useAppLock(): UseAppLockResult {
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('focus', handleWindowFocus);
     };
-  }, [status?.hasPin, locked]);
+  }, [status?.hasPin]);
 
-  // Lock function - works immediately without waiting for server
+  // Lock function - only works if PIN exists
   const lock = useCallback(() => {
+    if (!status?.hasPin) {
+      debugLog('Cannot lock - no PIN on server');
+      return;
+    }
     debugLog('Manual lock requested');
     lockApp();
     setLocked(true);
-    debugLog('App locked immediately');
-  }, []);
+  }, [status?.hasPin]);
 
+  // Unlock function
   const unlock = useCallback(() => {
     debugLog('Unlocking app');
     unlockApp();
     setLocked(false);
   }, []);
 
-  // hasPotentialLock: true if local storage indicates we might be locked
-  // This is used to block rendering even before server confirms PIN exists
-  const hasPotentialLock = locked && !pinVerified.current;
-
   return {
-    isEnabled: status?.hasPin ?? false,
+    hasPinOnServer: status?.hasPin ?? false,
     isLocked: locked,
     isLoading,
-    hasPotentialLock,
     lock,
     unlock,
     status,
