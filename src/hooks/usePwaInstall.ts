@@ -1,72 +1,59 @@
 import { useEffect, useState, useCallback } from "react";
+import {
+  type InstallState,
+  type PromptInstallResult,
+  canInstall as checkCanInstall,
+  isInstalled as checkIsInstalled,
+  promptInstall as triggerPromptInstall,
+  subscribeToInstallState,
+  getInstallState,
+  getFallbackInstructions,
+} from "@/lib/pwa-install";
+
+export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult } from "@/lib/pwa-install";
 
 /**
- * Not in standard TypeScript libs; required for PWA install prompt.
- * @see https://developer.mozilla.org/en-US/docs/Web/API/BeforeInstallPromptEvent
+ * React hook for PWA installation.
+ * 
+ * Uses the global pwa-install module which captures the beforeinstallprompt
+ * event early (before React mounts) to ensure we don't miss it.
  */
-export interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
-
-export type PromptInstallResult = "accepted" | "dismissed" | "unavailable";
-
-function getIsStandalone(): boolean {
-  if (typeof window === "undefined") return false;
-  const standaloneMedia = window.matchMedia("(display-mode: standalone)").matches;
-  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return standaloneMedia || iosStandalone;
-}
-
 export function usePwaInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [installState, setInstallState] = useState<InstallState>(getInstallState);
+  const [canInstall, setCanInstall] = useState(checkCanInstall);
+  const [isInstalled, setIsInstalled] = useState(checkIsInstalled);
 
   useEffect(() => {
-    setIsInstalled(getIsStandalone());
+    // Subscribe to state changes from the global module
+    const unsubscribe = subscribeToInstallState((newState) => {
+      setInstallState(newState);
+      setCanInstall(checkCanInstall());
+      setIsInstalled(checkIsInstalled());
+    });
 
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
-    };
+    // Also update immediately in case state changed before subscription
+    setCanInstall(checkCanInstall());
+    setIsInstalled(checkIsInstalled());
 
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    const mediaQuery = window.matchMedia("(display-mode: standalone)");
-    const handleDisplayModeChange = () => setIsInstalled(getIsStandalone());
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-    mediaQuery.addEventListener("change", handleDisplayModeChange);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-      mediaQuery.removeEventListener("change", handleDisplayModeChange);
-    };
+    return unsubscribe;
   }, []);
 
-  const promptInstall = useCallback((): Promise<PromptInstallResult> => {
-    if (!deferredPrompt) return Promise.resolve("unavailable");
-    return deferredPrompt
-      .prompt()
-      .then(() => deferredPrompt.userChoice)
-      .then((choice) => {
-        setDeferredPrompt(null);
-        return choice.outcome;
-      })
-      .catch(() => {
-        setDeferredPrompt(null);
-        return "unavailable" as PromptInstallResult;
-      });
-  }, [deferredPrompt]);
+  const promptInstall = useCallback(async (): Promise<PromptInstallResult> => {
+    const result = await triggerPromptInstall();
+    // State will be updated via subscription
+    return result;
+  }, []);
 
   return {
-    canInstall: Boolean(deferredPrompt),
+    /** Whether the install prompt is available and can be triggered */
+    canInstall,
+    /** Whether the app is installed (running as standalone PWA) */
     isInstalled,
+    /** Current install state for UI feedback */
+    installState,
+    /** Trigger the install prompt. Returns the user's choice. */
     promptInstall,
+    /** Get device-specific fallback instructions when direct install isn't available */
+    getFallbackInstructions,
   };
 }

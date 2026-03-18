@@ -5,7 +5,12 @@ import App from "./App.tsx";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
+import { initPwaInstall } from "@/lib/pwa-install";
 import "./index.css";
+
+// Initialize PWA install prompt capture EARLY (before React mounts)
+// This ensures we don't miss the beforeinstallprompt event
+initPwaInstall();
 
 const DEV_SW_RESET_MARKER = "__farmvault_dev_sw_reset__";
 let shouldRenderApp = true;
