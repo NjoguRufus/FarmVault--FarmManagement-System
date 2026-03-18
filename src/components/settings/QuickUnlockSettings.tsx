@@ -22,6 +22,7 @@ import {
   getLockTimeout,
   setLockTimeout,
   lockApp,
+  hasPinInLocalStorage,
   checkBiometricCapabilities,
   clearPinSetupSkipped,
   dismissPrompt,
@@ -413,7 +414,23 @@ export function QuickUnlockSettings() {
               variant="default"
               onClick={() => {
                 log('Lock now clicked');
+                // Verify PIN exists before locking
+                const hasPin = hasPinInLocalStorage();
+                if (!hasPin) {
+                  log('Cannot lock - no PIN in localStorage');
+                  toast({
+                    title: 'Cannot lock',
+                    description: 'No PIN is set up. Please create a PIN first.',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+                // Lock the app - this will:
+                // 1. Set fv_locked = 'true' in localStorage
+                // 2. Dispatch APP_LOCK_CHANGE_EVENT with { locked: true, hasPin: true }
+                // 3. AppLockGate will receive the event and show the lock screen
                 lockApp();
+                log('Lock triggered successfully');
               }}
               className="gap-2"
             >

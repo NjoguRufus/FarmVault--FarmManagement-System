@@ -11,34 +11,59 @@
  * - Any async operations
  * 
  * The lock state is read SYNCHRONOUSLY from localStorage before any render.
+ * 
+ * Boot states:
+ * - 'booting': Initial load, reading localStorage
+ * - 'locked': App is locked, show PIN screen
+ * - 'unlocked': App is unlocked, show children
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { QuickUnlockScreen } from './QuickUnlockScreen';
 import {
   getInitialLockState,
-  isAppLocked,
   shouldLockNow,
   lockApp,
   unlockApp,
   recordLastActive,
   getLockTimeout,
+  hasPinInLocalStorage,
   APP_LOCK_CHANGE_EVENT,
+  APP_PIN_CHANGE_EVENT,
+  type AppLockChangeEventDetail,
+  type AppPinChangeEventDetail,
 } from '@/services/appLockService';
 
-// Debug logging
+// Debug logging - always enabled for now to help diagnose issues
 function debugLog(...args: unknown[]): void {
   // eslint-disable-next-line no-console
   console.log('[AppLockGate]', ...args);
 }
 
+type BootState = 'booting' | 'locked' | 'unlocked';
+
+interface LockState {
+  hasPin: boolean;
+  isLocked: boolean;
+}
+
 /**
  * Read lock state synchronously from localStorage.
  * This MUST be synchronous to prevent any flash of unlocked content.
+ * 
+ * Decision logic:
+ * 1. If no PIN exists → unlocked (nothing to lock with)
+ * 2. If PIN exists AND fv_locked is 'true' → locked
+ * 3. If PIN exists AND fv_locked is NOT 'true' → check timeout
+ * 4. If timeout has elapsed → lock and return locked
+ * 5. Otherwise → unlocked
  */
-function readLockStateSync(): { hasPin: boolean; isLocked: boolean } {
+function readLockStateSync(): { state: LockState; bootDecision: BootState } {
   if (typeof window === 'undefined') {
-    return { hasPin: false, isLocked: false };
+    return { 
+      state: { hasPin: false, isLocked: false },
+      bootDecision: 'unlocked'
+    };
   }
 
   const state = getInitialLockState();
@@ -48,17 +73,31 @@ function readLockStateSync(): { hasPin: boolean; isLocked: boolean } {
   debugLog('fv_locked:', state.isLocked);
   debugLog('fv_app_lock_timeout:', getLockTimeout(), 'seconds');
 
-  // If PIN exists, also check if we should lock due to timeout
-  if (state.hasPin && !state.isLocked) {
-    // Check if timeout has elapsed since last activity
-    if (shouldLockNow(true)) {
-      debugLog('BOOT: Timeout elapsed since last activity, locking app');
-      lockApp();
-      return { hasPin: true, isLocked: true };
-    }
+  // No PIN → can't lock, default to unlocked
+  if (!state.hasPin) {
+    debugLog('BOOT DECISION: unlocked (no PIN exists)');
+    return { state, bootDecision: 'unlocked' };
   }
 
-  return state;
+  // PIN exists AND explicitly locked → show lock screen
+  if (state.isLocked) {
+    debugLog('BOOT DECISION: locked (fv_locked is true)');
+    return { state, bootDecision: 'locked' };
+  }
+
+  // PIN exists but not explicitly locked → check timeout
+  if (shouldLockNow(true)) {
+    debugLog('BOOT DECISION: locked (timeout elapsed since last activity)');
+    // Persist the lock state so reload also shows lock
+    lockApp();
+    return { 
+      state: { hasPin: true, isLocked: true },
+      bootDecision: 'locked'
+    };
+  }
+
+  debugLog('BOOT DECISION: unlocked (timeout not elapsed)');
+  return { state, bootDecision: 'unlocked' };
 }
 
 interface AppLockGateProps {
@@ -67,41 +106,86 @@ interface AppLockGateProps {
 
 export function AppLockGate({ children }: AppLockGateProps) {
   // Read initial state SYNCHRONOUSLY - this is critical to prevent bypass
-  const [lockState, setLockState] = useState(() => {
-    const state = readLockStateSync();
-    debugLog('Initial lock state:', state);
-    return state;
+  const [bootResult] = useState(() => {
+    const result = readLockStateSync();
+    debugLog('Initial boot result:', result);
+    return result;
   });
+  
+  const [lockState, setLockState] = useState<LockState>(bootResult.state);
+  const [bootState, setBootState] = useState<BootState>('booting');
 
-  // Track if we're in the "boot" phase (checking initial state)
-  const [isBooting, setIsBooting] = useState(true);
-
-  // On mount, finish the boot phase
+  // On mount, set the boot decision
   useEffect(() => {
-    debugLog('Boot phase complete');
-    setIsBooting(false);
-  }, []);
+    debugLog('Boot phase complete, decision:', bootResult.bootDecision);
+    setBootState(bootResult.bootDecision);
+  }, [bootResult.bootDecision]);
 
   // Listen for lock state changes from other components
   useEffect(() => {
     const handleLockChange = (event: Event) => {
-      const customEvent = event as CustomEvent<{ locked: boolean }>;
-      debugLog('Lock change event received:', customEvent.detail);
+      const customEvent = event as CustomEvent<AppLockChangeEventDetail>;
+      const detail = customEvent.detail;
       
-      if (customEvent.detail?.locked) {
-        setLockState(prev => ({ ...prev, isLocked: true }));
-      } else {
-        setLockState(prev => ({ ...prev, isLocked: false }));
+      debugLog('Lock change event received:', detail);
+      
+      if (detail) {
+        // Update both hasPin and isLocked from the event
+        const newHasPin = detail.hasPin ?? lockState.hasPin;
+        const newIsLocked = detail.locked;
+        
+        debugLog('Updating lock state:', { hasPin: newHasPin, isLocked: newIsLocked });
+        
+        setLockState({ hasPin: newHasPin, isLocked: newIsLocked });
+        
+        // Immediately update boot state based on the new lock state
+        if (newHasPin && newIsLocked) {
+          debugLog('*** LOCKING APP (event) ***');
+          setBootState('locked');
+        } else {
+          debugLog('*** UNLOCKING APP (event) ***');
+          setBootState('unlocked');
+        }
       }
     };
 
     window.addEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
     return () => window.removeEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
+  }, [lockState.hasPin]);
+
+  // Listen for PIN existence changes
+  useEffect(() => {
+    const handlePinChange = (event: Event) => {
+      const customEvent = event as CustomEvent<AppPinChangeEventDetail>;
+      const detail = customEvent.detail;
+      
+      debugLog('PIN change event received:', detail);
+      
+      if (detail) {
+        setLockState(prev => {
+          const newState = { ...prev, hasPin: detail.hasPin };
+          debugLog('Updated hasPin:', detail.hasPin);
+          return newState;
+        });
+        
+        // If PIN was removed, ensure we're unlocked
+        if (!detail.hasPin) {
+          debugLog('PIN removed - ensuring unlocked state');
+          setBootState('unlocked');
+        }
+      }
+    };
+
+    window.addEventListener(APP_PIN_CHANGE_EVENT, handlePinChange);
+    return () => window.removeEventListener(APP_PIN_CHANGE_EVENT, handlePinChange);
   }, []);
 
-  // Track visibility changes for auto-lock
+  // Track visibility changes for auto-lock timeout
   useEffect(() => {
-    if (!lockState.hasPin) {
+    // Re-read hasPin from localStorage to ensure we have current value
+    const currentHasPin = hasPinInLocalStorage();
+    
+    if (!currentHasPin) {
       debugLog('[VISIBILITY] Not tracking - no PIN exists');
       return;
     }
@@ -114,10 +198,13 @@ export function AppLockGate({ children }: AppLockGateProps) {
         recordLastActive();
       } else {
         debugLog('[VISIBILITY] App visible - checking if should lock');
-        if (shouldLockNow(true)) {
+        // Re-check PIN exists in case it was removed while hidden
+        const hasPin = hasPinInLocalStorage();
+        if (hasPin && shouldLockNow(true)) {
           debugLog('[VISIBILITY] *** AUTO-LOCK TRIGGERED ***');
           lockApp();
-          setLockState(prev => ({ ...prev, isLocked: true }));
+          setLockState({ hasPin: true, isLocked: true });
+          setBootState('locked');
         }
       }
     };
@@ -134,10 +221,13 @@ export function AppLockGate({ children }: AppLockGateProps) {
 
     const handleWindowFocus = () => {
       debugLog('[VISIBILITY] Window focus - checking if should lock');
-      if (shouldLockNow(true)) {
+      // Re-check PIN exists
+      const hasPin = hasPinInLocalStorage();
+      if (hasPin && shouldLockNow(true)) {
         debugLog('[VISIBILITY] *** AUTO-LOCK TRIGGERED ON FOCUS ***');
         lockApp();
-        setLockState(prev => ({ ...prev, isLocked: true }));
+        setLockState({ hasPin: true, isLocked: true });
+        setBootState('locked');
       }
     };
 
@@ -154,11 +244,12 @@ export function AppLockGate({ children }: AppLockGateProps) {
     };
   }, [lockState.hasPin]);
 
-  // Handle unlock
+  // Handle unlock - called when PIN is entered correctly
   const handleUnlock = useCallback(() => {
     debugLog('=== UNLOCK FROM GATE ===');
     unlockApp();
     setLockState(prev => ({ ...prev, isLocked: false }));
+    setBootState('unlocked');
   }, []);
 
   // Handle switching to password login
@@ -167,20 +258,30 @@ export function AppLockGate({ children }: AppLockGateProps) {
     // Clear lock state and redirect to sign-in
     unlockApp();
     setLockState(prev => ({ ...prev, isLocked: false }));
+    setBootState('unlocked');
     // Force navigation to sign-in
     window.location.href = '/sign-in';
   }, []);
 
-  // During boot, show nothing to prevent flash
-  if (isBooting) {
-    debugLog('Booting - showing nothing');
-    return null;
+  // During boot, show a minimal splash to prevent flash of content
+  if (bootState === 'booting') {
+    debugLog('Booting - showing splash');
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center bg-background"
+        aria-busy="true"
+        aria-label="Loading FarmVault"
+      >
+        <div className="h-12 w-12 rounded-full bg-primary/10 animate-pulse" />
+      </div>
+    );
   }
 
   // If locked, show ONLY the lock screen - block everything else
-  if (lockState.hasPin && lockState.isLocked) {
+  if (bootState === 'locked') {
     debugLog('=== SHOWING LOCK SCREEN (GATE LEVEL) ===');
-    debugLog('App is locked - all content blocked');
+    debugLog('bootState:', bootState);
+    debugLog('lockState:', lockState);
     
     return (
       <QuickUnlockScreen
@@ -190,7 +291,7 @@ export function AppLockGate({ children }: AppLockGateProps) {
     );
   }
 
-  // Not locked - render children normally
+  // Unlocked - render children normally
   debugLog('App is unlocked - rendering children');
   return <>{children}</>;
 }
