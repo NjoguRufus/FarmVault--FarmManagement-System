@@ -64,18 +64,17 @@ export function QuickUnlockScreen({
     checkStatus();
   }, []);
 
-  // Auto-submit when PIN reaches 4 digits (with debounce to allow typing more)
+  // Auto-submit when PIN reaches exactly 4 digits
   useEffect(() => {
-    // Only auto-submit if we haven't already submitted for this exact PIN
-    if (pin.length >= 4 && pin.length <= 6 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
-      // Small delay to allow user to enter more digits if they want
+    if (pin.length === 4 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
+      // Small delay for visual feedback
       const timer = setTimeout(() => {
-        if (pin.length >= 4 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
-          log('Auto-submitting PIN of length:', pin.length);
+        if (pin.length === 4 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
+          log('Auto-submitting 4-digit PIN');
           autoSubmittedFor.current = pin;
           handleVerify();
         }
-      }, 500); // 500ms delay to allow typing more digits
+      }, 200);
       
       return () => clearTimeout(timer);
     }
@@ -83,8 +82,8 @@ export function QuickUnlockScreen({
   }, [pin, verifying, isLocked]);
 
   const handleVerify = useCallback(async () => {
-    if (pin.length < 4) {
-      setError('Enter at least 4 digits');
+    if (pin.length !== 4) {
+      setError('Enter your 4-digit PIN');
       return;
     }
 
@@ -134,7 +133,7 @@ export function QuickUnlockScreen({
   const handleDigitPress = useCallback((digit: string) => {
     if (isLocked || verifying) return;
     log('Digit pressed:', digit);
-    if (pin.length < 6) {
+    if (pin.length < 4) {
       setPin((prev) => prev + digit);
       setError(null);
     }
@@ -214,9 +213,9 @@ export function QuickUnlockScreen({
             {isLocked ? 'Account temporarily locked' : 'Enter your PIN to unlock'}
           </p>
 
-          {/* PIN dots */}
-          <div className="flex justify-center gap-3">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
+          {/* PIN dots - 4 digit PIN */}
+          <div className="flex justify-center gap-4">
+            {[0, 1, 2, 3].map((i) => (
               <div
                 key={i}
                 className={cn(

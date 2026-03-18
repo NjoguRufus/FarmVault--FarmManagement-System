@@ -21,6 +21,7 @@ import {
   recordLastActive,
   shouldLockNow,
   clearQuickUnlockState,
+  shouldShowAppLockPrompt,
   APP_LOCK_CHANGE_EVENT,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
@@ -32,6 +33,8 @@ export interface UseAppLockResult {
   isLocked: boolean;
   /** Whether we're still loading the server status */
   isLoading: boolean;
+  /** Whether to show the first-time App Lock prompt */
+  showPrompt: boolean;
   /** Lock the app immediately (only works if PIN exists) */
   lock: () => void;
   /** Unlock the app */
@@ -220,10 +223,15 @@ export function useAppLock(): UseAppLockResult {
     setLocked(false);
   }, []);
 
+  // Calculate whether to show the first-time prompt
+  // Show only if: not loading, no PIN exists on server, and prompt not dismissed
+  const showPrompt = !isLoading && !status?.hasPin && shouldShowAppLockPrompt();
+
   return {
     hasPinOnServer: status?.hasPin ?? false,
     isLocked: locked,
     isLoading,
+    showPrompt,
     lock,
     unlock,
     status,

@@ -123,6 +123,7 @@ import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
 import { QuickUnlockScreen } from "@/components/auth/QuickUnlockScreen";
+import { AppLockPrompt } from "@/components/auth/AppLockPrompt";
 import { useAppLock } from "@/hooks/useAppLock";
 import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
@@ -183,16 +184,15 @@ const CompanyDashboardRoute = () => {
 const AppRoutesWithLock = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const { hasPinOnServer, isLocked, isLoading, unlock } = useAppLock();
+  const { hasPinOnServer, isLocked, isLoading, showPrompt, unlock, refresh } = useAppLock();
 
-  // CRITICAL FIX: Only show lock screen if:
+  // CRITICAL: Only show lock screen if:
   // 1. Server has CONFIRMED a PIN exists (hasPinOnServer = true)
   // 2. AND the app is in locked state (isLocked = true)
-  // 
-  // We NEVER show lock screen while loading or if no PIN exists.
-  // This fixes the bug where users see lock screen without ever creating a PIN.
+  // 3. AND we're not loading
   const shouldShowLockScreen = hasPinOnServer && isLocked && !isLoading;
 
+  // Show lock screen first (takes priority)
   if (shouldShowLockScreen) {
     return (
       <QuickUnlockScreen
@@ -205,6 +205,23 @@ const AppRoutesWithLock = () => {
           navigate("/sign-in", { replace: true });
         }}
       />
+    );
+  }
+
+  // Show first-time App Lock prompt if needed
+  // Only shows when: not loading, no PIN exists, prompt not dismissed
+  if (showPrompt && user) {
+    return (
+      <>
+        <AppLockPrompt
+          onComplete={() => {
+            refresh();
+          }}
+          onSkip={() => {
+            refresh();
+          }}
+        />
+      </>
     );
   }
   
