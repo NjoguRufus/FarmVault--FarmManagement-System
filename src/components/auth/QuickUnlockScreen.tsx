@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, Lock, ArrowLeft, Loader2, AlertCircle, Fingerprint } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { verifyPin, unlockApp, getDeviceAppLockStatus } from '@/services/appLockService';
+import { verifyPin, getDeviceAppLockStatus } from '@/services/appLockService';
 import { cn } from '@/lib/utils';
 
 interface QuickUnlockScreenProps {
@@ -67,7 +67,8 @@ export function QuickUnlockScreen({
       const isValid = await verifyPin(pin);
 
       if (isValid) {
-        unlockApp();
+        // Call the unlock callback - the parent (App.tsx) handles unlockApp()
+        // which records the unlock timestamp and clears the lock state
         onUnlocked();
       } else {
         const newAttempts = attemptsRemaining - 1;

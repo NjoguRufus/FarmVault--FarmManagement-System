@@ -4,7 +4,7 @@
 
 export const SEO_BASE_URL = typeof window !== "undefined"
   ? `${window.location.protocol}//${window.location.host}`
-  : "https://farmvault.co.ke";
+  : "https://farmvault.africa";
 
 export const DEFAULT_SITE_NAME = "FarmVault";
 export const DEFAULT_TITLE = "FarmVault | Farm Management Software Kenya";

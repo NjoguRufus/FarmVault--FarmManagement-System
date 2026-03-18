@@ -11,6 +11,11 @@ import {
   enableQuickUnlock,
   disableQuickUnlock,
   getDeviceAppLockStatus,
+  updatePin,
+  verifyPin,
+  getLockTimeout,
+  setLockTimeout,
+  lockApp,
   checkBiometricCapabilities,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
@@ -26,9 +31,13 @@ export function QuickUnlockSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showPinSetup, setShowPinSetup] = useState(false);
+  const [isChangingPin, setIsChangingPin] = useState(false);
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false);
   const [pin, setPin] = useState('');
+  const [currentPin, setCurrentPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
+  const [timeoutSeconds, setTimeoutSeconds] = useState<number>(() => getLockTimeout());
 
   const { toast } = useToast();
 
@@ -51,10 +60,28 @@ export function QuickUnlockSettings() {
     loadStatus();
   }, []);
 
-  const handleEnableQuickUnlock = async () => {
+  const resetPinState = () => {
+    setShowPinSetup(false);
+    setIsChangingPin(false);
+    setShowDisableConfirm(false);
+    setPin('');
+    setCurrentPin('');
+    setConfirmPin('');
+    setPinError(null);
+  };
+
+  const handleEnableOrChangePin = async () => {
     setPinError(null);
 
-    // Validate PIN
+    // When changing an existing PIN, require current PIN
+    if (isChangingPin) {
+      if (!currentPin || currentPin.length < 4) {
+        setPinError('Enter your current PIN');
+        return;
+      }
+    }
+
+    // Validate new PIN
     if (pin.length < 4 || pin.length > 6) {
       setPinError('PIN must be 4-6 digits');
       return;
@@ -70,19 +97,23 @@ export function QuickUnlockSettings() {
 
     setSaving(true);
     try {
-      await enableQuickUnlock(pin);
+      if (isChangingPin) {
+        await updatePin(currentPin, pin);
+      } else {
+        await enableQuickUnlock(pin);
+      }
       const newStatus = await getDeviceAppLockStatus();
       setStatus(newStatus);
-      setShowPinSetup(false);
-      setPin('');
-      setConfirmPin('');
+      resetPinState();
       toast({
-        title: 'Quick unlock enabled',
-        description: 'You can now use your PIN to unlock FarmVault on this device.',
+        title: isChangingPin ? 'PIN updated' : 'Quick unlock enabled',
+        description: isChangingPin
+          ? 'Your quick unlock PIN has been updated.'
+          : 'You can now use your PIN to unlock FarmVault on this device.',
       });
     } catch (err) {
       toast({
-        title: 'Failed to enable quick unlock',
+        title: isChangingPin ? 'Failed to update PIN' : 'Failed to enable quick unlock',
         description: (err as Error).message,
         variant: 'destructive',
       });
@@ -92,6 +123,25 @@ export function QuickUnlockSettings() {
   };
 
   const handleDisableQuickUnlock = async () => {
+    setPinError(null);
+    setShowDisableConfirm(true);
+  };
+
+  const handleConfirmDisableQuickUnlock = async () => {
+    setPinError(null);
+    // Require PIN confirmation when a PIN exists
+    if (status?.hasPin) {
+      if (pin.length < 4) {
+        setPinError('Enter your PIN to confirm');
+        return;
+      }
+      const valid = await verifyPin(pin);
+      if (!valid) {
+        setPinError('Incorrect PIN. Quick unlock was not disabled.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await disableQuickUnlock();
@@ -103,6 +153,7 @@ export function QuickUnlockSettings() {
         isLocked: false,
         lockedUntil: null,
       });
+      resetPinState();
       toast({
         title: 'Quick unlock disabled',
         description: 'PIN unlock has been removed from this device.',
@@ -157,13 +208,35 @@ export function QuickUnlockSettings() {
         </span>
       </div>
 
-      {/* PIN Setup Form */}
-      {showPinSetup && !isEnabled && (
+      {/* PIN Setup / Change Form */}
+      {showPinSetup && (
         <div className="space-y-4 p-4 bg-muted/30 rounded-lg border border-border/60">
           <div className="space-y-3">
+            {isEnabled && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Current PIN
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="\d*"
+                  maxLength={6}
+                  className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                  value={currentPin}
+                  onChange={(e) => {
+                    setCurrentPin(e.target.value.replace(/\D/g, ''));
+                    setPinError(null);
+                  }}
+                  placeholder="• • • •"
+                  autoComplete="off"
+                />
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
-                Choose a 4-6 digit PIN
+                {isEnabled ? 'New 4-6 digit PIN' : 'Choose a 4-6 digit PIN'}
               </label>
               <input
                 type="password"
@@ -212,7 +285,7 @@ export function QuickUnlockSettings() {
           <div className="flex gap-2">
             <Button
               size="sm"
-              onClick={handleEnableQuickUnlock}
+              onClick={handleEnableOrChangePin}
               disabled={saving || pin.length < 4}
               className="gap-2"
             >
@@ -221,16 +294,13 @@ export function QuickUnlockSettings() {
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              Enable Quick Unlock
+              {isEnabled ? 'Update PIN' : 'Enable Quick Unlock'}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => {
-                setShowPinSetup(false);
-                setPin('');
-                setConfirmPin('');
-                setPinError(null);
+                resetPinState();
               }}
               disabled={saving}
             >
@@ -245,7 +315,10 @@ export function QuickUnlockSettings() {
         <div className="flex flex-col gap-3">
           {!isEnabled ? (
             <Button
-              onClick={() => setShowPinSetup(true)}
+              onClick={() => {
+                setIsChangingPin(false);
+                setShowPinSetup(true);
+              }}
               className="gap-2 w-full sm:w-auto"
             >
               <Lock className="h-4 w-4" />
@@ -254,8 +327,23 @@ export function QuickUnlockSettings() {
           ) : (
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
+                variant="default"
+                onClick={() => {
+                  lockApp();
+                  // Trigger a page reload to show the lock screen
+                  window.location.reload();
+                }}
+                className="gap-2"
+              >
+                <Lock className="h-4 w-4" />
+                Lock now
+              </Button>
+              <Button
                 variant="outline"
-                onClick={() => setShowPinSetup(true)}
+                onClick={() => {
+                  setIsChangingPin(true);
+                  setShowPinSetup(true);
+                }}
                 className="gap-2"
               >
                 <Lock className="h-4 w-4" />
@@ -278,6 +366,116 @@ export function QuickUnlockSettings() {
           )}
         </div>
       )}
+
+      {/* Disable confirmation */}
+      {showDisableConfirm && (
+        <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border/60">
+          <p className="text-xs text-muted-foreground">
+            Enter your PIN to disable quick unlock on this device. You can still log in with your
+            password later.
+          </p>
+          {isEnabled && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="\d*"
+                maxLength={6}
+                className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, ''));
+                  setPinError(null);
+                }}
+                placeholder="• • • •"
+                autoComplete="off"
+              />
+            </div>
+          )}
+          {pinError && (
+            <div className="flex items-center gap-2 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5" />
+              {pinError}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleConfirmDisableQuickUnlock}
+              disabled={saving}
+              className="gap-2"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              Confirm disable
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => {
+                setShowDisableConfirm(false);
+                setPin('');
+                setPinError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-lock timeout */}
+      <div className="space-y-2 pt-3 border-t border-border/60">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground">Auto-lock timeout</span>
+          <span className="text-[11px] text-muted-foreground">
+            {isEnabled ? 'When the app should relock' : 'Enable PIN unlock to configure'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[10, 30, 60, 300].map((seconds) => {
+            const label =
+              seconds < 60
+                ? `${seconds}s`
+                : seconds === 60
+                ? '1 min'
+                : `${Math.round(seconds / 60)} min`;
+            const selected = timeoutSeconds === seconds;
+            return (
+              <button
+                key={seconds}
+                type="button"
+                disabled={!isEnabled}
+                onClick={() => {
+                  const newTimeout = seconds as 10 | 30 | 60 | 300;
+                  setTimeoutSeconds(newTimeout);
+                  setLockTimeout(newTimeout);
+                  toast({
+                    title: 'Timeout saved',
+                    description: `Auto-lock will trigger after ${label} of inactivity.`,
+                    duration: 2000,
+                  });
+                }}
+                className={cn(
+                  'text-xs px-2 py-1.5 rounded-full border transition-colors',
+                  selected
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border text-muted-foreground hover:bg-muted/60',
+                  !isEnabled && 'opacity-50 cursor-not-allowed'
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {isEnabled && (
+          <p className="text-[11px] text-muted-foreground">
+            The app will lock after {timeoutSeconds < 60 ? `${timeoutSeconds} seconds` : timeoutSeconds === 60 ? '1 minute' : `${Math.round(timeoutSeconds / 60)} minutes`} when you leave or switch apps.
+          </p>
+        )}
+      </div>
 
       {/* Biometric placeholder */}
       <div className="pt-3 border-t border-border/60 space-y-3">

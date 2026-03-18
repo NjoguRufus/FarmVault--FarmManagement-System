@@ -3,14 +3,14 @@ import { Link } from "react-router-dom";
 
 const footerLinks = [
   { label: "Home", href: "/" },
-  { label: "Features", href: "/#features" },
-  { label: "Pricing", href: "/#pricing" },
-  { label: "About", href: "/#about" },
-  { label: "Contact", href: "/#contact" },
+  { label: "Features", href: "/features" },
+  { label: "Pricing", href: "/pricing" },
+  { label: "About", href: "/about" },
+  { label: "Blog", href: "/blog" },
   { label: "Farm Management Software Kenya", href: "/farm-management-software-kenya" },
   { label: "Crop Guides", href: "/crop-guides" },
   { label: "Farm Calculators", href: "/farm-calculators" },
-  { label: "Blog", href: "/blog" },
+  { label: "Contact", href: "/#contact" },
 ];
 
 export function Footer() {
