@@ -16,6 +16,7 @@ import {
   setEmployeeStatus,
   deleteEmployee as deleteEmployeeSupabase,
   revokeEmployeeInvite,
+  resendEmployeeInvite,
 } from '@/services/employeesSupabaseService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
@@ -255,6 +256,7 @@ export default function EmployeesPage() {
   // Deactivate/delete confirmation
   const [deactivateTarget, setDeactivateTarget] = useState<Employee | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const [resendingEmployeeId, setResendingEmployeeId] = useState<string | null>(null);
   const handleDeactivateEmployee = async () => {
     if (!deactivateTarget || !companyId || !isEmployeesSupabase) return;
     setDeactivating(true);
@@ -1659,7 +1661,7 @@ export default function EmployeesPage() {
                   <th>Email</th>
                   <th>Role</th>
                   <th>Department</th>
-                  <th>Invited</th>
+                  <th>Last sent</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -1796,11 +1798,20 @@ export default function EmployeesPage() {
                     <td>{getEmployeeEmail(employee) || '—'}</td>
                     <td>{getRoleLabel(getEmployeeRole(employee))}</td>
                     <td>{employee.department || 'General'}</td>
-                    <td>
-                      {employee.createdAt
-                        ? formatDate(employee.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })
-                        : '—'}
-                    </td>
+                  <td>
+                    {employee.inviteLastSentAt || employee.inviteSentAt || employee.createdAt
+                      ? formatDate(employee.inviteLastSentAt ?? employee.inviteSentAt ?? employee.createdAt, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                    {typeof employee.inviteResendCount === 'number' && employee.inviteResendCount > 0 && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        (resent {employee.inviteResendCount}x)
+                      </span>
+                    )}
+                  </td>
                     <td>
                       <span className={cn('fv-badge capitalize', getStatusBadge(employee.status))}>
                         {employee.status.replace('-', ' ')}
@@ -1817,11 +1828,59 @@ export default function EmployeesPage() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem disabled className="opacity-60">
-                            Resend invite (coming soon)
-                          </DropdownMenuItem>
                           {canEditEmployees && (
                             <>
+                              <DropdownMenuItem
+                                className="cursor-pointer"
+                                disabled={resendingEmployeeId === employee.id}
+                                onClick={async () => {
+                                  if (!companyId || !isEmployeesSupabase) return;
+                                  const email = (getEmployeeEmail(employee) || '').toLowerCase();
+                                  if (!email) {
+                                    toast.error('Cannot resend invite', {
+                                      description: 'Invite has no email address.',
+                                    });
+                                    return;
+                                  }
+                                  if (employee.status !== 'invited') {
+                                    toast.error('Cannot resend invite', {
+                                      description: 'Only pending invites can be resent.',
+                                    });
+                                    return;
+                                  }
+                                  try {
+                                    setResendingEmployeeId(employee.id);
+                                    if (import.meta.env.DEV) {
+                                      // eslint-disable-next-line no-console
+                                      console.log('[EmployeesPage] resendEmployeeInvite', {
+                                        companyId,
+                                        email,
+                                        employeeId: employee.id,
+                                      });
+                                    }
+                                    await resendEmployeeInvite(companyId, employee.id);
+                                    await logActivity({
+                                      companyId,
+                                      employeeId: employee.id,
+                                      action: 'Invite resent',
+                                      module: 'employees',
+                                      metadata: { updated_by: user?.id, email },
+                                    });
+                                    await refetchSupabaseEmployees();
+                                    toast.success('Invite resent');
+                                  } catch (err: unknown) {
+                                    const message =
+                                      (err as { message?: string })?.message ?? 'Failed to resend invite';
+                                    toast.error('Resend failed', { description: message });
+                                  } finally {
+                                    setResendingEmployeeId((current) =>
+                                      current === employee.id ? null : current,
+                                    );
+                                  }
+                                }}
+                              >
+                                Resend invite
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="cursor-pointer"
                                 onClick={async () => {
@@ -2185,11 +2244,59 @@ export default function EmployeesPage() {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem disabled className="opacity-60">
-                          Resend invite (coming soon)
-                        </DropdownMenuItem>
                         {canEditEmployees && (
                           <>
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              disabled={resendingEmployeeId === employee.id}
+                              onClick={async () => {
+                                if (!companyId || !isEmployeesSupabase) return;
+                                const emailAddr = (getEmployeeEmail(employee) || '').toLowerCase();
+                                if (!emailAddr) {
+                                  toast.error('Cannot resend invite', {
+                                    description: 'Invite has no email address.',
+                                  });
+                                  return;
+                                }
+                                if (employee.status !== 'invited') {
+                                  toast.error('Cannot resend invite', {
+                                    description: 'Only pending invites can be resent.',
+                                  });
+                                  return;
+                                }
+                                try {
+                                  setResendingEmployeeId(employee.id);
+                                  if (import.meta.env.DEV) {
+                                    // eslint-disable-next-line no-console
+                                    console.log('[EmployeesPage] resendEmployeeInvite (mobile)', {
+                                      companyId,
+                                      email: emailAddr,
+                                      employeeId: employee.id,
+                                    });
+                                  }
+                                  await resendEmployeeInvite(companyId, employee.id);
+                                  await logActivity({
+                                    companyId,
+                                    employeeId: employee.id,
+                                    action: 'Invite resent',
+                                    module: 'employees',
+                                    metadata: { updated_by: user?.id, email: emailAddr },
+                                  });
+                                  await refetchSupabaseEmployees();
+                                  toast.success('Invite resent');
+                                } catch (err: unknown) {
+                                  const message =
+                                    (err as { message?: string })?.message ?? 'Failed to resend invite';
+                                  toast.error('Resend failed', { description: message });
+                                } finally {
+                                  setResendingEmployeeId((current) =>
+                                    current === employee.id ? null : current,
+                                  );
+                                }
+                              }}
+                            >
+                              Resend invite
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               className="cursor-pointer"
                               onClick={async () => {

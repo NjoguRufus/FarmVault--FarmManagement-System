@@ -744,6 +744,12 @@ export interface Employee {
   joinDate?: Date | unknown;
   createdAt?: Date | unknown;
   inviteSentAt?: Date | unknown; // when invite email was sent (for status=invited)
+  /** When set, the most recent time an invitation email (initial or resend) was sent. */
+  inviteLastSentAt?: Date | unknown;
+  /** Number of times an invite has been resent (not counting the initial send). */
+  inviteResendCount?: number;
+  /** Employee id / actor who most recently resent the invite. */
+  inviteLastResentBy?: string | null;
   createdBy?: string;
   authUserId?: string;
   avatarUrl?: string;
