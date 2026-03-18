@@ -10,10 +10,16 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_URL = process.env.SITEMAP_BASE_URL || "https://farmvault.co.ke";
+const BASE_URL = process.env.SITEMAP_BASE_URL || "https://farmvault.africa";
 
 const PATHS = [
+  // Core pages
   "/",
+  "/features",
+  "/pricing",
+  "/about",
+  "/blog",
+  // SEO landing pages
   "/farm-management-software-kenya",
   "/crop-monitoring-software",
   "/farm-inventory-management-system",
@@ -21,27 +27,31 @@ const PATHS = [
   "/farm-harvest-management-system",
   "/farm-project-management-software",
   "/farm-budgeting-software",
+  // Guides
   "/crop-guides",
   "/farm-budget-guides",
   "/farm-chemicals-guide",
   "/crop-disease-database",
   "/farm-calculators",
+  // Crop guides
   "/tomato-farming-kenya",
   "/maize-farming-kenya",
   "/rice-farming-kenya",
   "/french-beans-farming-kenya",
   "/capsicum-farming-kenya",
   "/watermelon-farming-kenya",
+  // Location pages
   "/farm-management-software-nairobi",
   "/farm-management-software-eldoret",
   "/farm-management-software-nakuru",
   "/farm-management-software-kisumu",
   "/farm-management-software-mombasa",
+  // Calculators
   "/tomato-profit-calculator",
   "/maize-profit-calculator",
   "/farm-budget-calculator",
   "/yield-per-acre-calculator",
-  "/blog",
+  // Blog posts
   "/blog/farm-record-keeping-template-kenya",
   "/blog/best-fertilizer-for-tomatoes-kenya",
   "/blog/maize-farming-profit-per-acre-kenya",
@@ -64,13 +74,29 @@ const PATHS = [
   "/blog/climate-smart-agriculture-kenya",
 ];
 
+function getPriority(path) {
+  if (path === "/") return "1.0";
+  if (["/features", "/pricing", "/about"].includes(path)) return "0.9";
+  if (path === "/blog") return "0.9";
+  if (path.startsWith("/blog/")) return "0.8";
+  return "0.9";
+}
+
+function getChangeFreq(path) {
+  if (path === "/") return "weekly";
+  if (["/features", "/pricing", "/about"].includes(path)) return "monthly";
+  if (path === "/blog") return "daily";
+  if (path.startsWith("/blog/")) return "weekly";
+  return "weekly";
+}
+
 const today = new Date().toISOString().slice(0, 10);
 const urls = PATHS.map(
   (path) => `  <url>
     <loc>${BASE_URL}${path}</loc>
     <lastmod>${today}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>${path === "/" ? "1.0" : path.startsWith("/blog/") ? "0.8" : "0.9"}</priority>
+    <changefreq>${getChangeFreq(path)}</changefreq>
+    <priority>${getPriority(path)}</priority>
   </url>`
 ).join("\n");
 
