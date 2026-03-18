@@ -406,6 +406,9 @@ export async function enableQuickUnlock(
   // Set PIN exists flag in localStorage so we know to show lock screen on reload
   setPinExistsFlag(true);
   debugLog('PIN created successfully - fv_pin_exists set to "true"');
+  
+  // Notify components that PIN now exists
+  notifyPinChange(true);
 }
 
 /**
@@ -426,6 +429,9 @@ export async function disableQuickUnlock(): Promise<void> {
   // Clear all local Quick Unlock state including PIN exists flag
   clearQuickUnlockState();
   debugLog('Quick unlock disabled - all local state cleared');
+  
+  // Notify components that PIN no longer exists
+  notifyPinChange(false);
 }
 
 /**
@@ -506,6 +512,27 @@ export function getInitialLockState(): { hasPin: boolean; isLocked: boolean } {
 export const APP_LOCK_CHANGE_EVENT = 'fv-app-lock-change';
 
 /**
+ * Custom event name for PIN existence changes.
+ * Fired when PIN is created, changed, or deleted.
+ */
+export const APP_PIN_CHANGE_EVENT = 'fv-app-pin-change';
+
+/**
+ * Event payload for lock state changes.
+ */
+export interface AppLockChangeEventDetail {
+  locked: boolean;
+  hasPin: boolean;
+}
+
+/**
+ * Event payload for PIN changes.
+ */
+export interface AppPinChangeEventDetail {
+  hasPin: boolean;
+}
+
+/**
  * Set the explicit lock flag.
  * This marks the app as locked so the lock screen will show.
  * Dispatches a custom event so React components can react immediately.
@@ -513,13 +540,22 @@ export const APP_LOCK_CHANGE_EVENT = 'fv-app-lock-change';
 export function lockApp(): void {
   if (typeof window === 'undefined') return;
   
+  const hasPin = hasPinInLocalStorage();
+  if (!hasPin) {
+    debugLog('=== LOCK REQUESTED BUT NO PIN EXISTS ===');
+    debugLog('Cannot lock without a PIN');
+    return;
+  }
+  
   // Set lock state to true - this persists across reload
   window.localStorage.setItem(LOCK_STATE_KEY, 'true');
   debugLog('=== APP LOCKED ===');
   debugLog('localStorage fv_locked set to "true"');
+  debugLog('hasPin:', hasPin);
   
-  // Dispatch custom event for React components to react immediately
-  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: true } }));
+  // Dispatch custom event with BOTH locked and hasPin states
+  const detail: AppLockChangeEventDetail = { locked: true, hasPin: true };
+  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail }));
 }
 
 /**
@@ -530,6 +566,8 @@ export function lockApp(): void {
 export function unlockApp(): void {
   if (typeof window === 'undefined') return;
   
+  const hasPin = hasPinInLocalStorage();
+  
   // Set lock state to false - this persists across reload
   window.localStorage.setItem(LOCK_STATE_KEY, 'false');
   window.localStorage.removeItem(LAST_ACTIVE_KEY);
@@ -537,8 +575,23 @@ export function unlockApp(): void {
   debugLog('=== APP UNLOCKED ===');
   debugLog('localStorage fv_locked set to "false"');
   
-  // Dispatch custom event for React components to react immediately
-  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: false } }));
+  // Dispatch custom event with BOTH locked and hasPin states
+  const detail: AppLockChangeEventDetail = { locked: false, hasPin };
+  window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail }));
+}
+
+/**
+ * Dispatch a PIN change event to notify components that PIN status has changed.
+ * Called when PIN is created, changed, or deleted.
+ */
+export function notifyPinChange(hasPin: boolean): void {
+  if (typeof window === 'undefined') return;
+  
+  debugLog('=== PIN CHANGE EVENT ===');
+  debugLog('hasPin:', hasPin);
+  
+  const detail: AppPinChangeEventDetail = { hasPin };
+  window.dispatchEvent(new CustomEvent(APP_PIN_CHANGE_EVENT, { detail }));
 }
 
 /**

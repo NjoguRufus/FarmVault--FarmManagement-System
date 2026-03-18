@@ -10,6 +10,12 @@
  *
  * The AppLockGate reads localStorage synchronously on boot to enforce lock
  * before any React components render.
+ * 
+ * CRITICAL: This hook must NOT clear the locked state (fv_locked) unexpectedly.
+ * The lock state should only be cleared when:
+ * 1. User enters correct PIN
+ * 2. User explicitly disables App Lock
+ * 3. User logs out
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -18,11 +24,10 @@ import {
   getDeviceAppLockStatus,
   lockApp,
   unlockApp,
-  clearQuickUnlockState,
   shouldShowAppLockPrompt,
-  getInitialLockState,
   setPinExistsFlag,
   hasPinInLocalStorage,
+  notifyPinChange,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
 
@@ -82,14 +87,26 @@ export function useAppLock(): UseAppLockResult {
       debugLog('Device status from server:', deviceStatus);
 
       // Sync the PIN exists flag with server truth
-      setPinExistsFlag(deviceStatus.hasPin);
-      setHasPinLocal(deviceStatus.hasPin);
-
-      if (!deviceStatus.hasPin) {
-        // No PIN on server - clear any stale local lock state
-        debugLog('No PIN on server - clearing stale local state');
-        clearQuickUnlockState();
+      // NOTE: We only update the flag, NOT clear the lock state
+      // The lock state should only be cleared when:
+      // 1. User enters correct PIN (in QuickUnlockScreen)
+      // 2. User explicitly disables App Lock (in Settings)
+      // 3. User logs out (in AuthContext)
+      
+      const previousHasPin = hasPinInLocalStorage();
+      if (deviceStatus.hasPin !== previousHasPin) {
+        debugLog('PIN status changed from server:', previousHasPin, '->', deviceStatus.hasPin);
+        setPinExistsFlag(deviceStatus.hasPin);
+        setHasPinLocal(deviceStatus.hasPin);
+        // Notify AppLockGate about the PIN change
+        notifyPinChange(deviceStatus.hasPin);
+      } else {
+        setHasPinLocal(deviceStatus.hasPin);
       }
+      
+      // DO NOT call clearQuickUnlockState() here!
+      // That would bypass the lock by clearing fv_locked when server temporarily
+      // returns hasPin: false due to network issues or race conditions.
     } catch (err) {
       console.error('[useAppLock] Failed to get status:', err);
       // On error, keep the local state as-is
