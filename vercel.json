@@ -83,11 +83,11 @@
   ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
     },
     {
-      "source": "/((?!api/|sitemap\\.xml|robots\\.txt|googlec9ea9b1ff81e755d\\.html|Logo/|landing/|favicon\\.ico|manifest\\.json|placeholder\\.svg).*)",
+      "source": "/:path((?!.*\\.).*)",
       "destination": "/index.html"
     }
   ]
