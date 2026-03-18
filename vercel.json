@@ -35,7 +35,7 @@
       "headers": [
         {
           "key": "Content-Type",
-          "value": "application/xml"
+          "value": "application/xml; charset=utf-8"
         },
         {
           "key": "Cache-Control",
@@ -48,7 +48,7 @@
       "headers": [
         {
           "key": "Content-Type",
-          "value": "text/plain"
+          "value": "text/plain; charset=utf-8"
         },
         {
           "key": "Cache-Control",
@@ -87,7 +87,7 @@
       "destination": "/api/$1"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|sitemap\\.xml|robots\\.txt|googlec9ea9b1ff81e755d\\.html|Logo/|landing/|favicon\\.ico|manifest\\.json|placeholder\\.svg).*)",
       "destination": "/index.html"
     }
   ]
