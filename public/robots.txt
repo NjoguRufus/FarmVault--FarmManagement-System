@@ -1,16 +1,44 @@
-# FarmVault – Kenya Farm Management Software
+# FarmVault – Smart Farm Management System for Africa
 # Allow public pages; block app and auth areas.
 
 User-agent: *
 Allow: /
 
+# Public pages to index
+Allow: /features
+Allow: /pricing
+Allow: /about
+Allow: /blog
+Allow: /farm-management-software-kenya
+Allow: /crop-monitoring-software
+Allow: /farm-inventory-management-system
+Allow: /farm-expense-tracking-software
+Allow: /farm-harvest-management-system
+Allow: /farm-project-management-software
+Allow: /farm-budgeting-software
+Allow: /crop-guides
+Allow: /farm-budget-guides
+Allow: /farm-chemicals-guide
+Allow: /crop-disease-database
+Allow: /farm-calculators
+
+# Block authenticated/private areas
 Disallow: /admin
 Disallow: /admin/
 Disallow: /dashboard
 Disallow: /dashboard/
+Disallow: /developer
+Disallow: /developer/
+Disallow: /dev
+Disallow: /dev/
+Disallow: /app
+Disallow: /app/
 Disallow: /auth
 Disallow: /auth/
 Disallow: /login
+Disallow: /sign-in
+Disallow: /sign-up
+Disallow: /onboarding
 Disallow: /setup-company
 Disallow: /projects
 Disallow: /expenses
@@ -21,13 +49,15 @@ Disallow: /harvest-collections
 Disallow: /broker
 Disallow: /manager
 Disallow: /driver
+Disallow: /staff
 Disallow: /settings
 Disallow: /billing
 Disallow: /reports
 Disallow: /employees
-Disallow: /notes
+Disallow: /records
 Disallow: /feedback
 Disallow: /support
+Disallow: /accept-invitation
 
-# Sitemap (update base URL when deploying)
-Sitemap: https://farmvault.co.ke/sitemap.xml
+# Sitemap
+Sitemap: https://farmvault.africa/sitemap.xml

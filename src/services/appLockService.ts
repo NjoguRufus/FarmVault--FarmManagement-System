@@ -2,12 +2,34 @@
  * App Lock Service
  * Handles per-device, per-user PIN-based quick unlock.
  * Secure: PIN is hashed before storage, never stored in plain text.
+ *
+ * Storage keys (all in localStorage, device-specific):
+ * - fv_device_id: Unique device identifier
+ * - fv_app_locked: Explicit lock state ('true' if locked)
+ * - fv_app_lock_timeout: Auto-lock timeout in seconds (10, 30, 60, 300)
+ * - fv_app_last_active: Timestamp when user last left the app
+ * - fv_app_unlocked_at: Timestamp when PIN was last successfully entered
  */
 
 import { supabase } from '@/lib/supabase';
 
 const DEVICE_KEY = 'fv_device_id';
 const LOCK_STATE_KEY = 'fv_app_locked';
+const LOCK_TIMEOUT_KEY = 'fv_app_lock_timeout';
+const LAST_ACTIVE_KEY = 'fv_app_last_active';
+const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
+
+export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
+
+// Debug flag - set to true to see lock logic in console
+const DEBUG_LOCK = import.meta.env.DEV;
+
+function debugLog(...args: unknown[]): void {
+  if (DEBUG_LOCK) {
+    // eslint-disable-next-line no-console
+    console.log('[AppLock]', ...args);
+  }
+}
 
 /**
  * Get or create a unique device ID stored in localStorage.
@@ -19,14 +41,14 @@ export function getOrCreateDeviceId(): string {
   if (!id) {
     id = crypto.randomUUID();
     window.localStorage.setItem(DEVICE_KEY, id);
+    debugLog('Created new device ID:', id);
   }
   return id;
 }
 
 /**
  * Hash a PIN for secure storage.
- * Uses a simple but non-reversible approach for client-side.
- * For production, consider moving to server-side KDF (e.g., argon2).
+ * Uses SHA-256 with a salt. PIN is never stored in plain text.
  */
 async function hashPin(pin: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -43,6 +65,119 @@ export interface DeviceAppLockStatus {
   passkeyEnabled: boolean;
   isLocked: boolean;
   lockedUntil: Date | null;
+}
+
+/**
+ * Get the configured auto-lock timeout from localStorage.
+ * Default is 60 seconds (1 minute).
+ */
+export function getLockTimeout(): LockTimeoutSeconds {
+  if (typeof window === 'undefined') return 60;
+  const raw = window.localStorage.getItem(LOCK_TIMEOUT_KEY);
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (parsed === 10 || parsed === 30 || parsed === 60 || parsed === 300) {
+    return parsed;
+  }
+  return 60;
+}
+
+/**
+ * Save the auto-lock timeout to localStorage.
+ * This is device-specific and persists across sessions.
+ */
+export function setLockTimeout(timeout: LockTimeoutSeconds): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LOCK_TIMEOUT_KEY, String(timeout));
+  debugLog('Timeout set to:', timeout, 'seconds');
+}
+
+/**
+ * Record the current timestamp as "last active".
+ * Called when the user leaves the app (tab hidden, window blur, etc.)
+ */
+export function recordLastActive(): void {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  window.localStorage.setItem(LAST_ACTIVE_KEY, String(now));
+  debugLog('Recorded last active:', new Date(now).toISOString());
+}
+
+/**
+ * Get the timestamp when the app was last successfully unlocked via PIN.
+ * Returns null if never unlocked or data is invalid.
+ */
+export function getUnlockedAt(): number | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(UNLOCKED_AT_KEY);
+  if (!raw) return null;
+  const ts = Number.parseInt(raw, 10);
+  return Number.isFinite(ts) ? ts : null;
+}
+
+/**
+ * Record when the PIN was successfully entered.
+ * This is used to determine if the user needs to re-enter PIN on fresh load.
+ */
+export function recordUnlockedAt(): void {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  window.localStorage.setItem(UNLOCKED_AT_KEY, String(now));
+  debugLog('Recorded unlocked at:', new Date(now).toISOString());
+}
+
+/**
+ * Determine if the app should be locked based on timeout logic.
+ *
+ * The app should lock if:
+ * 1. There's a last_active timestamp AND elapsed time >= timeout
+ * 2. OR there's no unlocked_at timestamp (never unlocked this session)
+ * 3. OR the unlocked_at timestamp is older than the timeout
+ *
+ * @param hasPin - Whether Quick Unlock is enabled (PIN exists)
+ */
+export function shouldLockNow(hasPin: boolean = true): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!hasPin) return false;
+
+  const timeout = getLockTimeout();
+  const now = Date.now();
+
+  // Check if there's a "last active" timestamp (user left and returned)
+  const lastActiveRaw = window.localStorage.getItem(LAST_ACTIVE_KEY);
+  if (lastActiveRaw) {
+    const lastActive = Number.parseInt(lastActiveRaw, 10);
+    if (Number.isFinite(lastActive)) {
+      const elapsed = now - lastActive;
+      const shouldLock = elapsed >= timeout * 1000;
+      debugLog('Last active check:', {
+        lastActive: new Date(lastActive).toISOString(),
+        elapsedMs: elapsed,
+        timeoutMs: timeout * 1000,
+        shouldLock,
+      });
+      if (shouldLock) return true;
+    }
+  }
+
+  // Check if there's an "unlocked at" timestamp (fresh load scenario)
+  const unlockedAt = getUnlockedAt();
+  if (unlockedAt === null) {
+    // Never unlocked in this browser session - require PIN
+    debugLog('No unlock timestamp found - requiring PIN');
+    return true;
+  }
+
+  // Check if the unlock timestamp is too old
+  const unlockElapsed = now - unlockedAt;
+  const unlockExpired = unlockElapsed >= timeout * 1000;
+  debugLog('Unlock timestamp check:', {
+    unlockedAt: new Date(unlockedAt).toISOString(),
+    elapsedMs: unlockElapsed,
+    timeoutMs: timeout * 1000,
+    expired: unlockExpired,
+  });
+
+  return unlockExpired;
 }
 
 /**
@@ -116,6 +251,7 @@ export async function enableQuickUnlock(
 
 /**
  * Disable quick unlock for the current device.
+ * Removes the PIN from the server and clears all local Quick Unlock state.
  */
 export async function disableQuickUnlock(): Promise<void> {
   const deviceId = getOrCreateDeviceId();
@@ -128,10 +264,9 @@ export async function disableQuickUnlock(): Promise<void> {
     throw new Error(error.message ?? 'Failed to disable quick unlock');
   }
 
-  // Clear local lock state
-  if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(LOCK_STATE_KEY);
-  }
+  // Clear all local Quick Unlock state
+  clearQuickUnlockState();
+  debugLog('Quick unlock disabled');
 }
 
 /**
@@ -156,28 +291,50 @@ export async function verifyPin(pin: string): Promise<boolean> {
 }
 
 /**
- * Check if the app should show the lock screen.
- * Call this on app start after authentication.
+ * Check if the app has an explicit lock flag set.
+ * This is separate from the timeout-based lock logic.
  */
 export function isAppLocked(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(LOCK_STATE_KEY) === 'true';
+  const locked = window.localStorage.getItem(LOCK_STATE_KEY) === 'true';
+  debugLog('isAppLocked:', locked);
+  return locked;
 }
 
 /**
- * Lock the app (show lock screen on next check).
+ * Set the explicit lock flag.
+ * This marks the app as locked so the lock screen will show.
  */
 export function lockApp(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(LOCK_STATE_KEY, 'true');
+  debugLog('App locked');
 }
 
 /**
- * Unlock the app (hide lock screen).
+ * Clear the lock flag and record the unlock timestamp.
+ * This is called after successful PIN verification.
  */
 export function unlockApp(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(LOCK_STATE_KEY);
+  window.localStorage.removeItem(LAST_ACTIVE_KEY);
+  recordUnlockedAt();
+  debugLog('App unlocked');
+}
+
+/**
+ * Clear all Quick Unlock state from localStorage.
+ * Call this on logout to ensure fresh state on next login.
+ * Does NOT clear the device ID - that persists to identify the device.
+ */
+export function clearQuickUnlockState(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(LOCK_STATE_KEY);
+  window.localStorage.removeItem(LAST_ACTIVE_KEY);
+  window.localStorage.removeItem(UNLOCKED_AT_KEY);
+  // Note: We keep LOCK_TIMEOUT_KEY as a device preference
+  debugLog('Quick unlock state cleared');
 }
 
 /**

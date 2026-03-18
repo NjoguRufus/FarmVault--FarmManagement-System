@@ -1,21 +1,40 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { InstallFarmVault } from "@/components/pwa/InstallFarmVault";
 
-const navLinks = ["Home", "Features", "How It Works", "Pricing", "About", "Contact"];
+const navLinks = [
+  { name: "Home", href: "/", type: "route" },
+  { name: "Features", href: "/features", type: "route" },
+  { name: "How It Works", href: "/#how-it-works", type: "anchor" },
+  { name: "Pricing", href: "/pricing", type: "route" },
+  { name: "About", href: "/about", type: "route" },
+  { name: "Blog", href: "/blog", type: "route" },
+] as const;
 
 export function LandingNavbar() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  const handleNavClick = (link: typeof navLinks[number]) => {
+    setOpen(false);
+    if (link.type === "anchor" && location.pathname === "/") {
+      const id = link.href.replace("/#", "");
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  };
 
   return (
     <motion.nav
@@ -38,10 +57,23 @@ export function LandingNavbar() {
 
         <ul className="hidden lg:flex items-center gap-8">
           {navLinks.map((link, i) => (
-            <motion.li key={link} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * i + 0.3, duration: 0.4 }}>
-              <a href={`#${link.toLowerCase().replace(/ /g, "-")}`} className={`text-sm font-medium transition-colors duration-200 hover:text-primary ${scrolled ? "text-muted-foreground" : "text-primary-foreground/80 hover:text-primary-foreground"}`}>
-                {link}
-              </a>
+            <motion.li key={link.name} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * i + 0.3, duration: 0.4 }}>
+              {link.type === "route" ? (
+                <Link
+                  to={link.href}
+                  className={`text-sm font-medium transition-colors duration-200 hover:text-primary ${scrolled ? "text-muted-foreground" : "text-primary-foreground/80 hover:text-primary-foreground"}`}
+                >
+                  {link.name}
+                </Link>
+              ) : (
+                <a
+                  href={link.href}
+                  onClick={() => handleNavClick(link)}
+                  className={`text-sm font-medium transition-colors duration-200 hover:text-primary ${scrolled ? "text-muted-foreground" : "text-primary-foreground/80 hover:text-primary-foreground"}`}
+                >
+                  {link.name}
+                </a>
+              )}
             </motion.li>
           ))}
         </ul>
@@ -70,10 +102,24 @@ export function LandingNavbar() {
             <div className="p-6">
               <ul className="flex flex-col gap-4 mb-6">
                 {navLinks.map((link) => (
-                  <li key={link}>
-                    <a href={`#${link.toLowerCase().replace(/ /g, "-")}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors" onClick={() => setOpen(false)}>
-                      {link}
-                    </a>
+                  <li key={link.name}>
+                    {link.type === "route" ? (
+                      <Link
+                        to={link.href}
+                        className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                        onClick={() => setOpen(false)}
+                      >
+                        {link.name}
+                      </Link>
+                    ) : (
+                      <a
+                        href={link.href}
+                        className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                        onClick={() => handleNavClick(link)}
+                      >
+                        {link.name}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>

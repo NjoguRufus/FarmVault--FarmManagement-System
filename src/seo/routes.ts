@@ -7,6 +7,10 @@ const BASE = "";
 
 export const SEO_ROUTES = {
   home: `${BASE}/`,
+  // Core pages
+  features: `${BASE}/features`,
+  pricing: `${BASE}/pricing`,
+  about: `${BASE}/about`,
   // Product pillar pages
   farmManagementSoftwareKenya: `${BASE}/farm-management-software-kenya`,
   cropMonitoringSoftware: `${BASE}/crop-monitoring-software`,
@@ -47,6 +51,9 @@ export const SEO_ROUTES = {
 export function getAllSeoPaths(): string[] {
   return [
     SEO_ROUTES.home,
+    SEO_ROUTES.features,
+    SEO_ROUTES.pricing,
+    SEO_ROUTES.about,
     SEO_ROUTES.farmManagementSoftwareKenya,
     SEO_ROUTES.cropMonitoringSoftware,
     SEO_ROUTES.farmInventoryManagement,

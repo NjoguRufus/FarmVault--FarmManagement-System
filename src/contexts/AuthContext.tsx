@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
 import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
+import { clearQuickUnlockState } from '@/services/appLockService';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -566,6 +567,7 @@ export function AuthProvider({
       
       // Confirmed logout: either we never had a cached user, or we previously confirmed sign-in
       // and now Clerk says signed out (explicit logout action).
+      clearQuickUnlockState(); // Clear Quick Unlock so next login requires full auth
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
@@ -1123,6 +1125,9 @@ export function AuthProvider({
   };
 
   const logout = () => {
+    // Clear Quick Unlock state on logout so next login requires full authentication
+    clearQuickUnlockState();
+
     if (isEmergencySession) {
       writeEmergencySession(null);
       setUser(null);
