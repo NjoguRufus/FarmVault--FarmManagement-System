@@ -4,8 +4,8 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 
 const contactItems = [
-  { icon: Phone, label: "Phone", value: "+254 700 123 456" },
-  { icon: Mail, label: "Email", value: "hello@farmvault.co.ke" },
+  { icon: Phone, label: "Phone", value: "0714 748299" },
+  { icon: Mail, label: "Email", value: "hello@farmvault.africa" },
   { icon: MapPin, label: "Office", value: "Nairobi, Kenya" },
 ];
 
