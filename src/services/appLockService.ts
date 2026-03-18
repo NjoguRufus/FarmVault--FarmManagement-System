@@ -9,23 +9,26 @@
  *
  * Storage keys (all in localStorage, device-specific):
  * - fv_device_id: Unique device identifier
- * - fv_app_locked: Explicit lock state ('true' if locked)
+ * - fv_locked: Explicit lock state ('true' if locked, 'false' if unlocked)
+ * - fv_pin_exists: Whether a PIN has been created ('true' when PIN exists)
  * - fv_app_lock_timeout: Auto-lock timeout in seconds (10, 30, 60, 300)
  * - fv_app_last_active: Timestamp when user last left the app
  * - fv_app_unlocked_at: Timestamp when PIN was last successfully entered
  * - fv_pin_setup_skipped: User skipped PIN setup for this session
  * 
  * CRITICAL RULE: The PIN lock screen should ONLY appear when:
- * 1. A PIN has been created and verified on the server
- * 2. The app is in a locked state (manual lock or timeout)
+ * 1. A PIN has been created and verified on the server (fv_pin_exists = 'true')
+ * 2. The app is in a locked state (fv_locked = 'true')
  * 
+ * Lock state persists across page reloads via localStorage.
  * If no PIN exists on the server, NEVER show the PIN lock screen.
  */
 
 import { supabase } from '@/lib/supabase';
 
 const DEVICE_KEY = 'fv_device_id';
-const LOCK_STATE_KEY = 'fv_app_locked';
+const LOCK_STATE_KEY = 'fv_locked'; // "true" when locked, "false" when unlocked
+const PIN_EXISTS_KEY = 'fv_pin_exists'; // "true" when PIN is created on server
 const LOCK_TIMEOUT_KEY = 'fv_app_lock_timeout';
 const LAST_ACTIVE_KEY = 'fv_app_last_active';
 const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
@@ -33,7 +36,7 @@ const PIN_SETUP_SKIPPED_KEY = 'fv_pin_setup_skipped';
 const PROMPT_DISMISSED_KEY = 'fv_app_lock_prompt_dismissed';
 // Version key to track migrations - increment when we need to reset state
 const STATE_VERSION_KEY = 'fv_quick_unlock_version';
-const CURRENT_STATE_VERSION = '3'; // Increment this to force reset of broken states
+const CURRENT_STATE_VERSION = '4'; // Increment this to force reset of broken states
 
 export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
 
@@ -66,10 +69,13 @@ export function migrateQuickUnlockState(): void {
     // Clear all lock-related state to start fresh
     // This fixes users who got stuck with broken lock state
     window.localStorage.removeItem(LOCK_STATE_KEY);
+    window.localStorage.removeItem(PIN_EXISTS_KEY);
     window.localStorage.removeItem(LAST_ACTIVE_KEY);
     window.localStorage.removeItem(UNLOCKED_AT_KEY);
     window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
     window.localStorage.removeItem(PROMPT_DISMISSED_KEY);
+    // Also remove old key name if it exists
+    window.localStorage.removeItem('fv_app_locked');
     // Keep device ID and timeout preference
     
     // Mark migration as complete
@@ -89,6 +95,7 @@ export function resetAllQuickUnlockState(): void {
   debugLog('=== RESETTING ALL QUICK UNLOCK STATE ===');
   
   window.localStorage.removeItem(LOCK_STATE_KEY);
+  window.localStorage.removeItem(PIN_EXISTS_KEY);
   window.localStorage.removeItem(LAST_ACTIVE_KEY);
   window.localStorage.removeItem(UNLOCKED_AT_KEY);
   window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
@@ -202,8 +209,10 @@ export function getLockTimeout(): LockTimeoutSeconds {
   const raw = window.localStorage.getItem(LOCK_TIMEOUT_KEY);
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (parsed === 10 || parsed === 30 || parsed === 60 || parsed === 300) {
+    debugLog('[TIMEOUT] Loaded timeout from localStorage:', parsed, 'seconds');
     return parsed;
   }
+  debugLog('[TIMEOUT] No valid timeout in localStorage, using default: 60 seconds');
   return 60;
 }
 
@@ -214,18 +223,21 @@ export function getLockTimeout(): LockTimeoutSeconds {
 export function setLockTimeout(timeout: LockTimeoutSeconds): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(LOCK_TIMEOUT_KEY, String(timeout));
-  debugLog('Timeout set to:', timeout, 'seconds');
+  debugLog('[TIMEOUT] Saved timeout to localStorage:', timeout, 'seconds');
 }
 
 /**
- * Record the current timestamp as "last active".
+ * Record the current timestamp as "last hidden".
  * Called when the user leaves the app (tab hidden, window blur, etc.)
+ * This is used to calculate elapsed time when user returns.
  */
 export function recordLastActive(): void {
   if (typeof window === 'undefined') return;
   const now = Date.now();
   window.localStorage.setItem(LAST_ACTIVE_KEY, String(now));
-  debugLog('Recorded last active:', new Date(now).toISOString());
+  debugLog('[TIMER] === APP HIDDEN/BLURRED ===');
+  debugLog('[TIMER] Saved fv_app_last_active:', new Date(now).toISOString());
+  debugLog('[TIMER] Current timeout setting:', getLockTimeout(), 'seconds');
 }
 
 /**
@@ -263,45 +275,62 @@ export function recordUnlockedAt(): void {
  */
 export function shouldLockNow(hasPin: boolean = true): boolean {
   if (typeof window === 'undefined') return false;
-  if (!hasPin) return false;
+  if (!hasPin) {
+    debugLog('[TIMER] shouldLockNow: No PIN exists, returning false');
+    return false;
+  }
 
   const timeout = getLockTimeout();
   const now = Date.now();
+  
+  debugLog('[TIMER] === CHECKING IF SHOULD LOCK ===');
+  debugLog('[TIMER] Current timeout setting:', timeout, 'seconds');
 
   // Check if there's a "last active" timestamp (user left and returned)
   const lastActiveRaw = window.localStorage.getItem(LAST_ACTIVE_KEY);
   if (lastActiveRaw) {
     const lastActive = Number.parseInt(lastActiveRaw, 10);
     if (Number.isFinite(lastActive)) {
-      const elapsed = now - lastActive;
-      const shouldLock = elapsed >= timeout * 1000;
-      debugLog('Last active check:', {
-        lastActive: new Date(lastActive).toISOString(),
-        elapsedMs: elapsed,
-        timeoutMs: timeout * 1000,
-        shouldLock,
-      });
-      if (shouldLock) return true;
+      const elapsedMs = now - lastActive;
+      const elapsedSeconds = Math.round(elapsedMs / 1000);
+      const timeoutMs = timeout * 1000;
+      const shouldLock = elapsedMs >= timeoutMs;
+      
+      debugLog('[TIMER] Last hidden check:');
+      debugLog('[TIMER]   - Hidden at:', new Date(lastActive).toISOString());
+      debugLog('[TIMER]   - Now:', new Date(now).toISOString());
+      debugLog('[TIMER]   - Elapsed:', elapsedSeconds, 'seconds (' + elapsedMs + 'ms)');
+      debugLog('[TIMER]   - Timeout:', timeout, 'seconds (' + timeoutMs + 'ms)');
+      debugLog('[TIMER]   - Should lock?', shouldLock ? 'YES (elapsed >= timeout)' : 'NO (elapsed < timeout)');
+      
+      if (shouldLock) {
+        debugLog('[TIMER] *** TIMER EXPIRED - LOCKING APP ***');
+        return true;
+      } else {
+        debugLog('[TIMER] Timer not expired yet, app stays unlocked');
+      }
     }
+  } else {
+    debugLog('[TIMER] No last_active timestamp found (app was not hidden recently)');
   }
 
   // Check if there's an "unlocked at" timestamp (fresh load scenario)
   const unlockedAt = getUnlockedAt();
   if (unlockedAt === null) {
-    // Never unlocked in this browser session - require PIN
-    debugLog('No unlock timestamp found - requiring PIN');
+    debugLog('[TIMER] No unlock timestamp found - this is a fresh session, requiring PIN');
     return true;
   }
 
   // Check if the unlock timestamp is too old
-  const unlockElapsed = now - unlockedAt;
-  const unlockExpired = unlockElapsed >= timeout * 1000;
-  debugLog('Unlock timestamp check:', {
-    unlockedAt: new Date(unlockedAt).toISOString(),
-    elapsedMs: unlockElapsed,
-    timeoutMs: timeout * 1000,
-    expired: unlockExpired,
-  });
+  const unlockElapsedMs = now - unlockedAt;
+  const unlockElapsedSeconds = Math.round(unlockElapsedMs / 1000);
+  const unlockExpired = unlockElapsedMs >= timeout * 1000;
+  
+  debugLog('[TIMER] Unlock timestamp check:');
+  debugLog('[TIMER]   - Unlocked at:', new Date(unlockedAt).toISOString());
+  debugLog('[TIMER]   - Elapsed since unlock:', unlockElapsedSeconds, 'seconds');
+  debugLog('[TIMER]   - Timeout:', timeout, 'seconds');
+  debugLog('[TIMER]   - Session expired?', unlockExpired ? 'YES' : 'NO');
 
   return unlockExpired;
 }
@@ -373,6 +402,10 @@ export async function enableQuickUnlock(
   if (error) {
     throw new Error(error.message ?? 'Failed to enable quick unlock');
   }
+  
+  // Set PIN exists flag in localStorage so we know to show lock screen on reload
+  setPinExistsFlag(true);
+  debugLog('PIN created successfully - fv_pin_exists set to "true"');
 }
 
 /**
@@ -390,9 +423,9 @@ export async function disableQuickUnlock(): Promise<void> {
     throw new Error(error.message ?? 'Failed to disable quick unlock');
   }
 
-  // Clear all local Quick Unlock state
+  // Clear all local Quick Unlock state including PIN exists flag
   clearQuickUnlockState();
-  debugLog('Quick unlock disabled');
+  debugLog('Quick unlock disabled - all local state cleared');
 }
 
 /**
@@ -417,6 +450,27 @@ export async function verifyPin(pin: string): Promise<boolean> {
 }
 
 /**
+ * Check if PIN exists flag is set in localStorage.
+ * This is set when a PIN is successfully created on the server.
+ */
+export function hasPinInLocalStorage(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hasPin = window.localStorage.getItem(PIN_EXISTS_KEY) === 'true';
+  debugLog('hasPinInLocalStorage:', hasPin);
+  return hasPin;
+}
+
+/**
+ * Set the PIN exists flag in localStorage.
+ * Called after PIN is successfully created on the server.
+ */
+export function setPinExistsFlag(exists: boolean): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PIN_EXISTS_KEY, exists ? 'true' : 'false');
+  debugLog('setPinExistsFlag:', exists);
+}
+
+/**
  * Check if the app has an explicit lock flag set.
  * This is separate from the timeout-based lock logic.
  */
@@ -425,6 +479,24 @@ export function isAppLocked(): boolean {
   const locked = window.localStorage.getItem(LOCK_STATE_KEY) === 'true';
   debugLog('isAppLocked:', locked);
   return locked;
+}
+
+/**
+ * Get the initial lock state synchronously from localStorage.
+ * This is used to hydrate React state BEFORE server calls.
+ * Returns { hasPin, isLocked } based on localStorage only.
+ */
+export function getInitialLockState(): { hasPin: boolean; isLocked: boolean } {
+  if (typeof window === 'undefined') {
+    return { hasPin: false, isLocked: false };
+  }
+  
+  const hasPin = window.localStorage.getItem(PIN_EXISTS_KEY) === 'true';
+  const isLocked = window.localStorage.getItem(LOCK_STATE_KEY) === 'true';
+  
+  debugLog('getInitialLockState from localStorage:', { hasPin, isLocked });
+  
+  return { hasPin, isLocked };
 }
 
 /**
@@ -440,8 +512,11 @@ export const APP_LOCK_CHANGE_EVENT = 'fv-app-lock-change';
  */
 export function lockApp(): void {
   if (typeof window === 'undefined') return;
+  
+  // Set lock state to true - this persists across reload
   window.localStorage.setItem(LOCK_STATE_KEY, 'true');
-  debugLog('App locked');
+  debugLog('=== APP LOCKED ===');
+  debugLog('localStorage fv_locked set to "true"');
   
   // Dispatch custom event for React components to react immediately
   window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: true } }));
@@ -454,10 +529,13 @@ export function lockApp(): void {
  */
 export function unlockApp(): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(LOCK_STATE_KEY);
+  
+  // Set lock state to false - this persists across reload
+  window.localStorage.setItem(LOCK_STATE_KEY, 'false');
   window.localStorage.removeItem(LAST_ACTIVE_KEY);
   recordUnlockedAt();
-  debugLog('App unlocked');
+  debugLog('=== APP UNLOCKED ===');
+  debugLog('localStorage fv_locked set to "false"');
   
   // Dispatch custom event for React components to react immediately
   window.dispatchEvent(new CustomEvent(APP_LOCK_CHANGE_EVENT, { detail: { locked: false } }));
@@ -471,10 +549,11 @@ export function unlockApp(): void {
 export function clearQuickUnlockState(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(LOCK_STATE_KEY);
+  window.localStorage.removeItem(PIN_EXISTS_KEY);
   window.localStorage.removeItem(LAST_ACTIVE_KEY);
   window.localStorage.removeItem(UNLOCKED_AT_KEY);
   // Note: We keep LOCK_TIMEOUT_KEY as a device preference
-  debugLog('Quick unlock state cleared');
+  debugLog('Quick unlock state cleared (fv_locked, fv_pin_exists, etc.)');
 }
 
 /**

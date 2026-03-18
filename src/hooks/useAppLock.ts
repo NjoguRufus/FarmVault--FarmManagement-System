@@ -5,10 +5,10 @@
  * IMPORTANT: Quick Unlock is an OPTIONAL security layer on top of normal login.
  * The PIN lock screen should ONLY appear when:
  * 1. Server has confirmed a PIN exists for this device
- * 2. The app is in a locked state (manual lock or timeout)
+ * 2. AND the app is in a locked state (manual lock or timeout)
  *
- * If no PIN exists on the server, we should NEVER show the PIN lock screen.
- * Instead, we might show a setup flow if the user wants to enable Quick Unlock.
+ * CRITICAL FIX: Lock state now persists across reloads via localStorage.
+ * We hydrate from localStorage BEFORE render to prevent bypass.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -22,6 +22,9 @@ import {
   shouldLockNow,
   clearQuickUnlockState,
   shouldShowAppLockPrompt,
+  getInitialLockState,
+  setPinExistsFlag,
+  getLockTimeout,
   APP_LOCK_CHANGE_EVENT,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
@@ -31,7 +34,7 @@ export interface UseAppLockResult {
   hasPinOnServer: boolean;
   /** Whether the app is currently locked and should show lock screen */
   isLocked: boolean;
-  /** Whether we're still loading the server status */
+  /** Whether we're still loading the server status (null = not yet determined) */
   isLoading: boolean;
   /** Whether to show the first-time App Lock prompt */
   showPrompt: boolean;
@@ -52,18 +55,38 @@ function debugLog(...args: unknown[]): void {
 }
 
 /**
+ * Get initial state synchronously from localStorage.
+ * This runs BEFORE render to hydrate lock state immediately.
+ */
+function getHydratedInitialState(): { hasPin: boolean; isLocked: boolean } {
+  const state = getInitialLockState();
+  debugLog('=== HYDRATING LOCK STATE FROM LOCALSTORAGE ===');
+  debugLog('fv_pin_exists:', state.hasPin);
+  debugLog('fv_locked:', state.isLocked);
+  return state;
+}
+
+/**
  * Hook to manage app lock state.
  * Call this at the app level to determine if lock screen should be shown.
  *
- * CRITICAL: We do NOT initialize lock state from localStorage.
- * We wait for server confirmation that a PIN exists before showing lock screen.
- * This prevents the bug where users see a lock screen without ever setting up a PIN.
+ * CRITICAL: We NOW initialize lock state from localStorage BEFORE render.
+ * This ensures lock screen shows immediately on reload when locked.
  */
 export function useAppLock(): UseAppLockResult {
   const { user } = useAuth();
+  
+  // CRITICAL: Hydrate initial state from localStorage synchronously
+  // This ensures we start with the correct lock state before any render
+  const initialState = useRef(getHydratedInitialState());
+  
   const [status, setStatus] = useState<DeviceAppLockStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [locked, setLocked] = useState(false);
+  // isLoading starts as true to block initial render
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Initialize locked state from localStorage - CRITICAL for reload persistence
+  const [locked, setLocked] = useState<boolean>(initialState.current.isLocked && initialState.current.hasPin);
+  // Track if we potentially have a PIN (from localStorage) before server confirms
+  const [hasPinLocal, setHasPinLocal] = useState<boolean>(initialState.current.hasPin);
   
   // Track if we've fetched status from server
   const hasFetchedStatus = useRef(false);
@@ -84,9 +107,12 @@ export function useAppLock(): UseAppLockResult {
       hasFetchedStatus.current = true;
       debugLog('Device status from server:', deviceStatus);
 
+      // Sync the PIN exists flag with server truth
+      setPinExistsFlag(deviceStatus.hasPin);
+      setHasPinLocal(deviceStatus.hasPin);
+
       if (!deviceStatus.hasPin) {
-        // No PIN on server - this is the key fix!
-        // Clear any stale local lock state and DO NOT show lock screen
+        // No PIN on server - clear any stale local lock state
         debugLog('No PIN on server - clearing stale local state, no lock screen');
         clearQuickUnlockState();
         setLocked(false);
@@ -97,9 +123,9 @@ export function useAppLock(): UseAppLockResult {
       // PIN exists on server, now check if we should be locked
       let shouldBeLocked = false;
 
-      // Check explicit lock flag (set by "Lock now" button)
+      // Check explicit lock flag from localStorage (set by "Lock now" button)
       if (isAppLocked()) {
-        debugLog('Explicit lock flag is set');
+        debugLog('Explicit lock flag is set in localStorage - app should be locked');
         shouldBeLocked = true;
       }
 
@@ -110,14 +136,21 @@ export function useAppLock(): UseAppLockResult {
         shouldBeLocked = true;
       }
 
-      debugLog('Final lock state:', shouldBeLocked);
+      debugLog('=== FINAL LOCK STATE ===');
+      debugLog('shouldBeLocked:', shouldBeLocked);
       setLocked(shouldBeLocked);
     } catch (err) {
       console.error('[useAppLock] Failed to get status:', err);
-      // On error, assume no PIN and don't lock
-      // This is safer than locking user out
-      debugLog('Error fetching status - assuming no PIN, not locking');
-      setLocked(false);
+      // On error, if localStorage says we have PIN and are locked, stay locked
+      // This is safer than unlocking and exposing data
+      const localState = getInitialLockState();
+      if (localState.hasPin && localState.isLocked) {
+        debugLog('Error fetching status - but localStorage shows locked, staying locked');
+        setLocked(true);
+      } else {
+        debugLog('Error fetching status - assuming no PIN, not locking');
+        setLocked(false);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -137,56 +170,74 @@ export function useAppLock(): UseAppLockResult {
       const customEvent = event as CustomEvent<{ locked: boolean }>;
       debugLog('Lock change event received:', customEvent.detail);
       
-      // Only respond to lock events if we have a PIN on the server
-      if (status?.hasPin) {
+      // Respond to lock events if we have a PIN (from server OR localStorage)
+      if (status?.hasPin || hasPinLocal) {
         setLocked(customEvent.detail?.locked ?? false);
       } else {
-        debugLog('Ignoring lock event - no PIN on server');
+        debugLog('Ignoring lock event - no PIN');
       }
     };
 
     window.addEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
     return () => window.removeEventListener(APP_LOCK_CHANGE_EVENT, handleLockChange);
-  }, [status?.hasPin]);
+  }, [status?.hasPin, hasPinLocal]);
 
-  // Track visibility changes for timeout-based locking
+  // Track visibility changes for timeout-based auto-locking
   useEffect(() => {
-    // Only track if we have a PIN on server
-    if (!status?.hasPin) {
-      debugLog('Not tracking visibility - no PIN on server');
+    // Only track if we have a PIN (from server OR localStorage)
+    const hasPin = status?.hasPin || hasPinLocal;
+    if (!hasPin) {
+      debugLog('[VISIBILITY] Not tracking - no PIN exists');
       return;
     }
 
+    const currentTimeout = getLockTimeout();
+    debugLog('[VISIBILITY] === ENABLING VISIBILITY TRACKING ===');
+    debugLog('[VISIBILITY] Current timeout setting:', currentTimeout, 'seconds');
+    debugLog('[VISIBILITY] Will auto-lock when app is hidden for longer than', currentTimeout, 'seconds');
+
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        debugLog('App hidden, recording last active');
+        debugLog('[VISIBILITY] ========================================');
+        debugLog('[VISIBILITY] EVENT: visibilitychange → HIDDEN');
+        debugLog('[VISIBILITY] User left the app/tab');
+        debugLog('[VISIBILITY] ========================================');
         recordLastActive();
       } else {
-        debugLog('App visible, checking if should lock');
+        debugLog('[VISIBILITY] ========================================');
+        debugLog('[VISIBILITY] EVENT: visibilitychange → VISIBLE');
+        debugLog('[VISIBILITY] User returned to the app/tab');
+        debugLog('[VISIBILITY] ========================================');
         if (shouldLockNow(true)) {
-          debugLog('Timeout elapsed on return, locking');
+          debugLog('[VISIBILITY] *** AUTO-LOCK TRIGGERED ON RETURN ***');
           lockApp();
           setLocked(true);
+        } else {
+          debugLog('[VISIBILITY] No lock needed - timeout not exceeded');
         }
       }
     };
 
     const handleBeforeUnload = () => {
-      debugLog('beforeunload, recording last active');
+      debugLog('[VISIBILITY] EVENT: beforeunload - recording timestamp before page unload');
       recordLastActive();
     };
 
     const handleWindowBlur = () => {
-      debugLog('Window blur, recording last active');
+      debugLog('[VISIBILITY] EVENT: window blur - user switched away');
       recordLastActive();
     };
 
     const handleWindowFocus = () => {
-      debugLog('Window focus, checking if should lock');
+      debugLog('[VISIBILITY] ========================================');
+      debugLog('[VISIBILITY] EVENT: window focus - user returned');
+      debugLog('[VISIBILITY] ========================================');
       if (shouldLockNow(true)) {
-        debugLog('Timeout elapsed on focus, locking');
+        debugLog('[VISIBILITY] *** AUTO-LOCK TRIGGERED ON FOCUS ***');
         lockApp();
         setLocked(true);
+      } else {
+        debugLog('[VISIBILITY] No lock needed - timeout not exceeded');
       }
     };
 
@@ -195,30 +246,30 @@ export function useAppLock(): UseAppLockResult {
     window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('focus', handleWindowFocus);
 
-    debugLog('Visibility tracking enabled (PIN exists on server)');
-
     return () => {
+      debugLog('[VISIBILITY] Removing visibility tracking listeners');
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('focus', handleWindowFocus);
     };
-  }, [status?.hasPin]);
+  }, [status?.hasPin, hasPinLocal]);
 
   // Lock function - only works if PIN exists
   const lock = useCallback(() => {
-    if (!status?.hasPin) {
-      debugLog('Cannot lock - no PIN on server');
+    const hasPin = status?.hasPin || hasPinLocal;
+    if (!hasPin) {
+      debugLog('Cannot lock - no PIN');
       return;
     }
-    debugLog('Manual lock requested');
+    debugLog('=== MANUAL LOCK REQUESTED ===');
     lockApp();
     setLocked(true);
-  }, [status?.hasPin]);
+  }, [status?.hasPin, hasPinLocal]);
 
   // Unlock function
   const unlock = useCallback(() => {
-    debugLog('Unlocking app');
+    debugLog('=== UNLOCK REQUESTED ===');
     unlockApp();
     setLocked(false);
   }, []);
@@ -227,8 +278,11 @@ export function useAppLock(): UseAppLockResult {
   // Show only if: not loading, no PIN exists on server, and prompt not dismissed
   const showPrompt = !isLoading && !status?.hasPin && shouldShowAppLockPrompt();
 
+  // Use server status if available, otherwise fall back to localStorage
+  const hasPinOnServer = status?.hasPin ?? hasPinLocal;
+
   return {
-    hasPinOnServer: status?.hasPin ?? false,
+    hasPinOnServer,
     isLocked: locked,
     isLoading,
     showPrompt,
