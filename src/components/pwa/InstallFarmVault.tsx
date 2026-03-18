@@ -1,16 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, ChevronDown, Download, ExternalLink, Smartphone } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, Loader2, Share2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Sheet,
   SheetContent,
@@ -30,63 +22,31 @@ interface InstallFarmVaultProps {
 
 export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
-  const { canInstall, isInstalled, promptInstall } = usePwaInstall();
-  const [panelOpen, setPanelOpen] = useState(false);
+  const { canInstall, isInstalled, installState, promptInstall, getFallbackInstructions } = usePwaInstall();
+  const [showFallback, setShowFallback] = useState(false);
   const isMobile = useIsMobile();
 
   const handleOpenApp = () => {
-    setPanelOpen(false);
     navigate("/dashboard");
   };
 
-  const handleInstallRecommended = async () => {
-    const result = await promptInstall();
-    if (result === "accepted") {
-      toast.success("FarmVault is installing. Open it from your home screen when ready.");
-      setPanelOpen(false);
-    } else if (result === "dismissed") {
-      toast.info("Install cancelled. You can try again from the Install button.");
+  const handleInstallClick = async () => {
+    // If install prompt is available, trigger it directly
+    if (canInstall) {
+      const result = await promptInstall();
+      if (result === "accepted") {
+        toast.success("FarmVault installed! Open it from your home screen.");
+      } else if (result === "dismissed") {
+        toast.info("Install cancelled. You can try again anytime.");
+      }
+      return;
     }
-    if (result !== "unavailable") setPanelOpen(false);
+
+    // If not available, show fallback instructions
+    setShowFallback(true);
   };
 
-  const triggerLabel = isInstalled ? "Open FarmVault" : "Install FarmVault";
-  const triggerIcon = isInstalled ? <CheckCircle2 className="h-4 w-4" /> : <ChevronDown className="h-4 w-4 opacity-90" />;
-
-  const triggerButton = (
-    <Button
-      type="button"
-      size={compact ? "sm" : "lg"}
-      className={cn(
-        "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
-        compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
-        className,
-      )}
-    >
-      {triggerLabel}
-      {!isInstalled && triggerIcon}
-      {isInstalled && <ExternalLink className="h-4 w-4 ml-1" />}
-    </Button>
-  );
-
-  const optionsContent = (
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="secondary"
-        className="w-full justify-start h-auto py-3 rounded-xl font-medium"
-        onClick={handleInstallRecommended}
-        disabled={!canInstall}
-      >
-        <CheckCircle2 className="h-4 w-4 mr-2 text-primary" />
-        Install App
-      </Button>
-      <p className="text-xs text-muted-foreground pt-1">
-        Works on modern browsers that support installing apps from the address bar.
-      </p>
-    </div>
-  );
-
+  // If already installed, show "Open" button
   if (isInstalled) {
     return (
       <Button
@@ -99,59 +59,92 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
           className,
         )}
       >
-        <CheckCircle2 className="h-4 w-4" />
+        <CheckCircle2 className="h-4 w-4 mr-2" />
         Open FarmVault
         <ExternalLink className="h-4 w-4 ml-1" />
       </Button>
     );
   }
 
+  const isPrompting = installState === "prompting";
+  const fallbackInfo = getFallbackInstructions();
+
   return (
     <>
-      {!isMobile ? (
-        <Popover open={panelOpen} onOpenChange={setPanelOpen}>
-          <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
-          <PopoverContent
-            align="start"
-            sideOffset={10}
-            className="w-[20rem] rounded-2xl border border-border bg-card p-4 shadow-lg"
-          >
-            <p className="text-sm font-semibold text-foreground mb-1">Install FarmVault</p>
-            <p className="text-xs text-muted-foreground mb-4">
-              Install FarmVault for a clean icon and standalone experience.
-            </p>
-            {optionsContent}
-          </PopoverContent>
-        </Popover>
-      ) : (
-        <>
-          <Button
-            type="button"
-            size={compact ? "sm" : "lg"}
-            onClick={() => setPanelOpen(true)}
-            className={cn(
-              "gradient-primary text-primary-foreground btn-luxury shadow-luxury",
-              compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
-              className,
-            )}
-          >
-            {triggerLabel}
-            {triggerIcon}
-          </Button>
-          <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
-            <SheetContent side="bottom" className="rounded-t-3xl">
-              <SheetHeader className="text-left">
-                <SheetTitle>Install FarmVault</SheetTitle>
-                <SheetDescription>
-                  Install FarmVault for a clean home screen icon and native-like experience.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-5">{optionsContent}</div>
-            </SheetContent>
-          </Sheet>
-        </>
-      )}
+      <Button
+        type="button"
+        size={compact ? "sm" : "lg"}
+        onClick={handleInstallClick}
+        disabled={isPrompting}
+        className={cn(
+          "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+          compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+          className,
+        )}
+      >
+        {isPrompting ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            Installing...
+          </>
+        ) : (
+          <>
+            <Download className="h-4 w-4 mr-2" />
+            Install FarmVault
+          </>
+        )}
+      </Button>
 
+      {/* Fallback Instructions Sheet */}
+      <Sheet open={showFallback} onOpenChange={setShowFallback}>
+        <SheetContent side="bottom" className="rounded-t-3xl">
+          <SheetHeader className="text-left">
+            <SheetTitle>{fallbackInfo?.title || "Install FarmVault"}</SheetTitle>
+            <SheetDescription>
+              Follow these steps to install FarmVault on your device.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-6 space-y-4">
+            {fallbackInfo?.steps.map((step, index) => (
+              <div key={index} className="flex items-start gap-4">
+                <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center shrink-0 text-primary-foreground font-bold text-sm">
+                  {index + 1}
+                </div>
+                <div className="flex-1 pt-1">
+                  <p className="text-foreground">{step}</p>
+                </div>
+              </div>
+            ))}
+
+            {/* Visual hint for iOS */}
+            {fallbackInfo?.title.includes("iPhone") && (
+              <div className="mt-6 p-4 bg-secondary/50 rounded-xl flex items-center gap-3">
+                <Share2 className="h-6 w-6 text-primary" />
+                <p className="text-sm text-muted-foreground">
+                  Look for the Share icon at the bottom of Safari
+                </p>
+              </div>
+            )}
+
+            {/* Visual hint for Android */}
+            {fallbackInfo?.title.includes("Android") && (
+              <div className="mt-6 p-4 bg-secondary/50 rounded-xl flex items-center gap-3">
+                <MoreVertical className="h-6 w-6 text-primary" />
+                <p className="text-sm text-muted-foreground">
+                  Look for the three-dot menu in Chrome
+                </p>
+              </div>
+            )}
+
+            <div className="pt-4 border-t border-border">
+              <p className="text-xs text-muted-foreground text-center">
+                Once installed, FarmVault will appear on your home screen and work offline.
+              </p>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </>
   );
 }
