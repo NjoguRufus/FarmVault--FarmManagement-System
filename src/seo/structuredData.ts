@@ -1,7 +1,12 @@
 /**
  * JSON-LD structured data for FarmVault – Organization, SoftwareApplication,
  * Article, FAQ, Breadcrumb, LocalBusiness.
+ * 
+ * IMPORTANT: All URLs use the canonical domain (farmvault.africa) to ensure
+ * consistent structured data regardless of which host the page is accessed from.
  */
+
+import { CANONICAL_DOMAIN } from "./constants";
 
 export interface OrganizationSchema {
   "@context": "https://schema.org";
@@ -71,7 +76,7 @@ export interface LocalBusinessSchema {
   email?: string;
 }
 
-const BASE_URL = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}` : "https://farmvault.co.ke";
+const BASE_URL = CANONICAL_DOMAIN;
 
 export function getOrganizationSchema(overrides?: Partial<OrganizationSchema>): OrganizationSchema {
   return {
@@ -168,6 +173,6 @@ export function getLocalBusinessSchema(
       addressCountry: "KE",
     },
     telephone: options.telephone,
-    email: options.email || "hello@farmvault.co.ke",
+    email: options.email || "hello@farmvault.africa",
   };
 }

@@ -2,6 +2,7 @@ import React from "react";
 import { Helmet } from "react-helmet-async";
 import {
   SEO_BASE_URL,
+  CANONICAL_DOMAIN,
   DEFAULT_TITLE,
   DEFAULT_DESCRIPTION,
   DEFAULT_OG_IMAGE,
@@ -9,6 +10,12 @@ import {
   TITLE_MAX_LENGTH,
   DESCRIPTION_MAX_LENGTH,
 } from "./constants";
+
+function isNonCanonicalDomain(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host.includes("vercel.app") || host === "localhost" || host === "127.0.0.1";
+}
 
 export interface SeoHeadProps {
   /** Page title (max 60 chars for SEO). */
@@ -60,15 +67,17 @@ export function SeoHead({
   const safeTitle = truncate(title, TITLE_MAX_LENGTH);
   const safeDescription = truncate(description, DESCRIPTION_MAX_LENGTH);
   const path = canonical ?? (typeof window !== "undefined" ? window.location.pathname || "/" : "/");
-  const canonicalUrl = path.startsWith("http") ? path : absoluteUrl(path, SEO_BASE_URL);
-  const imageUrl = image.startsWith("http") ? image : absoluteUrl(image, SEO_BASE_URL);
+  const canonicalUrl = path.startsWith("http") ? path : absoluteUrl(path, CANONICAL_DOMAIN);
+  const imageUrl = image.startsWith("http") ? image : absoluteUrl(image, CANONICAL_DOMAIN);
+  
+  const shouldNoindex = noindex || isNonCanonicalDomain();
 
   return (
     <Helmet>
       <title>{safeTitle}</title>
       <meta name="description" content={safeDescription} />
       <link rel="canonical" href={canonicalUrl} />
-      {noindex && <meta name="robots" content="noindex, nofollow" />}
+      {shouldNoindex && <meta name="robots" content="noindex, nofollow" />}
 
       {/* Open Graph */}
       <meta property="og:title" content={safeTitle} />

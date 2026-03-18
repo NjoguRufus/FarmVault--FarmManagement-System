@@ -1,10 +1,14 @@
 /**
  * FarmVault SEO constants – Kenya-first, scalable for East Africa.
+ * 
+ * IMPORTANT: SEO_BASE_URL is ALWAYS the canonical domain (farmvault.africa)
+ * regardless of which host the page is accessed from. This ensures proper
+ * canonicalization and prevents duplicate content issues.
  */
 
-export const SEO_BASE_URL = typeof window !== "undefined"
-  ? `${window.location.protocol}//${window.location.host}`
-  : "https://farmvault.africa";
+export const CANONICAL_DOMAIN = "https://farmvault.africa";
+
+export const SEO_BASE_URL = CANONICAL_DOMAIN;
 
 export const DEFAULT_SITE_NAME = "FarmVault";
 export const DEFAULT_TITLE = "FarmVault | Farm Management Software Kenya";
