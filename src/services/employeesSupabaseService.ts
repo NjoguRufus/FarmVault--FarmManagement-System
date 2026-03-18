@@ -255,12 +255,19 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
     ? `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/invite-employee`
     : null;
 
-  if (import.meta.env.DEV) {
+  const shouldLogInviteRequest =
+    import.meta.env.DEV || String(import.meta.env.VITE_ENABLE_DEV_GATEWAY).toLowerCase() === 'true';
+
+  if (shouldLogInviteRequest) {
     // eslint-disable-next-line no-console
     console.log('[employeesSupabaseService] inviteEmployee request', {
       url,
       hasAuth: !!token,
-      payload: { companyId: body.companyId, email: body.email },
+      environment: import.meta.env.MODE,
+      payload: {
+        companyId: body.companyId,
+        emailDomain: body.email.split('@')[1] ?? '',
+      },
     });
   }
 
@@ -287,6 +294,17 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
     } catch {
       // ignore parse error
     }
+
+    if (shouldLogInviteRequest) {
+      // eslint-disable-next-line no-console
+      console.log('[employeesSupabaseService] inviteEmployee response', {
+        url,
+        status: res.status,
+        ok: res.ok,
+        body: data ?? null,
+      });
+    }
+
     const errMsg = data?.error ?? data?.detail ?? (res.ok ? null : res.statusText || `Request failed (${res.status})`);
     if (!res.ok) {
       // Surface the real backend error for debugging
