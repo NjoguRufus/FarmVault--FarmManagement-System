@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Play, ArrowRight, Sparkles } from "lucide-react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,13 +45,17 @@ export function CtaSection() {
             </div>
 
             <h2 className="text-3xl md:text-5xl lg:text-6xl font-bold text-primary-foreground mb-6 tracking-tight leading-tight">
-              Ready to Digitize
+              Start Managing Your Farm
               <br />
-              <span className="text-gradient-gold">Your Farm?</span>
+              <span className="text-gradient-gold">Smarter Today</span>
             </h2>
 
-            <p className="text-primary-foreground/60 text-lg mb-12 max-w-md mx-auto font-light leading-relaxed">
-              Join thousands of farmers managing their operations smarter with FarmVault.
+            <p className="text-primary-foreground/70 text-lg mb-6 max-w-xl mx-auto font-light leading-relaxed">
+              Stop relying on guesswork and manual records.
+            </p>
+            
+            <p className="text-primary-foreground/60 text-base mb-12 max-w-md mx-auto font-light leading-relaxed">
+              Use FarmVault to track, manage, and grow your farm with confidence.
             </p>
 
             <div className="flex flex-wrap justify-center gap-4">

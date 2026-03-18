@@ -27,8 +27,11 @@ export function Footer() {
               </div>
               <span className="font-semibold text-xl text-primary-foreground">FarmVault</span>
             </div>
-            <p className="text-sm text-primary-foreground/50 leading-relaxed max-w-xs font-light">
-              The all-in-one farm management system built for African farmers. Empowering agriculture through technology.
+            <h2 className="text-base font-semibold text-primary-foreground mb-3">
+              Farm Management System in Kenya
+            </h2>
+            <p className="text-sm text-primary-foreground/50 leading-relaxed max-w-sm font-light">
+              Track harvest, labor, inventory, and expenses with a modern farm management system built for African farmers.
             </p>
           </div>
 
@@ -66,7 +69,9 @@ export function Footer() {
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
                   <Mail className="h-3.5 w-3.5 text-primary-foreground/60" />
                 </div>
-                hello@farmvault.africa
+                <a href="mailto:hello@farmvault.africa" className="hover:text-primary-foreground transition-colors">
+                  hello@farmvault.africa
+                </a>
               </li>
               <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
                 <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
@@ -80,7 +85,7 @@ export function Footer() {
 
         <div className="border-t border-primary-foreground/8 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-xs text-primary-foreground/30">
-            © {new Date().getFullYear()} FarmVault. All rights reserved.
+            © {new Date().getFullYear()} FarmVault. Smart Farm Management for Africa.
           </p>
           <div className="flex gap-6">
             {["Privacy", "Terms", "Cookies"].map((item) => (

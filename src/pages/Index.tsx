@@ -1,7 +1,11 @@
 import React from "react";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { HeroSection } from "@/components/landing/HeroSection";
+import { WhatIsFarmVaultSection } from "@/components/landing/WhatIsFarmVaultSection";
+import { ProblemSection } from "@/components/landing/ProblemSection";
+import { SolutionSection } from "@/components/landing/SolutionSection";
 import { FeaturesSection } from "@/components/landing/FeaturesSection";
+import { RealWorldSection } from "@/components/landing/RealWorldSection";
 import { HowItWorksSection } from "@/components/landing/HowItWorksSection";
 import { WhyFarmVault } from "@/components/landing/WhyFarmVault";
 import { PricingSection } from "@/components/landing/PricingSection";
@@ -20,6 +24,8 @@ const Index = () => {
   return (
     <div className="landing-page min-h-screen bg-background font-body">
       <SeoHead
+        title="FarmVault – Farm Management System in Kenya | Track Harvest, Labor & Expenses"
+        description="FarmVault is a farm management system in Kenya that helps farmers track harvest, labor, inventory, and expenses in real time. Built from real farm experience for African farmers."
         canonical="/"
         jsonLd={[
           getOrganizationSchema(),
@@ -29,7 +35,11 @@ const Index = () => {
       />
       <LandingNavbar />
       <HeroSection />
+      <WhatIsFarmVaultSection />
+      <ProblemSection />
+      <SolutionSection />
       <FeaturesSection />
+      <RealWorldSection />
       <HowItWorksSection />
       <PricingSection />
       <WhyFarmVault />
