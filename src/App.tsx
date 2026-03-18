@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
@@ -122,7 +122,7 @@ import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
-import { QuickUnlockScreen } from "@/components/auth/QuickUnlockScreen";
+import { AppLockGate } from "@/components/auth/AppLockGate";
 import { AppLockPrompt } from "@/components/auth/AppLockPrompt";
 import { useAppLock } from "@/hooks/useAppLock";
 import DevSignInPage from "@/pages/dev/DevSignIn";
@@ -182,73 +182,22 @@ const CompanyDashboardRoute = () => {
 };
 
 const AppRoutesWithLock = () => {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  const { hasPinOnServer, isLocked, isLoading, showPrompt, unlock, refresh } = useAppLock();
-
-  // Debug logs for lock state
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('[AppRoutesWithLock] Lock state:', {
-      hasPinOnServer,
-      isLocked,
-      isLoading,
-      showPrompt,
-      userId: user?.id,
-    });
-  }
-
-  // CRITICAL: Block initial render while loading if we potentially have a lock
-  // This prevents bypassing the lock screen on reload
-  if (isLoading && hasPinOnServer && isLocked) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('[AppRoutesWithLock] Blocking render - loading with potential lock');
-    }
-    // Return null or a minimal loading state to prevent app content flash
-    return null;
-  }
-
-  // CRITICAL: Show lock screen if:
-  // 1. PIN exists (from server or localStorage)
-  // 2. AND the app is in locked state
-  const shouldShowLockScreen = hasPinOnServer && isLocked;
-
-  if (import.meta.env.DEV && shouldShowLockScreen) {
-    // eslint-disable-next-line no-console
-    console.log('[AppRoutesWithLock] Showing lock screen');
-  }
-
-  // Show lock screen first (takes priority)
-  if (shouldShowLockScreen) {
-    return (
-      <QuickUnlockScreen
-        userName={user?.name ?? user?.email ?? undefined}
-        onUnlocked={() => {
-          unlock();
-        }}
-        onSwitchToPassword={() => {
-          logout();
-          navigate("/sign-in", { replace: true });
-        }}
-      />
-    );
-  }
+  const { user } = useAuth();
+  const { showPrompt, refresh } = useAppLock();
 
   // Show first-time App Lock prompt if needed
   // Only shows when: not loading, no PIN exists, prompt not dismissed
+  // Note: The actual lock screen is handled by AppLockGate at the root level
   if (showPrompt && user) {
     return (
-      <>
-        <AppLockPrompt
-          onComplete={() => {
-            refresh();
-          }}
-          onSkip={() => {
-            refresh();
-          }}
-        />
-      </>
+      <AppLockPrompt
+        onComplete={() => {
+          refresh();
+        }}
+        onSkip={() => {
+          refresh();
+        }}
+      />
     );
   }
 
@@ -519,31 +468,40 @@ const AppRoutesWithLock = () => {
   );
 };
 
+/**
+ * Root App component.
+ * 
+ * CRITICAL: AppLockGate MUST be at the outermost level to enforce lock
+ * BEFORE any providers, routing, or auth logic runs.
+ * This prevents the lock from being bypassed by reload.
+ */
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ErrorBoundary>
-      <ProjectProvider>
-        <NotificationProvider>
-          <ConnectivityProvider>
-            <TooltipProvider>
-              <Toaster />
-              <Sonner />
-              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                <HelmetProvider>
-                  {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
-                  <RoutePersistence />
-                  <TourProvider>
-                    <AppRoutesWithLock />
-                  </TourProvider>
-                  {import.meta.env.DEV && <DevAuthDebugPanel />}
-                </HelmetProvider>
-              </BrowserRouter>
-            </TooltipProvider>
-          </ConnectivityProvider>
-        </NotificationProvider>
-      </ProjectProvider>
-    </ErrorBoundary>
-  </QueryClientProvider>
+  <AppLockGate>
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <ProjectProvider>
+          <NotificationProvider>
+            <ConnectivityProvider>
+              <TooltipProvider>
+                <Toaster />
+                <Sonner />
+                <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                  <HelmetProvider>
+                    {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
+                    <RoutePersistence />
+                    <TourProvider>
+                      <AppRoutesWithLock />
+                    </TourProvider>
+                    {import.meta.env.DEV && <DevAuthDebugPanel />}
+                  </HelmetProvider>
+                </BrowserRouter>
+              </TooltipProvider>
+            </ConnectivityProvider>
+          </NotificationProvider>
+        </ProjectProvider>
+      </ErrorBoundary>
+    </QueryClientProvider>
+  </AppLockGate>
 );
 
 export default App;
