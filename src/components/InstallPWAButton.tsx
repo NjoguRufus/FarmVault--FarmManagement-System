@@ -1,3 +1,15 @@
+/**
+ * @deprecated This component is DEPRECATED.
+ * 
+ * Use <InstallFarmVault /> from "@/components/pwa/InstallFarmVault" instead.
+ * 
+ * This legacy component has its own event listeners which compete with the
+ * global PWA install module (src/lib/pwa-install.ts). The global module
+ * captures beforeinstallprompt EARLY (before React mounts) to ensure we
+ * don't miss the event.
+ * 
+ * DO NOT USE THIS COMPONENT - it may cause the install prompt to fail.
+ */
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -13,6 +25,9 @@ interface InstallPWAButtonProps {
   className?: string;
 }
 
+/**
+ * @deprecated Use <InstallFarmVault /> instead. See module comment above.
+ */
 export function InstallPWAButton({ className }: InstallPWAButtonProps) {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);

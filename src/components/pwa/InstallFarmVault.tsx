@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, Download, ExternalLink, Loader2, Share2, MoreVertical } from "lucide-react";
+import { 
+  CheckCircle2, 
+  Download, 
+  ExternalLink, 
+  Loader2, 
+  Share2, 
+  MoreVertical, 
+  Plus,
+  Monitor,
+  Smartphone,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +21,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { usePwaInstall } from "@/hooks/usePwaInstall";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 function log(...args: unknown[]) {
@@ -27,9 +36,16 @@ interface InstallFarmVaultProps {
 
 export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
-  const { canInstall, isInstalled, installState, promptInstall, getFallbackInstructions } = usePwaInstall();
+  const { 
+    canInstall, 
+    needsFallback,
+    isInstalled, 
+    installState, 
+    browserInfo,
+    promptInstall, 
+    getFallbackInstructions,
+  } = usePwaInstall();
   const [showFallback, setShowFallback] = useState(false);
-  const isMobile = useIsMobile();
 
   const handleOpenApp = () => {
     navigate("/dashboard");
@@ -37,9 +53,9 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
 
   const handleInstallClick = async () => {
     log("=== Install button clicked ===");
-    log("Current state:", { canInstall, isInstalled, installState });
+    log("Current state:", { canInstall, needsFallback, isInstalled, installState, browserInfo });
     
-    // If install prompt is available, trigger it directly
+    // If native install prompt is available, trigger it directly
     if (canInstall) {
       log("Native install prompt is available - triggering...");
       const result = await promptInstall();
@@ -50,18 +66,16 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
       } else if (result === "dismissed") {
         toast.info("Install cancelled. You can try again anytime.");
       } else if (result === "unavailable") {
-        log("Prompt returned unavailable - showing fallback");
+        log("Prompt became unavailable - showing fallback");
         setShowFallback(true);
       }
       return;
     }
 
-    // If not available, show fallback instructions
+    // If browser doesn't support native install, show fallback instructions
     log("Native install NOT available - showing fallback instructions");
-    log("Possible reasons:");
-    log("  - Browser doesn't support beforeinstallprompt (iOS Safari, Firefox)");
-    log("  - App may already be installed");
-    log("  - PWA criteria not met (manifest, service worker, HTTPS)");
+    log("Browser:", browserInfo.browser, "Platform:", browserInfo.platform);
+    log("Supports beforeinstallprompt:", browserInfo.supportsBeforeInstallPrompt);
     setShowFallback(true);
   };
 
@@ -87,6 +101,32 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
 
   const isPrompting = installState === "prompting";
   const fallbackInfo = getFallbackInstructions();
+
+  // Choose the right icon based on fallback type
+  const getFallbackIcon = () => {
+    if (!fallbackInfo?.icon) return <MoreVertical className="h-6 w-6 text-primary" />;
+    
+    switch (fallbackInfo.icon) {
+      case "share":
+        return <Share2 className="h-6 w-6 text-primary" />;
+      case "menu":
+        return <MoreVertical className="h-6 w-6 text-primary" />;
+      case "plus":
+        return <Plus className="h-6 w-6 text-primary" />;
+      case "install":
+        return <Download className="h-6 w-6 text-primary" />;
+      default:
+        return <MoreVertical className="h-6 w-6 text-primary" />;
+    }
+  };
+
+  // Choose platform icon
+  const getPlatformIcon = () => {
+    if (browserInfo.platform === "ios" || browserInfo.platform === "android") {
+      return <Smartphone className="h-5 w-5 text-muted-foreground" />;
+    }
+    return <Monitor className="h-5 w-5 text-muted-foreground" />;
+  };
 
   return (
     <>
@@ -116,9 +156,12 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
 
       {/* Fallback Instructions Sheet */}
       <Sheet open={showFallback} onOpenChange={setShowFallback}>
-        <SheetContent side="bottom" className="rounded-t-3xl">
+        <SheetContent side="bottom" className="rounded-t-3xl max-h-[85vh] overflow-y-auto">
           <SheetHeader className="text-left">
-            <SheetTitle>{fallbackInfo?.title || "Install FarmVault"}</SheetTitle>
+            <div className="flex items-center gap-2">
+              {getPlatformIcon()}
+              <SheetTitle>{fallbackInfo?.title || "Install FarmVault"}</SheetTitle>
+            </div>
             <SheetDescription>
               Follow these steps to install FarmVault on your device.
             </SheetDescription>
@@ -136,30 +179,27 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
               </div>
             ))}
 
-            {/* Visual hint for iOS */}
-            {fallbackInfo?.title.includes("iPhone") && (
+            {/* Visual hint with icon */}
+            {fallbackInfo?.hint && (
               <div className="mt-6 p-4 bg-secondary/50 rounded-xl flex items-center gap-3">
-                <Share2 className="h-6 w-6 text-primary" />
+                {getFallbackIcon()}
                 <p className="text-sm text-muted-foreground">
-                  Look for the Share icon at the bottom of Safari
+                  {fallbackInfo.hint}
                 </p>
               </div>
             )}
 
-            {/* Visual hint for Android */}
-            {fallbackInfo?.title.includes("Android") && (
-              <div className="mt-6 p-4 bg-secondary/50 rounded-xl flex items-center gap-3">
-                <MoreVertical className="h-6 w-6 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Look for the three-dot menu in Chrome
-                </p>
-              </div>
-            )}
-
-            <div className="pt-4 border-t border-border">
+            <div className="pt-4 border-t border-border space-y-2">
               <p className="text-xs text-muted-foreground text-center">
                 Once installed, FarmVault will appear on your home screen and work offline.
               </p>
+              {/* Show browser info for debugging in development */}
+              {import.meta.env.DEV && (
+                <p className="text-[10px] text-muted-foreground/50 text-center font-mono">
+                  {browserInfo.browser} on {browserInfo.platform} | 
+                  {browserInfo.supportsBeforeInstallPrompt ? " ✓ supports prompt" : " ✗ no prompt support"}
+                </p>
+              )}
             </div>
           </div>
         </SheetContent>

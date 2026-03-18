@@ -6,6 +6,12 @@
  * 
  * The event must be captured at the module level because it fires once during
  * page load, often before React components have mounted.
+ * 
+ * BROWSER SUPPORT FOR beforeinstallprompt:
+ * ✅ Supported: Chrome, Edge, Brave, Opera, Samsung Internet, Arc
+ * ❌ Not supported: Safari (iOS & Mac), Firefox, IE
+ * 
+ * For unsupported browsers, we show browser-specific manual install instructions.
  */
 
 export interface BeforeInstallPromptEvent extends Event {
@@ -14,18 +20,26 @@ export interface BeforeInstallPromptEvent extends Event {
 }
 
 export type InstallState = 
-  | "idle"           // Initial state, checking availability
-  | "available"      // Install prompt is available
+  | "idle"           // Initial state, waiting for beforeinstallprompt
+  | "available"      // Install prompt is available (beforeinstallprompt captured)
   | "prompting"      // Currently showing the install prompt
   | "installed"      // App is installed (running standalone)
   | "dismissed"      // User dismissed the prompt (can still retry if prompt exists)
-  | "unavailable";   // Install not supported or already installed
+  | "unsupported"    // Browser doesn't support beforeinstallprompt (use fallback)
+  | "unavailable";   // Install not supported or criteria not met
 
 export type PromptInstallResult = "accepted" | "dismissed" | "unavailable";
+
+export type BrowserInfo = {
+  browser: "chrome" | "edge" | "brave" | "firefox" | "safari" | "opera" | "samsung" | "arc" | "other";
+  platform: "ios" | "android" | "macos" | "windows" | "linux" | "other";
+  supportsBeforeInstallPrompt: boolean;
+};
 
 // Module-level storage for the deferred prompt
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let installState: InstallState = "idle";
+let browserInfo: BrowserInfo | null = null;
 const listeners: Set<(state: InstallState) => void> = new Set();
 
 // Always log PWA install events for debugging (prefixed so users can filter)
@@ -42,11 +56,95 @@ function setState(newState: InstallState) {
   }
 }
 
+/**
+ * Detect browser and platform for appropriate install flow
+ */
+function detectBrowser(): BrowserInfo {
+  if (typeof window === "undefined") {
+    return { browser: "other", platform: "other", supportsBeforeInstallPrompt: false };
+  }
+
+  const ua = navigator.userAgent.toLowerCase();
+  const vendor = navigator.vendor?.toLowerCase() ?? "";
+  
+  // Platform detection
+  let platform: BrowserInfo["platform"] = "other";
+  if (/iphone|ipad|ipod/.test(ua)) {
+    platform = "ios";
+  } else if (/android/.test(ua)) {
+    platform = "android";
+  } else if (/macintosh|mac os x/.test(ua)) {
+    platform = "macos";
+  } else if (/windows/.test(ua)) {
+    platform = "windows";
+  } else if (/linux/.test(ua)) {
+    platform = "linux";
+  }
+
+  // Browser detection (order matters - more specific checks first)
+  let browser: BrowserInfo["browser"] = "other";
+  
+  // Brave has its own navigator property
+  if ((navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } }).brave) {
+    browser = "brave";
+  }
+  // Arc browser
+  else if (ua.includes("arc/")) {
+    browser = "arc";
+  }
+  // Samsung Internet
+  else if (ua.includes("samsungbrowser")) {
+    browser = "samsung";
+  }
+  // Opera
+  else if (ua.includes("opr/") || ua.includes("opera")) {
+    browser = "opera";
+  }
+  // Edge (Chromium-based)
+  else if (ua.includes("edg/")) {
+    browser = "edge";
+  }
+  // Firefox
+  else if (ua.includes("firefox") || ua.includes("fxios")) {
+    browser = "firefox";
+  }
+  // Chrome (must check after Edge since Edge includes "chrome" in UA)
+  else if (ua.includes("chrome") && vendor.includes("google")) {
+    browser = "chrome";
+  }
+  // Safari (must check after Chrome since Chrome on iOS includes "safari" in UA)
+  else if (ua.includes("safari") && vendor.includes("apple")) {
+    browser = "safari";
+  }
+
+  // beforeinstallprompt is supported by Chromium-based browsers
+  // Safari (all platforms) and Firefox do NOT support it
+  const supportsBeforeInstallPrompt = 
+    platform !== "ios" && // iOS doesn't support it in any browser
+    browser !== "safari" && 
+    browser !== "firefox" &&
+    ["chrome", "edge", "brave", "opera", "samsung", "arc"].includes(browser);
+
+  const info: BrowserInfo = { browser, platform, supportsBeforeInstallPrompt };
+  log("Browser detected:", info);
+  return info;
+}
+
 function getIsStandalone(): boolean {
   if (typeof window === "undefined") return false;
   const standaloneMedia = window.matchMedia("(display-mode: standalone)").matches;
   const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return standaloneMedia || iosStandalone;
+}
+
+/**
+ * Get the detected browser info
+ */
+export function getBrowserInfo(): BrowserInfo {
+  if (!browserInfo) {
+    browserInfo = detectBrowser();
+  }
+  return browserInfo;
 }
 
 /**
@@ -57,7 +155,12 @@ export function initPwaInstall(): void {
   if (typeof window === "undefined") return;
 
   log("=== Initializing PWA Install Prompt Capture ===");
-  log("Browser:", navigator.userAgent);
+  
+  // Detect browser capabilities first
+  browserInfo = detectBrowser();
+  log("Browser:", browserInfo.browser, "Platform:", browserInfo.platform);
+  log("Supports beforeinstallprompt:", browserInfo.supportsBeforeInstallPrompt);
+  log("User Agent:", navigator.userAgent);
   log("URL:", window.location.href);
 
   // Check if already installed
@@ -70,7 +173,18 @@ export function initPwaInstall(): void {
     return;
   }
 
-  // Listen for the beforeinstallprompt event
+  // If browser doesn't support beforeinstallprompt, mark as unsupported immediately
+  // This allows the UI to show fallback instructions right away
+  if (!browserInfo.supportsBeforeInstallPrompt) {
+    log("Browser does NOT support beforeinstallprompt - will use fallback instructions");
+    log("Fallback will be shown for:", browserInfo.browser, "on", browserInfo.platform);
+    setState("unsupported");
+    return;
+  }
+
+  // For supported browsers, listen for the beforeinstallprompt event
+  log("Browser supports beforeinstallprompt - setting up event listener");
+
   const handleBeforeInstallPrompt = (event: Event) => {
     log("=== beforeinstallprompt EVENT FIRED ===");
     log("Event object:", event);
@@ -79,7 +193,7 @@ export function initPwaInstall(): void {
     log("Deferred prompt stored successfully");
     log("deferredPrompt.prompt is function?", typeof deferredPrompt.prompt === "function");
     setState("available");
-    log("Install button should now trigger native prompt");
+    log("Install button will now trigger native prompt");
   };
 
   // Listen for successful installation
@@ -104,22 +218,23 @@ export function initPwaInstall(): void {
   window.addEventListener("appinstalled", handleAppInstalled);
   mediaQuery.addEventListener("change", handleDisplayModeChange);
 
-  // Check if we might have missed the event (it can fire before this code runs)
   log("Event listeners registered, waiting for beforeinstallprompt...");
   log("Note: Event will NOT fire if:");
-  log("  - Browser doesn't support PWA install (iOS Safari, Firefox)");
   log("  - App is already installed");
   log("  - Manifest is invalid or missing required fields");
   log("  - Site isn't served over HTTPS (except localhost)");
   log("  - Service worker isn't registered");
 
-  // Log status after a delay to help debugging
+  // For supported browsers, log status after a delay to help debugging
+  // If we haven't received the event, PWA criteria may not be met
   setTimeout(() => {
     if (installState === "idle" && !deferredPrompt) {
       log("=== TIMEOUT: No beforeinstallprompt received after 3s ===");
       log("Current state:", installState);
-      log("This means the browser likely doesn't support install or criteria not met");
-      log("Fallback instructions will be shown to user");
+      log("Browser supports the event but PWA criteria may not be met");
+      log("Check: manifest, service worker, HTTPS, icons");
+      // Mark as unavailable - we expected the event but didn't get it
+      setState("unavailable");
     } else if (deferredPrompt) {
       log("Good: beforeinstallprompt was captured, native install available");
     }
@@ -141,9 +256,8 @@ export function getInstallState(): InstallState {
 }
 
 /**
- * Check if install is available.
- * Returns true if we have a deferred prompt and the app isn't installed or currently prompting.
- * Allows retrying after dismissal since some browsers allow re-prompting.
+ * Check if native install prompt is available.
+ * Returns true if we have a deferred prompt and can trigger it.
  */
 export function canInstall(): boolean {
   const hasPrompt = deferredPrompt !== null;
@@ -153,6 +267,20 @@ export function canInstall(): boolean {
     installState !== "unavailable";
   log("canInstall check:", { hasPrompt, installState, canTrigger });
   return canTrigger;
+}
+
+/**
+ * Check if fallback instructions should be shown.
+ * This is true when:
+ * - Browser doesn't support beforeinstallprompt (Safari, Firefox)
+ * - OR PWA criteria aren't met (unavailable state)
+ * - AND app is not already installed
+ */
+export function needsFallback(): boolean {
+  const needs = (installState === "unsupported" || installState === "unavailable") && 
+    !getIsStandalone();
+  log("needsFallback check:", { installState, needs });
+  return needs;
 }
 
 /**
@@ -222,41 +350,109 @@ export function subscribeToInstallState(callback: (state: InstallState) => void)
   return () => listeners.delete(callback);
 }
 
+export interface FallbackInstructions {
+  title: string;
+  steps: string[];
+  icon?: "share" | "menu" | "plus" | "install";
+  hint?: string;
+}
+
 /**
- * Get device-specific fallback instructions
+ * Get browser-specific fallback instructions for manual PWA installation.
+ * These are shown when beforeinstallprompt is not available.
  */
-export function getFallbackInstructions(): { title: string; steps: string[] } | null {
+export function getFallbackInstructions(): FallbackInstructions | null {
   if (typeof window === "undefined") return null;
 
-  const ua = navigator.userAgent.toLowerCase();
-  const isIos = /iphone|ipad|ipod/.test(ua);
-  const isAndroid = /android/.test(ua);
-  const isSafari = /safari/.test(ua) && !/chrome/.test(ua);
-  const isChrome = /chrome/.test(ua) && !/edge/.test(ua);
+  const info = getBrowserInfo();
+  log("Getting fallback instructions for:", info);
 
-  if (isIos && isSafari) {
+  // iOS Safari (iPhone/iPad)
+  if (info.platform === "ios" && info.browser === "safari") {
     return {
       title: "Install on iPhone/iPad",
       steps: [
-        "Tap the Share button (square with arrow)",
+        "Tap the Share button at the bottom of Safari",
         "Scroll down and tap 'Add to Home Screen'",
-        "Tap 'Add' to confirm",
+        "Tap 'Add' in the top right to confirm",
       ],
+      icon: "share",
+      hint: "Look for the square icon with an upward arrow",
     };
   }
 
-  if (isAndroid && isChrome) {
+  // iOS with non-Safari browser (Chrome on iOS, Firefox on iOS, etc.)
+  if (info.platform === "ios") {
+    return {
+      title: "Install on iPhone/iPad",
+      steps: [
+        "Open this page in Safari for the best install experience",
+        "In Safari, tap the Share button",
+        "Tap 'Add to Home Screen'",
+      ],
+      icon: "share",
+      hint: "PWA installation works best in Safari on iOS",
+    };
+  }
+
+  // macOS Safari
+  if (info.platform === "macos" && info.browser === "safari") {
+    return {
+      title: "Install on Mac",
+      steps: [
+        "Click 'File' in the menu bar",
+        "Select 'Add to Dock...'",
+        "Click 'Add' to confirm",
+      ],
+      icon: "plus",
+      hint: "FarmVault will appear in your Dock as a standalone app",
+    };
+  }
+
+  // Firefox (all platforms)
+  if (info.browser === "firefox") {
+    return {
+      title: "Install FarmVault",
+      steps: [
+        "Firefox doesn't support one-click PWA install",
+        "For the best experience, use Chrome, Edge, or Brave",
+        "Or bookmark this page for quick access",
+      ],
+      icon: "menu",
+      hint: "Consider using a Chromium-based browser for PWA install",
+    };
+  }
+
+  // Android Chrome
+  if (info.platform === "android" && info.browser === "chrome") {
     return {
       title: "Install on Android",
       steps: [
-        "Tap the menu button (three dots)",
+        "Tap the three-dot menu (⋮) in Chrome",
         "Tap 'Install app' or 'Add to Home Screen'",
         "Tap 'Install' to confirm",
       ],
+      icon: "menu",
+      hint: "FarmVault will appear on your home screen",
     };
   }
 
-  if (isAndroid) {
+  // Android Samsung Internet
+  if (info.platform === "android" && info.browser === "samsung") {
+    return {
+      title: "Install on Android",
+      steps: [
+        "Tap the menu button (three lines)",
+        "Tap 'Add page to' → 'Home Screen'",
+        "Tap 'Add' to confirm",
+      ],
+      icon: "menu",
+      hint: "FarmVault will appear on your home screen",
+    };
+  }
+
+  // Android other browsers
+  if (info.platform === "android") {
     return {
       title: "Install on Android",
       steps: [
@@ -264,16 +460,76 @@ export function getFallbackInstructions(): { title: string; steps: string[] } | 
         "Look for 'Install app' or 'Add to Home Screen'",
         "Follow the prompts to install",
       ],
+      icon: "menu",
+      hint: "The option name varies by browser",
     };
   }
 
-  // Desktop browsers
+  // Desktop Chrome
+  if (info.browser === "chrome") {
+    return {
+      title: "Install FarmVault",
+      steps: [
+        "Click the install icon (⊕) in the address bar",
+        "Or click the three-dot menu → 'Install FarmVault'",
+        "Click 'Install' when prompted",
+      ],
+      icon: "install",
+      hint: "Look for the install icon in the right side of the address bar",
+    };
+  }
+
+  // Desktop Edge
+  if (info.browser === "edge") {
+    return {
+      title: "Install FarmVault",
+      steps: [
+        "Click the install icon in the address bar",
+        "Or click the menu (⋯) → Apps → 'Install FarmVault'",
+        "Click 'Install' to confirm",
+      ],
+      icon: "install",
+      hint: "Edge provides excellent PWA support",
+    };
+  }
+
+  // Desktop Brave
+  if (info.browser === "brave") {
+    return {
+      title: "Install FarmVault",
+      steps: [
+        "Click the install icon in the address bar",
+        "Or click the menu → 'Install FarmVault'",
+        "Click 'Install' to confirm",
+      ],
+      icon: "install",
+      hint: "Brave supports PWA installation like Chrome",
+    };
+  }
+
+  // Desktop Opera
+  if (info.browser === "opera") {
+    return {
+      title: "Install FarmVault",
+      steps: [
+        "Click the install icon in the address bar",
+        "Or go to Menu → 'Install FarmVault'",
+        "Click 'Install' to confirm",
+      ],
+      icon: "install",
+      hint: "Opera supports PWA installation",
+    };
+  }
+
+  // Generic fallback for unknown browsers
   return {
     title: "Install FarmVault",
     steps: [
-      "Look for the install icon in the address bar",
-      "Or use browser menu → 'Install FarmVault'",
-      "Click 'Install' when prompted",
+      "Look for an install option in your browser menu",
+      "Or check for an install icon in the address bar",
+      "If not available, bookmark this page for quick access",
     ],
+    icon: "menu",
+    hint: "Installation varies by browser",
   };
 }
