@@ -50,6 +50,14 @@ function mapRowToEmployee(row: Record<string, unknown>): Employee {
     avatarUrl: row.avatar_url != null ? String(row.avatar_url) : undefined,
     // For invited: use invite_sent_at when available, else created_at
     inviteSentAt: row.invite_sent_at ?? row.created_at,
+    inviteLastSentAt: row.invite_last_sent_at ?? row.invite_sent_at ?? row.created_at,
+    inviteResendCount:
+      typeof row.invite_resend_count === 'number'
+        ? (row.invite_resend_count as number)
+        : row.invite_resend_count != null
+        ? Number(row.invite_resend_count)
+        : 0,
+    inviteLastResentBy: row.invite_last_resent_by != null ? String(row.invite_last_resent_by) : null,
   };
 }
 
@@ -474,6 +482,92 @@ export async function revokeEmployeeInvite(companyId: string, email: string): Pr
       res.data?.error ??
       res.error?.message ??
       'Revoke invite failed';
+    throw new Error(msg);
+  }
+}
+
+export async function resendEmployeeInvite(companyId: string, employeeId: string): Promise<void> {
+  const token = await getSupabaseAccessToken();
+  if (!token) {
+    throw new Error('You must be signed in to resend employee invites.');
+  }
+
+  const body = {
+    companyId,
+    employeeId,
+  };
+
+  const url = SUPABASE_URL
+    ? `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/resend-employee-invite`
+    : null;
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[employeesSupabaseService] resendEmployeeInvite request', { url, body });
+  }
+
+  if (url) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    let data: { ok?: boolean; error?: string; detail?: string } | null = null;
+    try {
+      const text = await res.text();
+      if (text) data = JSON.parse(text) as typeof data;
+    } catch {
+      // ignore parse error
+    }
+
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[employeesSupabaseService] resendEmployeeInvite response', {
+        status: res.status,
+        ok: res.ok,
+        data,
+      });
+    }
+
+    if (!res.ok || data?.error) {
+      const msg =
+        (data?.detail ?? data?.error ?? res.statusText) ||
+        `Resend invite failed (${res.status})`;
+      throw new Error(msg);
+    }
+
+    return;
+  }
+
+  const res = await supabase.functions.invoke<{
+    ok?: boolean;
+    error?: string;
+    detail?: string;
+  }>('resend-employee-invite', {
+    body,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[employeesSupabaseService] resendEmployeeInvite invoke result', {
+      data: res.data,
+      error: res.error,
+    });
+  }
+
+  if (res.error || res.data?.error) {
+    const msg =
+      res.data?.detail ??
+      res.data?.error ??
+      res.error?.message ??
+      'Resend invite failed';
     throw new Error(msg);
   }
 }
