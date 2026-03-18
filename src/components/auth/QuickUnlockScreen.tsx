@@ -2,13 +2,21 @@
  * QuickUnlockScreen component.
  * Shows a PIN entry screen to unlock the app on a trusted device.
  * Fallback to full password login is always available.
+ * 
+ * Mobile-optimized with proper touch handling and visual feedback.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Shield, Lock, ArrowLeft, Loader2, AlertCircle, Fingerprint } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Shield, Lock, Delete, Loader2, AlertCircle, Fingerprint } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { verifyPin, getDeviceAppLockStatus } from '@/services/appLockService';
 import { cn } from '@/lib/utils';
+
+// Debug logging
+function log(...args: unknown[]) {
+  // eslint-disable-next-line no-console
+  console.log('[QuickUnlock]', ...args);
+}
 
 interface QuickUnlockScreenProps {
   onUnlocked: () => void;
@@ -28,12 +36,22 @@ export function QuickUnlockScreen({
   const [isLocked, setIsLocked] = useState(false);
   const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  
+  // Track which button is being pressed for visual feedback
+  const [pressedKey, setPressedKey] = useState<string | null>(null);
+  
+  // Ref to prevent double-submission
+  const isSubmitting = useRef(false);
+  // Ref to track if we've already auto-submitted for this PIN
+  const autoSubmittedFor = useRef<string | null>(null);
 
   // Check lock status on mount
   useEffect(() => {
     async function checkStatus() {
       try {
+        log('Checking device lock status...');
         const status = await getDeviceAppLockStatus();
+        log('Device status:', status);
         if (status.isLocked && status.lockedUntil) {
           setIsLocked(true);
           setLockedUntil(status.lockedUntil);
@@ -46,13 +64,23 @@ export function QuickUnlockScreen({
     checkStatus();
   }, []);
 
-  // Auto-submit when PIN is 4-6 digits
+  // Auto-submit when PIN reaches 4 digits (with debounce to allow typing more)
   useEffect(() => {
-    if (pin.length >= 4 && pin.length <= 6 && !verifying && !isLocked) {
-      handleVerify();
+    // Only auto-submit if we haven't already submitted for this exact PIN
+    if (pin.length >= 4 && pin.length <= 6 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
+      // Small delay to allow user to enter more digits if they want
+      const timer = setTimeout(() => {
+        if (pin.length >= 4 && !verifying && !isLocked && autoSubmittedFor.current !== pin) {
+          log('Auto-submitting PIN of length:', pin.length);
+          autoSubmittedFor.current = pin;
+          handleVerify();
+        }
+      }, 500); // 500ms delay to allow typing more digits
+      
+      return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pin]);
+  }, [pin, verifying, isLocked]);
 
   const handleVerify = useCallback(async () => {
     if (pin.length < 4) {
@@ -60,20 +88,29 @@ export function QuickUnlockScreen({
       return;
     }
 
+    // Prevent double submission
+    if (isSubmitting.current) {
+      log('Already submitting, ignoring');
+      return;
+    }
+    
+    isSubmitting.current = true;
     setVerifying(true);
     setError(null);
+    log('Verifying PIN...');
 
     try {
       const isValid = await verifyPin(pin);
+      log('PIN verification result:', isValid);
 
       if (isValid) {
-        // Call the unlock callback - the parent (App.tsx) handles unlockApp()
-        // which records the unlock timestamp and clears the lock state
+        log('PIN correct, unlocking...');
         onUnlocked();
       } else {
         const newAttempts = attemptsRemaining - 1;
         setAttemptsRemaining(newAttempts);
         setPin('');
+        autoSubmittedFor.current = null; // Reset so user can try again
 
         if (newAttempts <= 0) {
           setIsLocked(true);
@@ -84,31 +121,48 @@ export function QuickUnlockScreen({
         }
       }
     } catch (err) {
+      log('PIN verification error:', err);
       setError('Failed to verify PIN. Please try again.');
       setPin('');
+      autoSubmittedFor.current = null;
     } finally {
       setVerifying(false);
+      isSubmitting.current = false;
     }
   }, [pin, attemptsRemaining, onUnlocked]);
 
-  const handleDigitPress = (digit: string) => {
+  const handleDigitPress = useCallback((digit: string) => {
     if (isLocked || verifying) return;
+    log('Digit pressed:', digit);
     if (pin.length < 6) {
       setPin((prev) => prev + digit);
       setError(null);
     }
-  };
+  }, [isLocked, verifying, pin.length]);
 
-  const handleBackspace = () => {
+  const handleBackspace = useCallback(() => {
     if (isLocked || verifying) return;
+    log('Backspace pressed');
     setPin((prev) => prev.slice(0, -1));
     setError(null);
-  };
+    autoSubmittedFor.current = null; // Reset auto-submit tracking
+  }, [isLocked, verifying]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     if (isLocked || verifying) return;
+    log('Clear pressed');
     setPin('');
     setError(null);
+    autoSubmittedFor.current = null;
+  }, [isLocked, verifying]);
+  
+  // Handle touch/click with visual feedback
+  const handleKeyDown = (key: string) => {
+    setPressedKey(key);
+  };
+  
+  const handleKeyUp = () => {
+    setPressedKey(null);
   };
 
   // Countdown timer for locked state
@@ -195,49 +249,70 @@ export function QuickUnlockScreen({
           )}
         </div>
 
-        {/* Number pad */}
+        {/* Number pad - Mobile optimized with larger touch targets */}
         {!isLocked && (
-          <div className="grid grid-cols-3 gap-3">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', ''].map((digit, i) => {
-              if (digit === '' && i === 9) {
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 select-none">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((key, i) => {
+              if (key === '' && i === 9) {
                 // Empty space or biometric button
                 return biometricAvailable ? (
                   <button
                     key="biometric"
                     type="button"
-                    className="h-14 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted/50 transition-colors"
+                    className="h-16 sm:h-14 rounded-xl flex items-center justify-center text-muted-foreground touch-manipulation"
                     disabled
                     title="Biometric unlock coming soon"
                   >
                     <Fingerprint className="h-6 w-6" />
                   </button>
                 ) : (
-                  <div key="empty-left" />
+                  <div key="empty-left" className="h-16 sm:h-14" />
                 );
               }
-              if (digit === '' && i === 11) {
+              if (key === 'del') {
                 // Backspace button
                 return (
                   <button
                     key="backspace"
                     type="button"
                     onClick={handleBackspace}
-                    disabled={verifying}
-                    className="h-14 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+                    onTouchStart={() => handleKeyDown('del')}
+                    onTouchEnd={handleKeyUp}
+                    onMouseDown={() => handleKeyDown('del')}
+                    onMouseUp={handleKeyUp}
+                    onMouseLeave={handleKeyUp}
+                    disabled={verifying || pin.length === 0}
+                    className={cn(
+                      "h-16 sm:h-14 rounded-xl flex items-center justify-center transition-all touch-manipulation",
+                      "text-muted-foreground disabled:opacity-30",
+                      pressedKey === 'del' ? "bg-muted scale-95" : "hover:bg-muted/50 active:bg-muted active:scale-95"
+                    )}
                   >
-                    <ArrowLeft className="h-6 w-6" />
+                    <Delete className="h-6 w-6" />
                   </button>
                 );
               }
+              // Number buttons
               return (
                 <button
-                  key={digit}
+                  key={key}
                   type="button"
-                  onClick={() => handleDigitPress(digit)}
+                  onClick={() => handleDigitPress(key)}
+                  onTouchStart={() => handleKeyDown(key)}
+                  onTouchEnd={handleKeyUp}
+                  onMouseDown={() => handleKeyDown(key)}
+                  onMouseUp={handleKeyUp}
+                  onMouseLeave={handleKeyUp}
                   disabled={verifying}
-                  className="h-14 rounded-xl bg-muted/50 hover:bg-muted text-xl font-medium text-foreground transition-colors disabled:opacity-50 active:scale-95"
+                  className={cn(
+                    "h-16 sm:h-14 rounded-xl text-xl sm:text-2xl font-semibold text-foreground transition-all touch-manipulation",
+                    "disabled:opacity-50",
+                    pressedKey === key 
+                      ? "bg-primary text-primary-foreground scale-95" 
+                      : "bg-muted/50 hover:bg-muted active:bg-primary active:text-primary-foreground active:scale-95"
+                  )}
                 >
-                  {digit}
+                  {key}
                 </button>
               );
             })}

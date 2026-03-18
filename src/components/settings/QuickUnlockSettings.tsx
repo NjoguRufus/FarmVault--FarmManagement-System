@@ -1,10 +1,16 @@
 /**
  * Quick Unlock Settings component.
  * Allows users to enable/disable PIN-based quick unlock on their device.
+ * 
+ * PIN Creation Flow:
+ * 1. When no PIN exists, show "Create PIN" card with inline form
+ * 2. User enters and confirms PIN
+ * 3. After creation, the creation card disappears
+ * 4. Show "Lock now", "Change PIN", "Disable" options
  */
 
-import React, { useState, useEffect } from 'react';
-import { Shield, Lock, Fingerprint, Smartphone, Loader2, Check, X, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Shield, Lock, Fingerprint, Smartphone, Loader2, Check, X, AlertCircle, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -17,9 +23,16 @@ import {
   setLockTimeout,
   lockApp,
   checkBiometricCapabilities,
+  clearPinSetupSkipped,
   type DeviceAppLockStatus,
 } from '@/services/appLockService';
 import { cn } from '@/lib/utils';
+
+// Debug logging
+function log(...args: unknown[]) {
+  // eslint-disable-next-line no-console
+  console.log('[QuickUnlockSettings]', ...args);
+}
 
 export function QuickUnlockSettings() {
   const [status, setStatus] = useState<DeviceAppLockStatus | null>(null);
@@ -30,7 +43,6 @@ export function QuickUnlockSettings() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showPinSetup, setShowPinSetup] = useState(false);
   const [isChangingPin, setIsChangingPin] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
   const [pin, setPin] = useState('');
@@ -38,6 +50,13 @@ export function QuickUnlockSettings() {
   const [confirmPin, setConfirmPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [timeoutSeconds, setTimeoutSeconds] = useState<number>(() => getLockTimeout());
+  
+  // Track if user has started creating a PIN (for the creation flow)
+  const [isCreatingPin, setIsCreatingPin] = useState(false);
+  
+  // Refs for auto-focus
+  const pinInputRef = useRef<HTMLInputElement>(null);
+  const confirmPinInputRef = useRef<HTMLInputElement>(null);
 
   const { toast } = useToast();
 
@@ -45,10 +64,12 @@ export function QuickUnlockSettings() {
   useEffect(() => {
     async function loadStatus() {
       try {
+        log('Loading device status...');
         const [appLockStatus, bioCaps] = await Promise.all([
           getDeviceAppLockStatus(),
           checkBiometricCapabilities(),
         ]);
+        log('Status loaded:', appLockStatus);
         setStatus(appLockStatus);
         setBiometricCapabilities(bioCaps);
       } catch (err) {
@@ -61,7 +82,7 @@ export function QuickUnlockSettings() {
   }, []);
 
   const resetPinState = () => {
-    setShowPinSetup(false);
+    setIsCreatingPin(false);
     setIsChangingPin(false);
     setShowDisableConfirm(false);
     setPin('');
@@ -71,6 +92,7 @@ export function QuickUnlockSettings() {
   };
 
   const handleEnableOrChangePin = async () => {
+    log('handleEnableOrChangePin called', { isChangingPin, pinLength: pin.length });
     setPinError(null);
 
     // When changing an existing PIN, require current PIN
@@ -98,22 +120,28 @@ export function QuickUnlockSettings() {
     setSaving(true);
     try {
       if (isChangingPin) {
+        log('Updating PIN...');
         await updatePin(currentPin, pin);
       } else {
+        log('Enabling quick unlock with new PIN...');
         await enableQuickUnlock(pin);
+        // Clear the "skipped setup" flag since user is now setting up PIN
+        clearPinSetupSkipped();
       }
       const newStatus = await getDeviceAppLockStatus();
+      log('New status after save:', newStatus);
       setStatus(newStatus);
       resetPinState();
       toast({
-        title: isChangingPin ? 'PIN updated' : 'Quick unlock enabled',
+        title: isChangingPin ? 'PIN updated' : 'PIN created successfully!',
         description: isChangingPin
           ? 'Your quick unlock PIN has been updated.'
           : 'You can now use your PIN to unlock FarmVault on this device.',
       });
     } catch (err) {
+      log('Error saving PIN:', err);
       toast({
-        title: isChangingPin ? 'Failed to update PIN' : 'Failed to enable quick unlock',
+        title: isChangingPin ? 'Failed to update PIN' : 'Failed to create PIN',
         description: (err as Error).message,
         variant: 'destructive',
       });
@@ -178,6 +206,9 @@ export function QuickUnlockSettings() {
   }
 
   const isEnabled = status?.hasPin ?? false;
+  
+  // Show the PIN creation form when not enabled OR when changing PIN
+  const showPinForm = isCreatingPin || isChangingPin;
 
   return (
     <section className="fv-card space-y-4">
@@ -189,119 +220,179 @@ export function QuickUnlockSettings() {
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-foreground">Quick Unlock</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Mark this device as trusted and use a PIN to unlock FarmVault faster.
-            Password login is always available as fallback.
+            {isEnabled 
+              ? 'PIN unlock is enabled. Lock the app or change your PIN below.'
+              : 'Create a PIN to unlock FarmVault faster on this device.'}
           </p>
         </div>
       </div>
 
-      {/* Status indicator */}
-      <div className="flex items-center gap-2 text-sm">
-        <div
-          className={cn(
-            'h-2 w-2 rounded-full',
-            isEnabled ? 'bg-green-500' : 'bg-muted-foreground/40'
-          )}
-        />
-        <span className={cn(isEnabled ? 'text-green-600' : 'text-muted-foreground')}>
-          {isEnabled ? 'Enabled on this device' : 'Not enabled'}
-        </span>
-      </div>
+      {/* Status indicator - only show when PIN exists */}
+      {isEnabled && (
+        <div className="flex items-center gap-2 text-sm">
+          <div className="h-2 w-2 rounded-full bg-green-500" />
+          <span className="text-green-600 dark:text-green-400">PIN enabled on this device</span>
+        </div>
+      )}
 
-      {/* PIN Setup / Change Form */}
-      {showPinSetup && (
+      {/* ============================================= */}
+      {/* PIN Creation Card - Shows ONLY when no PIN exists and not creating */}
+      {/* ============================================= */}
+      {!isEnabled && !isCreatingPin && (
+        <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-3">
+          <div className="flex items-center gap-2">
+            <Plus className="h-5 w-5 text-primary" />
+            <span className="font-medium text-foreground">Create a PIN</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Set up a 4-6 digit PIN to quickly unlock FarmVault without entering your password every time.
+          </p>
+          <Button
+            onClick={() => {
+              log('Starting PIN creation flow');
+              setIsCreatingPin(true);
+              // Auto-focus the PIN input after a short delay
+              setTimeout(() => pinInputRef.current?.focus(), 100);
+            }}
+            className="gap-2 w-full"
+            size="lg"
+          >
+            <Lock className="h-4 w-4" />
+            Create PIN
+          </Button>
+        </div>
+      )}
+
+      {/* ============================================= */}
+      {/* PIN Form - Shows when creating or changing PIN */}
+      {/* ============================================= */}
+      {showPinForm && (
         <div className="space-y-4 p-4 bg-muted/30 rounded-lg border border-border/60">
-          <div className="space-y-3">
-            {isEnabled && (
-              <div className="space-y-1.5">
+          <div className="space-y-4">
+            {/* Current PIN - only when changing */}
+            {isChangingPin && (
+              <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">
                   Current PIN
                 </label>
                 <input
                   type="password"
                   inputMode="numeric"
-                  pattern="\d*"
+                  pattern="[0-9]*"
                   maxLength={6}
-                  className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                  className="fv-input w-full text-center text-xl tracking-[0.5em] font-mono h-12"
                   value={currentPin}
                   onChange={(e) => {
-                    setCurrentPin(e.target.value.replace(/\D/g, ''));
+                    const val = e.target.value.replace(/\D/g, '');
+                    setCurrentPin(val);
                     setPinError(null);
                   }}
-                  placeholder="• • • •"
+                  placeholder="••••"
                   autoComplete="off"
                 />
               </div>
             )}
 
-            <div className="space-y-1.5">
+            {/* New PIN */}
+            <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">
-                {isEnabled ? 'New 4-6 digit PIN' : 'Choose a 4-6 digit PIN'}
+                {isChangingPin ? 'New PIN (4-6 digits)' : 'Choose a PIN (4-6 digits)'}
               </label>
               <input
+                ref={pinInputRef}
                 type="password"
                 inputMode="numeric"
-                pattern="\d*"
+                pattern="[0-9]*"
                 maxLength={6}
-                className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                className="fv-input w-full text-center text-xl tracking-[0.5em] font-mono h-12"
                 value={pin}
                 onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, ''));
+                  const val = e.target.value.replace(/\D/g, '');
+                  setPin(val);
                   setPinError(null);
+                  // Auto-focus confirm field when PIN is complete
+                  if (val.length >= 4) {
+                    setTimeout(() => confirmPinInputRef.current?.focus(), 100);
+                  }
                 }}
-                placeholder="• • • •"
+                placeholder="••••"
                 autoComplete="off"
               />
+              {/* PIN strength indicator */}
+              <div className="flex gap-1">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <div 
+                    key={i} 
+                    className={cn(
+                      "h-1 flex-1 rounded-full transition-colors",
+                      i < pin.length ? "bg-primary" : "bg-muted"
+                    )} 
+                  />
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-1.5">
+            {/* Confirm PIN */}
+            <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">
                 Confirm PIN
               </label>
               <input
+                ref={confirmPinInputRef}
                 type="password"
                 inputMode="numeric"
-                pattern="\d*"
+                pattern="[0-9]*"
                 maxLength={6}
-                className="fv-input w-full max-w-[200px] text-center text-lg tracking-widest"
+                className={cn(
+                  "fv-input w-full text-center text-xl tracking-[0.5em] font-mono h-12",
+                  confirmPin.length > 0 && pin === confirmPin && "border-green-500 focus:border-green-500"
+                )}
                 value={confirmPin}
                 onChange={(e) => {
-                  setConfirmPin(e.target.value.replace(/\D/g, ''));
+                  const val = e.target.value.replace(/\D/g, '');
+                  setConfirmPin(val);
                   setPinError(null);
                 }}
-                placeholder="• • • •"
+                placeholder="••••"
                 autoComplete="off"
               />
+              {/* Match indicator */}
+              {confirmPin.length > 0 && (
+                <p className={cn(
+                  "text-xs",
+                  pin === confirmPin ? "text-green-600" : "text-muted-foreground"
+                )}>
+                  {pin === confirmPin ? "✓ PINs match" : "PINs don't match yet"}
+                </p>
+              )}
             </div>
 
+            {/* Error message */}
             {pinError && (
-              <div className="flex items-center gap-2 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 p-2 rounded">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 {pinError}
               </div>
             )}
           </div>
 
-          <div className="flex gap-2">
+          {/* Action buttons */}
+          <div className="flex gap-2 pt-2">
             <Button
-              size="sm"
               onClick={handleEnableOrChangePin}
-              disabled={saving || pin.length < 4}
-              className="gap-2"
+              disabled={saving || pin.length < 4 || pin !== confirmPin}
+              className="gap-2 flex-1"
             >
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              {isEnabled ? 'Update PIN' : 'Enable Quick Unlock'}
+              {isChangingPin ? 'Update PIN' : 'Create PIN'}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              onClick={() => {
-                resetPinState();
-              }}
+              onClick={resetPinState}
               disabled={saving}
             >
               Cancel
@@ -310,61 +401,45 @@ export function QuickUnlockSettings() {
         </div>
       )}
 
-      {/* Actions */}
-      {!showPinSetup && (
-        <div className="flex flex-col gap-3">
-          {!isEnabled ? (
+      {/* ============================================= */}
+      {/* Actions when PIN is enabled */}
+      {/* ============================================= */}
+      {isEnabled && !showPinForm && !showDisableConfirm && (
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Button
+              variant="default"
               onClick={() => {
-                setIsChangingPin(false);
-                setShowPinSetup(true);
+                log('Lock now clicked');
+                lockApp();
               }}
-              className="gap-2 w-full sm:w-auto"
+              className="gap-2"
             >
               <Lock className="h-4 w-4" />
-              Set up PIN unlock
+              Lock now
             </Button>
-          ) : (
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                variant="default"
-                onClick={() => {
-                  // lockApp() sets localStorage AND dispatches a custom event
-                  // The useAppLock hook listens for this event and updates state immediately
-                  // No page reload needed - the lock screen appears instantly
-                  lockApp();
-                }}
-                className="gap-2"
-              >
-                <Lock className="h-4 w-4" />
-                Lock now
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsChangingPin(true);
-                  setShowPinSetup(true);
-                }}
-                className="gap-2"
-              >
-                <Lock className="h-4 w-4" />
-                Change PIN
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={handleDisableQuickUnlock}
-                disabled={saving}
-                className="gap-2 text-muted-foreground hover:text-destructive"
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <X className="h-4 w-4" />
-                )}
-                Disable quick unlock
-              </Button>
-            </div>
-          )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                log('Change PIN clicked');
+                setIsChangingPin(true);
+                setTimeout(() => pinInputRef.current?.focus(), 100);
+              }}
+              className="gap-2"
+            >
+              <Lock className="h-4 w-4" />
+              Change PIN
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleDisableQuickUnlock}
+              disabled={saving}
+              className="gap-2 text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-4 w-4" />
+              Disable
+            </Button>
+          </div>
         </div>
       )}
 

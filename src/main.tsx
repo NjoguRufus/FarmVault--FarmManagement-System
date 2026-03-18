@@ -6,11 +6,16 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
 import { initPwaInstall } from "@/lib/pwa-install";
+import { migrateQuickUnlockState } from "@/services/appLockService";
 import "./index.css";
 
 // Initialize PWA install prompt capture EARLY (before React mounts)
 // This ensures we don't miss the beforeinstallprompt event
 initPwaInstall();
+
+// Migrate/reset Quick Unlock state to fix broken states from previous versions
+// This clears stale localStorage data that causes PIN screen to appear without proper setup
+migrateQuickUnlockState();
 
 const DEV_SW_RESET_MARKER = "__farmvault_dev_sw_reset__";
 let shouldRenderApp = true;
