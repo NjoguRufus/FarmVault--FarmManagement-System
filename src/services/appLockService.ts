@@ -12,6 +12,7 @@
  * - fv_locked: Explicit lock state ('true' if locked, 'false' if unlocked)
  * - fv_pin_exists: Whether a PIN has been created ('true' when PIN exists)
  * - fv_app_lock_timeout: Auto-lock timeout in seconds (10, 30, 60, 300)
+ * - fv_app_lock_inactivity_grace_ms: Idle grace before inactivity timer starts (2000, 5000, 10000)
  * - fv_app_last_active: Timestamp when user last left the app
  * - fv_app_unlocked_at: Timestamp when PIN was last successfully entered
  * - fv_pin_setup_skipped: User skipped PIN setup for this session
@@ -30,6 +31,7 @@ const DEVICE_KEY = 'fv_device_id';
 const LOCK_STATE_KEY = 'fv_locked'; // "true" when locked, "false" when unlocked
 const PIN_EXISTS_KEY = 'fv_pin_exists'; // "true" when PIN is created on server
 const LOCK_TIMEOUT_KEY = 'fv_app_lock_timeout';
+const INACTIVITY_GRACE_KEY = 'fv_app_lock_inactivity_grace_ms';
 const LAST_ACTIVE_KEY = 'fv_app_last_active';
 const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
 const PIN_SETUP_SKIPPED_KEY = 'fv_pin_setup_skipped';
@@ -39,6 +41,7 @@ const STATE_VERSION_KEY = 'fv_quick_unlock_version';
 const CURRENT_STATE_VERSION = '4'; // Increment this to force reset of broken states
 
 export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
+export type InactivityGraceMs = 2000 | 5000 | 10000;
 
 // Debug flag - always log for now to help debug issues
 const DEBUG_LOCK = true;
@@ -227,6 +230,31 @@ export function setLockTimeout(timeout: LockTimeoutSeconds): void {
 }
 
 /**
+ * Get the inactivity grace period (ms) before idle timer starts.
+ * Default is 2000ms (2 seconds).
+ */
+export function getInactivityGraceMs(): InactivityGraceMs {
+  if (typeof window === 'undefined') return 2000;
+  const raw = window.localStorage.getItem(INACTIVITY_GRACE_KEY);
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (parsed === 2000 || parsed === 5000 || parsed === 10000) {
+    debugLog('[INACTIVITY] Loaded grace from localStorage:', parsed, 'ms');
+    return parsed;
+  }
+  debugLog('[INACTIVITY] No valid grace in localStorage, using default: 2000ms');
+  return 2000;
+}
+
+/**
+ * Save the inactivity grace period (ms) to localStorage.
+ */
+export function setInactivityGraceMs(graceMs: InactivityGraceMs): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(INACTIVITY_GRACE_KEY, String(graceMs));
+  debugLog('[INACTIVITY] Saved grace to localStorage:', graceMs, 'ms');
+}
+
+/**
  * Record the current timestamp as "last hidden".
  * Called when the user leaves the app (tab hidden, window blur, etc.)
  * This is used to calculate elapsed time when user returns.
@@ -264,12 +292,11 @@ export function recordUnlockedAt(): void {
 }
 
 /**
- * Determine if the app should be locked based on timeout logic.
+ * Determine if the app should be locked based on inactivity timeout logic.
  *
- * The app should lock if:
- * 1. There's a last_active timestamp AND elapsed time >= timeout
- * 2. OR there's no unlocked_at timestamp (never unlocked this session)
- * 3. OR the unlocked_at timestamp is older than the timeout
+ * The app should lock only if:
+ * 1. There's a last_active timestamp
+ * 2. AND elapsed time since last_active >= timeout
  *
  * @param hasPin - Whether Quick Unlock is enabled (PIN exists)
  */
@@ -311,28 +338,10 @@ export function shouldLockNow(hasPin: boolean = true): boolean {
       }
     }
   } else {
-    debugLog('[TIMER] No last_active timestamp found (app was not hidden recently)');
+    debugLog('[TIMER] No last_active timestamp found (no inactivity period tracked yet)');
   }
 
-  // Check if there's an "unlocked at" timestamp (fresh load scenario)
-  const unlockedAt = getUnlockedAt();
-  if (unlockedAt === null) {
-    debugLog('[TIMER] No unlock timestamp found - this is a fresh session, requiring PIN');
-    return true;
-  }
-
-  // Check if the unlock timestamp is too old
-  const unlockElapsedMs = now - unlockedAt;
-  const unlockElapsedSeconds = Math.round(unlockElapsedMs / 1000);
-  const unlockExpired = unlockElapsedMs >= timeout * 1000;
-  
-  debugLog('[TIMER] Unlock timestamp check:');
-  debugLog('[TIMER]   - Unlocked at:', new Date(unlockedAt).toISOString());
-  debugLog('[TIMER]   - Elapsed since unlock:', unlockElapsedSeconds, 'seconds');
-  debugLog('[TIMER]   - Timeout:', timeout, 'seconds');
-  debugLog('[TIMER]   - Session expired?', unlockExpired ? 'YES' : 'NO');
-
-  return unlockExpired;
+  return false;
 }
 
 /**
