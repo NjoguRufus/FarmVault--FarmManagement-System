@@ -115,7 +115,7 @@ import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTou
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 
-type ViewMode = 'list' | 'intake' | 'pay' | 'buyer';
+type ViewMode = 'list' | 'intake' | 'pay' | 'buyer' | 'view_pickers';
 
 /** Threshold above which a crate weight is consigggered unusual and triggers a confirmation */
 const UNUSUAL_WEIGHT_THRESHOLD_KG = 25;
@@ -190,11 +190,18 @@ export default function HarvestCollectionsPage() {
   const [quickPayLocalPaidByPickerId, setQuickPayLocalPaidByPickerId] = useState<Record<string, number>>({});
   const [quickPaySummaryExpanded, setQuickPaySummaryExpanded] = useState(false);
   const [quickPaySearch, setQuickPaySearch] = useState('');
+  const [debouncedQuickPaySearch, setDebouncedQuickPaySearch] = useState('');
   const skipJustClickedRef = useRef(false);
 
   const [buyerPricePerKg, setBuyerPricePerKg] = useState('');
   const [markingBuyerPaid, setMarkingBuyerPaid] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
+  const [debouncedPickerSearch, setDebouncedPickerSearch] = useState('');
+  const [viewPickersSearch, setViewPickersSearch] = useState('');
+  const [debouncedViewPickersSearch, setDebouncedViewPickersSearch] = useState('');
+  const [expandedViewPickerIds, setExpandedViewPickerIds] = useState<Set<string>>(new Set());
+  const [viewPickersLayout, setViewPickersLayout] = useState<'list' | 'cards'>(isAdminUser ? 'cards' : 'list');
+  const viewPickersPrevSearchRef = useRef('');
   const [statsExpanded, setStatsExpanded] = useState(true);
   const [paySelectedIds, setPaySelectedIds] = useState<Set<string>>(new Set());
   const [cashAmount, setCashAmount] = useState('');
@@ -252,6 +259,34 @@ export default function HarvestCollectionsPage() {
   const canCloseHarvest = can('harvest', 'close');
   const canViewFinancials = canKey('harvest_collections.financials') || can('harvest', 'viewFinancials');
   const canViewPaymentAmounts = canViewFinancials;
+  const canViewPickerEntries = canKey('harvest_collections.view_picker_entries');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedPickerSearch(pickerSearch);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [pickerSearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuickPaySearch(quickPaySearch);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [quickPaySearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedViewPickersSearch(viewPickersSearch);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [viewPickersSearch]);
+
+  useEffect(() => {
+    if (!isAdminUser && viewPickersLayout !== 'list') {
+      setViewPickersLayout('list');
+    }
+  }, [isAdminUser, viewPickersLayout]);
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
@@ -267,11 +302,19 @@ export default function HarvestCollectionsPage() {
 
   const detailModes = useMemo<ViewMode[]>(() => {
     const modes: ViewMode[] = [];
+    if (isAdminUser) {
+      if (canViewPickerEntries) modes.push('view_pickers');
+      if (canViewBuyerSection) modes.push('buyer');
+      if (canManageIntake) modes.push('intake');
+      if (canPayPickers) modes.push('pay');
+      return modes;
+    }
     if (canManageIntake) modes.push('intake');
     if (canPayPickers) modes.push('pay');
     if (canViewBuyerSection) modes.push('buyer');
+    if (canViewPickerEntries) modes.push('view_pickers');
     return modes;
-  }, [canManageIntake, canPayPickers, canViewBuyerSection]);
+  }, [isAdminUser, canViewPickerEntries, canManageIntake, canPayPickers, canViewBuyerSection]);
   
   const defaultDetailMode: ViewMode = detailModes[0] ?? 'list';
 
@@ -1047,25 +1090,25 @@ export default function HarvestCollectionsPage() {
 
   const quickPayQueueFiltered = useMemo(() => {
     const q = quickPayQueue;
-    const s = (quickPaySearch ?? '').trim().toLowerCase();
+    const s = (debouncedQuickPaySearch ?? '').trim().toLowerCase();
     if (!s) return q;
     return q.filter(
       (item) =>
         String(item.pickerNumber).toLowerCase().includes(s) ||
         item.pickerName.toLowerCase().includes(s)
     );
-  }, [quickPayQueue, quickPaySearch]);
+  }, [quickPayQueue, debouncedQuickPaySearch]);
 
   /** Pickers matching search (all pickers in collection, for immediate card display when searching by number/name). */
   const quickPaySearchMatchingPickers = useMemo(() => {
-    const s = (quickPaySearch ?? '').trim().toLowerCase();
+    const s = (debouncedQuickPaySearch ?? '').trim().toLowerCase();
     if (!s) return [];
     return pickersForCollection.filter(
       (p) =>
         String(p.pickerNumber ?? '').toLowerCase().includes(s) ||
         String(p.pickerName ?? '').toLowerCase().includes(s)
     );
-  }, [quickPaySearch, pickersForCollection]);
+  }, [debouncedQuickPaySearch, pickersForCollection]);
 
   /** Picker to show in Quick Pay card: from queue when no search, else first match from all pickers (including paid). */
   const quickPayDisplayPickerId = useMemo(() => {
@@ -1110,14 +1153,97 @@ export default function HarvestCollectionsPage() {
   );
 
   const filteredPickers = useMemo(() => {
-    const q = (pickerSearch || '').trim().toLowerCase();
+    const q = (debouncedPickerSearch || '').trim().toLowerCase();
     if (!q) return pickersForCollection;
     return pickersForCollection.filter(
       (p) =>
         String(p.pickerNumber ?? '').toLowerCase().includes(q) ||
         (p.pickerName ?? '').toLowerCase().includes(q)
     );
-  }, [pickersForCollection, pickerSearch]);
+  }, [pickersForCollection, debouncedPickerSearch]);
+
+  const viewPickerRows = useMemo(() => {
+    const pricePerKgPicker = Number(selectedCollection?.pricePerKgPicker ?? 0);
+    const byPicker = new Map<
+      string,
+      {
+        pickerId: string;
+        pickerNumber: number | string;
+        pickerName: string;
+        totalKg: number;
+        totalAmount: number;
+        entries: Array<{ rowKey: string; timeLabel: string; kg: number; amount: number; recordedAtMs: number }>;
+      }
+    >();
+
+    pickersForCollection.forEach((picker) => {
+      byPicker.set(picker.id, {
+        pickerId: picker.id,
+        pickerNumber: picker.pickerNumber ?? '',
+        pickerName: picker.pickerName ?? '—',
+        totalKg: 0,
+        totalAmount: 0,
+        entries: [],
+      });
+    });
+
+    weighEntriesForCollection.forEach((entry, idx) => {
+      const pickerId = String(entry.pickerId ?? '');
+      const row = byPicker.get(pickerId);
+      if (!row) return;
+      const kg = Number(entry.weightKg ?? 0);
+      if (!Number.isFinite(kg) || kg <= 0) return;
+      row.totalKg += kg;
+      const amount = Math.round(kg * pricePerKgPicker);
+      row.totalAmount += amount;
+      row.entries.push({
+        rowKey: entry.id ?? `view-picker-entry-${idx}`,
+        timeLabel: entry.recordedAt != null ? format(toDate(entry.recordedAt) ?? new Date(), 'h:mm a') : '—',
+        kg,
+        amount,
+        recordedAtMs: entry.recordedAt != null ? (toDate(entry.recordedAt) ?? new Date()).getTime() : 0,
+      });
+    });
+
+    return Array.from(byPicker.values())
+      .map((row) => ({
+        ...row,
+        // Oldest first so entry #1 is the first recorded entry.
+        entries: row.entries.sort((a, b) => a.recordedAtMs - b.recordedAtMs),
+      }))
+      .sort((a, b) => Number(a.pickerNumber ?? 0) - Number(b.pickerNumber ?? 0));
+  }, [pickersForCollection, weighEntriesForCollection, selectedCollection?.pricePerKgPicker]);
+
+  const filteredViewPickerRows = useMemo(() => {
+    const query = (debouncedViewPickersSearch ?? '').trim().toLowerCase().replace(/^#/, '');
+    if (!query) return viewPickerRows;
+    return viewPickerRows.filter((row) => String(row.pickerNumber ?? '').toLowerCase().includes(query));
+  }, [viewPickerRows, debouncedViewPickersSearch]);
+
+  useEffect(() => {
+    if (viewMode !== 'view_pickers') return;
+    if (filteredViewPickerRows.length === 0) {
+      setExpandedViewPickerIds(new Set());
+      viewPickersPrevSearchRef.current = debouncedViewPickersSearch;
+      return;
+    }
+    const searchChanged = viewPickersPrevSearchRef.current !== debouncedViewPickersSearch;
+    // Admin card view should stay collapsed until chevron is explicitly tapped.
+    if (isAdminUser && viewPickersLayout === 'cards') {
+      if (searchChanged) setExpandedViewPickerIds(new Set());
+      viewPickersPrevSearchRef.current = debouncedViewPickersSearch;
+      return;
+    }
+    const visibleIds = new Set(filteredViewPickerRows.map((row) => row.pickerId));
+    setExpandedViewPickerIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => visibleIds.has(id)));
+      if (searchChanged && next.size === 0 && filteredViewPickerRows[0]) {
+        next.add(filteredViewPickerRows[0].pickerId);
+      }
+      return next;
+    });
+    viewPickersPrevSearchRef.current = debouncedViewPickersSearch;
+  }, [viewMode, filteredViewPickerRows, debouncedViewPickersSearch, isAdminUser, viewPickersLayout]);
 
   const filteredPickersForPay = useMemo(() => {
     return [...filteredPickers].sort((a, b) => (a.isPaid === b.isPaid ? 0 : a.isPaid ? 1 : -1));
@@ -2896,6 +3022,37 @@ export default function HarvestCollectionsPage() {
               <>
                 <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
                   <div className="flex flex-nowrap gap-2 sm:gap-3 overflow-x-auto pb-1 min-w-0 -mx-1 px-1 scrollbar-app">
+                    {isAdminUser && canViewPickerEntries && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('view_pickers')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'view_pickers'
+                            ? 'bg-slate-700 text-white border-slate-800 ring-2 ring-slate-400/50'
+                            : 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 dark:bg-slate-900/50 dark:text-slate-200 dark:border-slate-700'
+                        )}
+                      >
+                        <Search className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        View Pickers
+                      </button>
+                    )}
+                    {isAdminUser && canViewBuyerSection && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('buyer')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'buyer'
+                            ? 'bg-violet-500 text-white border-violet-600 ring-2 ring-violet-400/50'
+                            : 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-200 dark:bg-violet-950/50 dark:text-violet-200 dark:border-violet-800'
+                        )}
+                        data-tour="harvest-tab-buyer"
+                      >
+                        <ShoppingCart className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        Buyer
+                      </button>
+                    )}
                     {canManageIntake && (
                       <button
                         type="button"
@@ -2928,7 +3085,7 @@ export default function HarvestCollectionsPage() {
                         Pay
                       </button>
                     )}
-                    {canViewBuyerSection && (
+                    {!isAdminUser && canViewBuyerSection && (
                       <button
                         type="button"
                         onClick={() => setViewMode('buyer')}
@@ -2944,7 +3101,215 @@ export default function HarvestCollectionsPage() {
                         Buyer
                       </button>
                     )}
+                    {!isAdminUser && canViewPickerEntries && (
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('view_pickers')}
+                        className={cn(
+                          'flex-shrink-0 min-h-11 sm:min-h-10 px-4 sm:px-5 rounded-xl font-semibold text-sm sm:text-xs flex items-center justify-center gap-2 shadow-md border-2 transition-all touch-manipulation active:scale-[0.98]',
+                          viewMode === 'view_pickers'
+                            ? 'bg-slate-700 text-white border-slate-800 ring-2 ring-slate-400/50'
+                            : 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 dark:bg-slate-900/50 dark:text-slate-200 dark:border-slate-700'
+                        )}
+                      >
+                        <Search className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
+                        View Pickers
+                      </button>
+                    )}
                   </div>
+
+                  {canViewPickerEntries && (
+                    <TabsContent value="view_pickers" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h3 className="text-base font-semibold text-foreground">View Pickers</h3>
+                            <p className="text-xs text-muted-foreground">Read-only picker entries and totals.</p>
+                          </div>
+                          {isAdminUser && (
+                            <div className="inline-flex items-center rounded-lg border border-border p-1 bg-muted/30">
+                              <button
+                                type="button"
+                                onClick={() => setViewPickersLayout('list')}
+                                className={cn(
+                                  'px-3 py-1.5 text-xs rounded-md transition-colors',
+                                  viewPickersLayout === 'list'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                )}
+                              >
+                                List
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setViewPickersLayout('cards')}
+                                className={cn(
+                                  'px-3 py-1.5 text-xs rounded-md transition-colors',
+                                  viewPickersLayout === 'cards'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                )}
+                              >
+                                Cards
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                          <Input
+                            value={viewPickersSearch}
+                            onChange={(e) => setViewPickersSearch(e.target.value)}
+                            className="pl-9 min-h-10"
+                            placeholder="Search picker number (e.g. 69)"
+                          />
+                        </div>
+
+                        {filteredViewPickerRows.length === 0 ? (
+                          <div className="rounded-lg border border-red-300 bg-red-50/80 dark:border-red-800 dark:bg-red-950/30 p-3 text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 shrink-0" />
+                            <span>No picker entries match &quot;{viewPickersSearch}&quot;.</span>
+                          </div>
+                        ) : (
+                          <>
+                            {(isAdminUser ? viewPickersLayout : 'list') === 'cards' ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                {filteredViewPickerRows.map((row) => {
+                                  const expanded = expandedViewPickerIds.has(row.pickerId);
+                                  return (
+                                    <Card
+                                      key={row.pickerId}
+                                      className="relative min-h-[132px] flex flex-col overflow-hidden touch-manipulation rounded-xl"
+                                    >
+                                      <CardContent className="p-2 flex flex-col flex-1 justify-between min-h-0 text-center">
+                                        <div className="absolute top-1 right-1">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedViewPickerIds((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(row.pickerId)) next.delete(row.pickerId);
+                                                else next.add(row.pickerId);
+                                                return next;
+                                              })
+                                            }
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-muted border border-border text-muted-foreground hover:text-foreground"
+                                            aria-label={expanded ? `Collapse #${row.pickerNumber}` : `Expand #${row.pickerNumber}`}
+                                          >
+                                            {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+                                          </button>
+                                        </div>
+                                        <div className="flex justify-center flex-shrink-0 pt-1">
+                                          <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold tabular-nums shadow-lg ring-2 ring-background">
+                                            {row.pickerNumber}
+                                          </div>
+                                        </div>
+                                        <div className="font-semibold text-foreground text-xs sm:text-sm leading-tight line-clamp-2 mt-1 px-1">
+                                          {row.pickerName}
+                                        </div>
+                                        <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums mt-0.5">
+                                          {row.totalKg.toFixed(1)} kg
+                                        </div>
+                                        <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground tabular-nums">
+                                          KES {row.totalAmount.toLocaleString()}
+                                        </div>
+                                      </CardContent>
+                                      {expanded && (
+                                        <div className="border-t border-border">
+                                          <div className="grid grid-cols-3 gap-2 px-3 py-2 bg-muted/40 text-[11px] font-medium text-muted-foreground">
+                                            <span>Time</span>
+                                            <span>Kg</span>
+                                            <span>Amount</span>
+                                          </div>
+                                          <div className="max-h-56 overflow-y-auto">
+                                            {row.entries.length === 0 ? (
+                                              <p className="px-3 py-2 text-sm text-muted-foreground">No entries yet.</p>
+                                            ) : (
+                                              row.entries.map((entry) => (
+                                                <div key={entry.rowKey} className="grid grid-cols-3 gap-2 px-3 py-2 text-sm border-t border-border/70 first:border-t-0">
+                                                  <span>{entry.timeLabel}</span>
+                                                  <span className="tabular-nums">{entry.kg.toFixed(1)}</span>
+                                                  <span className="tabular-nums">KES {entry.amount.toLocaleString()}</span>
+                                                </div>
+                                              ))
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {filteredViewPickerRows.map((row) => {
+                                  const expanded = expandedViewPickerIds.has(row.pickerId);
+                                  return (
+                                    <div key={row.pickerId} className="rounded-xl border border-border overflow-hidden bg-card">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedViewPickerIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(row.pickerId)) next.delete(row.pickerId);
+                                            else next.add(row.pickerId);
+                                            return next;
+                                          })
+                                        }
+                                        className="w-full px-3 py-2.5 text-left hover:bg-muted/40 transition-colors"
+                                      >
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold tabular-nums shadow ring-2 ring-background shrink-0">
+                                            {row.pickerNumber}
+                                          </div>
+                                          <p className="min-w-0 flex-1 text-sm font-semibold text-foreground truncate">
+                                            {row.pickerName}
+                                          </p>
+                                          <p className="text-xs sm:text-sm font-semibold text-muted-foreground tabular-nums shrink-0">
+                                            {row.totalKg.toFixed(1)} kg
+                                          </p>
+                                          {expanded ? (
+                                            <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                                          ) : (
+                                            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                                          )}
+                                        </div>
+                                      </button>
+                                      {expanded && (
+                                        <div className="border-t border-border">
+                                          <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted/40 text-[11px] font-medium text-muted-foreground">
+                                            <span>Entry</span>
+                                            <span>Kg</span>
+                                            <span>Amount</span>
+                                            <span>Time</span>
+                                          </div>
+                                          <div className="max-h-56 overflow-y-auto">
+                                            {row.entries.length === 0 ? (
+                                              <p className="px-3 py-2 text-sm text-muted-foreground">No entries yet.</p>
+                                            ) : (
+                                              row.entries.map((entry, index) => (
+                                                <div key={entry.rowKey} className="grid grid-cols-4 gap-2 px-3 py-2 text-sm border-t border-border/70 first:border-t-0">
+                                                  <span className="tabular-nums">#{index + 1}</span>
+                                                  <span className="tabular-nums">{entry.kg.toFixed(1)}</span>
+                                                  <span className="tabular-nums">KES {entry.amount.toLocaleString()}</span>
+                                                  <span>{entry.timeLabel}</span>
+                                                </div>
+                                              ))
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </TabsContent>
+                  )}
 
                   {canManageIntake && (
                     <TabsContent value="intake" className="mt-3 sm:mt-4 space-y-3 sm:space-y-4">

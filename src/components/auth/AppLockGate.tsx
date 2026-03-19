@@ -27,6 +27,7 @@ import {
   unlockApp,
   recordLastActive,
   getLockTimeout,
+  getInactivityGraceMs,
   hasPinInLocalStorage,
   APP_LOCK_CHANGE_EVENT,
   APP_PIN_CHANGE_EVENT,
@@ -114,12 +115,17 @@ export function AppLockGate({ children }: AppLockGateProps) {
   
   const [lockState, setLockState] = useState<LockState>(bootResult.state);
   const [bootState, setBootState] = useState<BootState>('booting');
+  const [hasMountedAppOnce, setHasMountedAppOnce] = useState(bootResult.bootDecision !== 'locked');
 
   // On mount, set the boot decision
   useEffect(() => {
     debugLog('Boot phase complete, decision:', bootResult.bootDecision);
     setBootState(bootResult.bootDecision);
   }, [bootResult.bootDecision]);
+
+  useEffect(() => {
+    if (bootState === 'unlocked') setHasMountedAppOnce(true);
+  }, [bootState]);
 
   // Listen for lock state changes from other components
   useEffect(() => {
@@ -244,6 +250,58 @@ export function AppLockGate({ children }: AppLockGateProps) {
     };
   }, [lockState.hasPin]);
 
+  // Track in-app activity and lock only after real inactivity.
+  useEffect(() => {
+    if (bootState !== 'unlocked') return;
+    if (!lockState.hasPin) return;
+
+    let lastInteractionAt = Date.now();
+    let inactivityStartAt: number | null = null;
+    let didRecordInactivityStart = false;
+    const timeoutMs = getLockTimeout() * 1000;
+    const inactivityGraceMs = getInactivityGraceMs();
+
+    const markInteraction = () => {
+      lastInteractionAt = Date.now();
+      inactivityStartAt = null;
+      didRecordInactivityStart = false;
+    };
+
+    const checkInactivity = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      const idleMs = now - lastInteractionAt;
+
+      if (idleMs < inactivityGraceMs) return;
+
+      if (inactivityStartAt == null) {
+        inactivityStartAt = now;
+      }
+
+      if (!didRecordInactivityStart) {
+        recordLastActive();
+        didRecordInactivityStart = true;
+      }
+
+      const inactivityElapsedMs = now - inactivityStartAt;
+      if (inactivityElapsedMs >= timeoutMs) {
+        debugLog('[INACTIVITY] *** AUTO-LOCK TRIGGERED ***');
+        lockApp();
+        setLockState({ hasPin: true, isLocked: true });
+        setBootState('locked');
+      }
+    };
+
+    const events: Array<keyof WindowEventMap> = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((evt) => window.addEventListener(evt, markInteraction, { passive: true }));
+    const interval = window.setInterval(checkInactivity, 1000);
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, markInteraction));
+      window.clearInterval(interval);
+    };
+  }, [bootState, lockState.hasPin]);
+
   // Handle unlock - called when PIN is entered correctly
   const handleUnlock = useCallback(() => {
     debugLog('=== UNLOCK FROM GATE ===');
@@ -282,12 +340,28 @@ export function AppLockGate({ children }: AppLockGateProps) {
     debugLog('=== SHOWING LOCK SCREEN (GATE LEVEL) ===');
     debugLog('bootState:', bootState);
     debugLog('lockState:', lockState);
-    
+
+    // If app has never been mounted in this session, show lock screen only.
+    // If it was already mounted, keep it mounted and overlay lock screen so user returns to exact state.
+    if (!hasMountedAppOnce) {
+      return (
+        <QuickUnlockScreen
+          onUnlocked={handleUnlock}
+          onSwitchToPassword={handleSwitchToPassword}
+        />
+      );
+    }
+
     return (
-      <QuickUnlockScreen
-        onUnlocked={handleUnlock}
-        onSwitchToPassword={handleSwitchToPassword}
-      />
+      <>
+        {children}
+        <div className="fixed inset-0 z-[9999]">
+          <QuickUnlockScreen
+            onUnlocked={handleUnlock}
+            onSwitchToPassword={handleSwitchToPassword}
+          />
+        </div>
+      </>
     );
   }
 

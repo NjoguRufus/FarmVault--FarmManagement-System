@@ -21,6 +21,8 @@ import {
   verifyPin,
   getLockTimeout,
   setLockTimeout,
+  getInactivityGraceMs,
+  setInactivityGraceMs,
   lockApp,
   hasPinInLocalStorage,
   checkBiometricCapabilities,
@@ -52,6 +54,7 @@ export function QuickUnlockSettings() {
   const [confirmPin, setConfirmPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [timeoutSeconds, setTimeoutSeconds] = useState<number>(() => getLockTimeout());
+  const [inactivityGraceMs, setInactivityGraceMsState] = useState<number>(() => getInactivityGraceMs());
   
   // Track if user has started creating a PIN (for the creation flow)
   const [isCreatingPin, setIsCreatingPin] = useState(false);
@@ -568,6 +571,53 @@ export function QuickUnlockSettings() {
         {isEnabled && (
           <p className="text-[11px] text-muted-foreground">
             The app will lock after {timeoutSeconds < 60 ? `${timeoutSeconds} seconds` : timeoutSeconds === 60 ? '1 minute' : `${Math.round(timeoutSeconds / 60)} minutes`} when you leave or switch apps.
+          </p>
+        )}
+      </div>
+
+      {/* Inactivity grace */}
+      <div className="space-y-2 pt-3 border-t border-border/60">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground">Inactivity grace</span>
+          <span className="text-[11px] text-muted-foreground">
+            {isEnabled ? 'Delay before idle timer starts' : 'Enable PIN unlock to configure'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[2000, 5000, 10000].map((ms) => {
+            const label = ms === 2000 ? '2s' : ms === 5000 ? '5s' : '10s';
+            const selected = inactivityGraceMs === ms;
+            return (
+              <button
+                key={ms}
+                type="button"
+                disabled={!isEnabled}
+                onClick={() => {
+                  const next = ms as 2000 | 5000 | 10000;
+                  setInactivityGraceMsState(next);
+                  setInactivityGraceMs(next);
+                  toast({
+                    title: 'Inactivity grace saved',
+                    description: `Idle timer starts after ${label} without activity.`,
+                    duration: 2000,
+                  });
+                }}
+                className={cn(
+                  'text-xs px-2 py-1.5 rounded-full border transition-colors',
+                  selected
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border text-muted-foreground hover:bg-muted/60',
+                  !isEnabled && 'opacity-50 cursor-not-allowed'
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {isEnabled && (
+          <p className="text-[11px] text-muted-foreground">
+            App Lock waits {Math.round(inactivityGraceMs / 1000)} seconds of no activity before counting down the auto-lock timeout.
           </p>
         )}
       </div>
