@@ -340,6 +340,29 @@ export type RenameHarvestCollectionResult = {
   auditLogged: boolean;
 };
 
+export type HarvestCollectionProjectTransfer = {
+  id: string;
+  collectionId: string;
+  fromProjectId: string | null;
+  toProjectId: string | null;
+  reason: string | null;
+  transferredBy: string | null;
+  transferredAt: string | null;
+};
+
+function readFirstString(
+  row: Record<string, unknown>,
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
 /**
  * Rename a harvest collection session.
  * IMPORTANT: Update only the "notes" (collection name) column; do not touch totals or child harvest records.
@@ -387,6 +410,69 @@ export async function renameHarvestCollection(params: {
   }
 
   return { updatedName: trimmed, auditLogged };
+}
+
+export async function transferCollectionToProject(params: {
+  companyId: string;
+  collectionId: string;
+  targetProjectId: string;
+  reason?: string | null;
+  transferredBy?: string | null;
+}): Promise<void> {
+  const { error } = await supabase
+    .schema('harvest')
+    .rpc('transfer_collection_to_project', {
+      p_company_id: params.companyId,
+      p_collection_id: params.collectionId,
+      p_target_project_id: params.targetProjectId,
+      p_reason: params.reason ?? null,
+      p_transferred_by: params.transferredBy ?? null,
+    });
+  if (error) throw error;
+}
+
+export async function listHarvestCollectionProjectTransfers(params: {
+  companyId: string;
+  collectionId: string;
+}): Promise<HarvestCollectionProjectTransfer[]> {
+  const { data, error } = await harvest()
+    .from('harvest_collection_project_transfers')
+    .select('*')
+    .eq('company_id', params.companyId)
+    .eq('collection_id', params.collectionId)
+    .order('transferred_at', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  return (data ?? []).map((raw) => {
+    const row = raw as Record<string, unknown>;
+    const id = readFirstString(row, ['id']) ?? crypto.randomUUID();
+    const collectionId = readFirstString(row, ['collection_id']) ?? params.collectionId;
+    const fromProjectId = readFirstString(row, [
+      'from_project_id',
+      'source_project_id',
+      'old_project_id',
+      'previous_project_id',
+    ]);
+    const toProjectId = readFirstString(row, [
+      'to_project_id',
+      'target_project_id',
+      'new_project_id',
+      'destination_project_id',
+    ]);
+    const reason = readFirstString(row, ['reason', 'transfer_reason']);
+    const transferredBy = readFirstString(row, ['transferred_by', 'created_by', 'actor_user_id']);
+    const transferredAt = readFirstString(row, ['transferred_at', 'created_at']);
+    return {
+      id,
+      collectionId,
+      fromProjectId,
+      toProjectId,
+      reason,
+      transferredBy,
+      transferredAt,
+    };
+  });
 }
 
 /** Delete a harvest collection session (cascades to pickers + intake/payment entries). */

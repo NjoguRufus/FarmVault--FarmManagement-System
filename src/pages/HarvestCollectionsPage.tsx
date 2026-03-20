@@ -59,6 +59,7 @@ import {
   listPickerPaymentsByCollectionIds,
   renameHarvestCollection,
   deleteHarvestCollection,
+  transferCollectionToProject,
   mapPicker,
   computeCollectionFinancials,
   updateHarvestPicker,
@@ -124,6 +125,7 @@ import {
 } from '@/tours/harvestCollectionsTour';
 import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTour';
 import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestCollectionModal';
+import { HarvestCollectionTransferModal } from '@/components/modals/HarvestCollectionTransferModal';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 const HARVEST_COLLECTION_BASE_NAME = 'test';
@@ -259,6 +261,8 @@ export default function HarvestCollectionsPage() {
   // Collection management: rename (audit logged) + delete (with confirmation).
   const [renameCollectionDialogOpen, setRenameCollectionDialogOpen] = useState(false);
   const [renameTargetCollection, setRenameTargetCollection] = useState<HarvestCollection | null>(null);
+  const [transferCollectionDialogOpen, setTransferCollectionDialogOpen] = useState(false);
+  const [transferTargetCollection, setTransferTargetCollection] = useState<HarvestCollection | null>(null);
   const [deleteCollectionConfirm, setDeleteCollectionConfirm] = useState<HarvestCollection | null>(null);
   const [deletingCollection, setDeletingCollection] = useState(false);
 
@@ -284,6 +288,7 @@ export default function HarvestCollectionsPage() {
   const canViewPaymentAmounts = canViewFinancials;
   const canViewPickerEntries = canKey('harvest_collections.view_picker_entries');
   const canRenameCollection = canKey('harvest_collections.edit') || canManageIntake;
+  const canTransferCollection = isAdminUser && (canKey('harvest_collections.edit') || can('harvest', 'edit') || canManageIntake);
   const canDeleteCollection = canKey('harvest_collections.delete') || can('harvest', 'edit');
 
   useEffect(() => {
@@ -454,6 +459,11 @@ export default function HarvestCollectionsPage() {
     if (!open) setRenameTargetCollection(null);
   };
 
+  const handleTransferDialogOpenChange = (open: boolean) => {
+    setTransferCollectionDialogOpen(open);
+    if (!open) setTransferTargetCollection(null);
+  };
+
   const handleRenameCollectionSave = async (nextName: string) => {
     if (!renameTargetCollection || !companyId) return;
     if (!canRenameCollection) {
@@ -523,6 +533,54 @@ export default function HarvestCollectionsPage() {
       setDeletingCollection(false);
       setDeleteCollectionConfirm(null);
     }
+  };
+
+  const handleTransferCollectionSubmit = async (params: {
+    targetProjectId: string;
+    reason: string | null;
+  }) => {
+    if (!transferTargetCollection || !companyId) return;
+    if (!canTransferCollection) {
+      toast({
+        title: 'Access denied',
+        description: 'You do not have access to transfer this harvest collection.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (params.targetProjectId === transferTargetCollection.projectId) {
+      throw new Error('Please choose a different project.');
+    }
+    const validTarget = companyProjects.some(
+      (project) => project.companyId === companyId &&
+        project.id === params.targetProjectId &&
+        project.id !== transferTargetCollection.projectId,
+    );
+    if (!validTarget) {
+      throw new Error('Target project must belong to the same company.');
+    }
+
+    await transferCollectionToProject({
+      companyId,
+      collectionId: transferTargetCollection.id,
+      targetProjectId: params.targetProjectId,
+      reason: params.reason,
+      transferredBy: user?.id ?? null,
+    });
+
+    queryClient.invalidateQueries({ queryKey: ['harvestCollections'] });
+    queryClient.invalidateQueries({ queryKey: ['harvestCollectionTransfers', companyId, transferTargetCollection.id] });
+    queryClient.invalidateQueries({ queryKey: ['harvestCollectionsFinancialTotals'] });
+    queryClient.invalidateQueries({ queryKey: ['projectWalletTotals'] });
+    queryClient.invalidateQueries({ queryKey: ['projectWalletLedger'] });
+    queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals'] });
+
+    toast({
+      title: 'Collection transferred',
+      description: 'The collection has been moved to the selected project.',
+    });
+    setTransferCollectionDialogOpen(false);
+    setTransferTargetCollection(null);
   };
 
   useEffect(() => {
@@ -889,6 +947,19 @@ export default function HarvestCollectionsPage() {
     () => allCollections.find((c) => c.id === selectedCollectionId) ?? null,
     [allCollections, selectedCollectionId]
   );
+
+  const companyProjectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    companyProjects.forEach((project) => map.set(project.id, project.name));
+    return map;
+  }, [companyProjects]);
+
+  const transferTargetProjects = useMemo(() => {
+    if (!companyId) return [];
+    return companyProjects
+      .filter((project) => project.companyId === companyId)
+      .map((project) => ({ id: project.id, name: project.name }));
+  }, [companyProjects, companyId]);
 
   useEffect(() => {
     if (!selectedCollection) return;
@@ -2902,9 +2973,6 @@ export default function HarvestCollectionsPage() {
                                       >
                                         Rename Collection
                                       </DropdownMenuItem>
-                                      <DropdownMenuItem className="cursor-pointer" disabled>
-                                        Transfer Collection (Coming soon)
-                                      </DropdownMenuItem>
                                       <DropdownMenuItem
                                         className="cursor-pointer text-destructive focus:text-destructive"
                                         disabled={!canDeleteCollection}
@@ -3013,9 +3081,6 @@ export default function HarvestCollectionsPage() {
                                         }}
                                       >
                                         Rename Collection
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem className="cursor-pointer" disabled>
-                                        Transfer Collection (Coming soon)
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
                                         className="cursor-pointer text-destructive focus:text-destructive"
@@ -5140,6 +5205,19 @@ export default function HarvestCollectionsPage() {
         onOpenChange={handleRenameDialogOpenChange}
         currentName={renameTargetCollection?.name ?? ''}
         onSave={handleRenameCollectionSave}
+      />
+
+      <HarvestCollectionTransferModal
+        open={transferCollectionDialogOpen}
+        onOpenChange={handleTransferDialogOpenChange}
+        currentProjectId={transferTargetCollection?.projectId ?? ''}
+        currentProjectName={
+          transferTargetCollection?.projectId
+            ? (companyProjectNameById.get(transferTargetCollection.projectId) ?? 'Current project')
+            : 'Current project'
+        }
+        targetProjects={transferTargetProjects}
+        onSubmit={handleTransferCollectionSubmit}
       />
 
       {/* Delete collection confirmation */}
