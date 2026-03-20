@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Leaf, Users, ReceiptText, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SeoHead } from "@/seo/SeoHead";
 
 type CropId = "frenchbeans" | "tomatoes" | "capsicum" | "maize" | "rice";
@@ -111,6 +112,12 @@ const CROPS: CropJourney[] = [
 ];
 
 const cropLabelById = new Map(CROPS.map((crop) => [crop.id, crop.label]));
+const BENEFITS = [
+  { label: "Track harvest", icon: Leaf },
+  { label: "Manage workers", icon: Users },
+  { label: "Record expenses", icon: ReceiptText },
+  { label: "Reduce data loss", icon: ShieldCheck },
+] as const;
 
 function normalizeCropParam(raw: string | null): CropId | null {
   if (!raw) return null;
@@ -172,10 +179,10 @@ function CropSelector({
               whileHover={reducedMotion ? undefined : { y: -2, scale: 1.01 }}
               whileTap={reducedMotion ? undefined : { scale: 0.985 }}
               className={[
-                "rounded-2xl border px-4 py-4 text-left transition-all duration-300",
+                "rounded-xl border px-4 py-4 text-left transition-all duration-300",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D8B980]/80 focus-visible:ring-offset-2 focus-visible:ring-offset-black/0",
                 active
-                  ? "border-[#D8B980]/65 bg-[linear-gradient(145deg,rgba(24,41,32,0.95),rgba(15,29,22,0.9))] shadow-[0_0_24px_rgba(216,185,128,0.2)]"
+                  ? "border-[#D8B980]/60 bg-[linear-gradient(145deg,rgba(24,41,32,0.95),rgba(15,29,22,0.9))] shadow-[0_0_14px_rgba(216,185,128,0.12)]"
                   : "border-white/12 bg-[linear-gradient(145deg,rgba(16,32,24,0.85),rgba(12,24,19,0.8))] hover:border-[#D8B980]/35",
               ].join(" ")}
             >
@@ -212,9 +219,9 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
           animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
           exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
           transition={{ duration: reducedMotion ? 0 : 0.35, ease: "easeOut" }}
-          className="relative overflow-hidden rounded-[28px] border border-[#D8B980]/25 bg-[linear-gradient(155deg,rgba(16,33,25,0.94),rgba(10,20,16,0.92)_55%,rgba(20,31,24,0.9))] p-6 shadow-[0_0_30px_rgba(216,185,128,0.12)] backdrop-blur-md sm:p-8"
+          className="relative overflow-hidden rounded-2xl border border-[#D8B980]/12 bg-[linear-gradient(155deg,rgba(16,33,25,0.94),rgba(10,20,16,0.92)_55%,rgba(20,31,24,0.9))] p-6 shadow-[0_0_18px_rgba(216,185,128,0.08)] backdrop-blur-md sm:p-8"
         >
-          <div className="pointer-events-none absolute -top-20 right-0 h-40 w-40 rounded-full bg-[#D8B980]/15 blur-3xl" />
+          <div className="pointer-events-none absolute -top-20 right-0 h-36 w-36 rounded-full bg-[#D8B980]/10 blur-3xl" />
 
           {!data ? (
             <div>
@@ -229,7 +236,7 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
                 <Button
                   size="lg"
                   asChild
-                  className="h-13 rounded-2xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
+                  className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
                 >
                   <Link to={signupHref}>
                     <span className="inline-flex items-center">
@@ -242,7 +249,7 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
                   size="lg"
                   variant="ghost"
                   asChild
-                  className="h-13 rounded-2xl border border-[#D8B980]/45 px-6 text-base text-primary-foreground hover:border-[#D8B980]/80 hover:bg-[#D8B980]/10"
+                  className="h-13 rounded-xl border border-[#D8B980]/45 px-6 text-base text-primary-foreground hover:border-[#D8B980]/80 hover:bg-[#D8B980]/10"
                 >
                   <Link to="/login">Login</Link>
                 </Button>
@@ -269,7 +276,7 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
                 <Button
                   size="lg"
                   asChild
-                  className="h-13 rounded-2xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
+                  className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
                 >
                   <Link to={signupHref}>
                     <span className="inline-flex items-center">
@@ -357,81 +364,109 @@ export default function ScanPage() {
           />
           <motion.div
             aria-hidden="true"
-            className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#D8B980]/12 blur-[110px]"
+            className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#D8B980]/8 blur-[110px]"
             animate={reducedMotion ? undefined : { opacity: [0.35, 0.6, 0.35] }}
             transition={{ duration: 4.4, repeat: Infinity, ease: "easeInOut" }}
           />
 
-          <div className="container relative z-10 mx-auto px-4 pb-14 pt-10 lg:px-8">
-            <header className="flex items-center justify-between">
-              <Link to="/" className="flex items-center gap-2.5">
-                <img src={BRAND.logoSrc} alt={BRAND.logoAlt} className="h-9 w-auto rounded-md object-contain" />
-                <span className="text-lg font-semibold tracking-tight text-primary-foreground">{BRAND.name}</span>
-              </Link>
-              <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-primary-foreground/70 sm:block">
-                {selectedCrop ? `Selected: ${cropLabelById.get(selectedCrop)}` : "For all farmers"}
-              </span>
-            </header>
-
-            <main className="mt-8">
+          <div className="relative z-10 pb-14">
+            <main className="mt-0">
               <motion.section
                 initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: 14 }}
                 animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
                 transition={{ duration: reducedMotion ? 0 : 0.42, ease: "easeOut" }}
+                className="relative overflow-hidden"
               >
-                <h1 className="text-3xl font-extrabold leading-[1.06] tracking-tight text-primary-foreground sm:text-4xl">
-                  Farmers — this is for you.
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-relaxed text-primary-foreground/80 sm:text-base">
-                  FarmVault helps you manage your farm from planning to harvest. Keep records clear, track workers,
-                  harvest, expenses, payments, and reduce mistakes.
-                </p>
+                <OptimizedImage
+                  src="/landing/hero-bg.jpg"
+                  webpSrc="/landing/hero-bg.webp"
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 gradient-hero-overlay" />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-[linear-gradient(to_bottom,rgba(20,36,28,0)_0%,rgba(20,36,28,0.4)_40%,rgba(20,36,28,0.78)_72%,rgba(20,36,28,0.95)_88%,rgba(20,36,28,1)_100%)]"
+                />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 -bottom-1 h-16 bg-[radial-gradient(100%_80%_at_50%_0%,rgba(20,36,28,0.35)_0%,rgba(20,36,28,0)_70%)] blur-md"
+                />
+                <div className="relative z-10 container mx-auto px-4 py-10 sm:py-11 lg:px-8">
+                  <header className="flex items-center justify-between">
+                    <Link to="/" className="flex items-center gap-2.5">
+                      <img src={BRAND.logoSrc} alt={BRAND.logoAlt} className="h-9 w-auto rounded-md object-contain" />
+                      <span className="text-lg font-semibold tracking-tight text-primary-foreground">{BRAND.name}</span>
+                    </Link>
+                    <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-primary-foreground/70 sm:block">
+                      {selectedCrop ? `Selected: ${cropLabelById.get(selectedCrop)}` : "For all farmers"}
+                    </span>
+                  </header>
 
-                <CropSelector selected={selectedCrop} onSelect={handleSelectCrop} />
+                  <h1 className="mt-7 text-3xl font-extrabold leading-[1.06] tracking-tight text-primary-foreground sm:text-4xl">
+                    Farmers — this is for you.
+                  </h1>
+                  <p className="mt-3 max-w-2xl text-sm leading-relaxed text-primary-foreground/80 sm:text-base">
+                    FarmVault helps you manage your farm from planning to harvest. Keep records clear, track workers,
+                    harvest, expenses, payments, and reduce mistakes.
+                  </p>
+
+                  <CropSelector selected={selectedCrop} onSelect={handleSelectCrop} />
+                </div>
               </motion.section>
 
-              <div ref={dynamicSectionRef}>
-                <CropJourneySection cropId={selectedCrop} />
-              </div>
-
-              <section className="mt-8">
-                <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                  {["Track harvest", "Manage workers", "Record expenses", "Reduce data loss"].map((item) => (
-                    <div
-                      key={item}
-                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-primary-foreground/85"
-                    >
-                      {item}
-                    </div>
-                  ))}
+              <div className="container mx-auto px-4 lg:px-8">
+                <div ref={dynamicSectionRef}>
+                  <CropJourneySection cropId={selectedCrop} />
                 </div>
-              </section>
 
-              <footer className="mt-8">
-                <div className="rounded-3xl border border-[#D8B980]/20 bg-[linear-gradient(145deg,rgba(15,30,23,0.9),rgba(9,18,14,0.88))] p-5 sm:p-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold tracking-tight text-primary-foreground">Ready to start?</h3>
-                      <p className="mt-1 text-sm text-primary-foreground/75">Get started with the system in minutes.</p>
-                    </div>
-                    <div className="flex flex-col gap-3 sm:flex-row">
-                      <Button
-                        asChild
-                        className="h-13 rounded-2xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
+                <section className="mt-8">
+                  <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                    {BENEFITS.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                      <div
+                        key={item.label}
+                        className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-primary-foreground/85"
                       >
-                        <Link to={getSignupHref(selectedCrop)}>Get Started</Link>
-                      </Button>
-                      <Button
-                        asChild
-                        variant="ghost"
-                        className="h-13 rounded-2xl border border-[#D8B980]/45 px-6 text-base text-primary-foreground hover:border-[#D8B980]/80 hover:bg-[#D8B980]/10"
-                      >
-                        <Link to="/login">Login</Link>
-                      </Button>
+                        <div className="flex items-center gap-2.5">
+                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[#D8B980]/35 bg-[#D8B980]/10 text-[#D8B980]">
+                            <Icon className="h-4 w-4" aria-hidden="true" />
+                          </span>
+                          <span>{item.label}</span>
+                        </div>
+                      </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <footer className="mt-8">
+                  <div className="rounded-2xl border border-[#D8B980]/20 bg-[linear-gradient(145deg,rgba(15,30,23,0.9),rgba(9,18,14,0.88))] p-5 sm:p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-lg font-bold tracking-tight text-primary-foreground">Ready to start?</h3>
+                        <p className="mt-1 text-sm text-primary-foreground/75">Get started with the system in minutes.</p>
+                      </div>
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <Button
+                          asChild
+                          className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
+                        >
+                          <Link to={getSignupHref(selectedCrop)}>Get Started</Link>
+                        </Button>
+                        <Button
+                          asChild
+                          variant="ghost"
+                          className="h-13 rounded-xl border border-[#D8B980]/45 px-6 text-base text-primary-foreground hover:border-[#D8B980]/80 hover:bg-[#D8B980]/10"
+                        >
+                          <Link to="/login">Login</Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </footer>
+                </footer>
+              </div>
             </main>
           </div>
         </div>
