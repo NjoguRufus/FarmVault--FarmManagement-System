@@ -80,6 +80,7 @@ import AboutPage from "@/pages/AboutPage";
 import LoginPage from "@/pages/Auth/LoginPage";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
+import ScanPage from "@/pages/ScanPage";
 import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
 import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
@@ -239,6 +240,7 @@ const AppRoutesWithLock = () => {
       <Route path="/features" element={<FeaturesPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/about" element={<AboutPage />} />
+      <Route path="/scan" element={<ScanPage />} />
 
       {/* Public SEO pillar pages */}
       <Route path="/farm-management-software-kenya" element={<FarmManagementSoftwareKenyaPage />} />
