@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -20,6 +21,7 @@ import {
   Zap,
   CloudUpload,
   Pencil,
+  MoreHorizontal,
   Trash2,
   HelpCircle,
   Check,
@@ -35,6 +37,7 @@ import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import AccessRestrictedPage from '@/pages/AccessRestrictedPage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
+import { buildHarvestCollectionAutoName } from '@/lib/harvestCollectionNaming';
 import { cn } from '@/lib/utils';
 import type { HarvestCollection, HarvestPicker, PickerWeighEntry } from '@/types';
 import {
@@ -54,6 +57,8 @@ import {
   listPickersByCollectionIds,
   listPickerIntakeByCollectionIds,
   listPickerPaymentsByCollectionIds,
+  renameHarvestCollection,
+  deleteHarvestCollection,
   mapPicker,
   computeCollectionFinancials,
   updateHarvestPicker,
@@ -89,6 +94,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -112,8 +123,10 @@ import {
   type HarvestTourContext,
 } from '@/tours/harvestCollectionsTour';
 import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTour';
+import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestCollectionModal';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
+const HARVEST_COLLECTION_BASE_NAME = 'test';
 
 type ViewMode = 'list' | 'intake' | 'pay' | 'buyer' | 'view_pickers';
 
@@ -130,12 +143,13 @@ export default function HarvestCollectionsPage() {
   const { hasPendingWrites, isSyncing, isOnline, triggerSync } = useConnectivityStatus();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const userCompanyId = user?.companyId ?? null;
 
   const isAdminUser = user?.role === 'company-admin' || user?.role === 'developer';
 
   const companyProjects = useMemo(
-    () => (user ? projects.filter((p) => p.companyId === user.companyId) : projects),
-    [projects, user?.companyId]
+    () => (userCompanyId ? projects.filter((p) => p.companyId === userCompanyId) : projects),
+    [projects, userCompanyId]
   );
 
   const effectiveProject = useMemo(() => {
@@ -156,6 +170,9 @@ export default function HarvestCollectionsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [autoSuggestedCollectionName, setAutoSuggestedCollectionName] = useState('');
+  const newCollectionNameDirtyRef = useRef(false);
+  const createCollectionInFlightRef = useRef(false);
   const [newHarvestDate, setNewHarvestDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [newPricePerKgPicker, setNewPricePerKgPicker] = useState('20');
   const [creating, setCreating] = useState(false);
@@ -239,6 +256,12 @@ export default function HarvestCollectionsPage() {
   const [deleteIntakeConfirm, setDeleteIntakeConfirm] = useState<{ entryId: string; collectionId: string } | null>(null);
   const [deletingIntakeEntry, setDeletingIntakeEntry] = useState(false);
 
+  // Collection management: rename (audit logged) + delete (with confirmation).
+  const [renameCollectionDialogOpen, setRenameCollectionDialogOpen] = useState(false);
+  const [renameTargetCollection, setRenameTargetCollection] = useState<HarvestCollection | null>(null);
+  const [deleteCollectionConfirm, setDeleteCollectionConfirm] = useState<HarvestCollection | null>(null);
+  const [deletingCollection, setDeletingCollection] = useState(false);
+
   const [harvestTourRun, setHarvestTourRun] = useState(false);
   const [harvestTourStepIndex, setHarvestTourStepIndex] = useState(0);
   const [harvestTourSteps, setHarvestTourSteps] = useState<ReturnType<typeof getHarvestCollectionsStarterSteps>>([]);
@@ -260,6 +283,8 @@ export default function HarvestCollectionsPage() {
   const canViewFinancials = canKey('harvest_collections.financials') || can('harvest', 'viewFinancials');
   const canViewPaymentAmounts = canViewFinancials;
   const canViewPickerEntries = canKey('harvest_collections.view_picker_entries');
+  const canRenameCollection = canKey('harvest_collections.edit') || canManageIntake;
+  const canDeleteCollection = canKey('harvest_collections.delete') || can('harvest', 'edit');
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -289,7 +314,6 @@ export default function HarvestCollectionsPage() {
   }, [isAdminUser, viewPickersLayout]);
 
   if (import.meta.env.DEV && user) {
-    // eslint-disable-next-line no-console
     console.log('[HarvestCollections] edit/delete visibility', {
       canManageIntake,
       canDeleteIntakeEntry,
@@ -322,7 +346,6 @@ export default function HarvestCollectionsPage() {
   const effectiveProjectId = effectiveProject?.id ?? null;
 
   if (import.meta.env.DEV && user) {
-    // eslint-disable-next-line no-console
     console.log('[HarvestCollections] staff permissions', {
       uid: user.id,
       canViewCollections,
@@ -351,10 +374,6 @@ export default function HarvestCollectionsPage() {
         balances: canViewFinancials,
       },
     });
-  }
-
-  if (!canViewCollections) {
-    return <AccessRestrictedPage title="Harvest collections restricted" />;
   }
 
   useEffect(() => {
@@ -427,6 +446,82 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Error', description: e?.message ?? 'Failed to register cash', variant: 'destructive' });
     } finally {
       setCashDialogSaving(false);
+    }
+  };
+
+  const handleRenameDialogOpenChange = (open: boolean) => {
+    setRenameCollectionDialogOpen(open);
+    if (!open) setRenameTargetCollection(null);
+  };
+
+  const handleRenameCollectionSave = async (nextName: string) => {
+    if (!renameTargetCollection || !companyId) return;
+    if (!canRenameCollection) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to rename this harvest collection.',
+        variant: 'destructive',
+      });
+      throw new Error('Permission denied');
+    }
+
+    try {
+      const result = await renameHarvestCollection({
+        collectionId: renameTargetCollection.id,
+        companyId,
+        oldName: renameTargetCollection.name ?? null,
+        newName: nextName,
+        actorUserId: user?.id ?? null,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+
+      if (result.auditLogged) {
+        toast({ title: 'Collection renamed' });
+      } else {
+        toast({
+          title: 'Collection renamed',
+          description: 'Name updated, but audit log could not be saved.',
+          variant: 'destructive',
+        });
+      }
+    } catch (e: any) {
+      toast({
+        title: 'Rename failed',
+        description: e?.message ?? 'Could not rename collection.',
+        variant: 'destructive',
+      });
+      throw e;
+    }
+  };
+
+  const handleDeleteCollectionConfirm = async () => {
+    if (!deleteCollectionConfirm || !companyId) return;
+    if (!canDeleteCollection) {
+      toast({
+        title: 'Permission denied',
+        description: 'You do not have access to delete this harvest collection.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setDeletingCollection(true);
+    try {
+      await deleteHarvestCollection({ collectionId: deleteCollectionConfirm.id, companyId });
+      // Refresh list + clear selection if needed.
+      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
+      if (selectedCollectionId === deleteCollectionConfirm.id) setSelectedCollectionId(null);
+      toast({ title: 'Collection deleted' });
+    } catch (e: any) {
+      toast({
+        title: 'Delete failed',
+        description: e?.message ?? 'Could not delete collection.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingCollection(false);
+      setDeleteCollectionConfirm(null);
     }
   };
 
@@ -586,7 +681,10 @@ export default function HarvestCollectionsPage() {
     refetchOnMount: false,
   });
 
-  const walletEntriesForSummary = isFrenchBeansProject ? (supabaseLedgerEntries ?? []) : walletLedgerEntries;
+  const walletEntriesForSummary = useMemo(
+    () => (isFrenchBeansProject ? (supabaseLedgerEntries ?? []) : walletLedgerEntries),
+    [isFrenchBeansProject, supabaseLedgerEntries, walletLedgerEntries]
+  );
 
   useEffect(() => {
     if (!companyId || !effectiveProject?.id || isFrenchBeansProject) return;
@@ -609,13 +707,38 @@ export default function HarvestCollectionsPage() {
   const collections = useMemo(() => {
     if (!effectiveProject) return allCollections;
     const filtered = allCollections.filter((c) => c.projectId === effectiveProject.id);
-    const toTime = (c: HarvestCollection) => {
-      const d = c.harvestDate;
-      const t = d != null ? toDate(d) : null;
-      return t ? t.getTime() : 0;
+    const toCreatedMs = (c: HarvestCollection): number => {
+      const created = (c as { createdAt?: unknown }).createdAt;
+      const createdAt = created != null ? toDate(created) : null;
+      if (createdAt) return createdAt.getTime();
+      const harvestAt = c.harvestDate != null ? toDate(c.harvestDate) : null;
+      return harvestAt ? harvestAt.getTime() : 0;
     };
-    return [...filtered].sort((a, b) => toTime(b) - toTime(a));
+    // One global order: newest created first across both old and auto-named cards.
+    return [...filtered].sort((a, b) => {
+      const timeDiff = toCreatedMs(b) - toCreatedMs(a);
+      if (timeDiff !== 0) return timeDiff;
+      return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+    });
   }, [allCollections, effectiveProject]);
+
+  // New collection modal suggestion: use the same project-scoped list as visible cards.
+  // This keeps preview aligned with UI state and includes all statuses.
+  useEffect(() => {
+    if (!newCollectionOpen) return;
+    if (!effectiveProject) return;
+
+    const nextSequence = (collections.length || 0) + 1;
+    const suggestion = buildHarvestCollectionAutoName({
+      baseName: HARVEST_COLLECTION_BASE_NAME,
+      sequenceNumber: nextSequence,
+    });
+    setAutoSuggestedCollectionName(suggestion);
+    // Keep reactive to list updates while user has not manually edited the suggested value.
+    if (!newCollectionNameDirtyRef.current) {
+      setNewCollectionName(suggestion);
+    }
+  }, [newCollectionOpen, effectiveProject, collections.length]);
 
   const collectionsSummary = useMemo(() => {
     if (isFrenchBeansProject && collectionsFinancialTotals) {
@@ -623,7 +746,6 @@ export default function HarvestCollectionsPage() {
       const totalRevenue = Number(collectionsFinancialTotals.totalRevenue ?? collectionsFinancialTotals.totalSales ?? 0) || 0;
 
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.log('[HarvestCollections] summary (Supabase aggregate)', {
           companyId,
           projectId: effectiveProjectId,
@@ -663,7 +785,6 @@ export default function HarvestCollectionsPage() {
           revenue,
         };
       });
-      // eslint-disable-next-line no-console
       console.log('[HarvestCollections] summary (fallback from collections)', {
         companyId,
         projectId: effectiveProjectId,
@@ -762,7 +883,7 @@ export default function HarvestCollectionsPage() {
         toast({ title: 'Synced', description: `${synced} closed collection(s) added to Harvest & Sales.` });
       }
     })();
-  }, [collections, queryClient, toast]);
+  }, [collections, queryClient, toast, companyId, effectiveProjectId]);
 
   const selectedCollection = useMemo(
     () => allCollections.find((c) => c.id === selectedCollectionId) ?? null,
@@ -775,7 +896,7 @@ export default function HarvestCollectionsPage() {
     if (fromDb != null && Number(fromDb) > 0) {
       setBuyerPricePerKg(String(fromDb));
     }
-  }, [selectedCollection?.id, selectedCollection?.pricePerKgBuyer]);
+  }, [selectedCollection]);
 
   const isFrenchBeansCollection = useMemo(() => {
     const ct = (selectedCollection?.cropType as string | undefined)?.toLowerCase().replace('_', '-');
@@ -1038,9 +1159,9 @@ export default function HarvestCollectionsPage() {
     return { totalKg, activePickers, avgKgPerPicker };
   }, [pickerTotalsById]);
 
-  const getPickerTotals = (pickerId: string): { totalKg: number; totalPay: number } => {
+  const getPickerTotals = useCallback((pickerId: string): { totalKg: number; totalPay: number } => {
     return pickerTotalsById[pickerId] ?? { totalKg: 0, totalPay: 0 };
-  };
+  }, [pickerTotalsById]);
 
   const paidByPickerId = useMemo(() => {
     const map: Record<string, number> = {};
@@ -1055,7 +1176,7 @@ export default function HarvestCollectionsPage() {
   useEffect(() => {
     if (Object.keys(quickPayLocalPaidByPickerId).length === 0) return;
     setQuickPayLocalPaidByPickerId({});
-  }, [paymentsForCollection]);
+  }, [paymentsForCollection, quickPayLocalPaidByPickerId]);
 
   type QuickPayQueueItem = {
     pickerId: string;
@@ -1086,7 +1207,7 @@ export default function HarvestCollectionsPage() {
     });
     items.sort((a, b) => a.pickerNumber - b.pickerNumber);
     return items;
-  }, [pickersForCollection, pickerTotalsById, paidByPickerId, quickPayLocalPaidByPickerId]);
+  }, [pickersForCollection, getPickerTotals, paidByPickerId, quickPayLocalPaidByPickerId]);
 
   const quickPayQueueFiltered = useMemo(() => {
     const q = quickPayQueue;
@@ -1306,7 +1427,7 @@ export default function HarvestCollectionsPage() {
       const balanceB = getPickerTotals(b.id).totalPay - (paidByPickerId[b.id] ?? 0);
       return balanceB - balanceA;
     });
-  }, [payUnpaidAndGroups.unpaid, pickerTotalsById, paidByPickerId]);
+  }, [payUnpaidAndGroups.unpaid, getPickerTotals, paidByPickerId]);
 
   const recentPickersForIntake = useMemo(() => {
     const ids = recentPickerIds.slice(0, 10);
@@ -1321,7 +1442,7 @@ export default function HarvestCollectionsPage() {
       sum += getPickerTotals(id).totalPay;
     });
     return sum;
-  }, [paySelectedIds, pickerTotalsById]);
+  }, [paySelectedIds, getPickerTotals]);
 
   const nextPickerNumber = useMemo(() => {
     const max = pickersForCollection.length
@@ -1394,7 +1515,7 @@ export default function HarvestCollectionsPage() {
       totalPay += totals.totalPay;
     });
     return { totalKg, totalPay };
-  }, [pickersForCollection, pickerTotalsById]);
+  }, [pickersForCollection, getPickerTotals]);
 
   const allPickersPaid = useMemo(
     () => pickersForCollection.length > 0 && pickersForCollection.every((p) => p.isPaid),
@@ -1414,7 +1535,7 @@ export default function HarvestCollectionsPage() {
       const paid = paidByPickerId[p.id] ?? 0;
       return due > 0 && paid < due;
     });
-  }, [pickersForCollection, pickerTotalsById, paidByPickerId]);
+  }, [pickersForCollection, getPickerTotals, paidByPickerId]);
 
   const totalRevenue = useMemo(() => {
     const buyerPrice =
@@ -1430,6 +1551,7 @@ export default function HarvestCollectionsPage() {
   );
 
   const handleCreateCollection = async () => {
+    if (creating || createCollectionInFlightRef.current) return;
     if (!canCreateCollection) {
       toast({
         title: 'Permission denied',
@@ -1440,12 +1562,6 @@ export default function HarvestCollectionsPage() {
     }
     if (!companyId || !effectiveProject) return;
 
-    const name = (newCollectionName || '').trim();
-    if (!name) {
-      toast({ title: 'Name required', description: 'Give the collection a name.', variant: 'destructive' });
-      return;
-    }
-
     const harvestDate = new Date(newHarvestDate + 'T12:00:00');
     const price = Number(newPricePerKgPicker || 0);
     if (price <= 0) {
@@ -1454,26 +1570,48 @@ export default function HarvestCollectionsPage() {
     }
 
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    createCollectionInFlightRef.current = true;
     setCreating(true);
-    setNewCollectionOpen(false);
     if (import.meta.env.DEV) {
       console.log('[HC auth check]', { clerkUserId: user?.id, companyId: user?.companyId, role: user?.role });
     }
     try {
+      const typedName = (newCollectionName || '').trim();
+      const finalName = typedName;
+
+      if (!finalName) {
+        toast({ title: 'Name required', description: 'Give the collection a name.', variant: 'destructive' });
+        return;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('[HarvestCollections] create attempt', {
+          companyId,
+          projectId: effectiveProject.id,
+          finalName,
+          isOffline,
+        });
+      }
+
       const id = await createHarvestCollection({
         companyId,
         projectId: effectiveProject.id,
         cropType: effectiveProject.cropType,
-        name,
+        name: finalName,
         harvestDate,
         pricePerKgPicker: price,
       });
-      queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] });
-      queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboardFinancialTotals', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['harvestSalesTotals', companyId, effectiveProjectId] }),
+      ]);
       setSelectedCollectionId(id);
       setViewMode('intake');
+      setNewCollectionOpen(false);
       setNewCollectionName('');
+      setAutoSuggestedCollectionName('');
+      newCollectionNameDirtyRef.current = false;
       setNewHarvestDate(format(new Date(), 'yyyy-MM-dd'));
       setNewPricePerKgPicker('20');
       toast({
@@ -1486,6 +1624,7 @@ export default function HarvestCollectionsPage() {
       toast({ title: 'Error', description: e?.message ?? 'Failed to create collection', variant: 'destructive' });
     } finally {
       setCreating(false);
+      createCollectionInFlightRef.current = false;
     }
   };
 
@@ -2311,6 +2450,10 @@ export default function HarvestCollectionsPage() {
     }
   };
 
+  if (!canViewCollections) {
+    return <AccessRestrictedPage title="Harvest collections restricted" />;
+  }
+
   if (!effectiveProject) {
     return (
       <div className="p-4 md:p-6 space-y-4" data-tour="staff-harvest-root">
@@ -2727,6 +2870,53 @@ export default function HarvestCollectionsPage() {
                                 >
                                   {c.status}
                                 </span>
+                                <div className="absolute top-1.5 right-9 sm:right-10 z-20" onClick={(e) => e.stopPropagation()}>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="p-1.5 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                                        onClick={(e) => e.stopPropagation()}
+                                        aria-label="Collection actions"
+                                      >
+                                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-52" onClick={(e) => e.stopPropagation()}>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer"
+                                        onClick={() => {
+                                          setSelectedCollectionId(c.id);
+                                          setViewMode(defaultDetailMode);
+                                        }}
+                                      >
+                                        View Details
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer"
+                                        disabled={!canRenameCollection}
+                                        onClick={() => {
+                                          setRenameTargetCollection(c);
+                                          setRenameCollectionDialogOpen(true);
+                                        }}
+                                      >
+                                        Rename Collection
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem className="cursor-pointer" disabled>
+                                        Transfer Collection (Coming soon)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer text-destructive focus:text-destructive"
+                                        disabled={!canDeleteCollection}
+                                        onClick={() => {
+                                          setDeleteCollectionConfirm(c);
+                                        }}
+                                      >
+                                        Delete Collection
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
                                 <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
                                   <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
                                 </div>
@@ -2792,6 +2982,53 @@ export default function HarvestCollectionsPage() {
                                 <span className="absolute top-1.5 right-1.5 text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
                                   closed
                                 </span>
+                                <div className="absolute top-1.5 right-9 sm:right-10 z-20" onClick={(e) => e.stopPropagation()}>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="p-1.5 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                                        onClick={(e) => e.stopPropagation()}
+                                        aria-label="Collection actions"
+                                      >
+                                        <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-52" onClick={(e) => e.stopPropagation()}>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer"
+                                        onClick={() => {
+                                          setSelectedCollectionId(c.id);
+                                          setViewMode(defaultDetailMode);
+                                        }}
+                                      >
+                                        View Details
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer"
+                                        disabled={!canRenameCollection}
+                                        onClick={() => {
+                                          setRenameTargetCollection(c);
+                                          setRenameCollectionDialogOpen(true);
+                                        }}
+                                      >
+                                        Rename Collection
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem className="cursor-pointer" disabled>
+                                        Transfer Collection (Coming soon)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        className="cursor-pointer text-destructive focus:text-destructive"
+                                        disabled={!canDeleteCollection}
+                                        onClick={() => {
+                                          setDeleteCollectionConfirm(c);
+                                        }}
+                                      >
+                                        Delete Collection
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
                                 <div className="w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-muted flex items-center justify-center mb-2 shrink-0">
                                   <Icon className="h-5 w-5 sm:h-5 sm:w-5 text-muted-foreground" />
                                 </div>
@@ -4438,7 +4675,18 @@ export default function HarvestCollectionsPage() {
         </Dialog>
 
         {/* New collection dialog */}
-        <Dialog open={newCollectionOpen} onOpenChange={setNewCollectionOpen}>
+        <Dialog
+          open={newCollectionOpen}
+          onOpenChange={(open) => {
+            if (creating && !open) return;
+            setNewCollectionOpen(open);
+            if (!open) {
+              setAutoSuggestedCollectionName('');
+              newCollectionNameDirtyRef.current = false;
+              setNewCollectionName('');
+            }
+          }}
+        >
           <DialogContent className="w-full max-w-sm sm:max-w-md rounded-2xl mx-2 max-h-[85vh] sm:max-h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
             <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
               <DialogTitle>New collection</DialogTitle>
@@ -4448,11 +4696,20 @@ export default function HarvestCollectionsPage() {
               <div>
                 <Label>Collection name</Label>
                 <Input
+                  autoFocus
                   value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewCollectionName(v);
+                    const dirty = v.trim() !== (autoSuggestedCollectionName ?? '').trim();
+                    newCollectionNameDirtyRef.current = dirty;
+                  }}
                   placeholder="e.g. Morning shift, Block A"
                   className="mt-1 min-h-11 rounded-xl"
                 />
+                <p className="text-xs text-muted-foreground mt-2">
+                  A name has been suggested automatically based on the project and harvest sequence. You can edit it.
+                </p>
               </div>
               <div>
                 <Label>Date</Label>
@@ -4476,7 +4733,7 @@ export default function HarvestCollectionsPage() {
               </div>
             </div>
             <DialogFooter className="shrink-0 px-4 pb-4 pt-2 border-t border-border">
-              <Button variant="outline" onClick={() => setNewCollectionOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => setNewCollectionOpen(false)} disabled={creating}>Cancel</Button>
               <Button onClick={handleCreateCollection} disabled={creating}>
                 {creating ? 'Creating…' : 'Create'}
               </Button>
@@ -4876,6 +5133,51 @@ export default function HarvestCollectionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Rename collection (audit logged) */}
+      <RenameHarvestCollectionModal
+        open={renameCollectionDialogOpen}
+        onOpenChange={handleRenameDialogOpenChange}
+        currentName={renameTargetCollection?.name ?? ''}
+        onSave={handleRenameCollectionSave}
+      />
+
+      {/* Delete collection confirmation */}
+      <AlertDialog
+        open={!!deleteCollectionConfirm}
+        onOpenChange={(open) => !open && !deletingCollection && setDeleteCollectionConfirm(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete collection</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the collection and all its pickers, intake weights, and payment records.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingCollection} className="min-h-10">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteCollectionConfirm();
+              }}
+              disabled={deletingCollection}
+              className="min-h-10 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingCollection ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Deleting…
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete intake entry confirmation - system UI modal */}
       <AlertDialog open={!!deleteIntakeConfirm} onOpenChange={(open) => !open && !deletingIntakeEntry && setDeleteIntakeConfirm(null)}>
