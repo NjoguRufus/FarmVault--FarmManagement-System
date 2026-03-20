@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import type { HarvestCollectionStatus } from '@/types';
 import { addToOfflineQueue } from '@/lib/offlineQueue';
+import { logActivity } from '@/services/employeeAccessService';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
@@ -76,6 +77,7 @@ type DbCollection = {
   buyer_price_per_unit: number | null;
   is_closed?: boolean;
   closed_at: string | null;
+  sequence_number?: number | null;
   crop_type: string | null;
   price_per_kg?: number | null;
   picker_price_per_unit?: number | null;
@@ -114,6 +116,22 @@ type DbPaymentEntry = {
   note: string | null;
 };
 
+type SequencePreviewRpcRow = {
+  next_sequence?: number | string | null;
+  preview_name?: string | null;
+} | null;
+
+type CreateCollectionRpcRow = {
+  id: string;
+};
+
+function hasSecondsTimestamp(value: unknown): value is { seconds: number } {
+  return typeof value === 'object' &&
+    value !== null &&
+    'seconds' in value &&
+    typeof (value as { seconds?: unknown }).seconds === 'number';
+}
+
 // ---- Map to app types ----
 
 function mapCollection(row: DbCollection): {
@@ -122,6 +140,7 @@ function mapCollection(row: DbCollection): {
   projectId: string;
   cropType: string;
   name?: string;
+  sequenceNumber?: number;
   harvestDate: Date | string;
   pricePerKgPicker: number;
   pricePerKgBuyer?: number;
@@ -142,6 +161,7 @@ function mapCollection(row: DbCollection): {
     projectId: row.project_id,
     cropType: row.crop_type ?? 'french_beans',
     name: row.notes ?? undefined,
+    sequenceNumber: row.sequence_number != null ? Number(row.sequence_number) : undefined,
     harvestDate: row.collection_date,
     pricePerKgPicker: Number(pricePerUnit ?? 0),
     pricePerKgBuyer: row.buyer_price_per_unit != null ? Number(row.buyer_price_per_unit) : undefined,
@@ -151,6 +171,26 @@ function mapCollection(row: DbCollection): {
     buyerPaidAt: row.is_closed ? row.closed_at ?? undefined : undefined,
     createdAt: row.created_at,
   };
+}
+
+// ---- Sequence helpers (project-specific; forward-only) ----
+
+export async function previewNextHarvestCollectionSequence(params: {
+  projectId: string;
+  companyId: string;
+}): Promise<{ nextSequence: number; previewName: string }> {
+  const { data, error } = await supabase.schema('harvest').rpc('preview_next_collection_sequence', {
+    p_project_id: params.projectId,
+    p_company_id: params.companyId,
+  });
+  if (error) throw error;
+  const row: SequencePreviewRpcRow = Array.isArray(data) ? (data[0] as SequencePreviewRpcRow) : (data as SequencePreviewRpcRow);
+  const nextSequence = Number(row?.next_sequence ?? 0);
+  const previewName = String(row?.preview_name ?? '').trim();
+  if (!Number.isFinite(nextSequence) || nextSequence <= 0) {
+    throw new Error('Failed to preview harvest collection sequence');
+  }
+  return { nextSequence, previewName };
 }
 
 function mapCollectionStatus(s: string): HarvestCollectionStatus {
@@ -222,59 +262,47 @@ export async function createHarvestCollection(params: {
     ? dateSource
     : dateSource instanceof Date
       ? dateSource.toISOString().slice(0, 10)
-      : new Date((dateSource as any)?.seconds ? (dateSource as any).seconds * 1000 : dateSource).toISOString().slice(0, 10);
+      : new Date(hasSecondsTimestamp(dateSource) ? dateSource.seconds * 1000 : dateSource).toISOString().slice(0, 10);
 
-  const buyerPricePerKg: number | null = null;
   const pickerRatePerKg = params.pricePerKg ?? params.pricePerKgPicker ?? 20;
-  const notes = params.notes ?? params.name ?? null;
+  const customName = params.notes ?? params.name ?? null;
 
-  const payload = {
-    company_id: params.companyId,
-    project_id: params.projectId,
-    crop_type: 'french_beans',
-    collection_date,
-    buyer_price_per_unit: buyerPricePerKg,
-    unit: 'kg',
-    is_closed: false,
-    price_per_kg: buyerPricePerKg ?? null,
-    picker_price_per_unit: pickerRatePerKg,
-    notes: notes ?? null,
-    status: 'open',
-  };
-  // TEMP debug: do NOT send created_by; DB default core.current_user_id() should set it.
   if (import.meta.env.DEV) {
     const { data: whoami, error: whoErr } = await supabase.schema('admin').rpc('whoami');
-    // eslint-disable-next-line no-console
     console.log('[HC whoami]', { whoami, whoErr });
-    // eslint-disable-next-line no-console
-    console.log('[createHarvestCollection] payload', payload);
   }
 
-  const { data, error } = await supabase.schema('harvest').from('harvest_collections')
-    .insert(payload)
-    .select('id,created_by')
-    .single();
+  const { data, error } = await supabase.schema('harvest').rpc('create_collection', {
+    p_project_id: params.projectId,
+    p_company_id: params.companyId,
+    p_custom_name: customName,
+    p_collection_date: collection_date,
+    p_picker_price_per_unit: pickerRatePerKg,
+    p_crop_type: params.cropType ?? 'french_beans',
+  });
 
   if (error) {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.error('[createHarvestCollection] error', error);
     }
     throw error;
   }
 
-  if (import.meta.env.DEV && data) {
-    // eslint-disable-next-line no-console
-    console.log('[createHarvestCollection] returned row', data);
+  const row: CreateCollectionRpcRow | null = Array.isArray(data)
+    ? ((data[0] as CreateCollectionRpcRow | null) ?? null)
+    : ((data as CreateCollectionRpcRow | null) ?? null);
+
+  if (import.meta.env.DEV && row) {
+    console.log('[createHarvestCollection] returned row', row);
   }
 
-  if (!data?.id) throw new Error('Create harvest collection failed');
-  return data.id;
+  if (!row?.id) throw new Error('Create harvest collection failed');
+  return String(row.id);
 }
 
 // Explicit columns matching harvest.harvest_collections; do not use select('*') to avoid schema cache errors.
 const HARVEST_COLLECTIONS_SELECT =
-  'id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status';
+  'id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,sequence_number,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status';
 
 export async function listHarvestCollections(
   companyId: string,
@@ -284,7 +312,8 @@ export async function listHarvestCollections(
     .from('harvest_collections')
     .select(HARVEST_COLLECTIONS_SELECT)
     .eq('company_id', companyId)
-    .order('collection_date', { ascending: false });
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false });
 
   if (projectId) {
     q = q.eq('project_id', projectId);
@@ -304,6 +333,71 @@ export async function getHarvestCollection(collectionId: string): Promise<Return
 
   if (error) throw error;
   return data ? mapCollection(data as DbCollection) : null;
+}
+
+export type RenameHarvestCollectionResult = {
+  updatedName: string;
+  auditLogged: boolean;
+};
+
+/**
+ * Rename a harvest collection session.
+ * IMPORTANT: Update only the "notes" (collection name) column; do not touch totals or child harvest records.
+ */
+export async function renameHarvestCollection(params: {
+  collectionId: string;
+  companyId: string;
+  oldName?: string | null;
+  newName: string;
+  actorUserId?: string | null;
+}): Promise<RenameHarvestCollectionResult> {
+  const trimmed = params.newName.trim();
+  if (!trimmed) throw new Error('Collection name cannot be empty');
+  if (trimmed.length > 100) throw new Error('Collection name must be 100 characters or fewer');
+
+  const { data, error } = await harvest()
+    .from('harvest_collections')
+    .update({ notes: trimmed })
+    .eq('id', params.collectionId)
+    .eq('company_id', params.companyId)
+    .select('id, notes')
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.id) throw new Error('Rename failed');
+
+  let auditLogged = false;
+  try {
+    await logActivity({
+      companyId: params.companyId,
+      employeeId: params.actorUserId ?? null,
+      action: 'harvest_collection_renamed',
+      module: 'harvest',
+      metadata: {
+        old_name: params.oldName ?? null,
+        new_name: trimmed,
+      },
+    });
+    auditLogged = true;
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error('[renameHarvestCollection] audit log insert failed', err);
+    }
+    auditLogged = false;
+  }
+
+  return { updatedName: trimmed, auditLogged };
+}
+
+/** Delete a harvest collection session (cascades to pickers + intake/payment entries). */
+export async function deleteHarvestCollection(params: { collectionId: string; companyId: string }): Promise<void> {
+  const { error } = await harvest()
+    .from('harvest_collections')
+    .delete()
+    .eq('id', params.collectionId)
+    .eq('company_id', params.companyId);
+
+  if (error) throw error;
 }
 
 export async function addPicker(params: {

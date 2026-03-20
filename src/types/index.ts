@@ -986,6 +986,9 @@ export interface HarvestCollection {
   cropType: CropType;
   /** Display name for this collection (e.g. "Morning shift", "Block A") */
   name?: string;
+
+  /** Project-specific forward-only sequence number (internal), used for auto-naming. */
+  sequenceNumber?: number;
   harvestDate: Date | unknown;
 
   /** What pickers earn per kg (KES) */
