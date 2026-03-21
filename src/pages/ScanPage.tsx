@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, CheckCircle2, Leaf, Users, ReceiptText, ShieldCheck } from "lucide-react";
@@ -27,6 +27,9 @@ const BRAND = {
   logoSrc: "/Logo/FarmVault_Logo dark mode.png",
   logoAlt: "FarmVault",
 };
+
+/** Darker than `--fv-green-dark` (~18% L). One token for page bg + hero fades so nothing mismatches. */
+const SCAN_SURFACE_HSL = "150 38% 11%";
 
 const CROPS: CropJourney[] = [
   {
@@ -353,9 +356,12 @@ export default function ScanPage() {
         noindex
       />
 
-      <div className="landing-page min-h-screen overflow-hidden bg-fv-green-dark text-primary-foreground">
+      <div
+        className="landing-page min-h-screen overflow-hidden bg-[hsl(var(--scan-surface))] text-primary-foreground"
+        style={{ ["--scan-surface" as string]: SCAN_SURFACE_HSL }}
+      >
         <div className="relative">
-          <div className="absolute inset-0 gradient-hero-overlay opacity-80" aria-hidden="true" />
+          <div className="absolute inset-0 bg-[hsl(var(--scan-surface)_/_0.45)]" aria-hidden="true" />
           <motion.div
             aria-hidden="true"
             className="absolute -top-20 -left-24 h-72 w-72 rounded-full bg-primary/20 blur-[90px]"
@@ -383,14 +389,14 @@ export default function ScanPage() {
                   alt=""
                   className="absolute inset-0 h-full w-full object-cover"
                 />
-                <div className="absolute inset-0 gradient-hero-overlay" />
+                {/* Hero tint — same hue family as page; bottom stays light so fade can match bg exactly */}
                 <div
+                  className="absolute inset-0 bg-[linear-gradient(135deg,hsl(var(--scan-surface)_/_0.9)_0%,hsl(var(--scan-surface)_/_0.58)_45%,hsl(var(--scan-surface)_/_0.14)_100%)]"
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-[linear-gradient(to_bottom,rgba(20,36,28,0)_0%,rgba(20,36,28,0.4)_40%,rgba(20,36,28,0.78)_72%,rgba(20,36,28,0.95)_88%,rgba(20,36,28,1)_100%)]"
                 />
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-x-0 -bottom-1 h-16 bg-[radial-gradient(100%_80%_at_50%_0%,rgba(20,36,28,0.35)_0%,rgba(20,36,28,0)_70%)] blur-md"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-[min(22rem,55vh)] bg-[linear-gradient(to_bottom,hsl(var(--scan-surface)_/_0)_0%,hsl(var(--scan-surface)_/_0.2)_28%,hsl(var(--scan-surface)_/_0.48)_52%,hsl(var(--scan-surface)_/_0.75)_74%,hsl(var(--scan-surface)_/_0.94)_88%,hsl(var(--scan-surface))_100%)]"
                 />
                 <div className="relative z-10 container mx-auto px-4 py-10 sm:py-11 lg:px-8">
                   <header className="flex items-center justify-between">
