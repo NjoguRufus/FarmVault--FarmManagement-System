@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCopy, Mail, RefreshCw, Send } from 'lucide-react';
+import { ClipboardCopy, Mail, RefreshCw, Send, X } from 'lucide-react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -91,8 +92,54 @@ function statusBadgeClass(status: EmailLogStatus): string {
   return 'border-amber-500/40 bg-amber-500/12 text-amber-900 dark:text-amber-200';
 }
 
+const EMAIL_TYPE_LABELS: Record<string, string> = {
+  custom_manual: 'Manual send',
+  submission_received: 'Submission received',
+  submission_admin_notify: 'Submission (admin)',
+  workspace_ready: 'Workspace ready',
+  company_approved: 'Company approved',
+};
+
 function formatEmailType(t: string): string {
-  return t.replace(/_/g, ' ');
+  return EMAIL_TYPE_LABELS[t] ?? t.replace(/_/g, ' ');
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type ManualRecipientRow = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+function newRecipientRow(): ManualRecipientRow {
+  return {
+    id:
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `r-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    email: '',
+    name: '',
+  };
+}
+
+/** Non-empty rows only; valid emails; de-dupe by lowercase email (first row wins). */
+function buildManualRecipientSendList(rows: ManualRecipientRow[]): { email: string; name?: string }[] {
+  const seen = new Set<string>();
+  const out: { email: string; name?: string }[] = [];
+  for (const row of rows) {
+    const raw = row.email.trim();
+    if (!raw) continue;
+    if (!EMAIL_RE.test(raw)) {
+      throw new Error(`Invalid email: ${raw}`);
+    }
+    const key = raw.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const name = row.name.trim();
+    out.push({ email: raw, ...(name ? { name } : {}) });
+  }
+  return out;
 }
 
 export default function DeveloperEmailCenterPage() {
@@ -107,8 +154,7 @@ export default function DeveloperEmailCenterPage() {
   const [dateTo, setDateTo] = useState('');
   const [detail, setDetail] = useState<EmailLogRow | null>(null);
 
-  const [to, setTo] = useState('');
-  const [recipientName, setRecipientName] = useState('');
+  const [recipients, setRecipients] = useState<ManualRecipientRow[]>(() => [newRecipientRow()]);
   const [companyNameField, setCompanyNameField] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -172,40 +218,99 @@ export default function DeveloperEmailCenterPage() {
     void refetchRows();
   };
 
+  type ManualBatchSendResult = {
+    attempted: number;
+    succeeded: number;
+    failed: number;
+  };
+
   const sendMutation = useMutation({
-    mutationFn: async () => {
-      const payload: SendFarmVaultEmailPayload = {
-        emailType: 'custom_manual',
-        to: to.trim(),
-        data: {
-          subject: subject.trim(),
-          body: body.trim(),
-          ...(recipientName.trim() ? { recipientName: recipientName.trim() } : {}),
-          ...(category !== '_none' ? { category } : {}),
-        },
-        ...(companyNameField.trim() ? { companyName: companyNameField.trim() } : {}),
-      };
-      return invokeSendFarmVaultEmail(payload);
+    mutationFn: async (): Promise<ManualBatchSendResult> => {
+      const subjectTrim = subject.trim();
+      const bodyTrim = body.trim();
+
+      if (!subjectTrim) {
+        throw new Error('Subject is required.');
+      }
+      if (!bodyTrim) {
+        throw new Error('Message is required.');
+      }
+
+      let list: { email: string; name?: string }[];
+      try {
+        list = buildManualRecipientSendList(recipients);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(msg);
+      }
+
+      if (list.length === 0) {
+        throw new Error('Add at least one recipient with a valid email.');
+      }
+
+      let succeeded = 0;
+      let failed = 0;
+
+      for (const recipient of list) {
+        const payload: SendFarmVaultEmailPayload = {
+          emailType: 'custom_manual',
+          to: recipient.email,
+          subject: subjectTrim,
+          data: {
+            subject: subjectTrim,
+            body: bodyTrim,
+            ...(recipient.name ? { recipientName: recipient.name } : {}),
+            ...(category !== '_none' ? { category } : {}),
+          },
+          ...(companyNameField.trim() ? { companyName: companyNameField.trim() } : {}),
+          triggeredBy: 'developer_manual_send',
+        };
+
+        const result = await invokeSendFarmVaultEmail(payload);
+        if (result.ok) {
+          succeeded += 1;
+        } else {
+          failed += 1;
+          console.error('Manual email send error', recipient.email, result);
+        }
+      }
+
+      return { attempted: list.length, succeeded, failed };
     },
-    onSuccess: (result) => {
-      if (result.ok) {
+    onSuccess: (batch) => {
+      void queryClient.invalidateQueries({ queryKey: ['developer', 'email-center-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['developer', 'email-center-logs'] });
+
+      if (batch.failed === 0) {
         toast({
-          title: 'Email sent',
-          description: result.id ? `Provider id: ${result.id}` : 'Message queued via Resend.',
+          title: 'Emails sent',
+          description: `Emails sent to ${batch.succeeded} recipient${batch.succeeded === 1 ? '' : 's'}.`,
         });
-        setBody('');
-        void queryClient.invalidateQueries({ queryKey: ['developer', 'email-center-stats'] });
-        void queryClient.invalidateQueries({ queryKey: ['developer', 'email-center-logs'] });
-      } else {
+        if (batch.succeeded > 0) {
+          setBody('');
+        }
+        return;
+      }
+
+      if (batch.succeeded === 0) {
         toast({
           title: 'Send failed',
-          description: [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error',
+          description: `All ${batch.attempted} send${batch.attempted === 1 ? '' : 's'} failed. Check Logs for details.`,
           variant: 'destructive',
         });
+        return;
       }
+
+      toast({
+        title: 'Partially sent',
+        description: `Sent to ${batch.succeeded} recipient${batch.succeeded === 1 ? '' : 's'}, ${batch.failed} failed.`,
+        variant: 'destructive',
+      });
     },
-    onError: (err: Error) => {
-      toast({ title: 'Send failed', description: err.message, variant: 'destructive' });
+    onError: (err: unknown) => {
+      console.error('Manual email send error', err);
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: 'Send failed', description: message, variant: 'destructive' });
     },
   });
 
@@ -231,15 +336,44 @@ export default function DeveloperEmailCenterPage() {
     setCategory(p.category);
   };
 
-  const canSend =
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim()) &&
-    subject.trim().length > 0 &&
-    body.trim().length > 0;
+  const clearDraft = () => {
+    setRecipients([newRecipientRow()]);
+    setCompanyNameField('');
+    setSubject('');
+    setBody('');
+    setCategory('_none');
+  };
+
+  const addRecipientRow = () => {
+    setRecipients((prev) => [...prev, newRecipientRow()]);
+  };
+
+  const removeRecipientRow = (id: string) => {
+    setRecipients((prev) => {
+      if (prev.length <= 1) {
+        return [newRecipientRow()];
+      }
+      return prev.filter((r) => r.id !== id);
+    });
+  };
+
+  const updateRecipientRow = (id: string, patch: Partial<Pick<ManualRecipientRow, 'email' | 'name'>>) => {
+    setRecipients((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  const canSend = useMemo(() => {
+    if (subject.trim().length === 0 || body.trim().length === 0) return false;
+    try {
+      return buildManualRecipientSendList(recipients).length > 0;
+    } catch {
+      return false;
+    }
+  }, [recipients, subject, body]);
 
   return (
     <DeveloperPageShell
       title="Email Center"
-      description="Send branded messages and review the full outbound email history for FarmVault."
+      description="Compose one-off FarmVault emails and browse every outbound message—manual sends use the same pipeline and logging as workspace-ready and other transactional mail."
       isLoading={tab === 'logs' ? logsLoading : false}
       isRefetching={tab === 'logs' ? logsFetching : false}
       onRefresh={tab === 'logs' ? refresh : undefined}
@@ -248,71 +382,116 @@ export default function DeveloperEmailCenterPage() {
       onSearchChange={tab === 'logs' ? setSearch : undefined}
     >
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'send' | 'logs')} className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-2 h-11 p-1 bg-muted/80">
-          <TabsTrigger value="send" className="gap-2 data-[state=active]:shadow-sm">
+        <TabsList className="grid w-full max-w-lg grid-cols-2 h-11 p-1 rounded-xl bg-muted/70 ring-1 ring-border/60">
+          <TabsTrigger value="send" className="gap-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Send className="h-3.5 w-3.5" />
-            Send Email
+            Send email
           </TabsTrigger>
-          <TabsTrigger value="logs" className="gap-2 data-[state=active]:shadow-sm">
+          <TabsTrigger value="logs" className="gap-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Mail className="h-3.5 w-3.5" />
             Logs
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="send" className="mt-0 space-y-6 outline-none">
-          <div className="fv-card border-primary/10 bg-gradient-to-br from-background via-background to-primary/[0.03] space-y-6 p-6 sm:p-8">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight text-foreground">Compose</h2>
-              <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-                Sends a FarmVault-branded email to any valid address. Logged as{' '}
-                <code className="text-xs bg-muted px-1.5 py-0.5 rounded">custom_manual</code> with{' '}
-                <code className="text-xs bg-muted px-1.5 py-0.5 rounded">developer_manual_send</code>.
-              </p>
+          <div className="fv-card border-primary/15 bg-gradient-to-br from-background via-background to-primary/[0.04] shadow-sm space-y-6 p-6 sm:p-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">Manual send</h2>
+                  <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wider">
+                    Developer
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+                  Deliver to any valid address with the same branded shell and Resend path as other FarmVault mail.
+                  Messages are plain text in the editor; the server formats paragraphs for the template. Each send is
+                  recorded in Logs as a manual developer send.
+                </p>
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide w-full sm:w-auto sm:mr-2 sm:leading-9">
-                Quick fill
-              </span>
-              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('pilot')}>
-                Pilot appreciation
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('launch')}>
-                Launch update
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('support')}>
-                Support follow-up
-              </Button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Quick fill</span>
+                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('pilot')}>
+                  Pilot appreciation
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('launch')}>
+                  Launch update
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => applyPreset('support')}>
+                  Support follow-up
+                </Button>
+              </div>
             </div>
+
+            <Separator className="bg-border/70" />
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="ec-to">Recipient email</Label>
-                <Input
-                  id="ec-to"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="farmer@example.com"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="h-10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ec-name">Recipient name (optional)</Label>
-                <Input
-                  id="ec-name"
-                  placeholder="Jane"
-                  value={recipientName}
-                  onChange={(e) => setRecipientName(e.target.value)}
-                  className="h-10"
-                />
+              <div className="space-y-3 sm:col-span-2">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <Label className="text-foreground">Recipients</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Empty rows are ignored. Duplicate addresses are sent once.
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  {recipients.map((row, index) => (
+                    <div
+                      key={row.id}
+                      className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-end sm:gap-2 sm:p-2 sm:pr-1"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Label htmlFor={`ec-to-${row.id}`} className="text-xs text-muted-foreground">
+                          Email {recipients.length > 1 ? `(${index + 1})` : ''}
+                        </Label>
+                        <Input
+                          id={`ec-to-${row.id}`}
+                          type="email"
+                          autoComplete="email"
+                          placeholder="recipient@example.com"
+                          value={row.email}
+                          onChange={(e) => updateRecipientRow(row.id, { email: e.target.value })}
+                          className="h-10"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Label htmlFor={`ec-name-${row.id}`} className="text-xs text-muted-foreground">
+                          Name (optional)
+                        </Label>
+                        <Input
+                          id={`ec-name-${row.id}`}
+                          placeholder="Greeting name"
+                          value={row.name}
+                          onChange={(e) => updateRecipientRow(row.id, { name: e.target.value })}
+                          className="h-10"
+                        />
+                      </div>
+                      <div className="flex shrink-0 justify-end sm:pb-0.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeRecipientRow(row.id)}
+                          aria-label={recipients.length <= 1 ? 'Clear recipient row' : 'Remove recipient'}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={addRecipientRow}>
+                  Add recipient
+                </Button>
               </div>
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="ec-company">Company name (optional)</Label>
+                <Label htmlFor="ec-company">Company (optional)</Label>
                 <Input
                   id="ec-company"
-                  placeholder="Shown in email logs"
+                  placeholder="Stored on the log row for reference"
                   value={companyNameField}
                   onChange={(e) => setCompanyNameField(e.target.value)}
                   className="h-10"
@@ -322,13 +501,13 @@ export default function DeveloperEmailCenterPage() {
                 <Label htmlFor="ec-subject">Subject</Label>
                 <Input
                   id="ec-subject"
-                  placeholder="Email subject line"
+                  placeholder="Subject line"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                   className="h-10"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 sm:col-span-2 sm:max-w-xs">
                 <Label>Category (optional)</Label>
                 <Select value={category} onValueChange={setCategory}>
                   <SelectTrigger className="h-10">
@@ -344,40 +523,58 @@ export default function DeveloperEmailCenterPage() {
                 </Select>
               </div>
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="ec-body">Message body</Label>
+                <Label htmlFor="ec-body">Message</Label>
                 <Textarea
                   id="ec-body"
-                  placeholder="Plain text. Blank lines become new paragraphs."
+                  placeholder="Write in plain text. Empty lines start a new paragraph in the email."
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   rows={12}
-                  className="min-h-[200px] resize-y font-mono text-sm"
+                  className="min-h-[220px] resize-y text-[15px] leading-relaxed"
                 />
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/60">
-              <Button
-                type="button"
-                disabled={!canSend || sendMutation.isPending}
-                onClick={() => sendMutation.mutate()}
-                className="gap-2 min-w-[140px]"
-              >
-                {sendMutation.isPending ? (
-                  'Sending…'
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Send email
-                  </>
-                )}
-              </Button>
-              <p className="text-xs text-muted-foreground">Requires developer access. Uses the standard FarmVault email shell.</p>
+            <Separator className="bg-border/70" />
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  disabled={!canSend || sendMutation.isPending}
+                  onClick={() => sendMutation.mutate()}
+                  className="gap-2 min-w-[148px]"
+                >
+                  {sendMutation.isPending ? (
+                    'Sending…'
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Send email
+                    </>
+                  )}
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={clearDraft}>
+                  Clear draft
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground max-w-md sm:text-right">
+                Clerk session required; developer role enforced on the server. Resend delivers the message.
+              </p>
             </div>
           </div>
         </TabsContent>
 
         <TabsContent value="logs" className="mt-0 space-y-6 outline-none">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">Outbound history</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Filter and inspect rows written by Resend and edge functions—including manual sends.
+              </p>
+            </div>
+          </div>
+
           {(statsError || rowsError) && (
             <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive text-sm">
               {(statsError as Error)?.message ||

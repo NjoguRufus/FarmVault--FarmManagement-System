@@ -10,13 +10,25 @@ import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUse
 import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
 import { clearQuickUnlockState } from '@/services/appLockService';
 import { clearPendingApprovalSession } from '@/lib/pendingApprovalSession';
+import {
+  clerkOAuthDisplayHints,
+  resolveUserDisplayName,
+  seedFullNameFromClerk,
+} from '@/lib/userDisplayName';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
   isLoaded: boolean;
   isSignedIn: boolean;
   userId: string | null;
-  clerkUser: { primaryEmailAddress?: { emailAddress?: string }; fullName?: string; username?: string; imageUrl?: string } | null;
+  clerkUser: {
+    primaryEmailAddress?: { emailAddress?: string };
+    fullName?: string;
+    firstName?: string;
+    lastName?: string;
+    username?: string;
+    imageUrl?: string;
+  } | null;
   signInLoaded: boolean;
   signIn: { create: (opts: { identifier: string; password: string }) => Promise<{ status?: string; createdSessionId?: string; errors?: Array<{ message?: string; longMessage?: string }> }> } | null;
   setActiveSignIn: ((opts: { session: string }) => Promise<void>) | null;
@@ -206,7 +218,10 @@ function mapEmployeeRow(row: any): Employee {
     id: String(row.id ?? ''),
     companyId: String(row.company_id ?? ''),
     // `employees` table uses `full_name` (no `name` column). Keep UI `name` derived.
-    name: fullName ?? 'User',
+    name: resolveUserDisplayName({
+      profileDisplayName: fullName,
+      email: row.email != null ? String(row.email) : undefined,
+    }),
     fullName,
     email: row.email != null ? String(row.email) : undefined,
     phone: row.phone != null ? String(row.phone) : undefined,
@@ -613,14 +628,7 @@ export function AuthProvider({
     (async () => {
       try {
         const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
-        const fallbackName =
-          (clerkUser?.fullName && clerkUser.fullName.trim().length > 0
-            ? clerkUser.fullName
-            : undefined) ??
-          (clerkUser?.username && clerkUser.username.trim().length > 0
-            ? clerkUser.username
-            : undefined) ??
-          '';
+        const oauthHints = clerkOAuthDisplayHints(clerkUser);
 
         // 1) Determine developer status as early as possible.
         const devRoute = isCurrentRouteDev();
@@ -667,22 +675,50 @@ export function AuthProvider({
         // and treat them as a global developer user (role = 'developer').
         if (dev) {
           const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
-          const devProfileAvatar = await (async () => {
+          let devProfileAvatar: string | null = null;
+          let devProfileFullName: string | null = null;
+          try {
+            const { data: r } = await db
+              .core()
+              .from('profiles')
+              .select('avatar_url, full_name')
+              .eq('clerk_user_id', userId)
+              .maybeSingle();
+            devProfileAvatar = r?.avatar_url ?? null;
+            devProfileFullName =
+              r?.full_name != null && String(r.full_name).trim().length > 0
+                ? String(r.full_name).trim()
+                : null;
+          } catch {
+            devProfileAvatar = null;
+            devProfileFullName = null;
+          }
+          const devSeed = seedFullNameFromClerk(clerkUser);
+          if (!devProfileFullName && devSeed) {
             try {
-              const { data: r } = await db.core().from('profiles').select('avatar_url').eq('clerk_user_id', userId).maybeSingle();
-              return r?.avatar_url ?? null;
+              await db
+                .core()
+                .from('profiles')
+                .update({ full_name: devSeed, updated_at: new Date().toISOString() })
+                .eq('clerk_user_id', userId);
+              devProfileFullName = devSeed;
             } catch {
-              return null;
+              // non-blocking
             }
-          })();
+          }
           const devUser: User = {
             id: userId,
             email: fallbackEmail,
-            name: fallbackName,
+            name: resolveUserDisplayName({
+              profileDisplayName: devProfileFullName,
+              oauthFullName: oauthHints.oauthFullName,
+              oauthName: oauthHints.oauthName,
+              email: fallbackEmail,
+            }),
             role: 'developer',
             employeeRole: undefined,
             companyId: null,
-            avatar: (devProfileAvatar || clerkImageUrl) ? String(devProfileAvatar || clerkImageUrl) : undefined,
+            avatar: devProfileAvatar || clerkImageUrl ? String(devProfileAvatar || clerkImageUrl) : undefined,
             createdAt: new Date(),
           };
           setUser(devUser);
@@ -741,7 +777,12 @@ export function AuthProvider({
           const resetUser: User = {
             id: userId,
             email: fallbackEmail,
-            name: fallbackName || fallbackEmail || 'User',
+            name: resolveUserDisplayName({
+              profileDisplayName: null,
+              oauthFullName: oauthHints.oauthFullName,
+              oauthName: oauthHints.oauthName,
+              email: fallbackEmail,
+            }),
             role: 'employee',
             employeeRole: undefined,
             companyId: null,
@@ -800,6 +841,22 @@ export function AuthProvider({
               : null;
         } catch {
           // Non-blocking; fall back to Clerk image
+        }
+
+        if (!profileFullName) {
+          const seed = seedFullNameFromClerk(clerkUser);
+          if (seed) {
+            try {
+              await db
+                .core()
+                .from('profiles')
+                .update({ full_name: seed, updated_at: new Date().toISOString() })
+                .eq('clerk_user_id', userId);
+              profileFullName = seed;
+            } catch {
+              // non-blocking
+            }
+          }
         }
 
         // 4) Single source of truth: current_context() returns { company_id, role } from core.profiles + core.company_members.
@@ -896,7 +953,12 @@ export function AuthProvider({
         const mapped: User = {
           id: userId,
           email: fallbackEmail,
-          name: profileFullName || fallbackName,
+          name: resolveUserDisplayName({
+            profileDisplayName: profileFullName,
+            oauthFullName: oauthHints.oauthFullName,
+            oauthName: oauthHints.oauthName,
+            email: fallbackEmail,
+          }),
           role: normalizedRole,
           employeeRole: undefined,
           companyId: hasCompanyId && hasRole ? contextCompanyId : null,
@@ -1085,14 +1147,11 @@ export function AuthProvider({
           { forceCompanyAdmin: isContextCompanyAdmin }
         );
 
-        // Display name: prefer profile name, then employee name, then Clerk fallback
+        // Display name: staff prefer employee record; otherwise profile + OAuth + email (see resolveUserDisplayName).
         const displayName =
-          (profileFullName && profileFullName.trim()) ||
           (!isContextCompanyAdmin && employee?.fullName && employee.fullName.trim()) ||
           (!isContextCompanyAdmin && employee?.name && employee.name.trim()) ||
-          (fallbackName && fallbackName.trim()) ||
-          fallbackEmail ||
-          'User';
+          mappedWithCompany.name;
 
         // Employee role: only set for non-admin users
         // Company admins should NOT have employeeRole set (it would affect routing)
@@ -1167,12 +1226,17 @@ export function AuthProvider({
           confirmedSignedInRef.current = true;
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
-          const fallbackName = clerkUser?.fullName ?? 'User';
+          const errOauth = clerkOAuthDisplayHints(clerkUser);
           const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
           const fallbackUser: User = {
             id: userId,
             email: fallbackEmail,
-            name: fallbackName,
+            name: resolveUserDisplayName({
+              profileDisplayName: null,
+              oauthFullName: errOauth.oauthFullName,
+              oauthName: errOauth.oauthName,
+              email: fallbackEmail,
+            }),
             role: 'employee',
             employeeRole: undefined,
             companyId: null,
@@ -1321,10 +1385,16 @@ export function AuthProvider({
         .maybeSingle();
       const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
       const resolvedAvatar = profileRow?.avatar_url || clerkImageUrl || null;
-      const resolvedName =
-        profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
-          ? String(profileRow.full_name)
-          : user.name;
+      const hints = clerkOAuthDisplayHints(clerkUser);
+      const resolvedName = resolveUserDisplayName({
+        profileDisplayName:
+          profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
+            ? String(profileRow.full_name)
+            : null,
+        oauthFullName: hints.oauthFullName,
+        oauthName: hints.oauthName,
+        email: user.email,
+      });
       const next = {
         ...user,
         name: resolvedName,
@@ -1415,11 +1485,32 @@ export function AuthProvider({
         ? undefined
         : (employee?.role ?? employee?.employeeRole ?? undefined);
 
+      const hints = clerkOAuthDisplayHints(clerkUser);
+      let profileName: string | null = null;
+      try {
+        const { data: pr } = await db
+          .core()
+          .from('profiles')
+          .select('full_name')
+          .eq('clerk_user_id', userId)
+          .maybeSingle();
+        profileName =
+          pr?.full_name != null && String(pr.full_name).trim().length > 0
+            ? String(pr.full_name).trim()
+            : null;
+      } catch {
+        profileName = null;
+      }
+
       const displayName =
         (!isCompanyAdmin && employee?.fullName && employee.fullName.trim()) ||
         (!isCompanyAdmin && employee?.name && employee.name.trim()) ||
-        user.name ||
-        'User';
+        resolveUserDisplayName({
+          profileDisplayName: profileName,
+          oauthFullName: hints.oauthFullName,
+          oauthName: hints.oauthName,
+          email: user.email,
+        });
 
       const nextUser: User = {
         ...user,

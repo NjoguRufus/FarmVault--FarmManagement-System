@@ -70,7 +70,7 @@ export function DeveloperDashboard() {
           </button>
           <button
             type="button"
-            onClick={() => navigate('/admin/companies')}
+            onClick={() => navigate('/developer/companies')}
             className="fv-btn fv-btn--primary"
           >
             <Building2 className="h-4 w-4" />

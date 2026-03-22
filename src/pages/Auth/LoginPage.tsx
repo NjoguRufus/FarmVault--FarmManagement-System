@@ -30,7 +30,7 @@ export default function LoginPage() {
       return;
     }
     if (user.role === 'developer') {
-      navigate('/admin', { replace: true });
+      navigate('/developer', { replace: true });
       return;
     }
     if (user.role === 'manager' || employeeRole === 'manager' || employeeRole === 'operations-manager') {

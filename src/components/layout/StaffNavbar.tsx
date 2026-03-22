@@ -7,6 +7,7 @@ import { useStaff } from '@/contexts/StaffContext';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { UserAvatar } from '@/components/UserAvatar';
 import { cn } from '@/lib/utils';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,7 +55,10 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   const navigate = useNavigate();
   const companyName = staffCompanyName || activeProject?.companyId || 'FarmVault';
 
-  const displayName = fullName ?? user?.email ?? 'User';
+  const displayName =
+    (fullName?.trim() && fullName) ||
+    user?.name ||
+    resolveUserDisplayName({ email: user?.email });
   const displayRole = roleLabel ?? 'Staff';
 
   const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;

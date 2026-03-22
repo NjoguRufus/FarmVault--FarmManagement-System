@@ -44,11 +44,10 @@ export default function OnboardingPage() {
     companyEmailTrim === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmailTrim);
   const step1Valid = companyName.trim().length >= 2 && companyEmailFormatOk;
 
-  // Pre-fill from Clerk once; do not overwrite if the user cleared optional fields in-session.
+  // Pre-fill company email from the sign-in account only. Farm/company name must be entered explicitly (never from Google name).
   useEffect(() => {
     if (!clerkUser) return;
     setCompanyEmail((prev) => (prev.trim() !== '' ? prev : accountEmail));
-    setCompanyName((prev) => (prev.trim() !== '' ? prev : clerkUser.fullName ?? ''));
   }, [clerkUser, accountEmail]);
 
   useEffect(() => {
@@ -74,6 +73,13 @@ export default function OnboardingPage() {
 
   const handleStep1CreateCompany = async () => {
     if (!step1Valid || !clerkId) return;
+    const trimmedFarm = companyName.trim();
+    if (trimmedFarm.length < 2) {
+      setError(
+        'Please enter your farm or company name (at least 2 characters). This is your workspace name — not your personal name.',
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -109,7 +115,7 @@ export default function OnboardingPage() {
 
       // Single RPC: creates core.companies, core.company_members (role=company_admin), core.profiles with active_company_id
       const { data: cid, error: rpcErr } = await supabase.rpc('create_company_with_admin', {
-        _name: companyName.trim(),
+        _name: trimmedFarm,
       });
 
       if (rpcErr || !cid) {
@@ -343,14 +349,21 @@ export default function OnboardingPage() {
               )}
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="companyName">Company name</Label>
+                  <Label htmlFor="companyName">Farm / Company Name</Label>
                   <Input
                     id="companyName"
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="e.g. Green Valley Farm"
+                    placeholder="e.g. Green Valley Farm Ltd"
                     className="mt-1"
+                    autoComplete="organization"
+                    required
+                    minLength={2}
                   />
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Enter the name of your farm, business, or company as you want it to appear in FarmVault. This is separate
+                    from your own name (your profile).
+                  </p>
                 </div>
                 <div>
                   <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">

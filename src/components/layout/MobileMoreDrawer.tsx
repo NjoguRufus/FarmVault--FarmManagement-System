@@ -139,7 +139,9 @@ export function MobileMoreDrawer({
                 const path = location.pathname.replace(/\/+/g, '/');
                 const isActive =
                   path === itemPath ||
-                  (itemPath !== '/' && path.startsWith(itemPath + '/'));
+                  (itemPath !== '/' &&
+                    itemPath !== '/developer' &&
+                    path.startsWith(itemPath + '/'));
                 const Icon = item.icon;
 
                 return (

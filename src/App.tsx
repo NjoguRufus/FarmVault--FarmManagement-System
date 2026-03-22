@@ -97,7 +97,6 @@ import { RequireBroker } from "@/components/auth/RequireBroker";
 import { RequireNotBroker } from "@/components/auth/RequireNotBroker";
 import { RequireDriver } from "@/components/auth/RequireDriver";
 import { PermissionRoute } from "@/components/auth/PermissionRoute";
-import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminCompaniesPage from "@/pages/admin/AdminCompaniesPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
 import AdminPendingUsersPage from "@/pages/admin/AdminPendingUsersPage";
@@ -176,7 +175,7 @@ const CompanyDashboardRoute = () => {
     });
   }
 
-  if (landing === "/admin") return <Navigate to="/admin" replace />;
+  if (landing === "/admin") return <Navigate to="/developer" replace />;
   if (landing === "/dashboard") return <CompanyDashboard />;
   if (landing === "/manager" || landing === "/manager/operations") return <Navigate to="/manager" replace />;
   if (landing === "/broker") return <Navigate to="/broker" replace />;
@@ -223,8 +222,8 @@ const AppRoutesWithLock = () => {
       <Route path="/dev/sign-in/*" element={<DevSignInPage />} />
       <Route path="/dev/sign-up" element={<DevSignUpPage />} />
       <Route path="/dev/sign-up/*" element={<DevSignUpPage />} />
-      {/* Intercept any Clerk organization task routes for dev sign-up and send directly to the dev dashboard. */}
-      <Route path="/dev/sign-up/tasks/*" element={<Navigate to="/dev/dashboard" replace />} />
+      {/* Intercept any Clerk organization task routes for dev sign-up and send to Developer Home. */}
+      <Route path="/dev/sign-up/tasks/*" element={<Navigate to="/developer" replace />} />
       <Route
         path="/dev/bootstrap"
         element={
@@ -420,14 +419,13 @@ const AppRoutesWithLock = () => {
           </RequireDeveloper>
         }
       >
-        {/* Default developer entrypoint – /dev → /dev/dashboard */}
-        <Route path="/dev" element={<Navigate to="/dev/dashboard" replace />} />
-        {/* Canonical developer dashboard path */}
-        <Route path="/dev/dashboard" element={<AdminDashboard />} />
+        {/* Legacy /dev → canonical developer console */}
+        <Route path="/dev" element={<Navigate to="/developer" replace />} />
+        <Route path="/dev/dashboard" element={<Navigate to="/developer" replace />} />
         <Route path="/dev/diagnostics" element={<DevDiagnosticsPage />} />
         <Route path="/dev/qr-generator" element={<Navigate to="/developer/qr" replace />} />
-        {/* Keep legacy /admin routes working but prefer /developer as canonical */}
-        <Route path="/admin" element={<AdminDashboard />} />
+        {/* Legacy /admin/* still supported; index redirects to Developer Home */}
+        <Route path="/admin" element={<Navigate to="/developer" replace />} />
         <Route path="/admin/companies" element={<AdminCompaniesPage />} />
         <Route path="/admin/users" element={<AdminUsersPage />} />
         <Route path="/admin/users/pending" element={<AdminPendingUsersPage />} />

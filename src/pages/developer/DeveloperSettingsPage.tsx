@@ -324,7 +324,7 @@ export default function DeveloperSettingsPage() {
         description:
           'Your session has been refreshed as a platform developer. You will now see admin routes again.',
       });
-      const target = result?.landingPage || '/admin';
+      const target = result?.landingPage || '/developer';
       navigate(target);
     },
     onError: (err: Error) => {

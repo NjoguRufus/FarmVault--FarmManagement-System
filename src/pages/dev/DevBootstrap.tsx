@@ -20,7 +20,7 @@ export default function DevBootstrapPage() {
       navigate('/dev/sign-in', { replace: true });
       return;
     }
-    navigate('/dev/dashboard', { replace: true });
+    navigate('/developer', { replace: true });
   }, [isLoaded, isSignedIn, navigate]);
 
   return (

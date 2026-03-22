@@ -33,7 +33,10 @@ export type CompanyApprovedEmailData = {
 /** Developer console: manual send to any address (requires is_developer). */
 export type CustomManualEmailData = {
   subject: string;
-  body: string;
+  /** Plain text; used when `html` is not set (server converts to paragraphs). */
+  body?: string;
+  /** Pre-rendered body HTML fragment (inserted inside branded shell). */
+  html?: string;
   recipientName?: string;
   category?: string;
 };
@@ -61,6 +64,13 @@ export type SendFarmVaultEmailPayload =
     | { emailType: "subscription_activated"; to: string; data: SubscriptionActivatedEmailData }
     | { emailType: "trial_ending"; to: string; data: TrialEndingEmailData }
     | { emailType: "company_approved"; to: string; data: CompanyApprovedEmailData }
-    | { emailType: "custom_manual"; to: string; data: CustomManualEmailData }
+    | {
+        emailType: "custom_manual";
+        to: string;
+        data: CustomManualEmailData;
+        /** Optional: same as `data.subject` / `data.html` for flat client payloads. */
+        subject?: string;
+        html?: string;
+      }
   )
   & SendFarmVaultEmailContext;

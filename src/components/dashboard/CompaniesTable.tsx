@@ -87,7 +87,7 @@ export function CompaniesTable({
           )}
           {showViewAll && (
             <Link
-              to="/admin/companies"
+              to="/developer/companies"
               className="text-sm text-primary hover:underline flex items-center gap-1"
             >
               View All

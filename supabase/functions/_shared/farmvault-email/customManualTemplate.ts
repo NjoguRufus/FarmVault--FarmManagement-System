@@ -30,11 +30,16 @@ export function buildCustomManualEmail(data: CustomManualEmailData): { subject: 
     ? `${data.category.charAt(0).toUpperCase()}${data.category.slice(1).replace(/_/g, " ")} · FarmVault`
     : "Message from the FarmVault team";
 
+  const bodyFragment =
+    typeof data.html === "string" && data.html.trim().length > 0
+      ? data.html.trim()
+      : bodyToHtml(typeof data.body === "string" ? data.body : "");
+
   const html = farmVaultEmailShell({
     preheader: subject.length > 140 ? `${subject.slice(0, 137)}…` : subject,
     title: subject,
     subtitle,
-    content: `${greeting}${bodyToHtml(data.body)}`,
+    content: `${greeting}${bodyFragment}`,
   });
 
   return { subject, html };

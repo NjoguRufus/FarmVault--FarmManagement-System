@@ -13,7 +13,7 @@ interface RequireOnboardingProps {
  * Enforces tenant onboarding for non-developer users.
  *
  * - Waits for authReady; shows loading until then.
- * - Developers bypass onboarding entirely (render children or redirect to /admin as configured).
+ * - Developers bypass onboarding entirely (render children or redirect to /developer as configured).
  * - Redirect to /onboarding ONLY when setupIncomplete === true (never based on subscription/trial).
  */
 export function RequireOnboarding({ children }: RequireOnboardingProps) {
@@ -38,7 +38,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
       // eslint-disable-next-line no-console
       console.log('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
     }
-    return <Navigate to="/admin" replace />;
+    return <Navigate to="/developer" replace />;
   }
 
   // If this session has an employee profile (from RPC activation or existing membership),

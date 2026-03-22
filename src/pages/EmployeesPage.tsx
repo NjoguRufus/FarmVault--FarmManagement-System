@@ -18,6 +18,7 @@ import {
   revokeEmployeeInvite,
   resendEmployeeInvite,
 } from '@/services/employeesSupabaseService';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -135,7 +136,10 @@ function resolveRoleForSave(
 }
 
 function getEmployeeName(employee: Employee): string {
-  return employee.fullName || employee.name || 'Employee';
+  return resolveUserDisplayName({
+    profileDisplayName: employee.fullName ?? employee.name,
+    email: employee.email,
+  });
 }
 
 function getEmployeePhone(employee: Employee): string {

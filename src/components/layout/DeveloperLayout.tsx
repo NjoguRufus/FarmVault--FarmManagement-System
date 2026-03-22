@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './AppSidebar';
+import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
@@ -89,6 +90,7 @@ export function DeveloperLayout() {
         </div>
       </main>
 
+      <BottomNav />
       <AIChatButton />
       <NotificationSetupPrompt />
     </div>

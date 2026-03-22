@@ -9,13 +9,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { UserAvatar } from '@/components/UserAvatar';
 import { uploadEmployeeAvatar, clearEmployeeAvatar } from '@/services/avatarService';
 import { useQueryClient } from '@tanstack/react-query';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 
 export default function StaffProfilePage() {
   const { user, employeeProfile } = useAuth();
   const { fullName, companyName, roleLabel, companyId, employeeId, avatarUrl: staffAvatarUrl } = useStaff();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [displayName, setDisplayName] = useState(fullName ?? user?.email ?? '');
+  const [displayName, setDisplayName] = useState(() =>
+    resolveUserDisplayName({ profileDisplayName: fullName, email: user?.email }),
+  );
   const [avatarUrl, setAvatarUrl] = useState<string | null>(staffAvatarUrl ?? null);
   const [employeeRow, setEmployeeRow] = useState<{
     id: string;
@@ -75,10 +78,11 @@ export default function StaffProfilePage() {
         }
         if (row) {
           setEmployeeRow(row);
-          const nameFromRow =
-            (row.full_name && String(row.full_name).trim().length > 0
-              ? String(row.full_name)
-              : '') || fullName || user.email || '';
+          const nameFromRow = resolveUserDisplayName({
+            profileDisplayName:
+              row.full_name && String(row.full_name).trim().length > 0 ? String(row.full_name) : fullName,
+            email: row.email ?? user.email,
+          });
           setDisplayName(nameFromRow);
           const avatarFromRow =
             (row.avatar_url && String(row.avatar_url).trim().length > 0
@@ -196,10 +200,13 @@ export default function StaffProfilePage() {
       const finalRow = refetchedRow;
       {
         setEmployeeRow(finalRow);
-        const finalName =
-          (finalRow.full_name && String(finalRow.full_name).trim().length > 0
-            ? String(finalRow.full_name)
-            : '') || user.email || '';
+        const finalName = resolveUserDisplayName({
+          profileDisplayName:
+            finalRow.full_name && String(finalRow.full_name).trim().length > 0
+              ? String(finalRow.full_name)
+              : null,
+          email: finalRow.email ?? user.email,
+        });
         const finalAvatar =
           (finalRow.avatar_url && String(finalRow.avatar_url).trim().length > 0
             ? String(finalRow.avatar_url)
@@ -257,14 +264,15 @@ export default function StaffProfilePage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Display name</label>
+            <label className="text-sm font-medium text-foreground">Your Name</label>
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name as staff"
+              placeholder="e.g. James Mwangi"
             />
             <p className="text-xs text-muted-foreground">
-              Updating your display name here will not change your employee record used by admins.
+              Your name as a team member — not your farm or company name. Saving updates your employee record for this
+              workspace.
             </p>
           </div>
 
@@ -327,10 +335,13 @@ export default function StaffProfilePage() {
                     const finalRow = refetchedRow ?? null;
                     if (finalRow) {
                       setEmployeeRow(finalRow);
-                      const finalName =
-                        (finalRow.full_name && String(finalRow.full_name).trim().length > 0
-                          ? String(finalRow.full_name)
-                          : '') || displayName || user.email || '';
+                      const finalName = resolveUserDisplayName({
+                        profileDisplayName:
+                          finalRow.full_name && String(finalRow.full_name).trim().length > 0
+                            ? String(finalRow.full_name)
+                            : displayName,
+                        email: finalRow.email ?? user.email,
+                      });
                       const finalAvatar =
                         (finalRow.avatar_url && String(finalRow.avatar_url).trim().length > 0
                           ? String(finalRow.avatar_url)

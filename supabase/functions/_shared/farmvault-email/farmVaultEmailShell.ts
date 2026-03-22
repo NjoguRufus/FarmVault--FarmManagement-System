@@ -16,6 +16,11 @@ export type FarmVaultEmailShellOptions = {
   content: string;
   /** Primary action (optional). */
   cta?: { label: string; href: string };
+  /**
+   * When true (default), shows WhatsApp and phone support above the standard footer block.
+   * Footer copy and structure below this section are unchanged.
+   */
+  includeContactSupport?: boolean;
 };
 
 const BRAND = {
@@ -32,12 +37,56 @@ const BRAND = {
 
 const fontStack = "Arial, Helvetica, sans-serif";
 
+const SUPPORT_WHATSAPP_HREF = "https://wa.me/254714456167";
+const SUPPORT_CALL_HREF = "tel:+254714456167";
+
+function contactSupportBlock(font: string): string {
+  const wa = escapeAttr(SUPPORT_WHATSAPP_HREF);
+  const tel = escapeAttr(SUPPORT_CALL_HREF);
+  const waGreen = "#25D366";
+  return `
+                <tr>
+                  <td style="padding:28px 40px 32px 40px;background-color:${BRAND.white};font-family:${font};font-size:15px;line-height:1.65;color:${BRAND.text};text-align:center;">
+                    <p style="margin:0 0 20px 0;padding:0;font-size:15px;line-height:1.65;color:${BRAND.text};">
+                      Feel free to reach out to our team for any assistance.
+                    </p>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto;max-width:420px;">
+                      <tr>
+                        <td align="center" valign="middle" width="50%" style="padding:6px 8px 8px 8px;">
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto;">
+                            <tr>
+                              <td align="center" bgcolor="${waGreen}" style="background-color:${waGreen};border-radius:10px;">
+                                <a href="${wa}" target="_blank" rel="noopener noreferrer"
+                                  style="display:inline-block;padding:12px 22px;font-family:${font};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;mso-line-height-rule:exactly;line-height:1.2;">
+                                  WhatsApp us
+                                </a>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td align="center" valign="middle" width="50%" style="padding:6px 8px 8px 8px;">
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto;">
+                            <tr>
+                              <td align="center" style="border:1px solid ${BRAND.border};border-radius:10px;background-color:${BRAND.white};">
+                                <a href="${tel}" style="display:inline-block;padding:12px 22px;font-family:${font};font-size:14px;font-weight:700;color:${BRAND.primary};text-decoration:none;border-radius:10px;mso-line-height-rule:exactly;line-height:1.2;">
+                                  Call us
+                                </a>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>`;
+}
+
 /**
  * Full HTML document for FarmVault transactional email.
  * Tables + inline styles only. Light header (logo + title) so the official logo reads clearly.
  */
 export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
-  const { preheader, title, subtitle, content, cta } = opts;
+  const { preheader, title, subtitle, content, cta, includeContactSupport = true } = opts;
   const safePre = escapeHtml(preheader);
   const safeTitle = escapeHtml(title);
   const safeSubtitle = escapeHtml(subtitle);
@@ -61,6 +110,8 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
   </tr>
 </table>`
     : "";
+
+  const supportBlock = includeContactSupport ? contactSupportBlock(fontStack) : "";
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -118,6 +169,7 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
                     </table>
                   </td>
                 </tr>
+                ${supportBlock}
                 <tr>
                   <td style="padding:28px 40px 36px 40px;background-color:${BRAND.softBg};font-family:${fontStack};font-size:13px;line-height:1.65;color:${BRAND.muted};text-align:center;">
                     <p style="margin:0 0 6px 0;font-size:14px;font-weight:700;color:${BRAND.text};">FarmVault</p>

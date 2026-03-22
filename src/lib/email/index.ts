@@ -6,6 +6,7 @@ export * from './trialEndingTemplate';
 export * from './companyApprovedTemplate';
 export * from './renderFarmVaultEmail';
 export * from './validatePayload';
+export * from './manualEmailHtml';
 export * from './invokeSendFarmVaultEmail';
 export * from './invokeNotifyCompanyWorkspaceReady';
 export * from './invokeNotifyCompanySubmissionReceived';

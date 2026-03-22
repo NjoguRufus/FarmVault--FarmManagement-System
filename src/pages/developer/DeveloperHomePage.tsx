@@ -80,7 +80,7 @@ export default function DeveloperHomePage() {
 
   return (
     <DeveloperPageShell
-      title="Developer Overview"
+      title="Developer Home"
       description="High-level overview of FarmVault tenants, users, and billing health."
       isLoading={isLoading}
       isRefetching={isFetching}
