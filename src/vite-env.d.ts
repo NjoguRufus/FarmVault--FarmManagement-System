@@ -14,4 +14,12 @@ interface ImportMetaEnv {
   readonly VITE_EMERGENCY_USER_ID?: string;
   readonly VITE_EMERGENCY_COMPANY_ID?: string;
   readonly VITE_EMERGENCY_ROLE?: string;
+  /** M-Pesa paybill / till number shown on billing checkout (digits). */
+  readonly VITE_MPESA_TILL_NUMBER?: string;
+  /** Display name for M-Pesa till (e.g. FarmVault). */
+  readonly VITE_MPESA_BUSINESS_NAME?: string;
+  /** International WhatsApp number for activation requests after company registration (digits, optional +). */
+  readonly VITE_FARMVAULT_ACTIVATION_WHATSAPP?: string;
+  /** Alias for activation WhatsApp (digits with country code, optional +). Used if FARMVAULT var is unset. */
+  readonly VITE_WHATSAPP_ACTIVATION_NUMBER?: string;
 }

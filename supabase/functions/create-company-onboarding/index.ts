@@ -101,37 +101,31 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const planRaw = (selectedPlan || "").toString();
-    let companyPlan: "starter" | "professional" | "enterprise" = "starter";
-    if (planRaw === "enterprise") companyPlan = "enterprise";
-    else if (planRaw === "pro" || planRaw === "professional") companyPlan = "professional";
-    else companyPlan = "starter"; // basic/pro default to starter, matching Firebase quirk
-
+    const normalizedCompanyEmail = companyEmail.trim().toLowerCase();
+    const normalizedAdminEmail = adminEmail.trim().toLowerCase();
+    const normalizedPlan = ((selectedPlan || "basic").toString().toLowerCase() === "pro" ? "pro" : "basic");
+    const normalizedBillingMode = "manual";
     const now = new Date();
-    const trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
 
-    const subscription = {
-      plan: "trial",
-      status: "active",
-      trialStartAt: now.toISOString(),
-      trialEndsAt: trialEndsAt.toISOString(),
-      paidUntil: null as string | null,
-      billingMode: (billingMode || "monthly") as string,
-      override: {
-        enabled: false,
-        type: "custom",
-        overrideEndsAt: null as string | null,
-        reason: null as string | null,
-        grantedBy: "",
-        grantedAt: now.toISOString(),
-      },
-    };
+    const { data: existingProfileEmail } = await adminClient
+      .schema("core")
+      .from("profiles")
+      .select("clerk_user_id")
+      .eq("email", normalizedAdminEmail)
+      .maybeSingle();
+    if (existingProfileEmail && existingProfileEmail.clerk_user_id !== clerkUserId) {
+      return new Response(
+        JSON.stringify({ error: "Email already exists", detail: "This admin email is already used by another account." }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const { data: companyRow, error: companyError } = await adminClient
       .from("companies")
       .insert({
         clerk_org_id: null,
         name: companyName.trim(),
+        email: normalizedCompanyEmail,
         logo_url: null,
         created_by_clerk_user_id: clerkUserId,
       })
@@ -156,7 +150,7 @@ Deno.serve(async (req: Request) => {
           company_id: companyId,
           role: "company-admin",
           name: profileName,
-          email: adminEmail.trim(),
+          email: normalizedAdminEmail,
           updated_at: now.toISOString(),
         },
         { onConflict: "clerk_user_id" },
@@ -167,6 +161,66 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "Company created but profile failed", detail: profileError.message }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    await adminClient
+      .from("company_subscriptions")
+      .upsert({
+        company_id: companyId,
+        plan_id: normalizedPlan,
+        plan_code: normalizedPlan,
+        billing_mode: normalizedBillingMode,
+        status: "pending_approval",
+        approved_at: null,
+        approved_by: null,
+        rejection_reason: null,
+        override_reason: null,
+        updated_at: now.toISOString(),
+      }, { onConflict: "company_id" });
+
+    await adminClient.from("admin_alerts").insert({
+      company_id: companyId,
+      severity: "normal",
+      module: "subscriptions",
+      action: "COMPANY_PENDING_APPROVAL",
+      actor_user_id: clerkUserId,
+      actor_name: profileName,
+      target_id: companyId,
+      target_label: companyName.trim(),
+      metadata: {
+        company_name: companyName.trim(),
+        owner_email: normalizedAdminEmail,
+        selected_plan: normalizedPlan,
+        created_at: now.toISOString(),
+      },
+      read: false,
+    });
+
+    const adminEmailTarget = Deno.env.get("DEVELOPER_ADMIN_EMAIL") || Deno.env.get("ADMIN_EMAIL");
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
+    if (adminEmailTarget && resendApiKey) {
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: "FarmVault <no-reply@farmvault.co.ke>",
+          to: [adminEmailTarget],
+          subject: `New company pending approval: ${companyName.trim()}`,
+          html: `
+            <p>A new company requires manual review.</p>
+            <ul>
+              <li><strong>Company:</strong> ${companyName.trim()}</li>
+              <li><strong>Owner email:</strong> ${normalizedAdminEmail}</li>
+              <li><strong>Selected plan:</strong> ${normalizedPlan}</li>
+              <li><strong>Created:</strong> ${now.toISOString()}</li>
+            </ul>
+            <p>Please review and approve from Developer Dashboard → Companies.</p>
+          `,
+        }),
+      });
     }
 
     return new Response(

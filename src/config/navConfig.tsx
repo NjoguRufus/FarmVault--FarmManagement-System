@@ -20,6 +20,7 @@ import {
   BarChart3,
   ArrowRightLeft,
   Shield,
+  QrCode,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -56,6 +57,7 @@ export const companyNavConfig: NavItem[] = [
 /** Developer/Admin nav. All items in main for sidebar; mobile gets simplified. */
 export const developerNavConfig: NavItem[] = [
   { label: 'Developer Home', path: '/developer', icon: LayoutDashboard, group: 'main' },
+  { label: 'Scan QR', path: '/developer/qr', icon: QrCode, group: 'main' },
   { label: 'Companies', path: '/developer/companies', icon: Building2, group: 'main' },
   { label: 'Users', path: '/developer/users', icon: Users, group: 'main' },
   { label: 'Developer Settings', path: '/developer/settings', icon: Shield, group: 'main' },

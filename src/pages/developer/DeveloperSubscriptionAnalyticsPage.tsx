@@ -30,6 +30,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
   const rows = data?.rows ?? [];
   const planDistribution = data?.plan_distribution ?? [];
   const statusDistribution = data?.status_distribution ?? [];
+  const pay = data?.payment_stats;
 
   return (
     <DeveloperPageShell
@@ -117,6 +118,45 @@ export default function DeveloperSubscriptionAnalyticsPage() {
             <p className="text-lg font-semibold">
               {Number(summary.rejected_subscriptions ?? 0).toLocaleString()}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Manual M-Pesa submissions (subscription_payments) */}
+      {pay && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Manual M-Pesa payments (all workspaces)</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="fv-card">
+              <p className="text-xs text-muted-foreground mb-1">Pending verification</p>
+              <p className="text-lg font-semibold">{Number(pay.pending_verification_count ?? 0).toLocaleString()}</p>
+            </div>
+            <div className="fv-card">
+              <p className="text-xs text-muted-foreground mb-1">Pending (incl. legacy)</p>
+              <p className="text-lg font-semibold">{Number(pay.pending_total_count ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Legacy pending rows: {Number(pay.pending_legacy_count ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="fv-card">
+              <p className="text-xs text-muted-foreground mb-1">Approved / Rejected</p>
+              <p className="text-lg font-semibold">
+                {Number(pay.approved_count ?? 0).toLocaleString()} /{' '}
+                {Number(pay.rejected_count ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="fv-card">
+              <p className="text-xs text-muted-foreground mb-1">Revenue (KES)</p>
+              <p className="text-sm font-semibold leading-snug">
+                Pending: {Number(pay.pending_revenue ?? 0).toLocaleString()}
+              </p>
+              <p className="text-sm font-semibold leading-snug text-emerald-700 dark:text-emerald-400">
+                Approved: {Number(pay.approved_revenue ?? 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Rejected (recorded): {Number(pay.rejected_revenue ?? 0).toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
       )}

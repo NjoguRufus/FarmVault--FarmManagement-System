@@ -1,5 +1,5 @@
-import React from 'react';
-import { LogOut, Menu, ChevronDown, HelpCircle, Settings } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { LogOut, Menu, ChevronDown, HelpCircle, Settings, Crown, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useStaffTour } from '@/tour/StaffTourProvider';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -27,7 +28,28 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   const { projects, activeProject, setActiveProject } = useProject();
   const { fullName, roleLabel, companyName: staffCompanyName, avatarUrl, companyId } = useStaff();
   const { startTour: startStaffTour } = useStaffTour();
+  const {
+    isTrial,
+    daysRemaining,
+    trialExpiredNeedsPlan,
+    isActivePaid,
+    plan: subPlan,
+    isOverrideActive,
+    status,
+  } = useSubscriptionStatus();
   const location = useLocation();
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !companyId) return;
+    // eslint-disable-next-line no-console
+    console.log('[StaffNavbar] subscription badge state', {
+      companyId,
+      isActivePaid,
+      isTrial,
+      status,
+      subPlan,
+    });
+  }, [companyId, isActivePaid, isTrial, status, subPlan]);
   const navigate = useNavigate();
   const companyName = staffCompanyName || activeProject?.companyId || 'FarmVault';
 
@@ -152,6 +174,35 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
         {/* Right: status + user menu */}
         <div className="flex items-center gap-2 sm:gap-3">
           <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
+
+          {isActivePaid && !isOverrideActive && (
+            <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
+              <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
+              {subPlan === 'pro' ? 'Pro' : subPlan === 'basic' ? 'Basic' : 'Plan'} · Active
+            </div>
+          )}
+
+          {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
+            <div
+              className="hidden sm:flex flex-col items-end gap-0.5 max-w-[200px]"
+              title={
+                daysRemaining === 0
+                  ? 'Your Pro trial ends today'
+                  : `Your Pro trial ends in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`
+              }
+            >
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900 border border-amber-200">
+                <Crown className="h-3 w-3 shrink-0" />
+                Pro trial · {daysRemaining}d
+              </span>
+            </div>
+          )}
+          {trialExpiredNeedsPlan && (
+            <div className="hidden sm:flex items-center gap-1 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-[10px] text-destructive max-w-[180px]">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              <span className="leading-tight">Pro trial ended — ask admin to pick a plan</span>
+            </div>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted transition-colors">

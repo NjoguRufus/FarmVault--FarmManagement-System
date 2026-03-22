@@ -7,10 +7,12 @@ import { StaffNavbar } from './StaffNavbar';
 import { StaffBottomNav } from './StaffBottomNav';
 import { cn } from '@/lib/utils';
 import { StaffTourProvider } from '@/tour/StaffTourProvider';
+import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 
 export function StaffLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user } = useAuth();
+  useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId));
   const location = useLocation();
 
   if (!user) {

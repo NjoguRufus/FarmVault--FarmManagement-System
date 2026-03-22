@@ -90,7 +90,7 @@ function deriveStatus(sub: CompanySubscription | undefined): {
   const overrideEnds = parseDate(sub.override?.overrideEndsAt);
 
   const overrideActive = Boolean(
-    sub.override?.enabled && overrideEnds && overrideEnds > now
+    sub.override?.enabled && (!overrideEnds || overrideEnds > now)
   );
   const hasTrial = Boolean(trialEnds && trialEnds > now);
   const hasPaid = Boolean(paidUntil && paidUntil > now);

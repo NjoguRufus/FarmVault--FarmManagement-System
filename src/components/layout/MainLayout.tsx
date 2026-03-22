@@ -11,10 +11,18 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
 import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { PostTrialPlanModal } from '@/components/subscription/PostTrialPlanModal';
+import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user, isEmergencySession, effectiveAccess } = useAuth();
+  const { trialExpiredNeedsPlan, isLoading: subscriptionLoading } = useSubscriptionStatus();
+  const isDeveloper = user?.role === 'developer';
+  useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId && !isDeveloper));
+  const isCompanyAdmin =
+    user?.role === 'company-admin' || (user as { role?: string } | null)?.role === 'company_admin';
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);
@@ -138,6 +146,8 @@ export function MainLayout() {
       <BottomNav />
       <AIChatButton />
       <NotificationSetupPrompt />
+
+      {!subscriptionLoading && trialExpiredNeedsPlan && isCompanyAdmin && <PostTrialPlanModal open />}
     </div>
   );
 }

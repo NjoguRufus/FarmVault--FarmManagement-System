@@ -33,6 +33,8 @@ interface AuthContextType {
   isDeveloper: boolean;
   /** True when user is signed in but users/{uid} is missing companyId/role (setup incomplete). */
   setupIncomplete: boolean;
+  /** True when this signed-in account was intentionally reset/deleted and must re-onboard manually. */
+  resetRequired: boolean;
   /** True when session is from emergency access (bypasses Clerk). Operational routes only. */
   isEmergencySession: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -449,6 +451,7 @@ export function AuthProvider({
     return false;
   });
   const [setupIncomplete, setSetupIncomplete] = useState(false);
+  const [resetRequired, setResetRequired] = useState(false);
   const [activationResolved, setActivationResolved] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState<boolean>(() => {
     if (typeof window === 'undefined' || clerkState === null) return false;
@@ -514,6 +517,7 @@ export function AuthProvider({
       if (emergencyUser) {
         setPermissions(buildEffectivePermissions(emergencyUser, null));
         setSetupIncomplete(false);
+        setResetRequired(false);
         setActivationResolved(true);
         setIsEmergencySession(true);
       } else {
@@ -539,6 +543,7 @@ export function AuthProvider({
         setEmployeeProfile(null);
         setPermissions(buildEffectivePermissions(emergencyUser, null));
         setSetupIncomplete(false);
+        setResetRequired(false);
         setIsEmergencySession(true);
         setActivationResolved(true);
         setAuthReady(true);
@@ -574,6 +579,7 @@ export function AuthProvider({
       writeCachedUser(null);
       writeEmergencySession(null);
       setSetupIncomplete(false);
+      setResetRequired(false);
       setIsDeveloper(false);
       setIsEmergencySession(false);
       setActivationResolved(true);
@@ -592,6 +598,7 @@ export function AuthProvider({
     let cancelled = false;
     setAuthReady(false);
     setSetupIncomplete(false);
+      setResetRequired(false);
     setActivationResolved(false);
 
     (async () => {
@@ -673,6 +680,7 @@ export function AuthProvider({
           setEmployeeProfile(null);
           setPermissions(getFullAccessPermissions());
           setSetupIncomplete(false);
+          setResetRequired(false);
           writeCachedUser(devUser);
           confirmedSignedInRef.current = true;
 
@@ -691,7 +699,52 @@ export function AuthProvider({
           return;
         }
 
-        // 3) Ensure profiles row exists so current_context can read active_company_id.
+        // 3) If this user was reset/deleted by developer action, do NOT auto-recreate profile.
+        const { data: resetState, error: resetError } = await supabase.rpc('get_reset_user_state');
+        const resetPayload = (resetState ?? {}) as {
+          has_reset_row?: boolean;
+          is_blocked?: boolean;
+          allow_resignup?: boolean;
+        };
+        const resetBlocked = resetPayload?.is_blocked === true;
+        const resetAllowResignup = resetPayload?.allow_resignup !== false;
+
+        if (resetError && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] get_reset_user_state RPC warning:', resetError);
+        }
+
+        if (resetBlocked) {
+          const resetUser: User = {
+            id: userId,
+            email: fallbackEmail,
+            name: fallbackName || fallbackEmail || 'User',
+            role: 'employee',
+            employeeRole: undefined,
+            companyId: null,
+            avatar: undefined,
+            createdAt: new Date(),
+          };
+          setUser(resetUser);
+          setEmployeeProfile(null);
+          setPermissions(getDefaultPermissions());
+          setSetupIncomplete(true);
+          setResetRequired(true);
+          writeCachedUser(null);
+          setActivationResolved(true);
+          confirmedSignedInRef.current = true;
+          setAuthReady(true);
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] Skipped auto-rehydration because account is in deleted/reset state', {
+            uid: userId,
+            allowResignup: resetAllowResignup,
+          });
+          return;
+        }
+
+        setResetRequired(false);
+
+        // 3b) Ensure profiles row exists so current_context can read active_company_id.
         // IMPORTANT: Do NOT overwrite full_name here – it is user-editable from Settings.
         // We only ensure the row + email exist; name is managed by core.profiles.full_name.
         const { error: upsertError } = await db
@@ -741,8 +794,48 @@ export function AuthProvider({
         }
 
         const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
-        const contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
-        const contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+        let contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
+        let contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+
+        // Guard against orphaned sessions: membership/profile points to a deleted company.
+        if (contextCompanyId) {
+          try {
+            const { data: existsData, error: existsError } = await supabase.rpc('company_exists', {
+              p_company_id: contextCompanyId,
+            });
+            const companyExists = existsData === true;
+            if (existsError && import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] company_exists RPC warning:', existsError);
+            }
+            if (!companyExists) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] Orphaned staff membership found during bootstrap; company is missing', {
+                uid: userId,
+                companyId: contextCompanyId,
+              });
+              try {
+                await supabase.rpc('cleanup_orphaned_access', { p_company_id: contextCompanyId });
+              } catch (cleanupError) {
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Auth] cleanup_orphaned_access failed (non-blocking):', cleanupError);
+                }
+              }
+              contextCompanyId = null;
+              contextRole = null;
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] Skipped staff login due to missing company for membership context', {
+                uid: userId,
+              });
+            }
+          } catch (existsUnexpectedError) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] company existence check unexpected failure:', existsUnexpectedError);
+            }
+          }
+        }
 
         const normalizedRole = normalizeRole(contextRole) as UserRole;
         const hasCompanyId = contextCompanyId != null && contextCompanyId !== '';
@@ -904,6 +997,7 @@ export function AuthProvider({
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(true);
+          setResetRequired(false);
           writeCachedUser(null);
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
@@ -1036,6 +1130,7 @@ export function AuthProvider({
         setPermissions(effectivePermissions);
         writeCachedUser(userWithDisplayName);
         setSetupIncomplete(false);
+        setResetRequired(false);
         setActivationResolved(true);
         confirmedSignedInRef.current = true;
         setAuthReady(true);
@@ -1047,6 +1142,7 @@ export function AuthProvider({
           setPermissions(buildEffectivePermissions(cached, null));
           writeCachedUser(cached);
           setSetupIncomplete(false);
+          setResetRequired(false);
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
         } else {
@@ -1067,6 +1163,7 @@ export function AuthProvider({
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(true);
+          setResetRequired(false);
           writeCachedUser(null);
           setActivationResolved(true);
         }
@@ -1112,6 +1209,7 @@ export function AuthProvider({
     if ((result as any)?.status === 'complete') {
       await setActiveSignIn({ session: (result as any).createdSessionId });
       setSetupIncomplete(false);
+      setResetRequired(false);
       return;
     }
 
@@ -1134,6 +1232,7 @@ export function AuthProvider({
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
       setSetupIncomplete(false);
+      setResetRequired(false);
       setIsEmergencySession(false);
       return;
     }
@@ -1147,6 +1246,7 @@ export function AuthProvider({
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
           setSetupIncomplete(false);
+          setResetRequired(false);
           setIsDeveloper(false);
           writeCachedUser(null);
         });
@@ -1155,6 +1255,7 @@ export function AuthProvider({
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
       setSetupIncomplete(false);
+      setResetRequired(false);
       setIsDeveloper(false);
       writeCachedUser(null);
     }
@@ -1343,6 +1444,7 @@ export function AuthProvider({
         authReady: authReady && activationResolved,
         isDeveloper,
         setupIncomplete,
+        resetRequired,
         isEmergencySession: !!isEmergencySession,
         login,
         logout,

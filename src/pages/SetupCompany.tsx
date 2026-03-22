@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, ShieldCheck, CheckCircle2, ChevronRight, Check, Zap, RefreshCw } from 'lucide-react';
+import { Building2, ShieldCheck, ChevronRight, Check, Zap, RefreshCw } from 'lucide-react';
 import { useSignUp } from '@clerk/react';
 import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from '@/config/plans';
 import { OnboardingHeader } from '@/components/onboarding/OnboardingHeader';
@@ -10,8 +10,10 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
+import { PendingCompanyApprovalScreen } from '@/components/onboarding/PendingCompanyApprovalScreen';
 
 const STEPS = 4;
+type EmailValidationResult = { ok: boolean; message?: string | null };
 
 export default function SetupCompany() {
   const navigate = useNavigate();
@@ -92,8 +94,8 @@ export default function SetupCompany() {
       setError('Check your email to verify your account, then return to continue setup.');
       return false;
     } catch (err: unknown) {
-      const anyErr = err as any;
-      const firstClerkError = anyErr?.errors?.[0];
+      const clerkErr = err as { errors?: Array<{ longMessage?: string; message?: string }> } | null;
+      const firstClerkError = clerkErr?.errors?.[0];
       const message =
         firstClerkError?.longMessage ||
         firstClerkError?.message ||
@@ -137,6 +139,27 @@ export default function SetupCompany() {
     setError(null);
 
     try {
+      const normalizedCompanyEmail = companyEmail.trim().toLowerCase();
+      const normalizedAdminEmail = adminEmail.trim().toLowerCase();
+
+      const [{ data: companyCheck }, { data: adminCheck }] = await Promise.all([
+        supabase.rpc('validate_email_uniqueness', { _email: normalizedCompanyEmail, _company_id: null }),
+        supabase.rpc('validate_email_uniqueness', { _email: normalizedAdminEmail, _company_id: null }),
+      ]);
+      const companyValidation = companyCheck as EmailValidationResult | null;
+      const adminValidation = adminCheck as EmailValidationResult | null;
+
+      if (companyValidation && companyValidation.ok === false) {
+        setError(companyValidation.message ?? 'Company email already exists.');
+        setLoading(false);
+        return;
+      }
+      if (adminValidation && adminValidation.ok === false) {
+        setError(adminValidation.message ?? 'Admin email already exists.');
+        setLoading(false);
+        return;
+      }
+
       const ok = await ensureClerkAdminAccount();
       if (!ok) {
         setLoading(false);
@@ -158,11 +181,11 @@ export default function SetupCompany() {
       }>('create-company-onboarding', {
         body: {
           companyName: companyName.trim(),
-          companyEmail: companyEmail.trim(),
+          companyEmail: normalizedCompanyEmail,
           selectedPlan,
-          billingMode,
+          billingMode: 'manual',
           adminName: adminName.trim(),
-          adminEmail: adminEmail.trim(),
+          adminEmail: normalizedAdminEmail,
         },
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -216,34 +239,15 @@ export default function SetupCompany() {
     );
   }
 
-  // Success state screen
+  // Success state: pending manual approval (only this screen auto-redirects to WhatsApp)
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
-        <Card className="w-full max-w-md rounded-2xl shadow-xl border-primary/10 overflow-hidden">
-          <CardContent className="p-8 sm:p-10 text-center">
-            <div className="flex justify-center mb-6">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary">
-                <CheckCircle2 className="h-10 w-10" />
-              </div>
-            </div>
-            <h1 className="text-2xl font-bold text-foreground mb-2">
-              Welcome to FarmVault, {companyName}
-            </h1>
-            <p className="text-muted-foreground text-sm mb-8">
-              Your company account is ready. Start managing your farm operations today.
-            </p>
-            <button
-              type="button"
-              onClick={handleGoToDashboard}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_4px_24px_-4px_rgba(45,74,62,0.25)] hover:bg-primary/90 transition-all"
-            >
-              Go to Dashboard
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </CardContent>
-        </Card>
-      </div>
+      <PendingCompanyApprovalScreen
+        companyName={companyName}
+        companyEmail={companyEmail.trim().toLowerCase()}
+        planLabel={planLabel ?? selectedPlan ?? ''}
+        onContinueToAccessGate={handleGoToDashboard}
+      />
     );
   }
 

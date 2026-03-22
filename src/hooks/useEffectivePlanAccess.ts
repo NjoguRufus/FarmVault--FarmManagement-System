@@ -56,25 +56,36 @@ export function useEffectivePlanAccess(): UseEffectivePlanAccessResult {
       };
     }
 
+    // Developer subscription override (admin.subscription_overrides) — full access
+    if (sub.isOverrideActive) {
+      return {
+        plan: 'enterprise',
+        status: 'active',
+        isTrial: false,
+        isOverride: true,
+        overrideMode: 'developer_override',
+        expiresAt: null,
+        daysRemaining: null,
+        canAccessFeature: () => true,
+        limits: {
+          maxActiveProjects: null,
+          maxEmployees: null,
+        },
+      };
+    }
+
     // Build subscription object from hook data
     const subscription: CompanySubscription = {
       plan: sub.plan as any,
       status: sub.status as any,
       trialStartAt: undefined,
-      trialEndsAt: undefined,
-      paidUntil: null,
-      override: sub.isOverrideActive
-        ? {
-            enabled: true,
-            type: 'custom',
-            overrideEndsAt: null,
-            reason: null,
-          }
-        : undefined,
+      trialEndsAt: sub.isActivePaid ? undefined : sub.trialEndsAt ?? undefined,
+      paidUntil: sub.isActivePaid ? sub.displayAccessEndIso ?? null : null,
+      override: undefined,
     };
 
     return getEffectivePlanAccessFromSubscription(subscription);
-  }, [isDeveloper, sub.plan, sub.status, sub.isOverrideActive]);
+  }, [isDeveloper, sub.plan, sub.status, sub.isOverrideActive, sub.trialEndsAt, sub.isActivePaid, sub.displayAccessEndIso]);
 
   const planLabel = useMemo(() => getEffectivePlanLabel(access), [access]);
 
