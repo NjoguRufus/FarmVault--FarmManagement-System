@@ -17,7 +17,12 @@
 //   npx supabase functions deploy send-farmvault-email --no-verify-jwt
 //
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildEmailMetadataSummary, insertEmailLogRow, updateEmailLogRow } from "../_shared/emailLogs.ts";
+import {
+  buildEmailMetadataSummary,
+  getServiceRoleClientForEmailLogs,
+  insertEmailLogRow,
+  updateEmailLogRow,
+} from "../_shared/emailLogs.ts";
 import { renderFarmVaultEmail } from "../_shared/farmvault-email/renderFarmVaultEmail.ts";
 import type { SendFarmVaultEmailPayload } from "../_shared/farmvault-email/types.ts";
 import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/validatePayload.ts";
@@ -107,13 +112,6 @@ async function authorizeSend(
   return { ok: true };
 }
 
-function serviceRoleClient() {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
-  if (!supabaseUrl || !serviceKey) return null;
-  return createClient(supabaseUrl, serviceKey);
-}
-
 function payloadDataAsRecord(payload: SendFarmVaultEmailPayload): Record<string, unknown> {
   return { ...payload.data } as Record<string, unknown>;
 }
@@ -145,10 +143,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(auth.body, auth.status);
   }
 
-  const admin = serviceRoleClient();
-  if (!admin) {
-    console.error("[send-farmvault-email] SUPABASE_SERVICE_ROLE_KEY missing — email_logs disabled");
-  }
+  const admin = getServiceRoleClientForEmailLogs();
 
   let subject: string;
   let html: string;
@@ -271,6 +266,20 @@ Deno.serve(async (req: Request) => {
         status: "sent",
         provider_message_id: id ?? null,
         sent_at: sentAt,
+      });
+    } else if (admin && !logId) {
+      await insertEmailLogRow(admin, {
+        company_id: payload.companyId ?? null,
+        company_name: payload.companyName ?? null,
+        recipient_email: payload.to.trim().toLowerCase(),
+        email_type: payload.emailType,
+        subject,
+        status: "sent",
+        provider: "resend",
+        provider_message_id: id ?? null,
+        triggered_by: payload.triggeredBy ?? null,
+        sent_at: sentAt,
+        metadata: meta,
       });
     }
 

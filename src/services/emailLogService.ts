@@ -24,6 +24,8 @@ export const FARMVAULT_EMAIL_TYPES = [
   'subscription_activated',
   'trial_ending',
   'company_approved',
+  'workspace_ready',
+  'submission_received',
 ] as const;
 
 export type FarmVaultEmailTypeFilter = (typeof FARMVAULT_EMAIL_TYPES)[number] | 'all';
@@ -63,7 +65,13 @@ export async function fetchEmailLogs(filters: EmailLogListFilters): Promise<Emai
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data as EmailLogRow[]) ?? [];
+  const rows = (data as EmailLogRow[]) ?? [];
+  // TEMP: verify developer UI sees the same row count PostgREST returns
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[email_logs page] query row count', rows.length);
+  }
+  return rows;
 }
 
 export type EmailLogStats = {
@@ -90,11 +98,16 @@ export async function fetchEmailLogStats(): Promise<EmailLogStats> {
   const firstErr = [total, sent, failed, pending, today].find((r) => r.error);
   if (firstErr?.error) throw new Error(firstErr.error.message);
 
-  return {
+  const stats = {
     total: total.count ?? 0,
     sent: sent.count ?? 0,
     failed: failed.count ?? 0,
     pending: pending.count ?? 0,
     today: today.count ?? 0,
   };
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[email_logs page] stats counts', stats);
+  }
+  return stats;
 }

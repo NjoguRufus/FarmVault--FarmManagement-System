@@ -8,3 +8,4 @@ export * from './renderFarmVaultEmail';
 export * from './validatePayload';
 export * from './invokeSendFarmVaultEmail';
 export * from './invokeNotifyCompanyWorkspaceReady';
+export * from './invokeNotifyCompanySubmissionReceived';

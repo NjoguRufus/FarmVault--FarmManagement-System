@@ -7,6 +7,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ChevronRight, FolderPlus } from 'lucide-react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
+import { invokeNotifyCompanySubmissionReceived } from '@/lib/email';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -161,6 +162,38 @@ export default function OnboardingPage() {
 
   const navigateToPendingApproval = async () => {
     if (!companyId) return;
+
+    const recipient =
+      accountEmail.trim().toLowerCase() ||
+      companyEmail.trim().toLowerCase() ||
+      '';
+    const base =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'https://app.farmvault.africa'
+        : typeof window !== 'undefined'
+          ? window.location.origin
+          : 'https://app.farmvault.africa';
+    const dashboardUrl = `${base}/pending-approval`;
+
+    void (async () => {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return;
+      const token = await getSupabaseAccessToken();
+      if (!token) return;
+      const result = await invokeNotifyCompanySubmissionReceived({
+        to: recipient,
+        companyName: companyName.trim(),
+        dashboardUrl,
+      });
+      if (!result.ok) {
+        const msg = [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error';
+        toast({
+          title: 'Confirmation email not sent',
+          description: msg,
+        });
+      }
+    })();
+
     const payloadEmail =
       companyEmail.trim().toLowerCase() || accountEmail.toLowerCase() || '';
     const payload: PendingApprovalSessionPayload = {
