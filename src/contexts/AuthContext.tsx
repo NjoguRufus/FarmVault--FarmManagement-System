@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { User, UserRole, Employee, PermissionMap } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
@@ -47,6 +47,11 @@ interface AuthContextType {
   refreshUserProfile: () => Promise<void>;
   /** Refetch employee profile + context and recompute role/permissions. Returns new landingPage for redirect. */
   refreshAuthState: () => Promise<{ landingPage: string } | null>;
+  /**
+   * Re-read core membership via current_context after create_company_with_admin / subscription submit.
+   * Without this, user.companyId stays null until full auth remount → RequireOnboarding loops to create-company.
+   */
+  syncTenantCompanyFromServer: () => Promise<boolean>;
   /** Force-refresh session as a platform developer when backend confirms admin.developers membership. */
   forceDeveloperMode: () => Promise<{ landingPage: string } | null>;
 }
@@ -140,7 +145,10 @@ export function createEmergencySession(email: string): boolean {
 function isCurrentRouteDev(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return window.location.pathname.startsWith('/dev');
+    const p = window.location.pathname;
+    // Treat both legacy `/dev/*` and canonical `/developer/*` console routes as developer UI so
+    // `is_developer` RPC runs on bootstrap (non–email-allowlisted platform developers).
+    return p.startsWith('/dev') || p.startsWith('/developer');
   } catch {
     return false;
   }
@@ -1240,6 +1248,7 @@ export function AuthProvider({
 
     if (isEmergencySession) {
       writeEmergencySession(null);
+      clearPendingApprovalSession();
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
@@ -1254,6 +1263,7 @@ export function AuthProvider({
           // Ignore sign-out errors; proceed with local cleanup
         })
         .finally(() => {
+          clearPendingApprovalSession();
           setUser(null);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
@@ -1263,6 +1273,7 @@ export function AuthProvider({
           writeCachedUser(null);
         });
     } else {
+      clearPendingApprovalSession();
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
@@ -1325,6 +1336,70 @@ export function AuthProvider({
       // Non-blocking
     }
   };
+
+  const syncTenantCompanyFromServer = useCallback(async (): Promise<boolean> => {
+    if (isEmergencySession || !userId || !user || isDeveloper) return false;
+    try {
+      const { data: contextRows, error } = await supabase.rpc('current_context');
+      if (error) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Auth] syncTenantCompanyFromServer current_context error:', error);
+        }
+        return false;
+      }
+      const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
+      const contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
+      const contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+      if (!contextCompanyId || !contextRole) return false;
+
+      const normalizedRole = normalizeRole(contextRole) as UserRole;
+      const isContextCompanyAdmin =
+        normalizedRole === 'company-admin' ||
+        contextRole === 'company_admin' ||
+        contextRole === 'company-admin' ||
+        contextRole === 'admin';
+
+      let employee: Employee | null = null;
+      if (!isContextCompanyAdmin) {
+        employee = await loadEmployeeProfile(userId);
+      }
+
+      const nextUser: User = {
+        ...user,
+        companyId: contextCompanyId,
+        role: normalizedRole,
+        employeeRole: isContextCompanyAdmin ? undefined : (employee?.role ?? employee?.employeeRole ?? undefined),
+      };
+
+      const effectivePermissions = buildEffectivePermissions(
+        nextUser,
+        isContextCompanyAdmin ? null : employee,
+        { forceCompanyAdmin: isContextCompanyAdmin },
+      );
+
+      setUser(nextUser);
+      setEmployeeProfile(isContextCompanyAdmin ? null : employee);
+      setPermissions(effectivePermissions);
+      setSetupIncomplete(false);
+      writeCachedUser(nextUser);
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Auth] syncTenantCompanyFromServer applied', {
+          companyId: contextCompanyId,
+          role: normalizedRole,
+        });
+      }
+      return true;
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[Auth] syncTenantCompanyFromServer failed', e);
+      }
+      return false;
+    }
+  }, [isEmergencySession, userId, user, isDeveloper]);
 
   const refreshAuthState = async (): Promise<{ landingPage: string } | null> => {
     if (isEmergencySession || !userId || !user) return null;
@@ -1464,6 +1539,7 @@ export function AuthProvider({
         refreshUserAvatar,
         refreshUserProfile,
         refreshAuthState,
+        syncTenantCompanyFromServer,
         forceDeveloperMode,
       }}
     >

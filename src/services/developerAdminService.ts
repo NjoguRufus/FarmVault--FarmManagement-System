@@ -393,34 +393,124 @@ export async function renameCompany(companyId: string, name: string): Promise<vo
   }
 }
 
-/** Resolve company-admin recipient + name for workspace-ready email (developer session; uses public tables). */
-export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Promise<{
-  to: string;
-  companyName: string;
-} | null> {
+export type CompanyWorkspaceNotifyEmailSource =
+  | 'company_row_email'
+  | 'company_admin_member_profile'
+  | 'onboarding_creator_profile';
+
+export type CompanyWorkspaceNotifyResolution =
+  | { ok: true; to: string; companyName: string; source: CompanyWorkspaceNotifyEmailSource }
+  | { ok: false; companyName: string | null; reason: string; triedSteps: string[] };
+
+function isAdminishMemberRole(role: string | null | undefined): boolean {
+  const r = (role || '').toLowerCase().replace(/-/g, '_');
+  return r === 'company_admin' || r === 'companyadmin' || r === 'owner' || r === 'admin';
+}
+
+function normalizeNotifyEmail(raw: string | null | undefined): string | null {
+  const e = String(raw ?? '').trim();
+  if (!e || !e.includes('@')) return null;
+  return e.toLowerCase();
+}
+
+async function resolveProfileEmailForUid(uid: string): Promise<string | null> {
+  const id = String(uid ?? '').trim();
+  if (!id) return null;
+
+  const { data: profByClerk } = await supabase.from('profiles').select('email').eq('clerk_user_id', id).maybeSingle();
+  let email = normalizeNotifyEmail(profByClerk?.email as string | undefined);
+  if (email) return email;
+
+  const { data: profById } = await supabase.from('profiles').select('email').eq('id', id).maybeSingle();
+  email = normalizeNotifyEmail(profById?.email as string | undefined);
+  if (email) return email;
+
+  const { data: coreProf } = await supabase
+    .schema('core')
+    .from('profiles')
+    .select('email')
+    .eq('clerk_user_id', id)
+    .maybeSingle();
+  email = normalizeNotifyEmail(coreProf?.email as string | undefined);
+  return email;
+}
+
+type CompanyRowLite = {
+  name?: string | null;
+  email?: string | null;
+  created_by?: string | null;
+  created_by_clerk_user_id?: string | null;
+};
+
+/**
+ * Resolve workspace-ready email for a tenant (developer session).
+ * Order: company row email → admin/owner member profiles → company creator (onboarding) profile.
+ */
+export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Promise<CompanyWorkspaceNotifyResolution> {
+  const triedSteps: string[] = [];
   const cid = String(companyId ?? '').trim();
-  if (!cid) return null;
+  if (!cid) {
+    return { ok: false, companyName: null, reason: 'missing_company_id', triedSteps: ['validate_id'] };
+  }
 
   let companyName: string | null = null;
-  const { data: coPub, error: coPubErr } = await supabase.from('companies').select('name').eq('id', cid).maybeSingle();
-  if (coPub?.name && typeof coPub.name === 'string' && coPub.name.trim()) {
-    companyName = coPub.name.trim();
+  let rowEmail: string | null = null;
+  let creatorClerkId: string | null = null;
+
+  const { data: coCore, error: coCoreErr } = await supabase
+    .schema('core')
+    .from('companies')
+    .select('name,email,created_by')
+    .eq('id', cid)
+    .maybeSingle();
+
+  if (coCore && typeof coCore === 'object') {
+    const r = coCore as CompanyRowLite;
+    if (r.name && String(r.name).trim()) companyName = String(r.name).trim();
+    rowEmail = normalizeNotifyEmail(r.email as string | undefined);
+    if (r.created_by && String(r.created_by).trim()) creatorClerkId = String(r.created_by).trim();
+    triedSteps.push('load_core.companies');
   } else {
-    const { data: coCore } = await supabase.schema('core').from('companies').select('name').eq('id', cid).maybeSingle();
-    if (coCore?.name && typeof coCore.name === 'string' && coCore.name.trim()) {
-      companyName = coCore.name.trim();
+    triedSteps.push('load_core.companies(empty_or_error)');
+    if (import.meta.env.DEV && coCoreErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevAdmin] workspace notify: core.companies', coCoreErr);
+    }
+  }
+
+  if (!companyName || !creatorClerkId) {
+    const { data: coPub, error: coPubErr } = await supabase
+      .from('companies')
+      .select('name,created_by,created_by_clerk_user_id')
+      .eq('id', cid)
+      .maybeSingle();
+    triedSteps.push('load_public.companies');
+    if (coPub && typeof coPub === 'object') {
+      const r = coPub as CompanyRowLite;
+      if (!companyName && r.name && String(r.name).trim()) companyName = String(r.name).trim();
+      const pubCreator =
+        (r.created_by_clerk_user_id && String(r.created_by_clerk_user_id).trim()) ||
+        (r.created_by && String(r.created_by).trim()) ||
+        '';
+      if (!creatorClerkId && pubCreator) creatorClerkId = pubCreator;
+    } else if (import.meta.env.DEV && coPubErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevAdmin] workspace notify: public.companies', coPubErr);
     }
   }
 
   if (!companyName) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[DevAdmin] fetchCompanyWorkspaceNotifyPayload: company not found', coPubErr);
-    }
-    return null;
+    // eslint-disable-next-line no-console
+    console.warn('[DevAdmin] workspace notify: company not found', { companyId: cid, triedSteps });
+    return { ok: false, companyName: null, reason: 'company_not_found', triedSteps };
   }
 
-  let members: unknown[] | null = null;
+  if (rowEmail) {
+    return { ok: true, to: rowEmail, companyName, source: 'company_row_email' };
+  }
+  triedSteps.push('company_row_email(empty)');
+
+  let members: { clerk_user_id?: string | null; user_id?: string | null; role?: string | null }[] | null = null;
   const { data: memPub, error: mPubErr } = await supabase
     .from('company_members')
     .select('clerk_user_id, user_id, role')
@@ -428,7 +518,8 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     .order('created_at', { ascending: true });
 
   if (!mPubErr && Array.isArray(memPub) && memPub.length > 0) {
-    members = memPub;
+    members = memPub as typeof members;
+    triedSteps.push(`public.company_members(${memPub.length})`);
   } else {
     const { data: memCore, error: mCoreErr } = await supabase
       .schema('core')
@@ -437,60 +528,58 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
       .eq('company_id', cid)
       .order('created_at', { ascending: true });
     if (!mCoreErr && Array.isArray(memCore) && memCore.length > 0) {
-      members = memCore;
-    } else if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[DevAdmin] fetchCompanyWorkspaceNotifyPayload: members', mPubErr ?? mCoreErr);
+      members = memCore as typeof members;
+      triedSteps.push(`core.company_members(${memCore.length})`);
+    } else {
+      triedSteps.push('company_members(none_or_error)');
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[DevAdmin] workspace notify: no members', mPubErr ?? mCoreErr);
+      }
     }
   }
 
-  if (!members || members.length === 0) {
-    return null;
+  if (members && members.length > 0) {
+    const admins = members.filter((m) => isAdminishMemberRole(m.role));
+    const ordered = admins.length > 0 ? admins : members;
+    for (const m of ordered) {
+      const uid =
+        (m.clerk_user_id && String(m.clerk_user_id).trim()) || (m.user_id && String(m.user_id).trim()) || '';
+      if (!uid) continue;
+      const email = await resolveProfileEmailForUid(uid);
+      if (email) {
+        return { ok: true, to: email, companyName, source: 'company_admin_member_profile' };
+      }
+    }
+    triedSteps.push('admin_member_profiles(no_valid_email)');
+  } else {
+    triedSteps.push('company_members(empty)');
   }
 
-  const preferred = members.filter((m: { role?: string | null }) => {
-    const r = (m.role || '').toLowerCase().replace(/-/g, '_');
-    return r === 'company_admin' || r === 'companyadmin';
+  if (creatorClerkId) {
+    const email = await resolveProfileEmailForUid(creatorClerkId);
+    if (email) {
+      return { ok: true, to: email, companyName, source: 'onboarding_creator_profile' };
+    }
+    triedSteps.push(`onboarding_creator_profile(no_email_for:${creatorClerkId.slice(0, 8)}…)`);
+  } else {
+    triedSteps.push('onboarding_creator(missing_created_by)');
+  }
+
+  // eslint-disable-next-line no-console
+  console.warn('[DevAdmin] workspace notify: recipient unresolved', {
+    companyId: cid,
+    companyName,
+    reason: 'no_recipient_after_all_sources',
+    triedSteps,
   });
-  const ordered = preferred.length > 0 ? preferred : members;
 
-  for (const m of ordered) {
-    const row = m as { clerk_user_id?: string | null; user_id?: string | null };
-    const uid = (row.clerk_user_id && String(row.clerk_user_id).trim()) || (row.user_id && String(row.user_id).trim()) || '';
-    if (!uid) continue;
-
-    let email: string | null = null;
-
-    const { data: profByClerk } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('clerk_user_id', uid)
-      .maybeSingle();
-    if (profByClerk?.email && typeof profByClerk.email === 'string') {
-      email = profByClerk.email.trim();
-    }
-
-    if (!email || !email.includes('@')) {
-      const { data: profById } = await supabase.from('profiles').select('email').eq('id', uid).maybeSingle();
-      if (profById?.email && typeof profById.email === 'string') email = profById.email.trim();
-    }
-
-    if (!email || !email.includes('@')) {
-      const { data: coreProf } = await supabase
-        .schema('core')
-        .from('profiles')
-        .select('email')
-        .eq('clerk_user_id', uid)
-        .maybeSingle();
-      if (coreProf?.email && typeof coreProf.email === 'string') email = coreProf.email.trim();
-    }
-
-    if (email && email.includes('@')) {
-      return { to: email.toLowerCase(), companyName };
-    }
-  }
-
-  return null;
+  return {
+    ok: false,
+    companyName,
+    reason: 'no_recipient_after_all_sources',
+    triedSteps,
+  };
 }
 
 export {

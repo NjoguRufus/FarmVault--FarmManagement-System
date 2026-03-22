@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { fetchDeveloperCompanies } from '@/services/developerService';
 import {
@@ -11,6 +13,7 @@ import {
   type OverrideMode,
 } from '@/services/developerAdminService';
 import { getSupabaseAccessToken } from '@/lib/supabase';
+import { getTenantDashboardUrl } from '@/lib/tenantDashboardUrl';
 import { invokeNotifyCompanyWorkspaceReady } from '@/lib/email';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
 import { Button } from '@/components/ui/button';
@@ -192,6 +195,8 @@ export default function DeveloperCompaniesPage() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const { user, isDeveloper } = useAuth();
 
   const {
     data,
@@ -205,13 +210,6 @@ export default function DeveloperCompaniesPage() {
   });
 
   const companies = (data?.items ?? []) as CompanyRow[];
-
-  // eslint-disable-next-line no-console
-  console.log('[DeveloperCompaniesPage] companies query raw:', data);
-  // eslint-disable-next-line no-console
-  console.log('[DeveloperCompaniesPage] parsed companies length:', companies.length);
-  // eslint-disable-next-line no-console
-  console.log('[DeveloperCompaniesPage] first parsed company:', companies[0] ?? null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -348,32 +346,88 @@ export default function DeveloperCompaniesPage() {
       return { params, rpcResult };
     },
     onSuccess: async ({ params, rpcResult }) => {
-      toast({ title: 'Subscription updated', description: 'Company subscription state has been updated.' });
-      queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+      const pathBefore = typeof window !== 'undefined' ? window.location.pathname : location.pathname;
+      const isApprove = params.action === 'approve';
+      const isActivate = params.action === 'activate';
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[DevApproval] mutation success', {
+          route: location.pathname,
+          pathBefore,
+          isDeveloper,
+          userRole: user?.role,
+          companyIdContext: user?.companyId ?? null,
+          targetCompanyId: params.companyId,
+          action: params.action,
+          workspace_ready_email: rpcResult.workspace_ready_email,
+        });
+      }
+
+      const title =
+        isApprove ? 'Company approved' : isActivate ? 'Access activated' : 'Subscription updated';
+      const description = isApprove
+        ? 'The company can use the workspace. The list will refresh here.'
+        : isActivate
+          ? 'Subscription is active; the list will refresh here.'
+          : 'Company subscription state has been updated.';
+
+      toast({ title, description });
+
+      await queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+
+      if (import.meta.env.DEV) {
+        const pathAfter = typeof window !== 'undefined' ? window.location.pathname : location.pathname;
+        // eslint-disable-next-line no-console
+        console.log('[DevApproval] after list invalidate', {
+          pathBefore,
+          pathAfter,
+          isDeveloper,
+          userRole: user?.role,
+          companyIdContext: user?.companyId ?? null,
+        });
+      }
 
       const shouldNotify =
-        rpcResult.workspace_ready_email &&
-        (params.action === 'approve' || params.action === 'activate');
+        rpcResult.workspace_ready_email && (isApprove || isActivate);
       if (!shouldNotify) return;
 
       const token = await getSupabaseAccessToken();
       if (!token) {
         toast({
           title: 'Workspace email skipped',
-          description: 'No session token; sign in again to send the welcome email.',
-          variant: 'destructive',
+          description: 'No session token. Sign in again if you need to send the welcome email.',
         });
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[DevApproval] workspace email skipped: no Supabase token');
+        }
         return;
       }
 
       const resolved = await fetchCompanyWorkspaceNotifyPayload(params.companyId);
-      if (!resolved) {
+      if (!resolved.ok) {
         toast({
           title: 'Workspace email skipped',
-          description: 'Could not resolve company admin email. Send the email manually or check company membership.',
-          variant: 'destructive',
+          description:
+            resolved.reason === 'company_not_found'
+              ? 'Company record was not found for email lookup.'
+              : 'No recipient email found (company email, admin member, or creator profile). Send manually if needed.',
         });
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[DevApproval] workspace email skipped (resolution)', resolved);
+        }
         return;
+      }
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[DevApproval] workspace notify recipient', {
+          source: resolved.source,
+          to: `${resolved.to.slice(0, 3)}…`,
+          companyName: resolved.companyName,
+        });
       }
 
       const notify = await invokeNotifyCompanyWorkspaceReady({
@@ -381,7 +435,12 @@ export default function DeveloperCompaniesPage() {
         companyName: resolved.companyName,
         dashboardUrl: getTenantDashboardUrl(),
       });
-      if (!notify.ok) {
+      if (notify.ok) {
+        toast({
+          title: 'Workspace email sent',
+          description: `Sent to ${resolved.to} (source: ${resolved.source.replace(/_/g, ' ')}).`,
+        });
+      } else {
         toast({
           title: 'Workspace email failed',
           description: notify.detail || notify.error || 'Unknown error',

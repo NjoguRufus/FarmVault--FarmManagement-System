@@ -19,7 +19,7 @@ import { writePendingApprovalSession, type PendingApprovalSessionPayload } from 
 type EmailValidationResult = { ok: boolean; message?: string | null };
 
 export default function OnboardingPage() {
-  const { resetRequired, refreshAuthState } = useAuth();
+  const { resetRequired, refreshAuthState, syncTenantCompanyFromServer } = useAuth();
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
@@ -113,6 +113,7 @@ export default function OnboardingPage() {
           companyEmail: normalizedCompanyEmail,
         });
       }
+      await syncTenantCompanyFromServer();
       setStep(2);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Something went wrong';
@@ -141,6 +142,7 @@ export default function OnboardingPage() {
       console.log('[Onboarding] pending_approval_navigation', payload);
     }
     try {
+      await syncTenantCompanyFromServer();
       await refreshAuthState();
     } catch {
       /* non-fatal: session will catch up on next load */

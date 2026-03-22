@@ -5,6 +5,7 @@ import { Clock3, Ban, AlertTriangle, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSubscriptionGateState } from '@/services/subscriptionService';
 import { Button } from '@/components/ui/button';
+import { clearPendingApprovalSession } from '@/lib/pendingApprovalSession';
 
 export function SubscriptionAccessGate({ children }: { children: React.ReactElement }) {
   const { user, logout } = useAuth();
@@ -26,7 +27,10 @@ export function SubscriptionAccessGate({ children }: { children: React.ReactElem
   const status = (data.status || 'pending_approval').toLowerCase();
   // Include `trial`: approved Pro trial (running or ended — post-trial plan modal handles expiry).
   const fullAccess = status === 'trialing' || status === 'trial' || status === 'active' || status === 'pending_payment';
-  if (fullAccess) return children;
+  if (fullAccess) {
+    clearPendingApprovalSession();
+    return children;
+  }
 
   if (status === 'pending_approval') {
     if (import.meta.env.DEV) {
