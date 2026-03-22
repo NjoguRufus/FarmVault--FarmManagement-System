@@ -44,7 +44,7 @@ export default function DevSignUpPage() {
               routing="path"
               path="/dev/sign-up"
               signInUrl="/dev/sign-in"
-              afterSignUpUrl="/dev/dashboard"
+              afterSignUpUrl="/developer"
             />
           </div>
         </div>

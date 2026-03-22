@@ -22,12 +22,15 @@ import {
   Shield,
   QrCode,
   Mail,
+  ClipboardCheck,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
 
 export interface NavItem {
   label: string;
+  /** Shorter label for mobile bottom bar (sidebar / More keep `label`). */
+  shortLabel?: string;
   path: string;
   icon: LucideIcon;
   group: NavGroup;
@@ -55,24 +58,36 @@ export const companyNavConfig: NavItem[] = [
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
-/** Developer/Admin nav. All items in main for sidebar; mobile gets simplified. */
+/** Developer console: main = mobile bottom bar (4 + More); more = drawer only on mobile. */
 export const developerNavConfig: NavItem[] = [
-  { label: 'Developer Home', path: '/developer', icon: LayoutDashboard, group: 'main' },
-  { label: 'Scan QR', path: '/developer/qr', icon: QrCode, group: 'main' },
+  {
+    label: 'Developer Home',
+    shortLabel: 'Home',
+    path: '/developer',
+    icon: LayoutDashboard,
+    group: 'main',
+  },
   { label: 'Companies', path: '/developer/companies', icon: Building2, group: 'main' },
   { label: 'Users', path: '/developer/users', icon: Users, group: 'main' },
-  { label: 'Developer Settings', path: '/developer/settings', icon: Shield, group: 'main' },
-  { label: 'Billing Confirmation', path: '/developer/billing-confirmation', icon: Users, group: 'main' },
-  { label: 'Finances', path: '/developer/finances', icon: CreditCard, group: 'main' },
-  { label: 'Subscription Analytics', path: '/developer/subscription-analytics', icon: BarChart3, group: 'main' },
-  { label: 'FarmVault Expenses', path: '/developer/farmvault-expenses', icon: Receipt, group: 'main' },
-  { label: 'Backups', path: '/developer/backups', icon: Database, group: 'main' },
-  { label: 'Code Red', path: '/developer/code-red', icon: AlertTriangle, group: 'main' },
-  { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'main' },
-  { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'main' },
-  { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'main' },
-  { label: 'Records', path: '/developer/records', icon: FileText, group: 'main' },
-  { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'main' },
+  {
+    label: 'Billing Confirmation',
+    shortLabel: 'Billing',
+    path: '/developer/billing-confirmation',
+    icon: ClipboardCheck,
+    group: 'main',
+  },
+  { label: 'Scan QR', path: '/developer/qr', icon: QrCode, group: 'more' },
+  { label: 'Developer Settings', path: '/developer/settings', icon: Shield, group: 'more' },
+  { label: 'Finances', path: '/developer/finances', icon: CreditCard, group: 'more' },
+  { label: 'Subscription Analytics', path: '/developer/subscription-analytics', icon: BarChart3, group: 'more' },
+  { label: 'FarmVault Expenses', path: '/developer/farmvault-expenses', icon: Receipt, group: 'more' },
+  { label: 'Backups', path: '/developer/backups', icon: Database, group: 'more' },
+  { label: 'Code Red', path: '/developer/code-red', icon: AlertTriangle, group: 'more' },
+  { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'more' },
+  { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'more' },
+  { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
+  { label: 'Records', path: '/developer/records', icon: FileText, group: 'more' },
+  { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },
 ];
 
 /** Manager nav. */

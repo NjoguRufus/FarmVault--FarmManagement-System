@@ -30,7 +30,8 @@ enabled = false
 [functions.invite-employee]
 verify_jwt = false
 
-# Clerk session JWT verified in-function via Supabase third-party auth (same pattern as create-company-onboarding).
+# Clerk session tokens are RS256; Supabase's gateway JWT verify expects HS256 and fails with
+# "signing method RS256 is invalid". Verify the Bearer token inside the function instead.
 [functions.send-farmvault-email]
 verify_jwt = false
 

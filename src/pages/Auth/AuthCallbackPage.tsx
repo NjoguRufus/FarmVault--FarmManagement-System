@@ -24,7 +24,7 @@ export default function AuthCallbackPage() {
       // Developers should never go through the normal onboarding wizard.
       const email = clerkUser.primaryEmailAddress?.emailAddress ?? null;
       if (isDevEmail(email)) {
-        navigate('/dev/dashboard', { replace: true });
+        navigate('/developer', { replace: true });
         return;
       }
 

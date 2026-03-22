@@ -9,6 +9,7 @@ import type { Employee, EmployeeStatus, PermissionMap } from '@/types';
 import { getPresetPermissions } from '@/lib/employees/permissionPresets';
 import { flattenPermissionMap } from '@/lib/permissions';
 import type { EmployeeRoleKey } from '@/config/accessControl';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 
 /** Payload for Clerk-based invite (Edge Function). No Supabase Auth. */
 export type InviteEmployeePayload = {
@@ -30,8 +31,10 @@ function mapRowToEmployee(row: Record<string, unknown>): Employee {
     id: String(row.id ?? ''),
     companyId: String(row.company_id ?? ''),
     // `employees` table uses `full_name` (no `name` column). Keep the UI `name` field derived.
-    // Never default to a generic label when we have an email; use email instead.
-    name: fullName ?? (row.email != null ? String(row.email) : 'Employee'),
+    name: resolveUserDisplayName({
+      profileDisplayName: fullName,
+      email: row.email != null ? String(row.email) : undefined,
+    }),
     fullName,
     email: row.email != null ? String(row.email) : undefined,
     phone: row.phone != null ? String(row.phone) : undefined,

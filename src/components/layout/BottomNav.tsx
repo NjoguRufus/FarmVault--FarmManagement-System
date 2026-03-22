@@ -121,6 +121,7 @@ export function BottomNav() {
   const tabs = useMemo(() => {
     const list = visibleMainItems.map((item) => ({
       ...item,
+      label: item.shortLabel ?? item.label,
       type: 'link' as const,
       tourId: getBottomNavTourId(item.path, 'link'),
     }));
@@ -276,10 +277,13 @@ function NavItem({
 
   const itemPath = to.replace(/\/+/g, '/');
 
+  const endMatch =
+    itemPath === '/' || itemPath === '/developer' || itemPath === '/broker';
+
   return (
     <NavLink
       to={itemPath}
-      end={itemPath === '/'}
+      end={endMatch}
       data-tour={item.tourId}
       className="relative z-10 flex flex-1 min-w-0 min-h-[44px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
       aria-label={item.label}

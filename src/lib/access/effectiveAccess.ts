@@ -71,7 +71,7 @@ export function getLandingPageFromPermissions(
   permissions: PermissionMap,
   options?: { legacyRole?: string | null; isCompanyAdmin?: boolean; isDeveloper?: boolean }
 ): string {
-  if (options?.isDeveloper) return '/admin';
+  if (options?.isDeveloper) return '/developer';
   if (options?.isCompanyAdmin) return '/dashboard';
 
   // All employees live under the /staff namespace. Default landing is always staff dashboard.

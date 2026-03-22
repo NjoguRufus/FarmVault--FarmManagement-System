@@ -11,6 +11,8 @@ import { uploadAvatar, clearAvatar } from '@/services/avatarService';
 import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 import { QuickUnlockSettings } from '@/components/settings/QuickUnlockSettings';
 import { db } from '@/lib/db';
+import { useUser } from '@clerk/react';
+import { resolveUserDisplayNameFromSources } from '@/lib/userDisplayName';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -26,6 +28,7 @@ const STATUSES = [
 
 export default function SettingsPage() {
   const { user, refreshUserAvatar, refreshUserProfile } = useAuth();
+  const { user: clerkUser } = useUser();
   const queryClient = useQueryClient();
   const { addNotification } = useNotifications();
   const { startTour } = useTour();
@@ -72,25 +75,25 @@ export default function SettingsPage() {
         if (error) throw error;
         if (cancelled) return;
         
-        const fullName =
-          data?.full_name != null && String(data.full_name).trim().length > 0
-            ? String(data.full_name)
-            : user.name ?? user.email ?? '';
-        
+        const stored =
+          data?.full_name != null && String(data.full_name).trim().length > 0 ? String(data.full_name) : null;
+        const fullName = resolveUserDisplayNameFromSources(stored, clerkUser, user.email);
+
         setProfileName(fullName);
         setOriginalProfileName(fullName);
       } catch (e) {
         if (import.meta.env.DEV) {
           console.warn('[SettingsPage] Profile load failed', e);
         }
-        setProfileName(user.name ?? user.email ?? '');
-        setOriginalProfileName(user.name ?? user.email ?? '');
+        const fallback = resolveUserDisplayNameFromSources(null, clerkUser, user.email);
+        setProfileName(fallback);
+        setOriginalProfileName(fallback);
       } finally {
         if (!cancelled) setProfileLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.id, user?.name, user?.email]);
+  }, [user?.id, user?.name, user?.email, clerkUser?.fullName, clerkUser?.firstName, clerkUser?.lastName, clerkUser?.username]);
 
   // Check if profile has unsaved changes
   const profileHasChanges = profileName.trim() !== originalProfileName.trim();
@@ -102,7 +105,7 @@ export default function SettingsPage() {
     
     const trimmedName = profileName.trim();
     if (!trimmedName) {
-      setProfileError('Display name cannot be empty');
+      setProfileError('Your name cannot be empty');
       return;
     }
 
@@ -178,7 +181,7 @@ export default function SettingsPage() {
       
       addNotification({ 
         title: 'Profile updated', 
-        message: 'Your display name has been saved and updated everywhere.', 
+        message: 'Your name has been saved and updated everywhere.', 
         type: 'success' 
       });
     } catch (e: any) {
@@ -228,7 +231,7 @@ export default function SettingsPage() {
     // Validate before saving
     const trimmedName = editName.trim();
     if (!trimmedName) {
-      setSaveError('Company name cannot be empty');
+      setSaveError('Farm or company name cannot be empty');
       return;
     }
 
@@ -438,7 +441,7 @@ export default function SettingsPage() {
             {/* Display name input */}
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">
-                Display name <span className="text-destructive">*</span>
+                Your Name <span className="text-destructive">*</span>
               </label>
               <input
                 type="text"
@@ -448,7 +451,7 @@ export default function SettingsPage() {
                 placeholder="Your display name"
               />
               {!profileNameIsValid && profileName.length > 0 && (
-                <p className="mt-1 text-xs text-destructive">Display name is required</p>
+                <p className="mt-1 text-xs text-destructive">Your name is required</p>
               )}
               <p className="mt-1 text-xs text-muted-foreground">
                 This name is displayed in the dashboard, navbar, and throughout the app.
@@ -514,17 +517,17 @@ export default function SettingsPage() {
             )}
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">
-                Company name <span className="text-destructive">*</span>
+                Farm / Company Name <span className="text-destructive">*</span>
               </label>
               <input
                 type="text"
                 value={editName}
                 onChange={(e) => { setEditName(e.target.value); setSaveError(null); }}
                 className={`fv-input w-full ${!nameIsValid && editName.length > 0 ? 'border-destructive' : ''}`}
-                placeholder="Company name"
+                placeholder="Your farm or business name"
               />
               {!nameIsValid && editName.length > 0 && (
-                <p className="mt-1 text-xs text-destructive">Company name is required</p>
+                <p className="mt-1 text-xs text-destructive">Farm or company name is required</p>
               )}
             </div>
             <div>
@@ -578,7 +581,7 @@ export default function SettingsPage() {
             </p>
             <dl className="space-y-3 text-sm">
               <div>
-                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Company name</dt>
+                <dt className="text-muted-foreground text-xs uppercase tracking-wide">Farm / Company Name</dt>
                 <dd className="font-medium text-foreground mt-0.5">{company.name ?? '—'}</dd>
               </div>
               <div>

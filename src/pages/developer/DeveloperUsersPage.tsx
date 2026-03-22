@@ -16,6 +16,7 @@ import {
 import { Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { DeveloperUserRow } from '@/services/developerService';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 
 export default function DeveloperUsersPage() {
   const [search, setSearch] = useState('');
@@ -70,13 +71,16 @@ export default function DeveloperUsersPage() {
     if (!term) return rows;
     return rows.filter((u) => {
       const email = (u.email ?? '').toLowerCase();
-      const name = (u.full_name ?? '').toLowerCase();
+      const resolvedName = resolveUserDisplayName({
+        profileDisplayName: u.full_name,
+        email: u.email,
+      }).toLowerCase();
       const role = (u.role ?? '').toLowerCase();
       const company = (u.company_name ?? u.company?.company_name ?? '').toLowerCase();
       const userId = (u.user_id ?? '').toLowerCase();
       return (
         email.includes(term) ||
-        name.includes(term) ||
+        resolvedName.includes(term) ||
         role.includes(term) ||
         company.includes(term) ||
         userId.includes(term)
@@ -121,7 +125,10 @@ export default function DeveloperUsersPage() {
             </thead>
             <tbody>
               {filtered.map((u, idx) => {
-                const name = u.full_name || 'Unnamed User';
+                const name = resolveUserDisplayName({
+                  profileDisplayName: u.full_name,
+                  email: u.email,
+                });
                 const email = u.email || '—';
                 const companyName = u.company_name || u.company?.company_name || 'No Company';
                 const role = u.role || u.company?.role || '—';

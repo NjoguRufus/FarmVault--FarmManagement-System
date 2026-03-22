@@ -3,6 +3,8 @@
 // Idempotent: if the caller already has a profile with company_id, returns that company_id.
 // Requires env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, optional TRIAL_DAYS.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { farmVaultEmailShell } from "../_shared/farmvault-email/farmVaultEmailShell.ts";
+import { escapeHtml } from "../_shared/farmvault-email/escapeHtml.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,9 +75,13 @@ Deno.serve(async (req: Request) => {
       adminEmail: string;
     };
 
-    if (!companyName || !companyEmail || !adminEmail) {
+    const trimmedCompanyName = typeof companyName === "string" ? companyName.trim() : "";
+    if (!trimmedCompanyName || trimmedCompanyName.length < 2 || !companyEmail || !adminEmail) {
       return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
+        JSON.stringify({
+          error: "Missing or invalid fields",
+          detail: "Company name (at least 2 characters), company email, and admin email are required.",
+        }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -124,7 +130,7 @@ Deno.serve(async (req: Request) => {
       .from("companies")
       .insert({
         clerk_org_id: null,
-        name: companyName.trim(),
+        name: trimmedCompanyName,
         email: normalizedCompanyEmail,
         logo_url: null,
         created_by_clerk_user_id: clerkUserId,
@@ -149,7 +155,7 @@ Deno.serve(async (req: Request) => {
           clerk_user_id: clerkUserId,
           company_id: companyId,
           role: "company-admin",
-          name: profileName,
+          full_name: profileName,
           email: normalizedAdminEmail,
           updated_at: now.toISOString(),
         },
@@ -186,9 +192,9 @@ Deno.serve(async (req: Request) => {
       actor_user_id: clerkUserId,
       actor_name: profileName,
       target_id: companyId,
-      target_label: companyName.trim(),
+      target_label: trimmedCompanyName,
       metadata: {
-        company_name: companyName.trim(),
+        company_name: trimmedCompanyName,
         owner_email: normalizedAdminEmail,
         selected_plan: normalizedPlan,
         created_at: now.toISOString(),
@@ -199,6 +205,25 @@ Deno.serve(async (req: Request) => {
     const adminEmailTarget = Deno.env.get("DEVELOPER_ADMIN_EMAIL") || Deno.env.get("ADMIN_EMAIL");
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (adminEmailTarget && resendApiKey) {
+      const font = "Arial, Helvetica, sans-serif";
+      const safeCompany = escapeHtml(trimmedCompanyName);
+      const safeOwner = escapeHtml(normalizedAdminEmail);
+      const safePlan = escapeHtml(normalizedPlan);
+      const safeCreated = escapeHtml(now.toISOString());
+      const adminHtml = farmVaultEmailShell({
+        preheader: `New company pending approval: ${trimmedCompanyName}`,
+        title: "New company pending approval",
+        subtitle: "Manual review required in the developer console",
+        content: `
+<p style="margin:0 0 18px 0;font-family:${font};font-size:15px;line-height:1.7;color:#1f2937;">A new company requires manual review.</p>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 18px 0;border-collapse:collapse;">
+  <tr><td style="padding:6px 0;font-family:${font};font-size:14px;color:#6b7280;width:140px;vertical-align:top;">Company</td><td style="padding:6px 0;font-family:${font};font-size:14px;color:#111827;font-weight:600;">${safeCompany}</td></tr>
+  <tr><td style="padding:6px 0;font-family:${font};font-size:14px;color:#6b7280;vertical-align:top;">Owner email</td><td style="padding:6px 0;font-family:${font};font-size:14px;color:#111827;">${safeOwner}</td></tr>
+  <tr><td style="padding:6px 0;font-family:${font};font-size:14px;color:#6b7280;vertical-align:top;">Selected plan</td><td style="padding:6px 0;font-family:${font};font-size:14px;color:#111827;">${safePlan}</td></tr>
+  <tr><td style="padding:6px 0;font-family:${font};font-size:14px;color:#6b7280;vertical-align:top;">Created</td><td style="padding:6px 0;font-family:${font};font-size:14px;color:#111827;">${safeCreated}</td></tr>
+</table>
+<p style="margin:0;font-family:${font};font-size:15px;line-height:1.7;color:#1f2937;">Please review and approve from <strong>Developer Dashboard</strong> → <strong>Companies</strong>.</p>`,
+      });
       await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
@@ -208,17 +233,8 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           from: "FarmVault <no-reply@farmvault.co.ke>",
           to: [adminEmailTarget],
-          subject: `New company pending approval: ${companyName.trim()}`,
-          html: `
-            <p>A new company requires manual review.</p>
-            <ul>
-              <li><strong>Company:</strong> ${companyName.trim()}</li>
-              <li><strong>Owner email:</strong> ${normalizedAdminEmail}</li>
-              <li><strong>Selected plan:</strong> ${normalizedPlan}</li>
-              <li><strong>Created:</strong> ${now.toISOString()}</li>
-            </ul>
-            <p>Please review and approve from Developer Dashboard → Companies.</p>
-          `,
+          subject: `New company pending approval: ${trimmedCompanyName}`,
+          html: adminHtml,
         }),
       });
     }

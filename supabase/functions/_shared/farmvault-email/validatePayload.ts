@@ -1,4 +1,8 @@
-import type { SendFarmVaultEmailContext, SendFarmVaultEmailPayload } from "./types.ts";
+import type {
+  CustomManualEmailData,
+  SendFarmVaultEmailContext,
+  SendFarmVaultEmailPayload,
+} from "./types.ts";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE =
@@ -111,13 +115,25 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     if (!subjectField || subjectField.trim().length > 300) {
       return { ok: false, message: "subject is required (max 300 characters)" };
     }
-    if (!isNonEmptyString(dataObj.body)) {
-      return { ok: false, message: "data.body is required" };
+
+    const htmlFromRoot = isNonEmptyString(root.html) ? String(root.html).trim() : null;
+    const htmlFromData = isNonEmptyString(dataObj.html) ? String(dataObj.html).trim() : null;
+    const htmlField = htmlFromData ?? htmlFromRoot;
+
+    const plainBody = isNonEmptyString(dataObj.body) ? String(dataObj.body).trim() : "";
+    if (!plainBody && !htmlField) {
+      return {
+        ok: false,
+        message: "message is required: provide data.body (plain text) and/or data.html (or top-level html)",
+      };
     }
-    const body = dataObj.body.trim();
-    if (body.length > 50_000) {
+    if (plainBody.length > 50_000) {
       return { ok: false, message: "data.body exceeds maximum length (50000)" };
     }
+    if (htmlField && htmlField.length > 200_000) {
+      return { ok: false, message: "html exceeds maximum length (200000)" };
+    }
+
     let recipientName: string | undefined;
     if (isNonEmptyString(dataObj.recipientName)) {
       recipientName = dataObj.recipientName.trim().slice(0, 200);
@@ -137,17 +153,23 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     if (category) meta.category = category;
     if (recipientName) meta.recipientName = recipientName;
 
+    const subjectTrim = subjectField.trim().slice(0, 300);
+    const dataOut: CustomManualEmailData = {
+      subject: subjectTrim,
+      ...(plainBody ? { body: plainBody } : {}),
+      ...(htmlField ? { html: htmlField } : {}),
+      ...(recipientName ? { recipientName } : {}),
+      ...(category ? { category } : {}),
+    };
+
     return {
       ok: true,
       payload: {
         emailType: "custom_manual",
         to: normalizedTo,
-        data: {
-          subject: subjectField.trim().slice(0, 300),
-          body,
-          ...(recipientName ? { recipientName } : {}),
-          ...(category ? { category } : {}),
-        },
+        subject: subjectTrim,
+        ...(htmlField ? { html: htmlField } : {}),
+        data: dataOut,
         companyId: logCtx.companyId ?? null,
         companyName: logCtx.companyName ?? null,
         triggeredBy: "developer_manual_send",

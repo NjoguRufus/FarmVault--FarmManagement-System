@@ -9,13 +9,14 @@
 //   FARMVAULT_EMAIL_INTERNAL_SECRET — optional; allows trusted server-to-server sends (any `to`)
 //   FARMVAULT_EMAIL_FROM        — optional override, default "FarmVault <noreply@farmvault.africa>"
 //
-// Auth:
-//   - Default: Authorization: Bearer <Clerk session token or Supabase JWT>; recipient `to` must match the authenticated user's email.
-//   - custom_manual: Bearer + admin.is_developer() only; any valid `to` (developer console).
-//   - Server/cron/other Edge Functions: X-FarmVault-Email-Secret: <FARMVAULT_EMAIL_INTERNAL_SECRET> (omit user restriction).
+// Auth (user identity for getUser / RLS-backed RPCs):
+//   - Preferred when gateway JWT verify is ON: `Authorization: Bearer <anon JWT>` (gateway) +
+//     `X-FarmVault-Clerk-Authorization: Bearer <Clerk session>` (RS256 — read here, not in Authorization).
+//   - Or gateway verify OFF: `Authorization: Bearer <Clerk or Supabase JWT>` only.
+//   - custom_manual: Clerk JWT + is_developer() RPC only (do not call auth.getUser — RS256 fails there).
+//   - Server/cron: X-FarmVault-Email-Secret: <FARMVAULT_EMAIL_INTERNAL_SECRET>.
 //
-// Deploy with JWT verification disabled at the gateway (we verify the token in-code for Clerk compatibility):
-//   npx supabase functions deploy send-farmvault-email --no-verify-jwt
+// Optional: npx supabase functions deploy send-farmvault-email --no-verify-jwt (then Clerk-only Authorization works).
 //
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
@@ -34,7 +35,7 @@ import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/valid
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-farmvault-email-secret",
+    "authorization, x-client-info, apikey, content-type, x-farmvault-email-secret, x-farmvault-clerk-authorization",
 };
 
 const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
@@ -50,6 +51,19 @@ type AuthResult =
   | { ok: true }
   | { ok: false; status: number; body: Record<string, unknown> };
 
+/** Clerk JWT when the browser puts the anon key in `Authorization` for the gateway. */
+function resolveUserBearerAuthorization(req: Request): string | null {
+  const clerk = req.headers.get("x-farmvault-clerk-authorization")?.trim();
+  if (clerk?.toLowerCase().startsWith("bearer ") && clerk.length > 7) {
+    return clerk;
+  }
+  const std = req.headers.get("Authorization")?.trim();
+  if (std?.toLowerCase().startsWith("bearer ") && std.length > 7) {
+    return std;
+  }
+  return null;
+}
+
 async function authorizeSend(
   req: Request,
   toEmail: string,
@@ -61,8 +75,8 @@ async function authorizeSend(
     return { ok: true };
   }
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+  const authHeader = resolveUserBearerAuthorization(req);
+  if (!authHeader) {
     return {
       ok: false,
       status: 401,
@@ -85,23 +99,8 @@ async function authorizeSend(
     global: { headers: { Authorization: authHeader } },
   });
 
-  const {
-    data: { user },
-    error,
-  } = await userClient.auth.getUser();
-
-  if (error || !user) {
-    console.warn("[send-farmvault-email] JWT verification failed", error?.message ?? "no user");
-    return {
-      ok: false,
-      status: 401,
-      body: {
-        error: "Unauthorized",
-        detail: error?.message ?? "Invalid session",
-      },
-    };
-  }
-
+  // Developer manual sends use Clerk session JWT (RS256). `auth.getUser()` validates like a native
+  // Supabase session and rejects RS256 — same pattern as `notify-company-workspace-ready`: RPC only.
   if (emailType === "custom_manual") {
     const { data: isDev, error: devErr } = await userClient.rpc("is_developer");
     if (devErr) {
@@ -123,6 +122,23 @@ async function authorizeSend(
       };
     }
     return { ok: true };
+  }
+
+  const {
+    data: { user },
+    error,
+  } = await userClient.auth.getUser();
+
+  if (error || !user) {
+    console.warn("[send-farmvault-email] JWT verification failed", error?.message ?? "no user");
+    return {
+      ok: false,
+      status: 401,
+      body: {
+        error: "Unauthorized",
+        detail: error?.message ?? "Invalid session",
+      },
+    };
   }
 
   if (!user.email) {

@@ -23,6 +23,7 @@ import { findCropKnowledgeByTypeKey, getEffectiveEnvironmentForCrop } from '@/kn
 import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
+import { resolveUserDisplayName } from '@/lib/userDisplayName';
 
 export function StaffDashboard() {
   const { user, employeeProfile } = useAuth();
@@ -235,7 +236,10 @@ export function StaffDashboard() {
     activeProjectEnvironment,
   ]);
 
-  const displayName = fullName ?? user?.email ?? 'User';
+  const displayName =
+    (fullName?.trim() && fullName) ||
+    user?.name ||
+    resolveUserDisplayName({ email: user?.email });
 
   const displayRole = roleLabel ?? 'Staff';
 

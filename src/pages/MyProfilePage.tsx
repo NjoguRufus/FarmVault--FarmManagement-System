@@ -82,7 +82,7 @@ export default function MyProfilePage() {
       if (error) throw error;
 
       await refreshUserProfile();
-      toast({ title: 'Saved', description: 'Your profile name has been updated.' });
+      toast({ title: 'Saved', description: 'Your name has been updated.' });
     } catch (e: any) {
       toast({
         title: 'Error',
@@ -109,16 +109,17 @@ export default function MyProfilePage() {
               className="h-16 w-16"
             />
             <div className="text-sm text-muted-foreground">
-              Update your display name and profile photo. This name is shown across the admin workspace.
+              Your name is how you appear to your team. It is not the same as your farm or company name (that is set under
+              company / workspace settings).
             </div>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Display name</label>
+            <label className="text-sm font-medium text-foreground">Your Name</label>
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
+              placeholder="e.g. James Mwangi"
               disabled={loading}
             />
           </div>

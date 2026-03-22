@@ -137,6 +137,13 @@ export default function SetupCompany() {
   };
 
   const handleCreateAccount = async () => {
+    const trimmedFarm = companyName.trim();
+    if (trimmedFarm.length < 2) {
+      setError(
+        'Please enter your farm or company name (at least 2 characters). This is your workspace name — not your personal name.',
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -182,7 +189,7 @@ export default function SetupCompany() {
         detail?: string;
       }>('create-company-onboarding', {
         body: {
-          companyName: companyName.trim(),
+          companyName: trimmedFarm,
           companyEmail: normalizedCompanyEmail,
           selectedPlan,
           billingMode: 'manual',
@@ -341,12 +348,12 @@ export default function SetupCompany() {
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       <Building2 className="h-4 w-4" />
-                      Company details
+                      Farm / company details
                     </div>
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">
-                          Company Name
+                          Farm / Company Name
                         </label>
                         <input
                           type="text"
@@ -354,8 +361,14 @@ export default function SetupCompany() {
                           value={companyName}
                           onChange={(e) => setCompanyName(e.target.value)}
                           placeholder="GreenField Farms Ltd"
+                          autoComplete="organization"
                           required
+                          minLength={2}
                         />
+                        <p className="text-xs text-muted-foreground">
+                          Enter the name of your farm, business, or company as you want it to appear in FarmVault. Type it
+                          yourself — we do not fill this from your Google account or personal profile.
+                        </p>
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">
@@ -385,7 +398,7 @@ export default function SetupCompany() {
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">
-                          Admin Full Name
+                          Your Name
                         </label>
                         <input
                           type="text"
