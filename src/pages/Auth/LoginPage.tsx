@@ -11,8 +11,7 @@ export default function LoginPage() {
   const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
   const { login, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation() as { state?: { from?: { pathname?: string } } };
-  const from = location.state?.from?.pathname || '/dashboard';
+  const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,33 +19,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // After login, redirect by role or to dashboard (RequireOnboarding may send to /onboarding)
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     setLoading(false);
-    const employeeRole = (user as any).employeeRole as string | undefined;
-    if (user.role === 'company-admin' || user.role === ('company_admin' as any)) {
-      navigate('/dashboard', { replace: true });
-      return;
-    }
-    if (user.role === 'developer') {
-      navigate('/developer', { replace: true });
-      return;
-    }
-    if (user.role === 'manager' || employeeRole === 'manager' || employeeRole === 'operations-manager') {
-      navigate('/manager', { replace: true });
-      return;
-    }
-    if (user.role === 'broker' || employeeRole === 'sales-broker' || employeeRole === 'broker') {
-      navigate('/broker', { replace: true });
-      return;
-    }
-    if (employeeRole === 'logistics-driver' || employeeRole === 'driver') {
-      navigate('/driver', { replace: true });
-      return;
-    }
-    navigate(from || '/dashboard', { replace: true });
-  }, [isAuthenticated, user, navigate, from]);
+    navigate('/auth/continue', { replace: true, state: location.state });
+  }, [isAuthenticated, user, navigate, location.state]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +53,7 @@ export default function LoginPage() {
 
 
   if (clerkLoaded && clerkSignedIn) {
-    return <Navigate to={from || '/dashboard'} replace />;
+    return <Navigate to="/auth/continue" replace state={location.state} />;
   }
 
   return (

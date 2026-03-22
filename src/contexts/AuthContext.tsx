@@ -43,6 +43,11 @@ interface AuthContextType {
   effectiveAccess: EffectiveAccess;
   isAuthenticated: boolean;
   authReady: boolean;
+  /**
+   * Clerk finished loading and reports a signed-in session. FarmVault profile/onboarding may still be resolving (authReady false).
+   * Used to avoid flashing the public home page at "/" while hydration runs.
+   */
+  hasClerkSession: boolean;
   isDeveloper: boolean;
   /** True when user is signed in but users/{uid} is missing companyId/role (setup incomplete). */
   setupIncomplete: boolean;
@@ -1620,6 +1625,7 @@ export function AuthProvider({
         effectiveAccess,
         isAuthenticated: !!user,
         authReady: authReady && activationResolved,
+        hasClerkSession: clerkState !== null && clerkLoaded && isSignedIn,
         isDeveloper,
         setupIncomplete,
         resetRequired,

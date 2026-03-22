@@ -44,7 +44,7 @@ export default function SignUpPage() {
               routing="path"
               path="/sign-up"
               signInUrl="/sign-in"
-              afterSignUpUrl="/setup-company"
+              afterSignUpUrl="/auth/continue"
             />
           </div>
         </div>

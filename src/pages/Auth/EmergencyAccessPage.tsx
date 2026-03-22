@@ -41,7 +41,7 @@ export default function EmergencyAccessPage() {
     const ok = createEmergencySession(trimmed);
     setLoading(false);
     if (ok) {
-      navigate('/dashboard', { replace: true });
+      navigate('/auth/continue', { replace: true });
     } else {
       setError('Access not allowed for this email. Use the approved emergency account.');
     }

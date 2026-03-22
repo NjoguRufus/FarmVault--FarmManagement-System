@@ -77,12 +77,12 @@ import BlogPostPage from "@/pages/seo/BlogPostPage";
 import FeaturesPage from "@/pages/FeaturesPage";
 import PricingPage from "@/pages/PricingPage";
 import AboutPage from "@/pages/AboutPage";
-import LoginPage from "@/pages/Auth/LoginPage";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
 import ScanPage from "@/pages/ScanPage";
 import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
-import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
+import PostAuthContinuePage from "@/pages/Auth/PostAuthContinuePage";
+import { SignInRedirect } from "@/components/auth/SignInRedirect";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import PendingApprovalPage from "@/pages/PendingApprovalPage";
@@ -161,7 +161,7 @@ const CompanyDashboardRoute = () => {
       // eslint-disable-next-line no-console
       console.log("[CompanyDashboardRoute] No user → /sign-in");
     }
-    return <Navigate to="/sign-in" replace />;
+    return <SignInRedirect />;
   }
 
   const landing = effectiveAccess.landingPage;
@@ -232,11 +232,13 @@ const AppRoutesWithLock = () => {
           </DevRoute>
         }
       />
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      <Route path="/auth/callback" element={<PostAuthContinuePage />} />
+      <Route path="/auth/continue" element={<PostAuthContinuePage />} />
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
       <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
       <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
       <Route path="/pending-approval" element={<RequireAuth><PendingApprovalPage /></RequireAuth>} />
+      <Route path="/awaiting-approval" element={<Navigate to="/pending-approval" replace />} />
       <Route path="/start-fresh" element={<RequireAuth><StartFreshPage /></RequireAuth>} />
       <Route path="/setup-company" element={<Navigate to="/onboarding" replace />} />
       <Route path="/setup" element={<Navigate to="/onboarding" replace />} />

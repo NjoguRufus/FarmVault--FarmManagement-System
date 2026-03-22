@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useMemo } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { useQuery } from '@tanstack/react-query';
 import { LogOut, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -83,7 +84,7 @@ export default function PendingApprovalPage() {
   }
 
   if (!user) {
-    return <Navigate to="/sign-in" replace state={{ from: location }} />;
+    return <SignInRedirect />;
   }
 
   if (gateError) {

@@ -116,7 +116,14 @@ if (shouldRenderApp) {
     if (pk) {
       createRoot(root).render(
         <ClerkLoadErrorBoundary>
-          <ClerkProvider publishableKey={pk} afterSignOutUrl="/">
+          <ClerkProvider
+            publishableKey={pk}
+            signInUrl="/sign-in"
+            signUpUrl="/sign-up"
+            afterSignInUrl="/auth/continue"
+            afterSignUpUrl="/auth/continue"
+            afterSignOutUrl="/"
+          >
             <ClerkAuthBridge />
           </ClerkProvider>
         </ClerkLoadErrorBoundary>,

@@ -7,6 +7,8 @@ const NON_PERSISTED_PATHS = new Set([
   '/login',
   '/sign-in',
   '/sign-up',
+  '/auth/callback',
+  '/auth/continue',
   '/choose-plan',
   '/setup-company',
   '/setup',
