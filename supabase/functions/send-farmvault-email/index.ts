@@ -1,5 +1,5 @@
 // FarmVault Edge Function: send branded transactional email via Resend.
-// Supported emailType: welcome | subscription_activated | trial_ending | company_approved
+// Supported emailType: welcome | subscription_activated | trial_ending | company_approved | custom_manual
 //
 // Secrets (Supabase Dashboard → Edge Functions → Secrets):
 //   RESEND_API_KEY              — required to send
@@ -11,6 +11,7 @@
 //
 // Auth:
 //   - Default: Authorization: Bearer <Clerk session token or Supabase JWT>; recipient `to` must match the authenticated user's email.
+//   - custom_manual: Bearer + admin.is_developer() only; any valid `to` (developer console).
 //   - Server/cron/other Edge Functions: X-FarmVault-Email-Secret: <FARMVAULT_EMAIL_INTERNAL_SECRET> (omit user restriction).
 //
 // Deploy with JWT verification disabled at the gateway (we verify the token in-code for Clerk compatibility):
@@ -24,7 +25,10 @@ import {
   updateEmailLogRow,
 } from "../_shared/emailLogs.ts";
 import { renderFarmVaultEmail } from "../_shared/farmvault-email/renderFarmVaultEmail.ts";
-import type { SendFarmVaultEmailPayload } from "../_shared/farmvault-email/types.ts";
+import type {
+  FarmVaultEmailType,
+  SendFarmVaultEmailPayload,
+} from "../_shared/farmvault-email/types.ts";
 import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/validatePayload.ts";
 
 const corsHeaders = {
@@ -49,6 +53,7 @@ type AuthResult =
 async function authorizeSend(
   req: Request,
   toEmail: string,
+  emailType: FarmVaultEmailType,
 ): Promise<AuthResult> {
   const internal = Deno.env.get("FARMVAULT_EMAIL_INTERNAL_SECRET")?.trim();
   const provided = req.headers.get("x-farmvault-email-secret")?.trim();
@@ -76,7 +81,6 @@ async function authorizeSend(
     };
   }
 
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   const userClient = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -84,16 +88,50 @@ async function authorizeSend(
   const {
     data: { user },
     error,
-  } = await userClient.auth.getUser(token);
+  } = await userClient.auth.getUser();
 
-  if (error || !user?.email) {
-    console.warn("[send-farmvault-email] JWT verification failed", error?.message ?? "no email on user");
+  if (error || !user) {
+    console.warn("[send-farmvault-email] JWT verification failed", error?.message ?? "no user");
     return {
       ok: false,
       status: 401,
       body: {
         error: "Unauthorized",
-        detail: error?.message ?? "Invalid session or missing email on profile",
+        detail: error?.message ?? "Invalid session",
+      },
+    };
+  }
+
+  if (emailType === "custom_manual") {
+    const { data: isDev, error: devErr } = await userClient.rpc("is_developer");
+    if (devErr) {
+      console.error("[send-farmvault-email] is_developer RPC error", devErr.message);
+      return {
+        ok: false,
+        status: 403,
+        body: { error: "Forbidden", detail: "Could not verify developer access" },
+      };
+    }
+    if (isDev !== true) {
+      return {
+        ok: false,
+        status: 403,
+        body: {
+          error: "Forbidden",
+          detail: "Developer access is required to send manual emails",
+        },
+      };
+    }
+    return { ok: true };
+  }
+
+  if (!user.email) {
+    return {
+      ok: false,
+      status: 401,
+      body: {
+        error: "Unauthorized",
+        detail: "Your account has no email on file; transactional sends require it",
       },
     };
   }
@@ -138,7 +176,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const { payload } = validated;
-  const auth = await authorizeSend(req, payload.to);
+  const auth = await authorizeSend(req, payload.to, payload.emailType);
   if (!auth.ok) {
     return jsonResponse(auth.body, auth.status);
   }

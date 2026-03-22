@@ -3,7 +3,8 @@ export type FarmVaultEmailType =
   | "welcome"
   | "subscription_activated"
   | "trial_ending"
-  | "company_approved";
+  | "company_approved"
+  | "custom_manual";
 
 export type WelcomeEmailData = {
   companyName: string;
@@ -29,11 +30,20 @@ export type CompanyApprovedEmailData = {
   dashboardUrl: string;
 };
 
+/** Developer console: manual send to any address (requires is_developer). */
+export type CustomManualEmailData = {
+  subject: string;
+  body: string;
+  recipientName?: string;
+  category?: string;
+};
+
 export type FarmVaultEmailDataMap = {
   welcome: WelcomeEmailData;
   subscription_activated: SubscriptionActivatedEmailData;
   trial_ending: TrialEndingEmailData;
   company_approved: CompanyApprovedEmailData;
+  custom_manual: CustomManualEmailData;
 };
 
 /** Optional audit/context fields for logging (stored in email_logs). */
@@ -51,5 +61,6 @@ export type SendFarmVaultEmailPayload =
     | { emailType: "subscription_activated"; to: string; data: SubscriptionActivatedEmailData }
     | { emailType: "trial_ending"; to: string; data: TrialEndingEmailData }
     | { emailType: "company_approved"; to: string; data: CompanyApprovedEmailData }
+    | { emailType: "custom_manual"; to: string; data: CustomManualEmailData }
   )
   & SendFarmVaultEmailContext;

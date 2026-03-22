@@ -87,15 +87,6 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
   const to = root.to;
   const data = root.data;
 
-  if (
-    emailType !== "welcome" &&
-    emailType !== "subscription_activated" &&
-    emailType !== "trial_ending" &&
-    emailType !== "company_approved"
-  ) {
-    return { ok: false, message: "Invalid or missing emailType" };
-  }
-
   if (!isNonEmptyString(to) || !EMAIL_RE.test(to.trim())) {
     return { ok: false, message: "Invalid or missing to (email)" };
   }
@@ -108,6 +99,71 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
   const logCtx = withLogContext(audit.ctx, dataObj);
 
   const normalizedTo = to.trim();
+
+  if (emailType === "custom_manual") {
+    const subjectFromRoot = root.subject;
+    const subjectFromData = dataObj.subject;
+    const subjectField = isNonEmptyString(subjectFromRoot)
+      ? subjectFromRoot
+      : isNonEmptyString(subjectFromData)
+        ? subjectFromData
+        : null;
+    if (!subjectField || subjectField.trim().length > 300) {
+      return { ok: false, message: "subject is required (max 300 characters)" };
+    }
+    if (!isNonEmptyString(dataObj.body)) {
+      return { ok: false, message: "data.body is required" };
+    }
+    const body = dataObj.body.trim();
+    if (body.length > 50_000) {
+      return { ok: false, message: "data.body exceeds maximum length (50000)" };
+    }
+    let recipientName: string | undefined;
+    if (isNonEmptyString(dataObj.recipientName)) {
+      recipientName = dataObj.recipientName.trim().slice(0, 200);
+    }
+    const allowedCat = new Set(["announcement", "appreciation", "support", "onboarding", "other"]);
+    let category: string | undefined;
+    if (isNonEmptyString(dataObj.category)) {
+      const c = dataObj.category.trim().toLowerCase().slice(0, 50);
+      category = allowedCat.has(c) ? c : "other";
+    }
+
+    const meta: Record<string, unknown> = {
+      ...(logCtx.metadata && typeof logCtx.metadata === "object" && !Array.isArray(logCtx.metadata)
+        ? logCtx.metadata
+        : {}),
+    };
+    if (category) meta.category = category;
+    if (recipientName) meta.recipientName = recipientName;
+
+    return {
+      ok: true,
+      payload: {
+        emailType: "custom_manual",
+        to: normalizedTo,
+        data: {
+          subject: subjectField.trim().slice(0, 300),
+          body,
+          ...(recipientName ? { recipientName } : {}),
+          ...(category ? { category } : {}),
+        },
+        companyId: logCtx.companyId ?? null,
+        companyName: logCtx.companyName ?? null,
+        triggeredBy: "developer_manual_send",
+        metadata: meta,
+      },
+    };
+  }
+
+  if (
+    emailType !== "welcome" &&
+    emailType !== "subscription_activated" &&
+    emailType !== "trial_ending" &&
+    emailType !== "company_approved"
+  ) {
+    return { ok: false, message: "Invalid or missing emailType" };
+  }
 
   if (emailType === "welcome") {
     if (!isNonEmptyString(dataObj.companyName)) {

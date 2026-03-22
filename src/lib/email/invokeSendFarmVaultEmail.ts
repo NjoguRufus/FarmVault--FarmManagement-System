@@ -12,8 +12,9 @@ export type InvokeSendFarmVaultEmailResult = {
 };
 
 /**
- * Calls the send-farmvault-email Edge Function with the caller's Clerk session token.
- * The API only delivers to the signed-in user's email unless the function is called with an internal secret (server-side).
+ * Calls the send-farmvault-email Edge Function with the caller's session token.
+ * Most email types only deliver to the signed-in user's address; `custom_manual` requires developer access and allows any recipient.
+ * Server-to-server calls can use the internal secret header instead.
  */
 export async function invokeSendFarmVaultEmail(
   payload: SendFarmVaultEmailPayload,
