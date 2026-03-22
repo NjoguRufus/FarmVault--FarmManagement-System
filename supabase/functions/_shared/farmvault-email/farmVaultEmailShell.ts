@@ -5,6 +5,13 @@ import { FARMVAULT_EMAIL_HEADER_LOGO_ROW } from "./emailHeaderLogoRow.ts";
 export const FARMVAULT_EMAIL_LOGO_URL =
   "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
 
+export type FarmVaultEmailQrShare = {
+  /** Public HTTPS URL for the QR image (must be safe to embed in email). */
+  imageUrl: string;
+  /** URL the QR encodes; image and buttons link here. */
+  targetUrl: string;
+};
+
 export type FarmVaultEmailShellOptions = {
   /** Inbox preview line (hidden in body). */
   preheader: string;
@@ -16,6 +23,11 @@ export type FarmVaultEmailShellOptions = {
   content: string;
   /** Primary action (optional). */
   cta?: { label: string; href: string };
+  /**
+   * Optional share block: copy + wrapped QR image (links to targetUrl) + button + plain link.
+   * Rendered after main content and CTA, before the divider and support/footer sections.
+   */
+  qrShare?: FarmVaultEmailQrShare | null;
   /**
    * When true (default), shows WhatsApp and phone support above the standard footer block.
    * Footer copy and structure below this section are unchanged.
@@ -81,12 +93,53 @@ function contactSupportBlock(font: string): string {
                 </tr>`;
 }
 
+const QR_SHARE_COPY =
+  "Know another farmer who may need this? Let them scan the QR code below or visit farmvault.africa.";
+
+function qrShareSectionHtml(
+  imageUrl: string,
+  targetUrl: string,
+  font: string,
+): string {
+  const img = escapeAttr(imageUrl);
+  const tgt = escapeAttr(targetUrl);
+  return `
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0;">
+  <tr>
+    <td align="center" style="padding:28px 0 0 0;font-family:${font};">
+      <p style="margin:0 0 16px 0;padding:0 12px;font-size:14px;line-height:1.6;color:${BRAND.muted};text-align:center;max-width:440px;">
+        ${escapeHtml(QR_SHARE_COPY)}
+      </p>
+      <a href="${tgt}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-block;">
+        <img src="${img}" width="180" height="180" alt="QR code linking to farmvault.africa for sharing" border="0"
+          style="display:block;margin:0 auto;border:0;outline:none;width:180px;height:180px;line-height:0;" />
+      </a>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:14px auto 0 auto;">
+        <tr>
+          <td align="center" bgcolor="${BRAND.primary}" style="background-color:${BRAND.primary};border-radius:8px;">
+            <a href="${tgt}" target="_blank" rel="noopener noreferrer"
+              style="display:inline-block;padding:10px 22px;font-family:${font};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;mso-line-height-rule:exactly;line-height:1.2;">
+              Open FarmVault
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:12px 0 0 0;padding:0 12px;font-size:12px;line-height:1.5;color:${BRAND.muted};text-align:center;word-break:break-all;">
+        <a href="${tgt}" target="_blank" rel="noopener noreferrer" style="color:${BRAND.primary};text-decoration:underline;">
+          ${escapeHtml(targetUrl)}
+        </a>
+      </p>
+    </td>
+  </tr>
+</table>`;
+}
+
 /**
  * Full HTML document for FarmVault transactional email.
  * Tables + inline styles only. Light header (logo + title) so the official logo reads clearly.
  */
 export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
-  const { preheader, title, subtitle, content, cta, includeContactSupport = true } = opts;
+  const { preheader, title, subtitle, content, cta, qrShare, includeContactSupport = true } = opts;
   const safePre = escapeHtml(preheader);
   const safeTitle = escapeHtml(title);
   const safeSubtitle = escapeHtml(subtitle);
@@ -110,6 +163,13 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
   </tr>
 </table>`
     : "";
+
+  const qrBlock =
+    qrShare &&
+    qrShare.imageUrl.trim().length > 0 &&
+    qrShare.targetUrl.trim().length > 0
+      ? qrShareSectionHtml(qrShare.imageUrl.trim(), qrShare.targetUrl.trim(), fontStack)
+      : "";
 
   const supportBlock = includeContactSupport ? contactSupportBlock(fontStack) : "";
 
@@ -158,6 +218,7 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
                   <td style="padding:36px 40px 28px 40px;background-color:${BRAND.white};font-family:${fontStack};font-size:15px;line-height:1.7;color:${BRAND.text};">
                     ${content}
                     ${ctaBlock}
+                    ${qrBlock}
                   </td>
                 </tr>
                 <tr>

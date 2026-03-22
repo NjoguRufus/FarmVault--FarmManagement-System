@@ -1,4 +1,5 @@
 import { farmVaultEmailShell } from "./farmVaultEmailShell.ts";
+import { resolveEmailQrShare } from "./emailQrShare.ts";
 import { escapeHtml } from "./escapeHtml.ts";
 import type { CompanyApprovedEmailData } from "./types.ts";
 
@@ -15,12 +16,19 @@ export function buildCompanyApprovedEmail(data: CompanyApprovedEmailData): { sub
 <p style="margin:0 0 18px 0;font-family:${fontStack};font-size:15px;line-height:1.7;color:#1f2937;">You now have one place to manage your farm with more clarity, structure, and confidence — a calmer way to see what matters and move forward without the noise.</p>
 <p style="margin:0;font-family:${fontStack};font-size:15px;line-height:1.7;color:#1f2937;">We are glad to welcome you. Step in whenever you are ready.</p>`;
 
+  const qrShare = resolveEmailQrShare("transactional_default_off", {
+    showQrCode: data.showQrCode,
+    qrCodeImageUrl: data.qrCodeImageUrl,
+    qrCodeTargetUrl: data.qrCodeTargetUrl,
+  });
+
   const html = farmVaultEmailShell({
     preheader: `Your FarmVault workspace is ready — ${data.companyName.trim() || "your farm"} can begin.`,
     title: "Hello from the FarmVault Team 🌱",
     subtitle: "Your farm is ready inside FarmVault — your workspace is all set",
     content,
     cta: { label: "Enter Your Farm", href: data.dashboardUrl },
+    qrShare,
   });
 
   return { subject: companyApprovedEmailSubject, html };

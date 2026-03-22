@@ -1,5 +1,6 @@
 import type {
   CustomManualEmailData,
+  FarmVaultEmailQrOptions,
   SendFarmVaultEmailContext,
   SendFarmVaultEmailPayload,
 } from "./types.ts";
@@ -25,6 +26,58 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
   } catch {
     return `${field} must be a valid URL`;
   }
+}
+
+function readQrFields(dataObj: Record<string, unknown>): FarmVaultEmailQrOptions {
+  const f: FarmVaultEmailQrOptions = {};
+  if (dataObj.showQrCode === true) f.showQrCode = true;
+  else if (dataObj.showQrCode === false) f.showQrCode = false;
+  if (isNonEmptyString(dataObj.qrCodeImageUrl)) {
+    f.qrCodeImageUrl = String(dataObj.qrCodeImageUrl).trim();
+  }
+  if (isNonEmptyString(dataObj.qrCodeTargetUrl)) {
+    f.qrCodeTargetUrl = String(dataObj.qrCodeTargetUrl).trim();
+  }
+  return f;
+}
+
+/** Validate optional QR URLs when the QR strip is enabled for the given policy. */
+function validateQrFieldUrls(
+  policy: "manual" | "transactional",
+  f: FarmVaultEmailQrOptions,
+): string | null {
+  const enabled =
+    policy === "manual" ? f.showQrCode !== false : f.showQrCode === true;
+  if (!enabled) return null;
+  if (f.qrCodeImageUrl) {
+    const e = requireHttpsUrl(f.qrCodeImageUrl, "data.qrCodeImageUrl");
+    if (e) return e;
+  }
+  if (f.qrCodeTargetUrl) {
+    const e = requireHttpsUrl(f.qrCodeTargetUrl, "data.qrCodeTargetUrl");
+    if (e) return e;
+  }
+  return null;
+}
+
+function validatedTransactionalQr(
+  dataObj: Record<string, unknown>,
+): { ok: true; qr: FarmVaultEmailQrOptions } | { ok: false; message: string } {
+  const qr = readQrFields(dataObj);
+  const err = validateQrFieldUrls("transactional", qr);
+  if (err) return { ok: false, message: err };
+  return { ok: true, qr };
+}
+
+function mergeQrOpts(
+  base: FarmVaultEmailQrOptions,
+): FarmVaultEmailQrOptions {
+  return {
+    ...(base.showQrCode === true ? { showQrCode: true as const } : {}),
+    ...(base.showQrCode === false ? { showQrCode: false as const } : {}),
+    ...(base.qrCodeImageUrl ? { qrCodeImageUrl: base.qrCodeImageUrl } : {}),
+    ...(base.qrCodeTargetUrl ? { qrCodeTargetUrl: base.qrCodeTargetUrl } : {}),
+  };
 }
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -153,6 +206,10 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     if (category) meta.category = category;
     if (recipientName) meta.recipientName = recipientName;
 
+    const qrManual = readQrFields(dataObj);
+    const qrManualErr = validateQrFieldUrls("manual", qrManual);
+    if (qrManualErr) return { ok: false, message: qrManualErr };
+
     const subjectTrim = subjectField.trim().slice(0, 300);
     const dataOut: CustomManualEmailData = {
       subject: subjectTrim,
@@ -160,6 +217,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
       ...(htmlField ? { html: htmlField } : {}),
       ...(recipientName ? { recipientName } : {}),
       ...(category ? { category } : {}),
+      ...mergeQrOpts(qrManual),
     };
 
     return {
@@ -193,6 +251,8 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     }
     const urlErr = requireHttpsUrl(dataObj.dashboardUrl, "data.dashboardUrl");
     if (urlErr) return { ok: false, message: urlErr };
+    const qrCheck = validatedTransactionalQr(dataObj);
+    if (!qrCheck.ok) return { ok: false, message: qrCheck.message };
     return {
       ok: true,
       payload: {
@@ -201,6 +261,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
         data: {
           companyName: dataObj.companyName.trim(),
           dashboardUrl: String(dataObj.dashboardUrl).trim(),
+          ...mergeQrOpts(qrCheck.qr),
         },
         ...logCtx,
       },
@@ -213,6 +274,8 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     }
     const urlErr = requireHttpsUrl(dataObj.dashboardUrl, "data.dashboardUrl");
     if (urlErr) return { ok: false, message: urlErr };
+    const qrCheck = validatedTransactionalQr(dataObj);
+    if (!qrCheck.ok) return { ok: false, message: qrCheck.message };
     return {
       ok: true,
       payload: {
@@ -221,6 +284,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
         data: {
           companyName: dataObj.companyName.trim(),
           dashboardUrl: String(dataObj.dashboardUrl).trim(),
+          ...mergeQrOpts(qrCheck.qr),
         },
         ...logCtx,
       },
@@ -239,6 +303,8 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     }
     const dashErr = requireHttpsUrl(dataObj.dashboardUrl, "data.dashboardUrl");
     if (dashErr) return { ok: false, message: dashErr };
+    const qrCheck = validatedTransactionalQr(dataObj);
+    if (!qrCheck.ok) return { ok: false, message: qrCheck.message };
     return {
       ok: true,
       payload: {
@@ -249,6 +315,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
           planName: dataObj.planName.trim(),
           renewalDate: dataObj.renewalDate.trim(),
           dashboardUrl: String(dataObj.dashboardUrl).trim(),
+          ...mergeQrOpts(qrCheck.qr),
         },
         ...logCtx,
       },
@@ -266,6 +333,9 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
   const upErr = requireHttpsUrl(dataObj.upgradeUrl, "data.upgradeUrl");
   if (upErr) return { ok: false, message: upErr };
 
+  const qrCheck = validatedTransactionalQr(dataObj);
+  if (!qrCheck.ok) return { ok: false, message: qrCheck.message };
+
   return {
     ok: true,
     payload: {
@@ -275,6 +345,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
         companyName: dataObj.companyName.trim(),
         daysLeft: Math.floor(daysLeft),
         upgradeUrl: String(dataObj.upgradeUrl).trim(),
+        ...mergeQrOpts(qrCheck.qr),
       },
       ...logCtx,
     },
