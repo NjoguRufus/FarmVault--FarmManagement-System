@@ -5,11 +5,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { generateStageTimeline, getCropStages } from '@/lib/cropStageConfig';
 import { EnvironmentType } from '@/types';
 import { cn } from '@/lib/utils';
-import { useCollection } from '@/hooks/useCollection';
-import { createBudgetPool } from '@/services/budgetPoolService';
+import { createBudgetPool, getBudgetPoolsByCompany } from '@/services/budgetPoolService';
 import { getChallengeTemplates } from '@/services/challengeTemplatesService';
 import { createProject } from '@/services/projectsService';
-import type { BudgetPool } from '@/types';
 import {
   cropSupportsEnvironment,
   findCropKnowledgeByTypeKey,
@@ -165,16 +163,12 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     }
   }, [projectCropTypeForTemplates, templateIdsKey]);
 
-  const { data: budgetPools = [] } = useCollection<BudgetPool>(
-    `budget-pools-${user?.companyId ?? ''}`,
-    'budgetPools',
-    {
-      companyId: user?.companyId ?? null,
-      orderByField: 'createdAt',
-      orderByDirection: 'desc',
-      enabled: Boolean(user?.companyId),
-    }
-  );
+  const { data: budgetPools = [] } = useQuery({
+    queryKey: ['budget-pools', user?.companyId ?? ''],
+    queryFn: () => getBudgetPoolsByCompany(user!.companyId),
+    enabled: Boolean(user?.companyId),
+    staleTime: 30_000,
+  });
 
   const stageOptions = selectedCrop?.stages ?? [];
   const resolvedEnvironmentType = getEffectiveEnvironmentForCrop(selectedCrop, form.environmentType);
@@ -364,6 +358,20 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         ? expectedHarvestDate.toISOString().slice(0, 10)
         : null;
 
+      const separateBudget = budgetType === 'separate' ? Math.max(0, Number(form.budget || '0') || 0) : 0;
+      const poolId = budgetType === 'pool' && budgetPoolId ? budgetPoolId : null;
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Project Creation payload]', {
+          budgetType,
+          separateBudget,
+          budgetPoolId: poolId,
+          name: form.projectName.trim(),
+          cropType: projectCropType,
+        });
+      }
+
       const project = await createProject({
         companyId: user.companyId,
         createdBy: user.id,
@@ -376,13 +384,17 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         fieldSize: Number(form.acreage || '0') || null,
         fieldUnit: 'acres',
         notes: form.location || null,
+        budget: poolId ? 0 : separateBudget,
+        budgetPoolId: poolId,
       });
 
       if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
         console.log('[Project Created]', project);
       }
 
       await queryClient.invalidateQueries({ queryKey: ['projects', user.companyId] });
+      await queryClient.invalidateQueries({ queryKey: ['budget-pools', user.companyId] });
       onSuccess?.();
     } catch (e) {
       console.error('[Project Create Error]', e);
@@ -809,7 +821,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
               {budgetType === 'pool' && (
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Budget Pool</Label>
-                  {budgetPools.length > 0 ? (
+                  {budgetPools.length > 0 && (
                     <Select value={budgetPoolId || '_none'} onValueChange={(v) => setBudgetPoolId(v === '_none' ? '' : v)}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Select pool" />
@@ -818,57 +830,69 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                         <SelectItem value="_none">Select a pool</SelectItem>
                         {budgetPools.map((p) => (
                           <SelectItem key={p.id} value={p.id}>
-                            {p.name} — {p.remainingAmount?.toLocaleString?.() ?? p.remainingAmount} KES left
+                            {p.name} — {Number(p.remainingAmount ?? 0).toLocaleString()} KES left
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/30">
-                      <p className="text-xs text-muted-foreground">No budget pools yet. Create one below.</p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <input
-                          className="fv-input text-sm"
-                          placeholder="Pool name"
-                          value={createPoolName}
-                          onChange={(e) => setCreatePoolName(e.target.value)}
-                        />
-                        <input
-                          className="fv-input text-sm"
-                          type="number"
-                          min={0}
-                          placeholder="Total amount (KES)"
-                          value={createPoolAmount}
-                          onChange={(e) => setCreatePoolAmount(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={creatingPool || !createPoolName.trim() || !(Number(createPoolAmount) > 0)}
-                        onClick={async () => {
-                          if (!user?.companyId || !createPoolName.trim() || !(Number(createPoolAmount) > 0)) return;
-                          setCreatingPool(true);
-                          try {
-                            const id = await createBudgetPool({
-                              companyId: user.companyId,
-                              name: createPoolName.trim(),
-                              totalAmount: Number(createPoolAmount),
-                            });
-                            setBudgetPoolId(id);
-                            setCreatePoolName('');
-                            setCreatePoolAmount('');
-                            queryClient.invalidateQueries({ queryKey: ['budget-pools'] });
-                          } finally {
-                            setCreatingPool(false);
-                          }
-                        }}
-                      >
-                        {creatingPool ? 'Creating…' : 'Create pool'}
-                      </Button>
-                    </div>
                   )}
+                  <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/30">
+                    <p className="text-xs text-muted-foreground">
+                      {budgetPools.length > 0
+                        ? 'Need another pool? Create one here — it will be selected for this project.'
+                        : 'No budget pools yet. Create one below.'}
+                    </p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        className="fv-input text-sm"
+                        placeholder="Pool name"
+                        value={createPoolName}
+                        onChange={(e) => setCreatePoolName(e.target.value)}
+                      />
+                      <input
+                        className="fv-input text-sm"
+                        type="number"
+                        min={0}
+                        placeholder="Total amount (KES)"
+                        value={createPoolAmount}
+                        onChange={(e) => setCreatePoolAmount(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={creatingPool || !createPoolName.trim() || !(Number(createPoolAmount) > 0)}
+                      onClick={async () => {
+                        if (!user?.companyId || !createPoolName.trim() || !(Number(createPoolAmount) > 0)) return;
+                        const payload = {
+                          companyId: user.companyId,
+                          name: createPoolName.trim(),
+                          totalAmount: Number(createPoolAmount),
+                        };
+                        if (import.meta.env.DEV) {
+                          // eslint-disable-next-line no-console
+                          console.log('[Budget pool creation payload]', payload);
+                        }
+                        setCreatingPool(true);
+                        try {
+                          const id = await createBudgetPool(payload);
+                          setBudgetPoolId(id);
+                          setCreatePoolName('');
+                          setCreatePoolAmount('');
+                          await queryClient.invalidateQueries({ queryKey: ['budget-pools', user.companyId] });
+                          toast.success('Budget pool created and selected.');
+                        } catch (err) {
+                          console.error('[Budget pool create]', err);
+                          toast.error('Could not create budget pool. Please try again.');
+                        } finally {
+                          setCreatingPool(false);
+                        }
+                      }}
+                    >
+                      {creatingPool ? 'Creating…' : 'Create pool'}
+                    </Button>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

@@ -9,6 +9,7 @@ import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
 import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
 import { clearQuickUnlockState } from '@/services/appLockService';
+import { clearPendingApprovalSession } from '@/lib/pendingApprovalSession';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -699,14 +700,16 @@ export function AuthProvider({
           return;
         }
 
-        // 3) If this user was reset/deleted by developer action, do NOT auto-recreate profile.
+        // 3) Developer delete (user or company) inserts admin.reset_users so we do not resurrect stale sessions.
+        // When re-signup is allowed, consume that tombstone immediately — same as the old "Start Fresh" button —
+        // so the user continues like a first-time signup straight into onboarding (no extra gate page).
         const { data: resetState, error: resetError } = await supabase.rpc('get_reset_user_state');
         const resetPayload = (resetState ?? {}) as {
           has_reset_row?: boolean;
           is_blocked?: boolean;
           allow_resignup?: boolean;
         };
-        const resetBlocked = resetPayload?.is_blocked === true;
+        const hasActiveResetRow = resetPayload?.has_reset_row === true;
         const resetAllowResignup = resetPayload?.allow_resignup !== false;
 
         if (resetError && import.meta.env.DEV) {
@@ -714,7 +717,19 @@ export function AuthProvider({
           console.warn('[Auth] get_reset_user_state RPC warning:', resetError);
         }
 
-        if (resetBlocked) {
+        if (hasActiveResetRow && resetAllowResignup) {
+          const { error: consumeErr } = await supabase.rpc('consume_reset_user_for_signup');
+          if (consumeErr && import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] consume_reset_user_for_signup (auto after dev delete) failed:', consumeErr);
+          } else {
+            clearPendingApprovalSession();
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.log('[Auth] Cleared reset tombstone; continuing bootstrap as new signup', { uid: userId });
+            }
+          }
+        } else if (hasActiveResetRow && !resetAllowResignup) {
           const resetUser: User = {
             id: userId,
             email: fallbackEmail,
@@ -735,10 +750,7 @@ export function AuthProvider({
           confirmedSignedInRef.current = true;
           setAuthReady(true);
           // eslint-disable-next-line no-console
-          console.warn('[Auth] Skipped auto-rehydration because account is in deleted/reset state', {
-            uid: userId,
-            allowResignup: resetAllowResignup,
-          });
+          console.warn('[Auth] Re-signup blocked for this account (allow_resignup=false)', { uid: userId });
           return;
         }
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,6 +17,9 @@ import {
 } from '@/utils/cropStages';
 import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
 import { getProject, deleteProject as deleteProjectService } from '@/services/projectsService';
+import { getFinanceExpenses } from '@/services/financeExpenseService';
+import { getBudgetPool } from '@/services/budgetPoolService';
+import { isInputExpenseCategory, isLabourExpenseCategory } from '@/lib/financeExpenseCategories';
 import { getCropHeroImage } from '@/lib/cropHeroImage';
 import {
   ProjectHeroCard,
@@ -94,9 +97,10 @@ export default function ProjectDetailsPage() {
     ...scope,
     projectId: projectId ?? null,
   });
-  const { data: allExpenses = [] } = useCollection<Expense>('project-details-expenses', 'expenses', {
-    ...scope,
-    projectId: projectId ?? null,
+  const { data: financeExpensesRaw = [] } = useQuery({
+    queryKey: ['project-finance-expenses', companyId, projectId],
+    queryFn: () => getFinanceExpenses(companyId!, projectId!),
+    enabled: Boolean(companyId && projectId),
   });
   const allChallenges = allChallengesFromHook;
   const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>(
@@ -132,13 +136,29 @@ export default function ProjectDetailsPage() {
         : [],
     [allWorkLogs, companyId, projectId],
   );
-  const expenses = useMemo(
-    () =>
-      companyId && projectId
-        ? allExpenses.filter((item) => item.companyId === companyId && item.projectId === projectId)
-        : [],
-    [allExpenses, companyId, projectId],
-  );
+  const expenses = useMemo((): Expense[] => {
+    if (!companyId || !projectId) return [];
+    return financeExpensesRaw.map(
+      (e) =>
+        ({
+          id: e.id,
+          companyId: e.companyId,
+          projectId: e.projectId ?? projectId,
+          category: e.category as Expense['category'],
+          description: e.description,
+          amount: e.amount,
+          date: (typeof e.date === 'string'
+            ? new Date(e.date.includes('T') ? e.date : `${e.date}T12:00:00`)
+            : e.date) as Date,
+        }) as Expense,
+    );
+  }, [financeExpensesRaw, companyId, projectId]);
+
+  const { data: linkedBudgetPool } = useQuery({
+    queryKey: ['budget-pool', companyId, project?.budgetPoolId],
+    queryFn: () => getBudgetPool(project!.budgetPoolId!, companyId!),
+    enabled: Boolean(companyId && project?.budgetPoolId),
+  });
   const challenges = useMemo(
     () =>
       companyId && projectId
@@ -206,13 +226,61 @@ export default function ProjectDetailsPage() {
     [templateStages, daysSincePlanting],
   );
 
+  const expenseSpanDays = useMemo(() => {
+    if (!expenses.length) return 0;
+    const times = expenses
+      .map((e) => normalizeDate(e.date)?.getTime())
+      .filter((t): t is number => t != null);
+    if (!times.length) return 0;
+    const minT = Math.min(...times);
+    return Math.max(1, Math.ceil((Date.now() - minT) / 86400000));
+  }, [expenses]);
+
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const labourCost = expenses.filter((e) => e.category === 'labour').reduce((s, e) => s + e.amount, 0);
-  const inputCost = expenses
-    .filter((e) => ['fertilizer', 'chemical', 'fuel'].includes(e.category))
+  const labourCost = expenses
+    .filter((e) => isLabourExpenseCategory(String(e.category)))
     .reduce((s, e) => s + e.amount, 0);
-  const avgDailyCost =
-    daysSincePlanting && daysSincePlanting > 0 ? Math.round(totalExpenses / daysSincePlanting) : 0;
+  const inputCost = expenses
+    .filter((e) => isInputExpenseCategory(String(e.category)))
+    .reduce((s, e) => s + e.amount, 0);
+  const avgDailyDenominator =
+    daysSincePlanting != null && daysSincePlanting > 0 ? daysSincePlanting : expenseSpanDays;
+  const avgDailyCost = avgDailyDenominator > 0 ? Math.round(totalExpenses / avgDailyDenominator) : 0;
+
+  const snapshotBudgetRemaining = useMemo(() => {
+    if (!project) return null;
+    if (project.budgetPoolId) {
+      if (!linkedBudgetPool) return null;
+      return linkedBudgetPool.totalAmount - totalExpenses;
+    }
+    if (Number(project.budget) > 0) return Number(project.budget) - totalExpenses;
+    return null;
+  }, [project, linkedBudgetPool, totalExpenses]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !projectId || !project) return;
+    // eslint-disable-next-line no-console
+    console.log('[ProjectDetails financial snapshot source]', {
+      projectId,
+      financeExpenseCount: financeExpensesRaw.length,
+      totalSpent: totalExpenses,
+      labourCost,
+      inputCost,
+      budgetPoolId: project.budgetPoolId ?? null,
+      poolTotal: linkedBudgetPool?.totalAmount ?? null,
+      separateBudgetCap: project.budget,
+    });
+  }, [
+    projectId,
+    project,
+    financeExpensesRaw.length,
+    totalExpenses,
+    labourCost,
+    inputCost,
+    linkedBudgetPool?.totalAmount,
+    project?.budget,
+    project?.budgetPoolId,
+  ]);
 
   const totalSeasonDays = cropTimeline?.totalDaysToHarvest ?? null;
   const dayOfSeason =
@@ -403,7 +471,7 @@ export default function ProjectDetailsPage() {
         labourCost={labourCost}
         inputCost={inputCost}
         averageDailyCost={Number.isFinite(avgDailyCost) ? avgDailyCost : 0}
-        budgetRemaining={project.budget != null ? (project.budget as number) - totalExpenses : null}
+        budgetRemaining={snapshotBudgetRemaining}
         formatCurrency={formatCurrency}
       />
       </div>

@@ -51,7 +51,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   }
 
   // Redirect ONLY when setupIncomplete is true AND there is no employee profile
-  // (no invite match). Reset/deleted users go to explicit Start Fresh gate.
+  // (no invite match). Re-signup blocked (allow_resignup=false) still uses /start-fresh.
   if (setupIncomplete && !employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console

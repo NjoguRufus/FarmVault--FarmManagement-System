@@ -19,6 +19,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { Button } from '@/components/ui/button';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -135,7 +136,23 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-72">
-              <DropdownMenuLabel>Switch Project</DropdownMenuLabel>
+              <DropdownMenuLabel className="flex items-center justify-between gap-2 pr-2 font-normal">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Switch Project
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs font-medium shrink-0"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setActiveProject(null);
+                  }}
+                >
+                  All
+                </Button>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               {companyProjects.length === 0 ? (
                 <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>

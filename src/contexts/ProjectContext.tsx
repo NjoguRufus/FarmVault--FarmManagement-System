@@ -1,4 +1,13 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  ReactNode,
+} from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Project } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +22,10 @@ interface ProjectContextType {
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const PROJECTS_CACHE_KEY = 'farmvault:projects:cache:v1';
+
+function activeProjectStorageKey(companyId: string) {
+  return `farmvault:activeProjectId:v1:${companyId}`;
+}
 
 function readCachedProjects(): Project[] {
   if (typeof window === 'undefined') return [];
@@ -48,14 +61,32 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     refetchOnReconnect: false,
   });
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
-  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [activeProject, setActiveProjectState] = useState<Project | null>(null);
+  const restoredActiveForCompanyRef = useRef<string | null>(null);
+
+  const setActiveProject = useCallback(
+    (project: Project | null) => {
+      setActiveProjectState(project);
+      if (typeof window === 'undefined' || !companyId) return;
+      try {
+        const key = activeProjectStorageKey(companyId);
+        if (project) window.localStorage.setItem(key, project.id);
+        else window.localStorage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    },
+    [companyId],
+  );
 
   useEffect(() => {
     const prev = prevCompanyIdRef.current;
     if (prev !== undefined && prev !== companyId) {
       setCachedProjects([]);
-      setActiveProject(null);
+      setActiveProjectState(null);
+      restoredActiveForCompanyRef.current = null;
       try {
+        if (prev) window.localStorage.removeItem(activeProjectStorageKey(prev));
         window.localStorage.removeItem(PROJECTS_CACHE_KEY);
         queryClient.clear();
       } catch {
@@ -64,7 +95,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
     if (!companyId && !isDeveloper) {
       setCachedProjects([]);
-      setActiveProject(null);
+      setActiveProjectState(null);
+      restoredActiveForCompanyRef.current = null;
       try {
         window.localStorage.removeItem(PROJECTS_CACHE_KEY);
       } catch {
@@ -113,7 +145,35 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!activeProject) return;
     const stillExists = projects.some((p) => p.id === activeProject.id);
     if (!stillExists) setActiveProject(null);
+  }, [projects, activeProject, setActiveProject]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const fresh = projects.find((p) => p.id === activeProject.id);
+    if (!fresh) return;
+    if (
+      fresh.budget !== activeProject.budget ||
+      fresh.budgetPoolId !== activeProject.budgetPoolId ||
+      fresh.name !== activeProject.name
+    ) {
+      setActiveProjectState(fresh);
+    }
   }, [projects, activeProject]);
+
+  useEffect(() => {
+    if (!companyId || !canSubscribeProjects || isLoading || error) return;
+    if (!projects.length) return;
+    if (restoredActiveForCompanyRef.current === companyId) return;
+    restoredActiveForCompanyRef.current = companyId;
+    try {
+      const raw = window.localStorage.getItem(activeProjectStorageKey(companyId));
+      if (!raw?.trim()) return;
+      const match = projects.find((p) => p.id === raw.trim());
+      if (match) setActiveProjectState(match);
+    } catch {
+      // ignore
+    }
+  }, [companyId, canSubscribeProjects, isLoading, error, projects]);
 
   const getProjectsByCompany = (companyId: string) => {
     return projects.filter((p) => p.companyId === companyId);

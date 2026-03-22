@@ -29,3 +29,10 @@ enabled = false
 # invite-employee uses Clerk JWT only; do not verify Supabase Auth JWT (deploy with --no-verify-jwt).
 [functions.invite-employee]
 verify_jwt = false
+
+# Clerk session JWT verified in-function via Supabase third-party auth (same pattern as create-company-onboarding).
+[functions.send-farmvault-email]
+verify_jwt = false
+
+[functions.notify-company-workspace-ready]
+verify_jwt = false

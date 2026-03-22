@@ -49,14 +49,19 @@ export type DeveloperSubscriptionAction =
   | 'extend'
   | 'set_plan';
 
+export type SetCompanySubscriptionStateResult = {
+  /** True when the company just left pending_approval via approve/activate; trigger workspace-ready email. */
+  workspace_ready_email: boolean;
+};
+
 export async function setCompanySubscriptionState(input: {
   companyId: string;
   action: DeveloperSubscriptionAction;
   planCode?: 'basic' | 'pro' | null;
   reason?: string | null;
   days?: number | null;
-}): Promise<void> {
-  const { error } = await supabase.rpc('set_company_subscription_state', {
+}): Promise<SetCompanySubscriptionStateResult> {
+  const { data, error } = await supabase.rpc('set_company_subscription_state', {
     _company_id: input.companyId,
     _action: input.action,
     _plan_code: input.planCode ?? null,
@@ -66,6 +71,8 @@ export async function setCompanySubscriptionState(input: {
   if (error) {
     throw new Error(error.message ?? 'Failed to update company subscription state');
   }
+  const payload = data as { workspace_ready_email?: boolean } | null;
+  return { workspace_ready_email: !!payload?.workspace_ready_email };
 }
 
 /** After Pro trial ends, company admin picks Basic or Pro (updates company_subscriptions.plan_code, clears is_trial). */

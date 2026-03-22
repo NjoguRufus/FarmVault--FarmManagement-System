@@ -25,22 +25,30 @@ export default function PendingApprovalPage() {
   const navState = location.state as Partial<PendingApprovalSessionPayload> | null;
   const stored = useMemo(() => readPendingApprovalSession(), [location.key]);
 
-  const companyId = user?.companyId ?? navState?.companyId ?? stored?.companyId ?? null;
-
-  /** Instant handoff when developer activates/approves (Realtime + short poll fallback). */
-  useCompanySubscriptionRealtime(companyId, Boolean(companyId));
-
-  const { data: gate, isLoading: gateLoading } = useQuery({
-    queryKey: ['subscription-gate', companyId],
+  // get_subscription_gate_state() resolves company from the signed-in user on the server — do not
+  // gate the query on client companyId. If we require companyId first, a brief null (refresh, cache)
+  // leaves gateLoading false and incorrectly sent users back to /onboarding.
+  const { data: gate, isLoading: gateLoading, isError: gateError } = useQuery({
+    queryKey: ['subscription-gate', 'pending-approval-page'],
     queryFn: () => getSubscriptionGateState(),
-    enabled: !!companyId,
+    enabled: authReady && !!user,
     staleTime: 0,
     refetchOnWindowFocus: true,
     refetchInterval: (q) => {
-      const s = (q.state.data?.status ?? '').toLowerCase();
+      const s = (q.state.data?.status ?? 'pending_approval').toLowerCase();
       return s === 'pending_approval' ? 2_000 : false;
     },
   });
+
+  const companyId =
+    user?.companyId ??
+    navState?.companyId ??
+    stored?.companyId ??
+    gate?.company_id ??
+    null;
+
+  /** Instant handoff when developer activates/approves (Realtime + short poll fallback). */
+  useCompanySubscriptionRealtime(companyId, Boolean(companyId));
 
   const companyName =
     navState?.companyName?.trim() ||
@@ -69,7 +77,10 @@ export default function PendingApprovalPage() {
 
   const whatsappUrl = useMemo(() => buildFarmVaultActivationWhatsAppUrl(activationMessage), [activationMessage]);
 
-  const gateStatus = useMemo(() => (gate?.status ?? '').toLowerCase(), [gate?.status]);
+  const gateStatus = useMemo(
+    () => (gate?.status ?? 'pending_approval').toLowerCase(),
+    [gate?.status],
+  );
 
   const [countdown, setCountdown] = useState(2);
   const [stayOnPage, setStayOnPage] = useState(false);
@@ -142,8 +153,17 @@ export default function PendingApprovalPage() {
     return <Navigate to="/sign-in" replace state={{ from: location }} />;
   }
 
-  if (!companyId && !gateLoading) {
-    return <Navigate to="/onboarding" replace />;
+  if (gateError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background px-4">
+        <p className="text-sm text-muted-foreground text-center max-w-md">
+          We couldn&apos;t load your approval status. Stay on this page and try again, or refresh.
+        </p>
+        <Button type="button" variant="outline" onClick={() => window.location.reload()}>
+          Refresh
+        </Button>
+      </div>
+    );
   }
 
   if (gateLoading && !gate) {
@@ -152,6 +172,11 @@ export default function PendingApprovalPage() {
         <p className="text-sm text-muted-foreground">Loading your request…</p>
       </div>
     );
+  }
+
+  // No subscription row and no company context anywhere — only then send to company setup.
+  if (!gateLoading && !gate && !companyId && !stored?.companyId && !navState?.companyId) {
+    return <Navigate to="/onboarding" replace />;
   }
 
   if (!gateLoading && gate && gateStatus !== 'pending_approval') {

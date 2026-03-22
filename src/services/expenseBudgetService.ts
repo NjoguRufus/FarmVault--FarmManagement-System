@@ -1,50 +1,30 @@
-import { doc, getDoc, getDocFromCache, updateDoc } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { db, requireCompanyId } from '@/lib/db';
 import { decrementPoolRemaining } from './budgetPoolService';
 
 /**
- * After creating an expense linked to a project, call this to deduct from
- * the project's budget or from its linked budget pool.
- * - If project.budgetPoolId is set: decrement budgetPools.remainingAmount.
- * - Else: decrement project.budget.
- * No-op if projectId is missing or project not found.
+ * After creating an expense linked to a project with a budget pool, decrement the pool's remaining balance.
+ * Projects with a separate budget (no pool) keep their allocated `budget` unchanged; spend is derived from finance.expenses.
  */
 export async function applyExpenseDeduction(
   companyId: string,
   projectId: string,
-  amount: number
+  amount: number,
 ): Promise<void> {
   if (!projectId || !companyId || Number(amount) <= 0) return;
+  const tenant = requireCompanyId(companyId);
 
-  const projectRef = doc(db, 'projects', projectId);
-  let snap;
-  try {
-    snap = await getDoc(projectRef);
-  } catch (err) {
-    const code = (err as { code?: string })?.code;
-    const msg = String((err as Error)?.message ?? '');
-    if (code === 'unavailable' || /offline|unavailable|failed to get/i.test(msg)) {
-      try {
-        snap = await getDocFromCache(projectRef);
-      } catch {
-        // Offline and no cached project document: skip budget deduction but don't block expense creation.
-        return;
-      }
-    } else {
-      throw err;
-    }
-  }
-  if (!snap.exists()) return;
-  const data = snap.data();
-  if (data?.companyId !== companyId) return;
+  const { data: proj, error } = await db
+    .projects()
+    .from('projects')
+    .select('budget_pool_id')
+    .eq('id', projectId)
+    .eq('company_id', tenant)
+    .maybeSingle();
 
-  const budgetPoolId = data.budgetPoolId ?? null;
-  if (budgetPoolId) {
-    await decrementPoolRemaining(budgetPoolId, amount);
-    return;
-  }
+  if (error || !proj) return;
 
-  const currentBudget = Number(data.budget ?? 0);
-  const nextBudget = Math.max(0, currentBudget - amount);
-  await updateDoc(projectRef, { budget: nextBudget });
+  const poolId = (proj as { budget_pool_id?: string | null }).budget_pool_id;
+  if (!poolId) return;
+
+  await decrementPoolRemaining(poolId, tenant, amount);
 }
