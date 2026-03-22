@@ -1,23 +1,23 @@
-// Public (anon-key) invoke: send “submission received” via Resend. No Supabase user JWT — Clerk RS256 is not verified here.
+// Public (anon-key) invoke: user confirmation + optional admin notify. No Supabase user JWT.
 //
 // Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs), SUPABASE_ANON_KEY (caller check).
-// Optional: FARMVAULT_EMAIL_FROM
+// Optional: FARMVAULT_EMAIL_FROM, FARMVAULT_ONBOARDING_ADMIN_EMAIL (default farmvaultke@gmail.com)
 //
-// Auth: Supabase project anon/publishable key only — `apikey` header and/or `Authorization: Bearer <anon>` (same key).
-// Do not pass Clerk session JWT; gateway: deploy with --no-verify-jwt (see config.toml).
-//
-// Body: { "to", "companyName", "dashboardUrl" } — caller supplies all fields (https URL required).
+// Body:
+//   to, companyName, dashboardUrl (user confirmation — unchanged)
+//   userEmail (optional; defaults to to) — shown on admin email
+//   approvalDashboardUrl (required https) — developer approvals link for admin email
 //
 // Deploy: npx supabase functions deploy notify-company-submission-received --no-verify-jwt
 //
-import {
-  getServiceRoleClientForEmailLogs,
-  insertEmailLogRow,
-  updateEmailLogRow,
-} from "../_shared/emailLogs.ts";
+import { getServiceRoleClientForEmailLogs, insertEmailLogRow } from "../_shared/emailLogs.ts";
+import { buildOnboardingAdminNotifyEmail } from "../_shared/farmvault-email/onboardingAdminNotifyTemplate.ts";
 import { buildSubmissionReceivedEmail } from "../_shared/farmvault-email/submissionReceivedTemplate.ts";
+import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
-const EMAIL_LOG_TYPE = "submission_received";
+const EMAIL_LOG_TYPE_USER = "submission_received";
+const EMAIL_LOG_TYPE_ADMIN = "submission_admin_notify";
+const DEFAULT_ADMIN_EMAIL = "farmvaultke@gmail.com";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,16 +50,6 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
     return null;
   } catch {
     return `${field} must be a valid URL`;
-  }
-}
-
-async function readResponsePayload(res: Response): Promise<Record<string, unknown>> {
-  const text = await res.text().catch(() => "");
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return { message: text.slice(0, 500) };
   }
 }
 
@@ -115,6 +105,10 @@ Deno.serve(async (req: Request) => {
     const to = typeof payload.to === "string" ? payload.to.trim() : "";
     const companyName = typeof payload.companyName === "string" ? payload.companyName.trim() : "";
     const dashboardUrl = typeof payload.dashboardUrl === "string" ? payload.dashboardUrl.trim() : "";
+    const userEmailRaw = typeof payload.userEmail === "string" ? payload.userEmail.trim() : "";
+    const userEmail = userEmailRaw || to;
+    const approvalDashboardUrl =
+      typeof payload.approvalDashboardUrl === "string" ? payload.approvalDashboardUrl.trim() : "";
 
     if (!to) {
       return jsonResponse(
@@ -124,6 +118,12 @@ Deno.serve(async (req: Request) => {
     }
     if (!EMAIL_RE.test(to)) {
       return jsonResponse({ error: "Invalid payload", detail: "to must be a valid email address" }, 400);
+    }
+    if (!EMAIL_RE.test(userEmail)) {
+      return jsonResponse(
+        { error: "Invalid payload", detail: "userEmail must be a valid email address" },
+        400,
+      );
     }
 
     if (!companyName || companyName.length < 2) {
@@ -138,9 +138,15 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Invalid payload", detail: urlErr }, 400);
     }
 
+    const apprErr = requireHttpsUrl(approvalDashboardUrl, "approvalDashboardUrl");
+    if (apprErr) {
+      return jsonResponse({ error: "Invalid payload", detail: apprErr }, 400);
+    }
+
     const admin = getServiceRoleClientForEmailLogs();
-    const logMeta = {
+    const logMetaUser = {
       source: "notify-company-submission-received",
+      branch: "user_confirmation",
       dashboardUrl,
     };
 
@@ -158,12 +164,12 @@ Deno.serve(async (req: Request) => {
           company_id: null,
           company_name: companyName,
           recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject: `[${EMAIL_LOG_TYPE}] Template build failed`,
+          email_type: EMAIL_LOG_TYPE_USER,
+          subject: `[${EMAIL_LOG_TYPE_USER}] Template build failed`,
           status: "failed",
           provider: "resend",
           error_message: errText,
-          metadata: logMeta,
+          metadata: logMetaUser,
         });
       }
       return jsonResponse(
@@ -180,12 +186,12 @@ Deno.serve(async (req: Request) => {
           company_id: null,
           company_name: companyName,
           recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
+          email_type: EMAIL_LOG_TYPE_USER,
           subject,
           status: "failed",
           provider: "resend",
           error_message: "RESEND_API_KEY missing",
-          metadata: logMeta,
+          metadata: logMetaUser,
         });
       }
       return jsonResponse(
@@ -196,114 +202,69 @@ Deno.serve(async (req: Request) => {
 
     const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
 
-    let logId: string | null = null;
-    if (admin) {
-      logId = await insertEmailLogRow(admin, {
-        company_id: null,
-        company_name: companyName,
-        recipient_email: to.toLowerCase(),
-        email_type: EMAIL_LOG_TYPE,
-        subject,
-        status: "pending",
-        provider: "resend",
-        metadata: logMeta,
-      });
+    const userSend = await sendResendWithEmailLog({
+      admin,
+      resendKey,
+      from,
+      to,
+      subject,
+      html,
+      email_type: EMAIL_LOG_TYPE_USER,
+      company_name: companyName,
+      metadata: logMetaUser,
+    });
+
+    if (!userSend.ok) {
+      return jsonResponse({ error: "Failed to send email", detail: userSend.error }, 500);
     }
 
-    let res: Response;
-    try {
-      res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject,
-          html,
-        }),
-      });
-    } catch (fetchErr) {
-      console.error("[notify-company-submission-received] Resend fetch network error", fetchErr);
-      const detail = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      if (admin && logId) {
-        await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
-      } else if (admin && !logId) {
-        await insertEmailLogRow(admin, {
-          company_id: null,
-          company_name: companyName,
-          recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject,
-          status: "failed",
-          provider: "resend",
-          error_message: detail,
-          metadata: logMeta,
-        });
-      }
-      return jsonResponse(
-        {
-          error: "Failed to send email",
-          detail,
-        },
-        500,
+    const adminRecipient =
+      Deno.env.get("FARMVAULT_ONBOARDING_ADMIN_EMAIL")?.trim() || DEFAULT_ADMIN_EMAIL;
+    const submittedAt = new Date().toISOString();
+    const adminBuilt = buildOnboardingAdminNotifyEmail({
+      companyName,
+      userEmail,
+      submittedAtIso: submittedAt,
+      approvalDashboardUrl,
+    });
+
+    const adminSend = await sendResendWithEmailLog({
+      admin,
+      resendKey,
+      from,
+      to: adminRecipient,
+      subject: adminBuilt.subject,
+      html: adminBuilt.html,
+      email_type: EMAIL_LOG_TYPE_ADMIN,
+      company_name: companyName,
+      metadata: {
+        source: "notify-company-submission-received",
+        branch: "admin_notify",
+        userEmail,
+        confirmationRecipient: to,
+        approvalDashboardUrl,
+        submittedAt,
+      },
+    });
+
+    if (!adminSend.ok) {
+      console.error(
+        "[notify-company-submission-received] admin notify failed (submission still OK for user)",
+        adminSend.error,
       );
     }
 
-    const resBody = await readResponsePayload(res);
-
-    if (!res.ok) {
-      console.error("[notify-company-submission-received] Resend error", res.status, resBody);
-      const detail =
-        typeof resBody.message === "string"
-          ? resBody.message
-          : typeof resBody.name === "string"
-            ? resBody.name
-            : `HTTP ${res.status}`;
-      if (admin && logId) {
-        await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
-      } else if (admin && !logId) {
-        await insertEmailLogRow(admin, {
-          company_id: null,
-          company_name: companyName,
-          recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject,
-          status: "failed",
-          provider: "resend",
-          error_message: detail,
-          metadata: logMeta,
-        });
-      }
-      return jsonResponse({ error: "Failed to send email", detail }, 500);
-    }
-
-    const id = typeof resBody.id === "string" ? resBody.id : undefined;
-    const sentAt = new Date().toISOString();
-    if (admin && logId) {
-      await updateEmailLogRow(admin, logId, {
-        status: "sent",
-        provider_message_id: id ?? null,
-        sent_at: sentAt,
-      });
-    } else if (admin && !logId) {
-      await insertEmailLogRow(admin, {
-        company_id: null,
-        company_name: companyName,
-        recipient_email: to.toLowerCase(),
-        email_type: EMAIL_LOG_TYPE,
-        subject,
-        status: "sent",
-        provider: "resend",
-        provider_message_id: id ?? null,
-        sent_at: sentAt,
-        metadata: logMeta,
-      });
-    }
-
-    return jsonResponse({ ok: true, id, to, logId: logId ?? undefined }, 200);
+    return jsonResponse(
+      {
+        ok: true,
+        id: userSend.resendId,
+        to,
+        logId: userSend.logId ?? undefined,
+        adminNotifyOk: adminSend.ok,
+        ...(adminSend.ok ? {} : { adminNotifyError: adminSend.error }),
+      },
+      200,
+    );
   } catch (unexpected) {
     console.error("[notify-company-submission-received] Unhandled error", unexpected);
     return jsonResponse(

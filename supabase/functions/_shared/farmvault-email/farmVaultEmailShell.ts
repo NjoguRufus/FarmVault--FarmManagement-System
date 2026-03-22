@@ -1,15 +1,16 @@
 import { escapeHtml } from "./escapeHtml.ts";
+import { FARMVAULT_EMAIL_HEADER_LOGO_ROW } from "./emailHeaderLogoRow.ts";
 
-/** Official hosted logo (farmvault.africa). */
+/** Same asset as header row (for callers that need the URL only). */
 export const FARMVAULT_EMAIL_LOGO_URL =
   "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
 
 export type FarmVaultEmailShellOptions = {
   /** Inbox preview line (hidden in body). */
   preheader: string;
-  /** Primary headline in the gradient header (white). */
+  /** Primary headline below the logo (light header). */
   title: string;
-  /** Supporting line under the title in the header (soft contrast on green). */
+  /** Supporting line under the title. */
   subtitle: string;
   /** Main body HTML; escape user-controlled values before interpolating. */
   content: string;
@@ -33,7 +34,7 @@ const fontStack = "Arial, Helvetica, sans-serif";
 
 /**
  * Full HTML document for FarmVault transactional email.
- * Tables + inline styles only (no flex/grid/classes). Gradient degrades to solid green where unsupported.
+ * Tables + inline styles only. Light header (logo + title) so the official logo reads clearly.
  */
 export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
   const { preheader, title, subtitle, content, cta } = opts;
@@ -88,20 +89,13 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
           <tr>
             <td style="background-color:${BRAND.white};border-radius:18px;overflow:hidden;border:1px solid ${BRAND.border};box-shadow:0 4px 24px rgba(31, 111, 67, 0.08);">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                ${FARMVAULT_EMAIL_HEADER_LOGO_ROW}
                 <tr>
-                  <td align="center" style="padding:40px 40px 28px 40px;background-color:${BRAND.primary};background-image:linear-gradient(135deg, ${BRAND.primary} 0%, ${BRAND.accent} 100%);">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;">
-                      <tr>
-                        <td align="center" style="padding:0 0 16px 0;">
-                          <img src="${FARMVAULT_EMAIL_LOGO_URL}" width="140" alt="FarmVault" border="0"
-                            style="display:block;width:140px;max-width:140px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;" />
-                        </td>
-                      </tr>
-                    </table>
-                    <h1 style="margin:0;padding:0;font-family:${fontStack};font-size:28px;line-height:1.25;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
+                  <td align="center" style="padding:0 40px 28px 40px;background-color:${BRAND.white};">
+                    <h1 style="margin:0;padding:0;font-family:${fontStack};font-size:28px;line-height:1.25;font-weight:700;color:${BRAND.primary};letter-spacing:-0.02em;">
                       ${safeTitle}
                     </h1>
-                    <p style="margin:12px 0 0 0;padding:0;font-family:${fontStack};font-size:15px;line-height:1.55;font-weight:400;color:#e3f2e9;">
+                    <p style="margin:12px 0 0 0;padding:0;font-family:${fontStack};font-size:15px;line-height:1.55;font-weight:400;color:${BRAND.muted};">
                       ${safeSubtitle}
                     </p>
                   </td>

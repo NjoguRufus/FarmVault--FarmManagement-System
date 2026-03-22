@@ -214,6 +214,7 @@ export default function SetupCompany() {
             ? window.location.origin
             : 'https://app.farmvault.africa';
       const dashboardUrl = `${base}/pending-approval`;
+      const approvalDashboardUrl = `${base}/developer/companies`;
 
       void (async () => {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return;
@@ -221,6 +222,8 @@ export default function SetupCompany() {
           to: recipient,
           companyName: companyName.trim(),
           dashboardUrl,
+          userEmail: normalizedAdminEmail,
+          approvalDashboardUrl,
         });
         if (!result.ok) {
           const msg = [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error';
