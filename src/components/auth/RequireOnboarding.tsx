@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
+import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
 
 interface RequireOnboardingProps {
   children: React.ReactElement;
@@ -15,7 +16,7 @@ interface RequireOnboardingProps {
  * - Redirect to /onboarding ONLY when setupIncomplete === true (never based on subscription/trial).
  */
 export function RequireOnboarding({ children }: RequireOnboardingProps) {
-  const { user, authReady, isDeveloper, setupIncomplete, employeeProfile } = useAuth();
+  const { user, authReady, isDeveloper, setupIncomplete, employeeProfile, resetRequired } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -50,7 +51,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   }
 
   // Redirect ONLY when setupIncomplete is true AND there is no employee profile
-  // (no invite match). This is the company-owner onboarding path.
+  // (no invite match). Reset/deleted users go to explicit Start Fresh gate.
   if (setupIncomplete && !employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -59,6 +60,11 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
         role: user.role,
         setupIncomplete,
       });
+    }
+    if (resetRequired) {
+      // eslint-disable-next-line no-console
+      console.warn('[AuthReset] Auto-onboarding skipped; routing reset user to Start Fresh gate');
+      return <Navigate to="/start-fresh" replace state={{ from: location }} />;
     }
     return <Navigate to="/onboarding" replace state={{ from: location }} />;
   }
@@ -74,5 +80,5 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
     });
   }
 
-  return children;
+  return <SubscriptionAccessGate>{children}</SubscriptionAccessGate>;
 }

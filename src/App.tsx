@@ -85,6 +85,8 @@ import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
 import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
+import PendingApprovalPage from "@/pages/PendingApprovalPage";
+import StartFreshPage from "@/pages/StartFreshPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireOnboarding } from "@/components/auth/RequireOnboarding";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
@@ -130,6 +132,7 @@ import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
 import DevBootstrapPage from "@/pages/dev/DevBootstrap";
 import DevDiagnosticsPage from "@/pages/dev/DevDiagnosticsPage";
+import DevQRGeneratorPage from "@/pages/dev/DevQRGeneratorPage";
 import { DeveloperLayout } from "@/components/layout/DeveloperLayout";
 import DeveloperCompaniesPage from "@/pages/developer/DeveloperCompaniesPage";
 import DeveloperUsersPage from "@/pages/developer/DeveloperUsersPage";
@@ -233,6 +236,8 @@ const AppRoutesWithLock = () => {
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
       <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
       <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+      <Route path="/pending-approval" element={<RequireAuth><PendingApprovalPage /></RequireAuth>} />
+      <Route path="/start-fresh" element={<RequireAuth><StartFreshPage /></RequireAuth>} />
       <Route path="/setup-company" element={<Navigate to="/onboarding" replace />} />
       <Route path="/setup" element={<Navigate to="/onboarding" replace />} />
 
@@ -419,6 +424,7 @@ const AppRoutesWithLock = () => {
         {/* Canonical developer dashboard path */}
         <Route path="/dev/dashboard" element={<AdminDashboard />} />
         <Route path="/dev/diagnostics" element={<DevDiagnosticsPage />} />
+        <Route path="/dev/qr-generator" element={<Navigate to="/developer/qr" replace />} />
         {/* Keep legacy /admin routes working but prefer /developer as canonical */}
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/companies" element={<AdminCompaniesPage />} />
@@ -462,6 +468,7 @@ const AppRoutesWithLock = () => {
         <Route path="records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
         <Route path="records/view/:recordId" element={<DeveloperRecordViewPage />} />
         <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
+        <Route path="qr" element={<DevQRGeneratorPage />} />
       </Route>
       
       {/* 404 route */}

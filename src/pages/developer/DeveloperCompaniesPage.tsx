@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { fetchDeveloperCompanies } from '@/services/developerService';
-import { overrideSubscription, deleteCompanySafely, type OverrideMode } from '@/services/developerAdminService';
+import { overrideSubscription, deleteCompanySafely, updateCompanySubscriptionState, listDuplicateEmails, type OverrideMode } from '@/services/developerAdminService';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,9 +33,27 @@ import {
   Loader2,
   Trash2,
   AlertTriangle,
+  CheckCircle2,
+  PauseCircle,
+  XOctagon,
+  Copy,
+  Search,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+
+type LatestSubscriptionPayment = {
+  id?: string;
+  status?: string | null;
+  amount?: number | string | null;
+  currency?: string | null;
+  plan_id?: string | null;
+  billing_cycle?: string | null;
+  submitted_at?: string | null;
+  mpesa_name?: string | null;
+  transaction_code?: string | null;
+};
 
 type CompanyRow = {
   company_id?: string;
@@ -51,6 +69,7 @@ type CompanyRow = {
   is_trial?: boolean | null;
   trial_ends_at?: string | null;
   active_until?: string | null;
+  latest_subscription_payment?: LatestSubscriptionPayment | null;
   override?: {
     enabled?: boolean;
     mode?: string;
@@ -80,15 +99,22 @@ function getEffectiveLabel(c: CompanyRow): { label: string; variant: 'default' |
   }
 
   if (status === 'trialing') return { label: 'Trial', variant: 'warning' };
+  if (status === 'pending_approval') return { label: 'Pending Approval', variant: 'warning' };
   if (status === 'active') {
     if (plan === 'pro' || plan === 'professional') return { label: 'Pro', variant: 'success' };
     if (plan === 'enterprise') return { label: 'Enterprise', variant: 'success' };
     return { label: 'Basic', variant: 'default' };
   }
   if (status === 'expired') return { label: 'Expired', variant: 'destructive' };
+  if (status === 'rejected') return { label: 'Rejected', variant: 'destructive' };
+  if (status === 'suspended') return { label: 'Suspended', variant: 'destructive' };
   if (status === 'cancelled') return { label: 'Cancelled', variant: 'destructive' };
 
-  return { label: plan || 'Basic', variant: 'default' };
+  if (!status) {
+    if (!plan) return { label: 'Unset / None', variant: 'default' };
+    return { label: `${plan} / Unset`, variant: 'default' };
+  }
+  return { label: plan || 'None', variant: 'default' };
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -101,8 +127,38 @@ function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
+function latestPaymentStatusStyles(status: string | undefined | null): string {
+  const s = (status ?? '').toLowerCase();
+  if (s === 'pending_verification' || s === 'pending') {
+    return 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200';
+  }
+  if (s === 'approved') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200';
+  if (s === 'rejected') return 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200';
+  return 'border-border bg-muted text-muted-foreground';
+}
+
+function latestPaymentStatusLabel(status: string | undefined | null): string {
+  const s = (status ?? '').toLowerCase();
+  if (s === 'pending_verification') return 'Pending verification';
+  if (s === 'pending') return 'Pending';
+  return (status ?? '—').replace(/_/g, ' ');
+}
+
+function isNewCompany(createdAt?: string | null, daysWindow: number = 7): boolean {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return false;
+  const now = new Date();
+  const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+  return diffDays <= daysWindow;
+}
+
 export default function DeveloperCompaniesPage() {
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended' | 'rejected' | 'approved' | 'pending_approval'>('all');
+  const [overrideFilter, setOverrideFilter] = useState<'all' | 'overridden' | 'pilot' | 'collaborator' | 'free_access' | 'trial_override'>('all');
+  const [newOnly, setNewOnly] = useState(false);
+  const [newWindowDays, setNewWindowDays] = useState<3 | 7 | 14>(7);
   const { activeCompanyId } = useActiveCompany();
   const [deleteModal, setDeleteModal] = useState<{
     open: boolean;
@@ -141,14 +197,43 @@ export default function DeveloperCompaniesPage() {
 
   const companies = (data?.items ?? []) as CompanyRow[];
 
+  // eslint-disable-next-line no-console
+  console.log('[DeveloperCompaniesPage] companies query raw:', data);
+  // eslint-disable-next-line no-console
+  console.log('[DeveloperCompaniesPage] parsed companies length:', companies.length);
+  // eslint-disable-next-line no-console
+  console.log('[DeveloperCompaniesPage] first parsed company:', companies[0] ?? null);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return companies;
     return companies.filter((c) => {
       const name = (c.company_name ?? c.name ?? '').toLowerCase();
       const plan = (c.plan_code ?? '').toLowerCase();
       const status = (c.subscription_status ?? '').toLowerCase();
       const id = (c.company_id ?? c.id ?? '').toLowerCase();
+      const mode = (c.override?.mode ?? '').toLowerCase();
+      const hasOverride = Boolean(c.override?.enabled);
+
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'approved') {
+          if (!['active', 'trialing'].includes(status)) return false;
+        } else if (status !== statusFilter) {
+          return false;
+        }
+      }
+
+      if (overrideFilter !== 'all') {
+        if (overrideFilter === 'overridden' && !hasOverride) return false;
+        if (overrideFilter === 'pilot' && mode !== 'pilot') return false;
+        if (overrideFilter === 'collaborator' && mode !== 'collaborator') return false;
+        if (overrideFilter === 'free_access' && !['free_forever', 'free_until'].includes(mode)) return false;
+        if (overrideFilter === 'trial_override' && !['start_trial', 'extended_trial'].includes(mode)) return false;
+      }
+
+      const isNew = isNewCompany(c.created_at, newWindowDays);
+      if (newOnly && !isNew) return false;
+
+      if (!term) return true;
       return (
         name.includes(term) ||
         plan.includes(term) ||
@@ -156,13 +241,40 @@ export default function DeveloperCompaniesPage() {
         id.includes(term)
       );
     });
-  }, [companies, search]);
+  }, [companies, search, statusFilter, overrideFilter, newOnly, newWindowDays]);
+
+  const formatCreatedTime = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return 'Unknown';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return String(dateStr);
+    }
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (companyId: string) => deleteCompanySafely(companyId),
     onSuccess: (result) => {
       if (result.success) {
-        toast({ title: 'Company deleted', description: 'Company has been removed.' });
+        const cleaned = result.deleted_counts
+          ? Object.values(result.deleted_counts).reduce((sum, n) => sum + Number(n || 0), 0)
+          : null;
+        toast({
+          title: 'Company deleted',
+          description:
+            cleaned != null
+              ? `Company and linked data removed (${cleaned} rows cleaned).`
+              : 'Company and linked data have been removed.',
+        });
+        // eslint-disable-next-line no-console
+        console.log('[DevDelete] Company cleanup counts:', result.deleted_counts ?? null);
         queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
         setDeleteModal({ open: false, company: null, confirmValue: '' });
       } else {
@@ -215,6 +327,34 @@ export default function DeveloperCompaniesPage() {
     },
   });
 
+  const stateMutation = useMutation({
+    mutationFn: (params: { companyId: string; action: 'approve' | 'reject' | 'suspend' | 'activate' | 'start_trial' | 'extend' | 'set_plan'; planCode?: 'basic' | 'pro'; reason?: string; days?: number }) =>
+      updateCompanySubscriptionState(params),
+    onSuccess: () => {
+      toast({ title: 'Subscription updated', description: 'Company subscription state has been updated.' });
+      queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
+  const duplicatesQuery = useQuery({
+    queryKey: ['developer', 'duplicate-emails'],
+    queryFn: () => listDuplicateEmails(),
+  });
+
+  const [showDuplicateDetails, setShowDuplicateDetails] = useState(false);
+
+  const copyToClipboard = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast({ title: `${label} copied`, description: value });
+    } catch {
+      toast({ title: 'Copy failed', description: 'Clipboard write was blocked.', variant: 'destructive' });
+    }
+  };
+
   const handleQuickOverride = (company: CompanyRow, mode: OverrideMode) => {
     const companyId = company.company_id ?? company.id ?? '';
     if (!companyId) return;
@@ -261,6 +401,94 @@ export default function DeveloperCompaniesPage() {
       searchValue={search}
       onSearchChange={setSearch}
     >
+      <div className="fv-card space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">New Companies:</span>
+          <button
+            type="button"
+            onClick={() => setNewOnly((v) => !v)}
+            className={cn(
+              'px-2.5 py-1 rounded-md text-xs border transition-colors',
+              newOnly
+                ? 'bg-emerald-500/15 text-emerald-700 border-emerald-400/40'
+                : 'bg-background text-muted-foreground border-border hover:border-emerald-400/40'
+            )}
+          >
+            {newOnly ? 'New only: ON' : 'New only: OFF'}
+          </button>
+          <div className="flex items-center gap-1">
+            {[3, 7, 14].map((days) => (
+              <button
+                key={days}
+                type="button"
+                onClick={() => setNewWindowDays(days as 3 | 7 | 14)}
+                className={cn(
+                  'px-2 py-1 rounded-md text-xs border transition-colors',
+                  newWindowDays === days
+                    ? 'bg-primary/15 text-primary border-primary/40'
+                    : 'bg-background text-muted-foreground border-border hover:border-primary/30'
+                )}
+                title={`Treat companies created in last ${days} days as new`}
+              >
+                {days}d
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Status:</span>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'active', label: 'Active' },
+            { key: 'suspended', label: 'Suspended' },
+            { key: 'rejected', label: 'Rejected' },
+            { key: 'approved', label: 'Approved' },
+            { key: 'pending_approval', label: 'Pending Approval' },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatusFilter(f.key as typeof statusFilter)}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                statusFilter === f.key
+                  ? 'bg-primary/15 text-primary border-primary/40'
+                  : 'bg-background text-muted-foreground border-border hover:border-primary/30'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Overrides:</span>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'overridden', label: 'Overridden' },
+            { key: 'pilot', label: 'Pilot' },
+            { key: 'collaborator', label: 'Collaborator' },
+            { key: 'free_access', label: 'Free Access' },
+            { key: 'trial_override', label: 'Trial Override' },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setOverrideFilter(f.key as typeof overrideFilter)}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                overrideFilter === f.key
+                  ? 'bg-primary/15 text-primary border-primary/40'
+                  : 'bg-background text-muted-foreground border-border hover:border-primary/30'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error && (
         <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive space-y-2">
           <p className="text-sm font-medium">Failed to load companies</p>
@@ -278,9 +506,15 @@ export default function DeveloperCompaniesPage() {
         </div>
       )}
 
-      {!isLoading && !error && filtered.length === 0 && (
+      {!isLoading && !error && companies.length === 0 && (
         <div className="fv-card text-sm text-muted-foreground">
           No companies found. Once tenants start signing up, they will appear here.
+        </div>
+      )}
+
+      {!isLoading && !error && companies.length > 0 && filtered.length === 0 && (
+        <div className="fv-card text-sm text-muted-foreground">
+          No companies match your current search. Clear the search to see all companies.
         </div>
       )}
 
@@ -291,6 +525,7 @@ export default function DeveloperCompaniesPage() {
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
                 <th className="py-2 text-left font-medium">Plan / Status</th>
+                <th className="py-2 text-left font-medium">Latest M-Pesa</th>
                 <th className="py-2 text-left font-medium">Users</th>
                 <th className="py-2 text-left font-medium">Trial ends</th>
                 <th className="py-2 text-left font-medium">Active until</th>
@@ -314,8 +549,18 @@ export default function DeveloperCompaniesPage() {
                 return (
                   <tr key={id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
                     <td className="py-3 pr-4">
-                      <div className="font-medium text-foreground">{displayName}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-medium text-foreground">{displayName}</div>
+                        {isNewCompany(c.created_at, newWindowDays) && (
+                          <span className="inline-flex items-center rounded-sm bg-emerald-500/15 text-emerald-700 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide">
+                            NEW
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-muted-foreground font-mono">{id.slice(0, 8)}…</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Created: {formatCreatedTime(c.created_at)}
+                      </div>
                     </td>
                     <td className="py-3 pr-4">
                       <span
@@ -331,6 +576,35 @@ export default function DeveloperCompaniesPage() {
                         {hasOverride && <ShieldCheck className="h-3 w-3" />}
                         {label}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4 text-xs align-top">
+                      {c.latest_subscription_payment ? (
+                        <div className="space-y-1 max-w-[200px]">
+                          <Badge
+                            variant="outline"
+                            className={cn('font-normal text-[10px] px-1.5 py-0', latestPaymentStatusStyles(c.latest_subscription_payment.status))}
+                          >
+                            {latestPaymentStatusLabel(c.latest_subscription_payment.status)}
+                          </Badge>
+                          <div className="text-foreground">
+                            {c.latest_subscription_payment.amount != null && c.latest_subscription_payment.amount !== ''
+                              ? `${c.latest_subscription_payment.currency ?? 'KES'} ${Number(c.latest_subscription_payment.amount).toLocaleString()}`
+                              : '—'}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {formatDate(
+                              c.latest_subscription_payment.submitted_at ?? undefined,
+                            )}
+                          </div>
+                          {(c.latest_subscription_payment.plan_id || c.latest_subscription_payment.billing_cycle) && (
+                            <div className="text-[10px] text-muted-foreground truncate" title={`${c.latest_subscription_payment.plan_id ?? ''} ${c.latest_subscription_payment.billing_cycle ?? ''}`}>
+                              {[c.latest_subscription_payment.plan_id, c.latest_subscription_payment.billing_cycle].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-xs text-muted-foreground">
                       {c.users_count ?? 0} / {c.employees_count ?? 0}
@@ -350,6 +624,65 @@ export default function DeveloperCompaniesPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem
+                            onClick={() => stateMutation.mutate({ companyId: id, action: 'approve' })}
+                            className="gap-2"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Approve (7-day Pro trial)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const reason = window.prompt('Reason for rejection (optional):', '');
+                              stateMutation.mutate({ companyId: id, action: 'reject', reason: reason ?? undefined });
+                            }}
+                            className="gap-2"
+                          >
+                            <XOctagon className="h-4 w-4" />
+                            Reject Company
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const reason = window.prompt('Reason for suspension (optional):', '');
+                              stateMutation.mutate({ companyId: id, action: 'suspend', reason: reason ?? undefined });
+                            }}
+                            className="gap-2"
+                          >
+                            <PauseCircle className="h-4 w-4" />
+                            Suspend Company
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => stateMutation.mutate({ companyId: id, action: 'activate' })}
+                            className="gap-2"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Activate (7-day Pro trial)
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const daysRaw = window.prompt('Trial days to grant', '7');
+                              const days = Number(daysRaw ?? '7');
+                              stateMutation.mutate({ companyId: id, action: 'start_trial', days: Number.isFinite(days) ? days : 7 });
+                            }}
+                            className="gap-2"
+                          >
+                            <Clock className="h-4 w-4" />
+                            Start Trial
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const daysRaw = window.prompt('Extra days to extend access', '30');
+                              const reason = window.prompt('Override note (optional)', '');
+                              const days = Number(daysRaw ?? '30');
+                              stateMutation.mutate({ companyId: id, action: 'extend', days: Number.isFinite(days) ? days : 30, reason: reason ?? undefined });
+                            }}
+                            className="gap-2"
+                          >
+                            <Clock className="h-4 w-4" />
+                            Extend Access
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
                             onClick={() => handleQuickOverride(c, 'paid_active')}
                             className="gap-2"
                           >
@@ -358,14 +691,7 @@ export default function DeveloperCompaniesPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
-                              setOverrideModal({
-                                open: true,
-                                company: c,
-                                mode: 'paid_active',
-                                days: 365,
-                                planCode: 'basic',
-                                reason: '',
-                              });
+                              stateMutation.mutate({ companyId: id, action: 'set_plan', planCode: 'basic' });
                             }}
                             className="gap-2"
                           >
@@ -459,6 +785,114 @@ export default function DeveloperCompaniesPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {duplicatesQuery.data && (
+        <div className="fv-card space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">Duplicate Email Cleanup</p>
+              <p className="text-xs text-muted-foreground">
+                Profiles: {duplicatesQuery.data.profiles.length} · Companies: {duplicatesQuery.data.companies.length} · Employee duplicates: {duplicatesQuery.data.employees_per_company.length}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowDuplicateDetails((v) => !v)}
+            >
+              {showDuplicateDetails ? 'Hide details' : 'Show details'}
+            </Button>
+          </div>
+
+          {showDuplicateDetails && (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-md border border-border/60 p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">User Profile Email Duplicates</p>
+                {duplicatesQuery.data.profiles.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No duplicates found.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {duplicatesQuery.data.profiles.map((row) => (
+                      <div key={`profile-${row.email}`} className="flex items-center justify-between gap-2 text-xs border border-border/40 rounded p-2">
+                        <div>
+                          <p className="font-medium">{row.email}</p>
+                          <p className="text-muted-foreground">Count: {row.count}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => setSearch(row.email)}>
+                            <Search className="h-3.5 w-3.5 mr-1" />
+                            Filter
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => copyToClipboard(row.email, 'Email')}>
+                            <Copy className="h-3.5 w-3.5 mr-1" />
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-md border border-border/60 p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Company Email Duplicates</p>
+                {duplicatesQuery.data.companies.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No duplicates found.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {duplicatesQuery.data.companies.map((row) => (
+                      <div key={`company-${row.email}`} className="flex items-center justify-between gap-2 text-xs border border-border/40 rounded p-2">
+                        <div>
+                          <p className="font-medium">{row.email}</p>
+                          <p className="text-muted-foreground">Count: {row.count}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => setSearch(row.email)}>
+                            <Search className="h-3.5 w-3.5 mr-1" />
+                            Filter
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => copyToClipboard(row.email, 'Email')}>
+                            <Copy className="h-3.5 w-3.5 mr-1" />
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-md border border-border/60 p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Employee Duplicates Per Company</p>
+                {duplicatesQuery.data.employees_per_company.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No duplicates found.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {duplicatesQuery.data.employees_per_company.map((row) => (
+                      <div key={`employee-${row.company_id}-${row.email}`} className="flex items-center justify-between gap-2 text-xs border border-border/40 rounded p-2">
+                        <div>
+                          <p className="font-medium">{row.email}</p>
+                          <p className="text-muted-foreground">Company: {row.company_id} · Count: {row.count}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => setSearch(row.company_id)}>
+                            <Search className="h-3.5 w-3.5 mr-1" />
+                            Company
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => copyToClipboard(row.email, 'Email')}>
+                            <Copy className="h-3.5 w-3.5 mr-1" />
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

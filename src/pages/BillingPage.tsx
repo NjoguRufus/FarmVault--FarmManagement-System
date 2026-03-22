@@ -1,31 +1,101 @@
-import React, { useMemo, useState } from 'react';
-import { Check, Crown, AlertTriangle, Zap, CreditCard } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  Crown,
+  CreditCard,
+  Shield,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery } from '@tanstack/react-query';
-import { collection, getDocs, query, where } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
-import { getCompany, type CompanyDoc, type CompanySubscription } from '@/services/companyService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
-import { UpgradeModal } from '@/components/subscription/UpgradeModal';
-import type { SubscriptionPaymentDoc } from '@/services/subscriptionPaymentService';
-import { format } from 'date-fns';
-import { useCollection } from '@/hooks/useCollection';
-import type { Harvest, Sale } from '@/types';
+import { getCompany, type CompanyDoc } from '@/services/companyService';
 import {
-  type BillingMode,
-  getBillingModeDurationLabel,
-  getPlanPrice,
-} from '@/config/plans';
-import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
+  getCurrentCompanySubscription,
+  listCompanySubscriptionPayments,
+  type CompanySubscriptionRow,
+  type PaymentSubmissionRow,
+} from '@/services/billingSubmissionService';
+import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { Button } from '@/components/ui/button';
+import { SUBSCRIPTION_PLANS } from '@/config/plans';
+import type { BillingSubmissionCycle, BillingSubmissionPlan } from '@/lib/billingPricing';
+import {
+  billingCycleDurationMonths,
+  billingCycleLabel,
+  billingPlanLabel,
+  computeBundleSavingsKes,
+  getBillingAmountKes,
+  parseBillingCycle,
+} from '@/lib/billingPricing';
+import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
+import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
+
+const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '123456';
+const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
+
+function gatePlanToWorkspacePlan(
+  p: 'trial' | 'basic' | 'pro' | 'enterprise',
+): BillingSubmissionPlan {
+  if (p === 'basic') return 'basic';
+  return 'pro';
+}
+
+function paymentStatusMeta(status: string): { label: string; className: string } {
+  const s = status.toLowerCase();
+  if (s === 'approved') {
+    return { label: 'Approved', className: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' };
+  }
+  if (s === 'rejected') {
+    return { label: 'Rejected', className: 'bg-destructive/15 text-destructive' };
+  }
+  if (s === 'pending_verification') {
+    return { label: 'Pending review', className: 'bg-amber-500/15 text-amber-950 dark:text-amber-200' };
+  }
+  return { label: 'Pending', className: 'bg-sky-500/10 text-sky-900 dark:text-sky-200' };
+}
+
+function cycleLabelFromRow(mode: string | null, cycle: string | null): string {
+  const parsed = parseBillingCycle(cycle ?? mode);
+  if (parsed) return billingCycleLabel(parsed);
+  const m = (mode ?? '').toLowerCase().trim();
+  if (m === 'manual' || m === 'mpesa_manual') {
+    const c = parseBillingCycle(cycle);
+    if (c) return billingCycleLabel(c);
+    return 'M-Pesa (manual)';
+  }
+  return '—';
+}
 
 export default function BillingPage() {
   const { user } = useAuth();
   const companyId = user?.companyId ?? null;
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [billingMode, setBillingMode] = useState<BillingMode>('monthly');
+  const isDeveloper = user?.role === 'developer';
 
-  const { plan, status, isTrial, isExpired, daysRemaining, isOverrideActive } = useSubscriptionStatus();
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<BillingSubmissionPlan>('pro');
+  const [selectedCycle, setSelectedCycle] = useState<BillingSubmissionCycle>('monthly');
+  const prefsInitialized = useRef(false);
+
+  const {
+    plan: gatePlan,
+    status: gateStatus,
+    isTrial,
+    isExpired,
+    daysRemaining,
+    isOverrideActive,
+    trialExpiredNeedsPlan,
+    isLoading: gateLoading,
+    trialEndsAt,
+    displayAccessEndIso,
+    isActivePaid,
+    billingModeFromGate,
+    billingCycleFromGate,
+  } = useSubscriptionStatus();
 
   const { data: company } = useQuery<CompanyDoc | null>({
     queryKey: ['company-billing', companyId],
@@ -33,406 +103,533 @@ export default function BillingPage() {
     queryFn: () => getCompany(companyId!),
   });
 
-  const subscription = (company as CompanyDoc | null)?.subscription as CompanySubscription | undefined;
-  const override = subscription?.override;
-
-  const { data: payments = [] } = useQuery<SubscriptionPaymentDoc[]>({
-    queryKey: ['subscription-payments', companyId],
-    enabled: !!companyId,
-    queryFn: async () => {
-      const q = query(
-        collection(db, 'subscriptionPayments'),
-        where('companyId', '==', companyId!),
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as SubscriptionPaymentDoc[];
-    },
+  const { data: subRow, isLoading: subLoading } = useQuery({
+    queryKey: ['company-subscription-row', companyId],
+    enabled: !!companyId && !isDeveloper,
+    queryFn: () => getCurrentCompanySubscription(companyId!),
   });
 
-  const { data: sales = [] } = useCollection<Sale>('billing-sales', 'sales', {
-    companyScoped: true,
-    companyId,
-    isDeveloper: user?.role === 'developer',
-  });
-  const { data: harvests = [] } = useCollection<Harvest>('billing-harvests', 'harvests', {
-    companyScoped: true,
-    companyId,
-    isDeveloper: user?.role === 'developer',
+  const { data: payments = [], isLoading: paymentsLoading } = useQuery({
+    queryKey: ['subscription-payments-supabase', companyId],
+    enabled: !!companyId && !isDeveloper,
+    queryFn: () => listCompanySubscriptionPayments(companyId!),
   });
 
-  const planLabel = useMemo(() => {
-    switch (plan) {
+  const workspacePlan = useMemo(() => gatePlanToWorkspacePlan(gatePlan), [gatePlan]);
+
+  const latestApprovedBillingCycle = useMemo(() => {
+    const approved = (payments as PaymentSubmissionRow[]).find((p) => (p.status ?? '').toLowerCase() === 'approved');
+    return approved?.billing_cycle ?? null;
+  }, [payments]);
+
+  const workspaceCycle = useMemo(() => {
+    const row = subRow as CompanySubscriptionRow | null | undefined;
+    return parseBillingCycle(
+      row?.billing_cycle ?? billingCycleFromGate ?? latestApprovedBillingCycle ?? row?.billing_mode ?? billingModeFromGate,
+    );
+  }, [subRow, billingCycleFromGate, billingModeFromGate, latestApprovedBillingCycle]);
+
+  useEffect(() => {
+    prefsInitialized.current = false;
+  }, [companyId]);
+
+  useEffect(() => {
+    if (prefsInitialized.current || isDeveloper || gateLoading) return;
+    if (!companyId) return;
+    if (subLoading) return;
+    setSelectedPlan(workspacePlan);
+    setSelectedCycle(workspaceCycle ?? 'monthly');
+    prefsInitialized.current = true;
+  }, [companyId, workspacePlan, workspaceCycle, gateLoading, subLoading, isDeveloper]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || isDeveloper || !companyId) return;
+    // eslint-disable-next-line no-console
+    console.log('[BillingPage] resolved subscription for UI', {
+      companyId,
+      isActivePaid,
+      gateStatus,
+      displayAccessEndIso,
+      subRowStatus: (subRow as CompanySubscriptionRow | null)?.status ?? null,
+    });
+  }, [companyId, isDeveloper, isActivePaid, gateStatus, displayAccessEndIso, subRow]);
+
+  const checkoutAmount = useMemo(
+    () => getBillingAmountKes(selectedPlan, selectedCycle),
+    [selectedPlan, selectedCycle],
+  );
+
+  const checkoutSavings = useMemo(
+    () => computeBundleSavingsKes(selectedPlan, selectedCycle),
+    [selectedPlan, selectedCycle],
+  );
+
+  const periodSuffix = useMemo(() => {
+    switch (selectedCycle) {
+      case 'monthly':
+        return '/ month';
+      case 'seasonal':
+        return '/ season';
+      case 'annual':
+        return '/ year';
+    }
+  }, [selectedCycle]);
+
+  const planTitle = useMemo(() => {
+    if (isDeveloper) return 'Developer';
+    if (isTrial) return 'Pro';
+    switch (gatePlan) {
       case 'basic':
         return 'Basic';
       case 'pro':
         return 'Pro';
       case 'enterprise':
         return 'Enterprise';
-      case 'trial':
       default:
-        return 'Trial';
+        return 'Workspace';
     }
-  }, [plan]);
+  }, [gatePlan, isTrial, isDeveloper]);
 
-  const statusLabel = useMemo(() => {
-    if (isOverrideActive) return 'Developer Override';
-    if (status === 'pending_payment') return 'Pending Payment';
-    if (isTrial) return 'Trial';
-    if (isExpired) return 'Expired';
-    if (status === 'active') return 'Active';
-    if (status === 'grace') return 'Grace';
-    if (status === 'paused') return 'Paused';
-    return 'Active';
-  }, [status, isTrial, isExpired, isOverrideActive]);
+  const statusHeadline = useMemo(() => {
+    if (isDeveloper) return 'Full platform access';
+    if (isOverrideActive) return 'Developer override active';
+    if (gateStatus === 'pending_approval') return 'Awaiting approval';
+    if (gateStatus === 'pending_payment') return 'Payment under review';
+    if (isActivePaid) return 'Active';
+    if (isTrial) return 'Pro trial active';
+    if (isExpired || trialExpiredNeedsPlan) return 'Subscription inactive';
+    if (gateStatus === 'active') return 'Active';
+    return 'Subscription';
+  }, [isDeveloper, isOverrideActive, gateStatus, isActivePaid, isTrial, isExpired, trialExpiredNeedsPlan]);
 
-  const latestPayment = useMemo(
-    () =>
-      [...payments].sort((a, b) => {
-        const ta = (a as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
-        const tb = (b as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
-        return tb - ta;
-      })[0],
-    [payments],
-  );
+  const statusDetail = useMemo(() => {
+    if (isDeveloper) return 'Your account is not billed through this workspace.';
+    if (isOverrideActive) return 'Billing and limits are managed by the FarmVault team.';
+    if (gateStatus === 'pending_approval') return 'Complete activation to start your trial or paid plan.';
+    if (gateStatus === 'pending_payment') return 'We will activate your plan after M-Pesa verification.';
+    if (isActivePaid) return 'Your paid subscription is active. Renew before the end date to avoid interruption.';
+    if (trialExpiredNeedsPlan) return 'Choose Basic or Pro to continue with full access.';
+    if (isExpired) return 'Renew to restore full write access to your farm data.';
+    if (isTrial) return 'Enjoy full Pro features during your trial window.';
+    return 'Thank you for being a FarmVault customer.';
+  }, [isDeveloper, isOverrideActive, gateStatus, isActivePaid, trialExpiredNeedsPlan, isExpired, isTrial]);
 
-  const planTypeLabel = useMemo(() => {
-    if (!latestPayment) {
-      return isTrial ? 'Trial' : '—';
-    }
-    switch (latestPayment.mode) {
-      case 'monthly':
-        return 'Monthly';
-      case 'seasonal':
-        return 'Per Season';
-      case 'annual':
-        return 'Annual';
-      default:
-        return '—';
-    }
-  }, [latestPayment, isTrial]);
-
-  const expiryDate = useMemo(() => {
-    if (isOverrideActive && override?.overrideEndsAt) {
-      const d = (override.overrideEndsAt as any).toDate?.() as Date | undefined;
-      return d ? format(d, 'PP') : '—';
-    }
-    const source =
-      subscription?.paidUntil ??
-      subscription?.trialEndsAt ??
+  const expiryLabel = useMemo(() => {
+    if (isDeveloper) return '—';
+    const iso =
+      displayAccessEndIso ??
+      subRow?.current_period_end ??
+      subRow?.active_until ??
+      trialEndsAt ??
+      subRow?.trial_ends_at ??
       null;
-    const d = (source as any)?.toDate?.() as Date | undefined;
-    return d ? format(d, 'PP') : '—';
-  }, [subscription?.paidUntil, subscription?.trialEndsAt, isOverrideActive, override?.overrideEndsAt]);
+    if (!iso) return '—';
+    try {
+      return format(parseISO(iso), 'PP');
+    } catch {
+      return '—';
+    }
+  }, [isDeveloper, displayAccessEndIso, trialEndsAt, subRow]);
 
-  const farmValue = useMemo(() => {
-    const totalSales = sales.reduce((sum, s) => sum + (s.totalAmount ?? 0), 0);
-    const harvestValueTracked = harvests.reduce((sum, h) => {
-      const anyHarvest = h as Harvest & { farmTotalPrice?: number };
-      return sum + (anyHarvest.farmTotalPrice ?? 0);
-    }, 0);
-    return totalSales + harvestValueTracked;
-  }, [sales, harvests]);
+  const billingCycleDisplay = useMemo(() => {
+    if (isDeveloper) return '—';
+    const row = subRow as CompanySubscriptionRow | null | undefined;
+    const mode = row?.billing_mode ?? billingModeFromGate ?? null;
+    const cycle = row?.billing_cycle ?? billingCycleFromGate ?? latestApprovedBillingCycle ?? null;
+    return cycleLabelFromRow(mode, cycle);
+  }, [isDeveloper, subRow, billingModeFromGate, billingCycleFromGate, latestApprovedBillingCycle]);
 
-  const currentPlanForPricing: 'basic' | 'pro' | null =
-    plan === 'basic' || plan === 'pro' ? plan : null;
-  const currentPrice =
-    currentPlanForPricing != null ? getPlanPrice(currentPlanForPricing, billingMode) : null;
-  const billingDurationLabel = getBillingModeDurationLabel(billingMode);
+  const primaryCtaLabel = useMemo(() => {
+    if (isDeveloper) return null;
+    if (isOverrideActive || gateStatus === 'pending_approval' || gateStatus === 'pending_payment') return null;
+    if (isExpired || trialExpiredNeedsPlan) return 'Activate subscription';
+    if (isTrial) return 'Upgrade';
+    if (gatePlan === 'basic' && gateStatus === 'active') return 'Upgrade';
+    return 'Renew & pay';
+  }, [isDeveloper, isOverrideActive, gateStatus, isExpired, trialExpiredNeedsPlan, isTrial, gatePlan]);
 
-  const showUpgradeNow =
-    (isTrial || isExpired) && status !== 'pending_payment' && !isOverrideActive;
-  const showUpgradeToPro =
-    plan === 'basic' && !isTrial && !isExpired && status === 'active' && !isOverrideActive;
-  const showRenew =
-    !isTrial && !isExpired && status === 'active' && !isOverrideActive;
+  const showPaySection =
+    !isDeveloper &&
+    !isOverrideActive &&
+    gateStatus !== 'pending_approval' &&
+    gateStatus !== 'pending_payment';
+
+  const trialBannerText = useMemo(() => {
+    if (!isTrial || isExpired || typeof daysRemaining !== 'number' || daysRemaining < 0) return null;
+    return `Pro trial · ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} left`;
+  }, [isTrial, isExpired, daysRemaining]);
+
+  if (!companyId) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 p-4 animate-fade-in">
+        <p className="text-sm text-muted-foreground">Join or select a company to manage billing.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Billing & Subscription</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage your FarmVault subscription, payments, and benefits.
-          </p>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 lg:px-8 animate-fade-in">
+      {/* Page header */}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Billing</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Subscription, M-Pesa payments, and plan options for your workspace.
+        </p>
       </div>
 
-      {isExpired && !isOverrideActive && (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4" />
-          <span>Your subscription has expired. Renew to continue writing data.</span>
+      {/* Alerts */}
+      {(isExpired || trialExpiredNeedsPlan) && !isOverrideActive && !isDeveloper && (
+        <div
+          className="flex gap-3 rounded-2xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive shadow-sm"
+          role="alert"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-semibold">Access limited</p>
+            <p className="mt-1 text-destructive/90">
+              {trialExpiredNeedsPlan
+                ? 'Your Pro trial has ended. Pick a plan and submit payment to restore full access, or use the plan picker in the app header if you are a company admin.'
+                : 'Your subscription has expired. Submit a payment to continue without interruption.'}
+            </p>
+          </div>
         </div>
       )}
 
-      {status === 'pending_payment' && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs sm:text-sm text-amber-900 flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4" />
-          <span>Payment submitted. Awaiting confirmation.</span>
+      {gateStatus === 'pending_approval' && !isDeveloper && (
+        <div className="flex gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-sm text-amber-950 shadow-sm dark:text-amber-100/90">
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <div>
+            <p className="font-semibold">Awaiting approval</p>
+            <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+              Your workspace is not active yet. You will receive Pro trial access once approved.
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Current Plan Overview */}
-      <div className="fv-card">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-fv-gold-soft">
-              <Crown className="h-7 w-7 text-fv-olive" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                {planLabel} Plan
-                {isTrial && (
-                  <span className="fv-badge fv-badge--gold text-[11px]">
-                    7-Day Free Trial
-                  </span>
-                )}
-                {isOverrideActive && (
-                  <span className="fv-badge text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-300">
-                    Developer Override Active
-                  </span>
-                )}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Subscription Status:{' '}
-                <span className="font-medium text-foreground">
-                  {statusLabel}
+      {gateStatus === 'pending_payment' && !isDeveloper && (
+        <div className="flex gap-3 rounded-2xl border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-sm shadow-sm">
+          <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
+          <div>
+            <p className="font-semibold text-foreground">Payment received — pending verification</p>
+            <p className="mt-1 text-muted-foreground">
+              Our team is reviewing your M-Pesa submission. No need to pay again unless we contact you.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isOverrideActive && !isDeveloper && (
+        <div className="flex gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm shadow-sm">
+          <Shield className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          <div>
+            <p className="font-semibold text-foreground">Developer override</p>
+            <p className="mt-1 text-muted-foreground">Your plan and billing are managed directly by FarmVault.</p>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 1 — Subscription status */}
+      <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {trialBannerText ? (
+                <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
+                  {trialBannerText}
                 </span>
-              </p>
+              ) : null}
+              {isActivePaid && !isDeveloper ? (
+                <span className="inline-flex items-center rounded-full border border-emerald-500/35 bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+                  Active
+                </span>
+              ) : null}
+              {!isTrial && gateStatus === 'active' && !isDeveloper && !isActivePaid ? (
+                <span className="inline-flex items-center rounded-full border border-border bg-muted/50 px-3 py-1 text-xs font-medium text-muted-foreground">
+                  {planTitle} plan
+                </span>
+              ) : null}
             </div>
-          </div>
-          <div className="text-sm space-y-1">
-            <p>
-              <span className="text-muted-foreground">Plan Type:</span>{' '}
-              <span className="font-medium text-foreground">{planTypeLabel}</span>
-            </p>
-            <p>
-              <span className="text-muted-foreground">
-                {isOverrideActive ? 'Override until:' : 'Expiry Date:'}
-              </span>{' '}
-              <span className="font-medium text-foreground">{expiryDate}</span>
-            </p>
-            {!isOverrideActive && typeof daysRemaining === 'number' && daysRemaining >= 0 && (
+
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary">
+                <Crown className="h-6 w-6" strokeWidth={1.5} />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+                  {isDeveloper ? 'Developer access' : `${planTitle} subscription`}
+                </h2>
+                <p className="text-sm text-muted-foreground">{statusDetail}</p>
+              </div>
+            </div>
+
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-muted/30 px-3 py-2.5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Plan</dt>
+                <dd className="mt-0.5 text-sm font-medium text-foreground">{isDeveloper ? '—' : planTitle}</dd>
+              </div>
+              <div className="rounded-xl bg-muted/30 px-3 py-2.5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Billing cycle
+                </dt>
+                <dd className="mt-0.5 text-sm font-medium text-foreground">{billingCycleDisplay}</dd>
+              </div>
+              <div className="rounded-xl bg-muted/30 px-3 py-2.5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {isTrial ? 'Trial ends' : 'Next renewal / ends'}
+                </dt>
+                <dd className="mt-0.5 text-sm font-medium text-foreground">{expiryLabel}</dd>
+              </div>
+              <div className="rounded-xl bg-muted/30 px-3 py-2.5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</dt>
+                <dd
+                  className={cn(
+                    'mt-0.5 text-sm font-medium',
+                    isActivePaid ? 'text-emerald-700 dark:text-emerald-400' : 'text-foreground',
+                  )}
+                >
+                  {statusHeadline}
+                </dd>
+              </div>
+            </dl>
+
+            {typeof daysRemaining === 'number' && daysRemaining >= 0 && isTrial && !isDeveloper ? (
               <p className="text-xs text-muted-foreground">
-                {daysRemaining} day{daysRemaining === 1 ? '' : 's'} remaining
+                <span className="font-medium text-foreground">{daysRemaining}</span> day
+                {daysRemaining === 1 ? '' : 's'} remaining on your trial.
               </p>
-            )}
+            ) : null}
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-2 lg:items-end">
+            {primaryCtaLabel ? (
+              <Button className="h-11 rounded-xl px-6 font-semibold shadow-sm" onClick={() => setCheckoutOpen(true)}>
+                {primaryCtaLabel}
+              </Button>
+            ) : null}
+            {showPaySection && !primaryCtaLabel ? (
+              <Button variant="outline" className="h-11 rounded-xl" onClick={() => setCheckoutOpen(true)}>
+                Pay with M-Pesa
+              </Button>
+            ) : null}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Upgrade / Renew Section */}
-      <div className="fv-card flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Manage your plan</h2>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Choose the best plan for your farm and keep your subscription active.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {showUpgradeNow && (
-            <button
-              type="button"
-              className="fv-btn fv-btn--primary"
-              onClick={() => setUpgradeOpen(true)}
-            >
-              Upgrade Now
-            </button>
-          )}
-          {showUpgradeToPro && (
-            <button
-              type="button"
-              className="fv-btn fv-btn--secondary"
-              onClick={() => setUpgradeOpen(true)}
-            >
-              Upgrade to Pro
-            </button>
-          )}
-          {showRenew && (
-            <button
-              type="button"
-              className="fv-btn fv-btn--outline"
-            onClick={() => setUpgradeOpen(true)}
-            >
-              Renew Plan
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Change Billing Mode */}
-      <div className="fv-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Change billing mode</h2>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-              Choose how often you want to be billed. Prices update automatically.
-            </p>
-          </div>
-          <BillingModeSelector mode={billingMode} onChange={setBillingMode} />
-        </div>
-        {currentPlanForPricing ? (
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <p className="text-sm text-muted-foreground">
-                {planLabel} &middot; {billingDurationLabel}
+      {!isDeveloper ? (
+        <>
+          {/* SECTION 2 & 3 — Plan + cycle */}
+          <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">Choose plan</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Selection updates your checkout amount. Your current workspace plan is marked below.
               </p>
-              {currentPrice != null && (
-                <p className="text-xl font-bold text-foreground mt-1">
-                  KES {currentPrice.toLocaleString()}
+            </div>
+            <div className="grid gap-8 lg:grid-cols-2">
+              <PlanSelector
+                value={selectedPlan}
+                onChange={setSelectedPlan}
+                workspacePlan={workspacePlan}
+                disabled={subLoading}
+              />
+              <BillingCycleSelector
+                value={selectedCycle}
+                onChange={setSelectedCycle}
+                workspaceCycle={workspaceCycle}
+                disabled={subLoading}
+              />
+            </div>
+            <div className="mt-6 rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Price preview</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+                KES {checkoutAmount.toLocaleString()}
+                <span className="text-base font-medium text-muted-foreground">{periodSuffix}</span>
+              </p>
+              {checkoutSavings > 0 ? (
+                <p className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                  Save KES {checkoutSavings.toLocaleString()} vs paying monthly for{' '}
+                  {billingCycleDurationMonths(selectedCycle)} months.
                 </p>
-              )}
-              {billingMode === 'annual' && (
-                <p className="text-xs text-emerald-700 mt-1">
-                  Save more with annual billing.
-                </p>
+              ) : null}
+            </div>
+          </section>
+
+          {/* SECTION 4 — Payment CTA */}
+          {showPaySection ? (
+            <section className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent p-5 shadow-md sm:p-6">
+              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-3">
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">Activate subscription</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Pay via M-Pesa to the till below, then complete checkout with your transaction code.
+                  </p>
+                  <ul className="space-y-1.5 text-sm">
+                    <li className="flex justify-between gap-8 border-b border-border/40 pb-1.5">
+                      <span className="text-muted-foreground">Till number</span>
+                      <span className="font-mono font-semibold text-foreground">{TILL}</span>
+                    </li>
+                    <li className="flex justify-between gap-8 border-b border-border/40 pb-1.5">
+                      <span className="text-muted-foreground">Business</span>
+                      <span className="font-medium text-foreground">{BUSINESS}</span>
+                    </li>
+                    <li className="flex justify-between gap-8 pt-0.5">
+                      <span className="text-muted-foreground">Amount due</span>
+                      <span className="text-lg font-semibold text-foreground">
+                        KES {checkoutAmount.toLocaleString()}
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+                <div className="flex flex-col items-stretch gap-2 md:w-52">
+                  <Button
+                    size="lg"
+                    className="h-12 rounded-xl text-base font-semibold shadow-md"
+                    onClick={() => setCheckoutOpen(true)}
+                  >
+                    Pay now
+                  </Button>
+                  <p className="text-center text-[11px] text-muted-foreground">Opens secure payment form</p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* SECTION 5 — Payment history */}
+          <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">Payment history</h2>
+            <p className="mt-1 text-sm text-muted-foreground">M-Pesa subscription submissions for this workspace.</p>
+            <div className="mt-4 overflow-x-auto rounded-xl border border-border/50">
+              {paymentsLoading ? (
+                <p className="p-6 text-sm text-muted-foreground">Loading payments…</p>
+              ) : payments.length === 0 ? (
+                <p className="p-6 text-sm text-muted-foreground">No payments yet.</p>
+              ) : (
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-border/60 bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Plan</th>
+                      <th className="px-4 py-3">Cycle</th>
+                      <th className="px-4 py-3 text-right">Amount</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p: PaymentSubmissionRow) => {
+                      const meta = paymentStatusMeta(String(p.status));
+                      const c = parseBillingCycle(p.billing_cycle ?? p.billing_mode);
+                      return (
+                        <tr key={p.id} className="border-b border-border/40 last:border-0">
+                          <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                            {p.created_at ? format(parseISO(p.created_at), 'PPp') : '—'}
+                          </td>
+                          <td className="px-4 py-3 capitalize">{p.plan_id}</td>
+                          <td className="px-4 py-3">{c ? billingCycleLabel(c) : '—'}</td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums">
+                            {p.currency ?? 'KES'} {Number(p.amount).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={cn(
+                                'inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize',
+                                meta.className,
+                              )}
+                            >
+                              {meta.label}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
-            <button
-              type="button"
-              className="fv-btn fv-btn--secondary"
-              onClick={() => setUpgradeOpen(true)}
-            >
-              Review &amp; pay
-            </button>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            When you move to a paid plan, you can preview prices for each billing mode here.
-          </p>
-        )}
-      </div>
+          </section>
 
-      {/* Payment History */}
-      <div className="fv-card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-foreground">Payment History</h2>
-        </div>
-        {payments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No subscription payments recorded yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="fv-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Plan</th>
-                  <th>Mode</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments
-                  .slice()
-                  .sort((a, b) => {
-                    const ta = (a as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
-                    const tb = (b as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
-                    return tb - ta;
-                  })
-                  .map((p) => {
-                    const created = (p as any).createdAt?.toDate?.() as Date | undefined;
-                    const statusBadgeClass =
-                      p.status === 'approved'
-                        ? 'fv-badge--active'
-                        : p.status === 'pending'
-                          ? 'fv-badge--warning'
-                          : 'bg-destructive/10 text-destructive';
-                    const modeLabel =
-                      p.mode === 'monthly'
-                        ? 'Monthly'
-                        : p.mode === 'seasonal'
-                          ? 'Per Season'
-                          : 'Annual';
-                    return (
-                      <tr key={p.id}>
-                        <td className="text-sm text-muted-foreground">
-                          {created ? format(created, 'PPp') : '—'}
-                        </td>
-                        <td className="capitalize">{p.plan}</td>
-                        <td className="capitalize">{modeLabel}</td>
-                        <td>KES {Number(p.amount).toLocaleString()}</td>
-                        <td>
-                          <span className={cn('fv-badge text-xs capitalize', statusBadgeClass)}>
-                            {p.status}
+          {/* SECTION 6 — Compare plans */}
+          <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">Compare plans</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Feature overview for Basic vs Pro.</p>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {SUBSCRIPTION_PLANS.filter((p) => p.value === 'basic' || p.value === 'pro').map((planOpt) => {
+                const isPro = planOpt.value === 'pro';
+                const price = planOpt.pricing[selectedCycle === 'seasonal' ? 'season' : selectedCycle];
+                return (
+                  <div
+                    key={planOpt.value}
+                    className={cn(
+                      'relative flex flex-col rounded-2xl border p-5 shadow-sm',
+                      isPro
+                        ? 'border-primary/30 bg-gradient-to-b from-primary/[0.07] to-card'
+                        : 'border-border/60 bg-muted/10',
+                    )}
+                  >
+                    {isPro ? (
+                      <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 dark:text-amber-100">
+                          <Zap className="h-3 w-3" />
+                          Most popular
+                        </span>
+                      </div>
+                    ) : null}
+                    <h3 className={cn('text-lg font-semibold', isPro ? 'mt-2' : '')}>{planOpt.name}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{planOpt.description}</p>
+                    <p className="mt-4 text-2xl font-bold tracking-tight text-foreground">
+                      {price != null ? (
+                        <>
+                          KES {price.toLocaleString()}
+                          <span className="text-sm font-medium text-muted-foreground">
+                            {selectedCycle === 'monthly' ? '/mo' : selectedCycle === 'seasonal' ? '/season' : '/yr'}
                           </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Plan Comparison */}
-      <div className="fv-card">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Compare Plans</h2>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Choose the level that fits your farm size and team.
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="fv-card border border-border/60 bg-card/80">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-base font-semibold text-foreground">Basic</h3>
+                        </>
+                      ) : (
+                        <span className="text-base font-medium text-muted-foreground">Custom</span>
+                      )}
+                    </p>
+                    <ul className="mt-4 flex-1 space-y-2 border-t border-border/40 pt-4">
+                      {planOpt.features.slice(0, 7).map((f) => (
+                        <li key={f} className="flex gap-2 text-sm text-foreground/90">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" strokeWidth={2.5} />
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      variant={isPro ? 'default' : 'outline'}
+                      className="mt-5 h-10 w-full rounded-xl font-semibold"
+                      disabled={!showPaySection}
+                      onClick={() => {
+                        setSelectedPlan(planOpt.value as BillingSubmissionPlan);
+                        setCheckoutOpen(true);
+                      }}
+                    >
+                      {planOpt.value === 'basic' ? 'Choose Basic' : 'Choose Pro'}
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
-            <ul className="space-y-2 text-sm mt-2">
-              <li>2 Projects</li>
-              <li>3 Employees</li>
-              <li>No Multi-block</li>
-              <li>No Season Budget</li>
-              <li>Standard Reports</li>
-            </ul>
-          </div>
-          <div className="fv-card border border-fv-gold/70 bg-fv-gold-soft/40 relative">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-              <span className="fv-badge fv-badge--gold text-xs flex items-center gap-1">
-                <Zap className="h-3 w-3" />
-                Most Popular
-              </span>
-            </div>
-            <div className="flex items-center justify-between mb-2 mt-2">
-              <h3 className="text-base font-semibold text-foreground">Pro</h3>
-            </div>
-            <ul className="space-y-2 text-sm mt-2">
-              <li>Unlimited Projects</li>
-              <li>Unlimited Employees</li>
-              <li>Multi-block</li>
-              <li>Season Budget</li>
-              <li>Advanced Reports</li>
-              <li>Exports</li>
-            </ul>
-          </div>
-        </div>
-      </div>
+          </section>
+        </>
+      ) : null}
 
-      {/* Revenue Value Reminder */}
-      <div className="fv-card bg-card/90 border border-border/70">
-        <p className="text-sm text-foreground">
-          FarmVault has tracked{' '}
-          <span className="font-semibold">
-            KES {farmValue.toLocaleString()}
-          </span>{' '}
-          in farm value this season.
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Continue managing your farm operations without interruption.
-        </p>
-      </div>
+      <p className="text-center text-xs text-muted-foreground">
+        Workspace: <span className="font-medium text-foreground">{company?.name ?? companyId}</span>
+      </p>
 
-      <UpgradeModal
-        open={upgradeOpen}
-        onOpenChange={setUpgradeOpen}
-        isTrial={isTrial}
-        isExpired={isExpired}
-        daysRemaining={daysRemaining}
-      />
+      {!isDeveloper ? (
+        <UpgradeModal
+          open={checkoutOpen}
+          onOpenChange={setCheckoutOpen}
+          isTrial={isTrial}
+          isExpired={isExpired}
+          daysRemaining={daysRemaining}
+          checkoutPlan={selectedPlan}
+          checkoutCycle={selectedCycle}
+        />
+      ) : null}
     </div>
   );
 }

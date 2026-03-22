@@ -3,7 +3,7 @@
  * Guard: redirect to /dashboard if user has active_company_id and membership; else show onboarding.
  */
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ChevronRight, FolderPlus } from 'lucide-react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
@@ -13,8 +13,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { writePendingApprovalSession, type PendingApprovalSessionPayload } from '@/lib/pendingApprovalSession';
+
+type EmailValidationResult = { ok: boolean; message?: string | null };
 
 export default function OnboardingPage() {
+  const { resetRequired, refreshAuthState } = useAuth();
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
@@ -32,7 +37,6 @@ export default function OnboardingPage() {
   const [projectCreated, setProjectCreated] = useState(false);
 
   const clerkId = clerkUser?.id ?? null;
-  const fullName = clerkUser?.fullName ?? companyEmail.split('@')[0] ?? '';
   const step1Valid = companyName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail.trim());
 
   // Pre-fill from Clerk user only (no organizations).
@@ -56,6 +60,18 @@ export default function OnboardingPage() {
     setLoading(true);
     setError(null);
     try {
+      const normalizedCompanyEmail = companyEmail.trim().toLowerCase();
+      const { data: companyCheck } = await supabase.rpc('validate_email_uniqueness', {
+        _email: normalizedCompanyEmail,
+        _company_id: null,
+      });
+      const companyValidation = companyCheck as EmailValidationResult | null;
+      if (companyValidation && companyValidation.ok === false) {
+        setError(companyValidation.message ?? 'Company email already exists.');
+        setLoading(false);
+        return;
+      }
+
       const token = await getSupabaseAccessToken();
       if (!token) {
         const message =
@@ -87,7 +103,16 @@ export default function OnboardingPage() {
         return;
       }
 
-      setCompanyId(cid as string);
+      const newId = cid as string;
+      setCompanyId(newId);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Onboarding] company_created', {
+          companyId: newId,
+          companyName: companyName.trim(),
+          companyEmail: normalizedCompanyEmail,
+        });
+      }
       setStep(2);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Something went wrong';
@@ -102,45 +127,75 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleStep2Trial = () => {
+  const navigateToPendingApproval = async () => {
+    if (!companyId) return;
+    const payload: PendingApprovalSessionPayload = {
+      companyName: companyName.trim(),
+      companyEmail: companyEmail.trim().toLowerCase(),
+      companyId,
+      startingPlanLabel: 'Pro Trial',
+    };
+    writePendingApprovalSession(payload);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Onboarding] pending_approval_navigation', payload);
+    }
+    try {
+      await refreshAuthState();
+    } catch {
+      /* non-fatal: session will catch up on next load */
+    }
+    navigate('/pending-approval', { state: payload, replace: true });
+  };
+
+  const handleStep2SubmitForApproval = async () => {
     if (!companyId || !clerkId) {
-      goToDashboard();
+      setError('Missing company or session. Try creating your company again.');
       return;
     }
     setLoading(true);
     setError(null);
-    const trialEnds = new Date();
-    trialEnds.setDate(trialEnds.getDate() + 7);
+    try {
+      const { error: subErr } = await supabase.rpc('initialize_company_subscription', {
+        _company_id: companyId,
+        _plan_code: 'pro',
+      });
 
-    const trialEndsAt = trialEnds.toISOString();
-    const payload = {
-      company_id: companyId,
-      status: 'trialing',
-      trial_ends_at: trialEndsAt,
-    };
-    // eslint-disable-next-line no-console
-    console.log('[SUB WRITE] target=billing.company_subscriptions', payload);
-    supabase
-      .schema('billing')
-      .from('company_subscriptions')
-      .upsert(payload, { onConflict: 'company_id' })
-      .then(({ error: subErr }) => {
-        setLoading(false);
-        if (subErr) {
-          setError(subErr.message);
+      if (subErr && /Could not find the function public\.initialize_company_subscription/i.test(subErr.message)) {
+        const { error: fallbackErr } = await supabase.rpc('start_trial', {
+          p_company_id: companyId,
+          p_plan_id: 'pro',
+          p_trial_ends_at: null,
+        });
+        if (fallbackErr) {
+          setError(fallbackErr.message);
           return;
         }
-        if (createProject && projectName.trim()) {
-          setStep(3);
-        } else {
-          goToDashboard();
-        }
-      });
+      } else if (subErr) {
+        setError(subErr.message);
+        return;
+      }
+
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Onboarding] subscription_saved_pending_approval', { companyId });
+      }
+
+      if (createProject && projectName.trim()) {
+        setStep(3);
+      } else {
+        await navigateToPendingApproval();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to submit for approval');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleStep3CreateProject = async () => {
     if (!companyId || !projectName.trim()) {
-      goToDashboard();
+      await navigateToPendingApproval();
       return;
     }
     if (!clerkUser?.id) {
@@ -164,7 +219,13 @@ export default function OnboardingPage() {
         });
       if (insertError) throw insertError;
       setProjectCreated(true);
-      setTimeout(goToDashboard, 1200);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.log('[Onboarding] first_project_created', { companyId, projectName: projectName.trim() });
+      }
+      setTimeout(() => {
+        void navigateToPendingApproval();
+      }, 1200);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create project');
     } finally {
@@ -172,20 +233,16 @@ export default function OnboardingPage() {
     }
   };
 
-  function goToDashboard() {
-    if (typeof window !== 'undefined') {
-      window.location.assign('/dashboard');
-    } else {
-      navigate('/dashboard', { replace: true });
-    }
-  }
-
   if (!isLoaded || !isSignedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
+  }
+
+  if (resetRequired) {
+    return <Navigate to="/start-fresh" replace />;
   }
 
   return (
@@ -251,9 +308,10 @@ export default function OnboardingPage() {
                   <CheckCircle2 className="h-10 w-10" />
                 </div>
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-2">Start 7-day Pro trial</h2>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Almost there</h2>
               <p className="text-sm text-muted-foreground mb-6">
-                <strong>{companyName}</strong> is ready. Activate your trial, then optionally create your first project.
+                <strong>{companyName}</strong> is set to <strong>Pro</strong> with a <strong>7-day trial</strong> after our team
+                approves your workspace. No plan pick is needed here.
               </p>
               <div className="flex items-center gap-2 mb-4">
                 <input
@@ -277,8 +335,8 @@ export default function OnboardingPage() {
                   />
                 </div>
               )}
-              <Button className="w-full" onClick={handleStep2Trial} disabled={loading}>
-                {loading ? 'Activating…' : createProject && projectName.trim() ? 'Activate trial & continue' : 'Activate trial & go to Dashboard'}
+              <Button className="w-full" onClick={() => void handleStep2SubmitForApproval()} disabled={loading}>
+                {loading ? 'Submitting…' : 'Submit for Approval'}
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </>
@@ -302,7 +360,7 @@ export default function OnboardingPage() {
                 />
               </div>
               <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={goToDashboard} disabled={loading}>
+                <Button variant="outline" className="flex-1" onClick={() => void navigateToPendingApproval()} disabled={loading}>
                   Skip
                 </Button>
                 <Button className="flex-1" onClick={handleStep3CreateProject} disabled={!projectName.trim() || loading}>
@@ -310,7 +368,7 @@ export default function OnboardingPage() {
                 </Button>
               </div>
               {projectCreated && (
-                <p className="mt-4 text-sm text-green-600 text-center">Project created. Redirecting to dashboard…</p>
+                <p className="mt-4 text-sm text-green-600 text-center">Project created. Continuing to approval…</p>
               )}
             </>
           )}

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { listDuplicateEmails, setCompanySubscriptionState, type DeveloperSubscriptionAction } from '@/services/subscriptionService';
 
 export interface DevDashboardKpis {
   // Shape is defined by RPC; keep flexible and only read known fields in UI.
@@ -36,6 +37,19 @@ export type DeveloperCompanyRow = {
     trial_end?: string | null;
     period_start?: string | null;
     period_end?: string | null;
+  } | null;
+  /** Latest row from public.subscription_payments (see list_companies migration). */
+  latest_subscription_payment?: {
+    id?: string;
+    status?: string | null;
+    amount?: number | string | null;
+    currency?: string | null;
+    plan_id?: string | null;
+    billing_cycle?: string | null;
+    billing_mode?: string | null;
+    submitted_at?: string | null;
+    mpesa_name?: string | null;
+    transaction_code?: string | null;
   } | null;
   [key: string]: unknown;
 };
@@ -101,8 +115,8 @@ export async function listCompanies(params?: {
   const { search = null, limit = 200, offset = 0 } = params ?? {};
 
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Calling list_companies RPC...');
-  const { data, error, status, statusText } = await supabase.rpc('list_companies', {
+  console.log('[DevAdmin] Calling list_companies_v2 RPC...');
+  const { data, error, status, statusText } = await supabase.rpc('list_companies_v2', {
     p_limit: limit,
     p_offset: offset,
     p_search: search,
@@ -124,18 +138,34 @@ export async function listCompanies(params?: {
     throw new Error(error.message ?? 'Failed to load companies');
   }
 
-  const payload = (data as { items?: DeveloperCompanyRow[]; total?: number; limit?: number; offset?: number } | null) ?? {
-    items: [],
-    total: 0,
-    limit,
-    offset,
-  };
+  const payload = (data as {
+    items?: DeveloperCompanyRow[];
+    rows?: DeveloperCompanyRow[];
+    total?: number;
+    limit?: number;
+    offset?: number;
+  } | null) ?? null;
+
+  // Support both payload shapes:
+  // - { items: [...] } (newer)
+  // - { rows: [...] }  (legacy)
+  const parsedItems = (payload?.items ?? payload?.rows ?? []) as DeveloperCompanyRow[];
+  const parsedTotal = Number(payload?.total ?? parsedItems.length);
+  const parsedLimit = Number(payload?.limit ?? limit);
+  const parsedOffset = Number(payload?.offset ?? offset);
+
+  // eslint-disable-next-line no-console
+  console.log('[DevAdmin] list_companies parsed:', {
+    parsedLength: parsedItems.length,
+    parsedTotal,
+    firstItem: parsedItems[0] ?? null,
+  });
 
   return {
-    items: (payload.items ?? []) as DeveloperCompanyRow[],
-    total: Number(payload.total ?? 0),
-    limit: Number(payload.limit ?? limit),
-    offset: Number(payload.offset ?? offset),
+    items: parsedItems,
+    total: parsedTotal,
+    limit: parsedLimit,
+    offset: parsedOffset,
   };
 }
 
@@ -157,6 +187,18 @@ export async function overrideSubscription(input: OverrideSubscriptionInput): Pr
   }
 }
 
+export async function updateCompanySubscriptionState(input: {
+  companyId: string;
+  action: DeveloperSubscriptionAction;
+  planCode?: 'basic' | 'pro' | null;
+  reason?: string | null;
+  days?: number | null;
+}): Promise<void> {
+  await setCompanySubscriptionState(input);
+}
+
+export { listDuplicateEmails };
+
 // ---------------------------------------------------------------------------
 // Safe developer delete actions
 // ---------------------------------------------------------------------------
@@ -173,7 +215,9 @@ export interface DeleteCompanyResult {
   success: boolean;
   blocked?: boolean;
   reason?: string | null;
+  deleted_company_id?: string;
   dependency_counts?: Record<string, number>;
+  deleted_counts?: Record<string, number>;
 }
 
 export async function deleteUserSafely(clerkUserId: string): Promise<DeleteUserResult> {
@@ -192,6 +236,9 @@ export async function deleteCompanySafely(companyId: string): Promise<DeleteComp
   });
   if (error) {
     throw new Error(error.message ?? 'Failed to delete company');
+  }
+  if (Array.isArray(data)) {
+    return (data[0] as DeleteCompanyResult) ?? { success: false, blocked: true, reason: 'Unknown error' };
   }
   return (data as DeleteCompanyResult) ?? { success: false, blocked: true, reason: 'Unknown error' };
 }
@@ -341,4 +388,14 @@ export async function renameCompany(companyId: string, name: string): Promise<vo
   }
 }
 
+export {
+  createPaymentSubmission,
+  getCurrentCompanySubscription,
+  getPendingPaymentStatus,
+  listCompanySubscriptionPayments,
+  type CompanySubscriptionRow,
+  type CreatePaymentSubmissionInput,
+  type PendingPaymentStatusResult,
+  type PaymentSubmissionRow,
+} from '@/services/billingSubmissionService';
 

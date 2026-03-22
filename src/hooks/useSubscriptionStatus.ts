@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCompany, type CompanyDoc } from '@/services/companyService';
+import { getSubscriptionGateState } from '@/services/subscriptionService';
+import { resolveWorkspaceSubscriptionState } from '@/lib/resolveWorkspaceSubscriptionState';
+import type { WorkspaceSubscriptionPlan, WorkspaceSubscriptionStatus } from '@/lib/resolveWorkspaceSubscriptionState';
 
-type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'enterprise';
-type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused' | 'pending_payment';
+export type SubscriptionPlan = WorkspaceSubscriptionPlan;
+export type SubscriptionStatus = WorkspaceSubscriptionStatus;
 
 export interface CompanySubscriptionOverride {
   enabled: boolean;
@@ -26,40 +28,26 @@ export interface CompanySubscription {
 
 export interface SubscriptionStatusResult {
   canWrite: boolean;
+  /** True while approved Pro trial is running (countdown active). */
   isTrial: boolean;
+  /** Subscription record says expired, or Pro trial window ended and plan must be chosen. */
   isExpired: boolean;
   daysRemaining: number | null;
   isOverrideActive: boolean;
   plan: SubscriptionPlan;
-   status: SubscriptionStatus;
+  status: SubscriptionStatus;
   isLoading: boolean;
-}
-
-function toDate(value: unknown): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  const ts = value as { toDate?: () => Date; seconds?: number };
-  if (typeof ts.toDate === 'function') return ts.toDate();
-  if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000);
-  return null;
-}
-
-function mapLegacyPlanToSubscriptionPlan(plan: string | null | undefined): SubscriptionPlan {
-  if (!plan) return 'basic';
-  switch (plan) {
-    case 'trial':
-      return 'trial';
-    case 'starter':
-    case 'basic':
-      return 'basic';
-    case 'professional':
-    case 'pro':
-      return 'pro';
-    case 'enterprise':
-      return 'enterprise';
-    default:
-      return 'basic';
-  }
+  /** Trial ended, is_trial still true in DB — company admin must call choose_post_trial_plan. */
+  trialExpiredNeedsPlan: boolean;
+  /** Raw trial end from gate RPC (for effective plan / feature access). */
+  trialEndsAt: string | null;
+  /** From gate: trial end or paid period end — use for billing renewal line. */
+  displayAccessEndIso: string | null;
+  /** Active paid (or equivalent); trial countdown hidden. */
+  isActivePaid: boolean;
+  /** From get_subscription_gate_state (same source as plan/status). */
+  billingModeFromGate: string | null;
+  billingCycleFromGate: string | null;
 }
 
 export function useSubscriptionStatus(): SubscriptionStatusResult {
@@ -67,101 +55,45 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
   const isDeveloper = user?.role === 'developer';
   const companyId = user?.companyId ?? null;
 
-  const { data: company, isLoading } = useQuery<CompanyDoc | null>({
+  const { data: subscriptionState, isLoading } = useQuery({
     queryKey: ['company-subscription', companyId],
     enabled: !!companyId,
-    queryFn: () => getCompany(companyId!),
-    staleTime: 60_000,
+    queryFn: () => getSubscriptionGateState(),
+    staleTime: 30_000,
   });
 
-  return useMemo<SubscriptionStatusResult>(() => {
-    // Developers are never blocked by subscription
-    if (isDeveloper) {
-      return {
-        canWrite: true,
-        isTrial: false,
-        isExpired: false,
-        daysRemaining: null,
-        isOverrideActive: false,
-        plan: 'enterprise',
-        status: 'active',
-        isLoading,
-      };
-    }
+  const resolved = useMemo(
+    () => resolveWorkspaceSubscriptionState(subscriptionState ?? null, companyId, Boolean(isDeveloper)),
+    [subscriptionState, companyId, isDeveloper],
+  );
 
-    // No company yet (onboarding, driver without company, etc.) – do not block writes here.
-    if (!companyId || !company) {
-      return {
-        canWrite: true,
-        isTrial: false,
-        isExpired: false,
-        daysRemaining: null,
-        isOverrideActive: false,
-        plan: 'basic',
-        status: 'active',
-        isLoading,
-      };
-    }
+  useEffect(() => {
+    if (!import.meta.env.DEV || !companyId) return;
+    // eslint-disable-next-line no-console
+    console.log('[SubscriptionStatus] gate row + resolver', {
+      companyId,
+      rawGate: subscriptionState ?? null,
+      resolved,
+    });
+  }, [companyId, subscriptionState, resolved]);
 
-    const rawSub = (company as any).subscription as CompanySubscription | undefined;
-
-    const subPlan: SubscriptionPlan = rawSub?.plan ?? mapLegacyPlanToSubscriptionPlan(
-      (company as any).plan ?? (company as any).subscriptionPlan,
-    );
-    const subStatus: SubscriptionStatus = rawSub?.status ?? 'active';
-
-    const trialEndsAt = toDate(rawSub?.trialEndsAt);
-    const paidUntil = toDate(rawSub?.paidUntil ?? null);
-
-    const override = rawSub?.override;
-    const overrideEndsAt = toDate(override?.overrideEndsAt ?? null);
-    const now = new Date();
-
-    const overrideActive =
-      Boolean(override?.enabled) &&
-      !!overrideEndsAt &&
-      overrideEndsAt.getTime() > now.getTime();
-
-    const hasPaid = !!paidUntil && paidUntil.getTime() > now.getTime();
-    const hasTrial = !!trialEndsAt && trialEndsAt.getTime() > now.getTime();
-
-    let canWrite = overrideActive || hasPaid || hasTrial;
-    let isTrial = subPlan === 'trial' && (hasTrial || (overrideActive && override?.type === 'extended_trial'));
-    const isExpired = !canWrite;
-
-    // If there is no structured subscription yet for legacy tenants, do not block writes.
-    if (!rawSub) {
-      canWrite = true;
-    }
-
-    let daysRemaining: number | null = null;
-    if (overrideActive && overrideEndsAt) {
-      daysRemaining = Math.max(
-        0,
-        Math.ceil((overrideEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
-      );
-    } else if (hasPaid && paidUntil) {
-      daysRemaining = Math.max(
-        0,
-        Math.ceil((paidUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
-      );
-    } else if (hasTrial && trialEndsAt) {
-      daysRemaining = Math.max(
-        0,
-        Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
-      );
-    }
-
-    return {
-      canWrite,
-      isTrial,
-      isExpired,
-      daysRemaining,
-      isOverrideActive: overrideActive,
-      plan: subPlan,
-      status: subStatus,
+  return useMemo<SubscriptionStatusResult>(
+    () => ({
+      canWrite: resolved.canWrite,
+      isTrial: resolved.isTrial,
+      isExpired: resolved.isExpired,
+      daysRemaining: resolved.daysRemaining,
+      isOverrideActive: resolved.isOverrideActive,
+      plan: resolved.plan,
+      status: resolved.status,
       isLoading,
-    };
-  }, [company, companyId, isDeveloper, isLoading]);
+      trialExpiredNeedsPlan: resolved.trialExpiredNeedsPlan,
+      trialEndsAt: resolved.trialEndsAt,
+      displayAccessEndIso: resolved.displayAccessEndIso,
+      isActivePaid: resolved.isActivePaid,
+      billingModeFromGate: subscriptionState?.billing_mode ?? null,
+      billingCycleFromGate: subscriptionState?.billing_cycle ?? null,
+    }),
+    [resolved, isLoading, subscriptionState?.billing_mode, subscriptionState?.billing_cycle],
+  );
 }
-

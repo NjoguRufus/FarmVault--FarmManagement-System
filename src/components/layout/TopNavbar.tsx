@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Search, ChevronDown, Settings, LogOut, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown } from 'lucide-react';
+import { Bell, Search, ChevronDown, Settings, LogOut, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -31,8 +31,33 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
   const { notifications, markAsRead, markAllRead, unreadCount } = useNotifications();
-  const { isTrial, isExpired, daysRemaining, status } = useSubscriptionStatus();
+  const {
+    isTrial,
+    isExpired,
+    daysRemaining,
+    status,
+    trialExpiredNeedsPlan,
+    isActivePaid,
+    plan: subPlan,
+    isOverrideActive,
+  } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !user?.companyId) return;
+    // eslint-disable-next-line no-console
+    console.log('[TopNavbar] subscription badge state', {
+      companyId: user.companyId,
+      isActivePaid,
+      isTrial,
+      status,
+      subPlan,
+    });
+  }, [user?.companyId, isActivePaid, isTrial, status, subPlan]);
+
+  const isCompanyAdmin =
+    user?.role === 'company-admin' || (user as { role?: string } | null)?.role === 'company_admin';
+  const hidePaymentUpgradeModal = trialExpiredNeedsPlan && isCompanyAdmin;
 
   const companyProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
 
@@ -169,25 +194,73 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </div>
           )}
 
-          {/* Subscription status badge */}
-          {!isExpired && isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && (
+          {isActivePaid && !isOverrideActive && (
+            <>
+              <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                {subPlan === 'pro' ? 'Pro' : subPlan === 'basic' ? 'Basic' : 'Plan'} · Active
+              </div>
+              <div className="sm:hidden inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
+                <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
+                Active
+              </div>
+            </>
+          )}
+
+          {/* Pro trial countdown + warning */}
+          {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
+            <div className="hidden md:flex flex-col items-end gap-0.5 max-w-[220px]">
+              <button
+                type="button"
+                onClick={() => setUpgradeOpen(true)}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200 hover:bg-amber-100"
+              >
+                <Crown className="h-3 w-3 shrink-0" />
+                Pro trial · {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
+              </button>
+              <span className="text-[10px] text-amber-800/90 text-right leading-tight">
+                {daysRemaining === 0
+                  ? 'Your Pro trial ends today'
+                  : `Your Pro trial ends in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`}
+              </span>
+            </div>
+          )}
+          {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
             <button
               type="button"
               onClick={() => setUpgradeOpen(true)}
-              className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200 hover:bg-amber-100"
+              className="md:hidden inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200"
             >
               <Crown className="h-3 w-3" />
-              {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
+              {daysRemaining}d Pro trial
             </button>
           )}
-          {isExpired && (
+
+          {trialExpiredNeedsPlan && (
+            <div
+              className="hidden sm:inline-flex flex-col items-end gap-0.5 max-w-[240px] rounded-lg border border-destructive/30 bg-destructive/5 px-2.5 py-1.5"
+              role="status"
+            >
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-destructive">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Pro trial ended
+              </span>
+              <span className="text-[10px] text-muted-foreground text-right leading-tight">
+                {isCompanyAdmin
+                  ? 'Choose Basic or Pro to continue.'
+                  : 'Ask your company admin to choose a plan.'}
+              </span>
+            </div>
+          )}
+
+          {isExpired && !trialExpiredNeedsPlan && (
             <button
               type="button"
               onClick={() => setUpgradeOpen(true)}
               className="hidden sm:inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-medium text-destructive border border-destructive/40 hover:bg-destructive/15"
             >
               <AlertTriangle className="h-3 w-3" />
-              Trial expired – Upgrade
+              Subscription expired – Upgrade
             </button>
           )}
 
@@ -281,13 +354,15 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           </DropdownMenu>
         </div>
       </div>
-      <UpgradeModal
-        open={upgradeOpen}
-        onOpenChange={setUpgradeOpen}
-        isTrial={isTrial}
-        isExpired={isExpired}
-        daysRemaining={daysRemaining}
-      />
+      {!hidePaymentUpgradeModal && (
+        <UpgradeModal
+          open={upgradeOpen}
+          onOpenChange={setUpgradeOpen}
+          isTrial={isTrial}
+          isExpired={isExpired && !trialExpiredNeedsPlan}
+          daysRemaining={daysRemaining}
+        />
+      )}
     </header>
   );
 }

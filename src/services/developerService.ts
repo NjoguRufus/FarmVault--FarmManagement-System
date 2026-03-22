@@ -42,7 +42,13 @@ export interface PendingPayment {
   amount: number | null;
   status: string;
   billing_mode: string | null;
+  billing_cycle: string | null;
+  mpesa_name: string | null;
+  mpesa_phone: string | null;
+  transaction_code: string | null;
   created_at: string | null;
+  submitted_at: string | null;
+  currency: string | null;
 }
 
 export interface PaymentRow {
@@ -102,11 +108,23 @@ export interface SubscriptionAnalyticsRow {
   updated_at: string | null;
 }
 
+export interface SubscriptionPaymentStats {
+  pending_verification_count: number;
+  pending_legacy_count: number;
+  pending_total_count: number;
+  approved_count: number;
+  rejected_count: number;
+  pending_revenue: number;
+  approved_revenue: number;
+  rejected_revenue: number;
+}
+
 export interface SubscriptionAnalyticsResponse {
   summary: SubscriptionSummary;
   plan_distribution: PlanDistributionEntry[];
   status_distribution: StatusDistributionEntry[];
   rows: SubscriptionAnalyticsRow[];
+  payment_stats: SubscriptionPaymentStats;
 }
 
 export async function fetchDeveloperKpis(): Promise<DeveloperDashboardKpis> {
@@ -158,30 +176,34 @@ export async function fetchDeveloperUsers(params?: {
 }
 
 export async function fetchPendingPayments(): Promise<PendingPayment[]> {
-  const { data, error } = await supabase.rpc('list_billing_confirmations', {
-    p_status: 'pending',
-    p_company_id: null,
-    p_limit: 100,
-    p_offset: 0,
-  });
+  const { data, error } = await supabase.rpc('list_pending_payments');
   if (error) {
     throw new Error(error.message ?? 'Failed to load pending payments');
   }
-  const payload = (data as { rows?: PendingPayment[] } | null) ?? { rows: [] };
-  return payload.rows ?? [];
+  const rows = (Array.isArray(data) ? data : []) as PendingPayment[];
+  // eslint-disable-next-line no-console
+  console.log('[DevService] list_pending_payments:', {
+    count: rows.length,
+    first: rows[0] ?? null,
+  });
+  return rows;
 }
 
 export async function approveSubscriptionPayment(id: string): Promise<void> {
-  const { error } = await supabase.rpc('approve_billing_confirmation', { p_confirmation_id: id });
+  // eslint-disable-next-line no-console
+  console.log('[DevService] approve_subscription_payment RPC (syncs company_subscriptions)', { paymentId: id });
+  const { error } = await supabase.rpc('approve_subscription_payment', { _payment_id: id });
   if (error) {
-    throw new Error(error.message ?? 'Failed to approve billing confirmation');
+    throw new Error(error.message ?? 'Failed to approve payment');
   }
+  // eslint-disable-next-line no-console
+  console.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
 }
 
 export async function rejectSubscriptionPayment(id: string): Promise<void> {
-  const { error } = await supabase.rpc('reject_billing_confirmation', { p_confirmation_id: id });
+  const { error } = await supabase.rpc('reject_subscription_payment', { _payment_id: id });
   if (error) {
-    throw new Error(error.message ?? 'Failed to reject billing confirmation');
+    throw new Error(error.message ?? 'Failed to reject payment');
   }
 }
 
@@ -249,6 +271,17 @@ export async function fetchSubscriptionAnalytics(params?: {
     throw new Error(error.message ?? 'Failed to load subscription analytics');
   }
 
+  const emptyPaymentStats: SubscriptionPaymentStats = {
+    pending_verification_count: 0,
+    pending_legacy_count: 0,
+    pending_total_count: 0,
+    approved_count: 0,
+    rejected_count: 0,
+    pending_revenue: 0,
+    approved_revenue: 0,
+    rejected_revenue: 0,
+  };
+
   const payload = (data as SubscriptionAnalyticsResponse | null) ?? {
     summary: {
       total_subscriptions: 0,
@@ -260,7 +293,28 @@ export async function fetchSubscriptionAnalytics(params?: {
     plan_distribution: [],
     status_distribution: [],
     rows: [],
+    payment_stats: emptyPaymentStats,
   };
+
+  const rawStats = payload.payment_stats as Record<string, unknown> | undefined;
+  const payment_stats: SubscriptionPaymentStats = rawStats
+    ? {
+        pending_verification_count: Number(rawStats.pending_verification_count ?? 0),
+        pending_legacy_count: Number(rawStats.pending_legacy_count ?? 0),
+        pending_total_count: Number(rawStats.pending_total_count ?? 0),
+        approved_count: Number(rawStats.approved_count ?? 0),
+        rejected_count: Number(rawStats.rejected_count ?? 0),
+        pending_revenue: Number(rawStats.pending_revenue ?? 0),
+        approved_revenue: Number(rawStats.approved_revenue ?? 0),
+        rejected_revenue: Number(rawStats.rejected_revenue ?? 0),
+      }
+    : emptyPaymentStats;
+
+  // eslint-disable-next-line no-console
+  console.log('[DevService] get_subscription_analytics parsed:', {
+    rowCount: (payload.rows ?? []).length,
+    payment_stats,
+  });
 
   return {
     summary: payload.summary ?? {
@@ -273,6 +327,7 @@ export async function fetchSubscriptionAnalytics(params?: {
     plan_distribution: payload.plan_distribution ?? [],
     status_distribution: payload.status_distribution ?? [],
     rows: payload.rows ?? [],
+    payment_stats,
   };
 }
 
