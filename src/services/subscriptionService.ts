@@ -52,6 +52,8 @@ export type DeveloperSubscriptionAction =
 export type SetCompanySubscriptionStateResult = {
   /** True when the company just left pending_approval via approve/activate; trigger workspace-ready email. */
   workspace_ready_email: boolean;
+  /** Canonical UUID echoed from the server (use for email lookup, not a stale UI id). */
+  company_id?: string | null;
 };
 
 export async function setCompanySubscriptionState(input: {
@@ -71,8 +73,15 @@ export async function setCompanySubscriptionState(input: {
   if (error) {
     throw new Error(error.message ?? 'Failed to update company subscription state');
   }
-  const payload = data as { workspace_ready_email?: boolean } | null;
-  return { workspace_ready_email: !!payload?.workspace_ready_email };
+  const payload = data as { workspace_ready_email?: boolean; company_id?: string | null } | null;
+  const cid =
+    payload?.company_id != null && String(payload.company_id).trim() !== ''
+      ? String(payload.company_id).trim()
+      : input.companyId;
+  return {
+    workspace_ready_email: !!payload?.workspace_ready_email,
+    company_id: cid,
+  };
 }
 
 /** After Pro trial ends, company admin picks Basic or Pro (updates company_subscriptions.plan_code, clears is_trial). */

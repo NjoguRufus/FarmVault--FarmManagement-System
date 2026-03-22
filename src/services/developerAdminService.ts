@@ -394,9 +394,12 @@ export async function renameCompany(companyId: string, name: string): Promise<vo
 }
 
 export type CompanyWorkspaceNotifyEmailSource =
+  /** Signed-in owner / company creator profile (Clerk-linked) — primary for farms without a separate company inbox. */
+  | 'onboarding_account_profile'
   | 'company_row_email'
   | 'company_admin_member_profile'
-  | 'onboarding_creator_profile';
+  /** Non-admin member, only after admin/owner list exhausted. */
+  | 'company_member_profile';
 
 export type CompanyWorkspaceNotifyResolution =
   | { ok: true; to: string; companyName: string; source: CompanyWorkspaceNotifyEmailSource }
@@ -442,17 +445,154 @@ type CompanyRowLite = {
   created_by_clerk_user_id?: string | null;
 };
 
+const COMPANY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function normalizeCompanyIdUuid(raw: string): string | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  return COMPANY_UUID_RE.test(s) ? s : null;
+}
+
+/** Clerk user ids are not UUIDs — only company_id must be a UUID for the lookup RPC. */
+function jsonbClerkIdList(val: unknown): string[] {
+  if (!Array.isArray(val)) return [];
+  const out: string[] = [];
+  for (const x of val) {
+    const id = String(x ?? '').trim();
+    if (id) out.push(id);
+  }
+  return out;
+}
+
 /**
  * Resolve workspace-ready email for a tenant (developer session).
- * Order: company row email → admin/owner member profiles → company creator (onboarding) profile.
+ * Prefer security-definer RPC (reads core.companies + members; browser RLS often blocks direct core selects).
+ * Priority: onboarding/account (creator) profile → company row email → admin/owner members → other members.
  */
 export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Promise<CompanyWorkspaceNotifyResolution> {
   const triedSteps: string[] = [];
-  const cid = String(companyId ?? '').trim();
-  if (!cid) {
+  const rawIn = String(companyId ?? '').trim();
+  if (!rawIn) {
     return { ok: false, companyName: null, reason: 'missing_company_id', triedSteps: ['validate_id'] };
   }
 
+  const uuidForRpc = normalizeCompanyIdUuid(rawIn);
+  if (!uuidForRpc) {
+    triedSteps.push('invalid_uuid_format');
+    // eslint-disable-next-line no-console
+    console.warn('[DevAdmin] workspace notify: company id is not a valid UUID', { companyId: rawIn });
+    return { ok: false, companyName: null, reason: 'company_not_found', triedSteps };
+  }
+
+  const { data: lookupRaw, error: lookupErr } = await supabase.rpc('get_company_workspace_notify_lookup', {
+    p_company_id: uuidForRpc,
+  });
+
+  if (lookupErr) {
+    triedSteps.push(`rpc_lookup_error:${lookupErr.message ?? 'unknown'}`);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevAdmin] get_company_workspace_notify_lookup failed; falling back to direct selects', lookupErr);
+    }
+  } else {
+    triedSteps.push('rpc_get_company_workspace_notify_lookup');
+  }
+
+  const lookup =
+    lookupRaw && typeof lookupRaw === 'object' && !Array.isArray(lookupRaw)
+      ? (lookupRaw as {
+          company_id?: string;
+          name?: string | null;
+          email?: string | null;
+          created_by?: string | null;
+          admin_clerk_ids?: unknown;
+          all_clerk_ids?: unknown;
+          source_table?: string | null;
+        })
+      : null;
+
+  if (lookup?.name && String(lookup.name).trim()) {
+    const companyName = String(lookup.name).trim();
+    const canonicalId = String(lookup.company_id ?? uuidForRpc).trim();
+    const rowEmail = normalizeNotifyEmail(lookup.email as string | undefined);
+    const creatorClerkId =
+      lookup.created_by && String(lookup.created_by).trim() ? String(lookup.created_by).trim() : null;
+
+    const adminIds = jsonbClerkIdList(lookup.admin_clerk_ids);
+    const allIds = jsonbClerkIdList(lookup.all_clerk_ids);
+
+    // 1) Onboarding / account owner (company creator)
+    if (creatorClerkId) {
+      const acctEmail = await resolveProfileEmailForUid(creatorClerkId);
+      if (acctEmail) {
+        // eslint-disable-next-line no-console
+        console.log('[FarmVault] workspace notify: recipient', {
+          source: 'onboarding_account_profile',
+          companyId: canonicalId,
+        });
+        return { ok: true, to: acctEmail, companyName, source: 'onboarding_account_profile' };
+      }
+      triedSteps.push('onboarding_account_profile(no_email)');
+    } else {
+      triedSteps.push('onboarding_account(missing_created_by)');
+    }
+
+    // 2) Company row email (optional in UI; may be empty)
+    if (rowEmail) {
+      // eslint-disable-next-line no-console
+      console.log('[FarmVault] workspace notify: recipient', {
+        source: 'company_row_email',
+        companyId: canonicalId,
+      });
+      return { ok: true, to: rowEmail, companyName, source: 'company_row_email' };
+    }
+    triedSteps.push('company_row_email(empty)');
+
+    // 3) Admin / owner members
+    for (const uid of adminIds) {
+      const email = await resolveProfileEmailForUid(uid);
+      if (email) {
+        // eslint-disable-next-line no-console
+        console.log('[FarmVault] workspace notify: recipient', {
+          source: 'company_admin_member_profile',
+          companyId: canonicalId,
+        });
+        return { ok: true, to: email, companyName, source: 'company_admin_member_profile' };
+      }
+    }
+    triedSteps.push(adminIds.length ? 'admin_member_profiles(no_valid_email)' : 'admin_member_ids(empty)');
+
+    // Other members (last resort)
+    for (const uid of allIds) {
+      if (adminIds.includes(uid)) continue;
+      const email = await resolveProfileEmailForUid(uid);
+      if (email) {
+        // eslint-disable-next-line no-console
+        console.log('[FarmVault] workspace notify: recipient', {
+          source: 'company_member_profile',
+          companyId: canonicalId,
+        });
+        return { ok: true, to: email, companyName, source: 'company_member_profile' };
+      }
+    }
+    triedSteps.push(allIds.length ? 'other_member_profiles(no_valid_email)' : 'all_member_ids(empty)');
+
+    // eslint-disable-next-line no-console
+    console.warn('[DevAdmin] workspace notify: recipient unresolved (RPC row)', {
+      companyId: canonicalId,
+      companyName,
+      source_table: lookup.source_table,
+      triedSteps,
+    });
+    return {
+      ok: false,
+      companyName,
+      reason: 'no_recipient_after_all_sources',
+      triedSteps,
+    };
+  }
+
+  const cid = uuidForRpc;
   let companyName: string | null = null;
   let rowEmail: string | null = null;
   let creatorClerkId: string | null = null;
@@ -505,11 +645,6 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     return { ok: false, companyName: null, reason: 'company_not_found', triedSteps };
   }
 
-  if (rowEmail) {
-    return { ok: true, to: rowEmail, companyName, source: 'company_row_email' };
-  }
-  triedSteps.push('company_row_email(empty)');
-
   let members: { clerk_user_id?: string | null; user_id?: string | null; role?: string | null }[] | null = null;
   const { data: memPub, error: mPubErr } = await supabase
     .from('company_members')
@@ -539,32 +674,64 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     }
   }
 
-  if (members && members.length > 0) {
-    const admins = members.filter((m) => isAdminishMemberRole(m.role));
-    const ordered = admins.length > 0 ? admins : members;
-    for (const m of ordered) {
-      const uid =
-        (m.clerk_user_id && String(m.clerk_user_id).trim()) || (m.user_id && String(m.user_id).trim()) || '';
-      if (!uid) continue;
-      const email = await resolveProfileEmailForUid(uid);
-      if (email) {
-        return { ok: true, to: email, companyName, source: 'company_admin_member_profile' };
-      }
-    }
-    triedSteps.push('admin_member_profiles(no_valid_email)');
-  } else {
+  if (!members || members.length === 0) {
     triedSteps.push('company_members(empty)');
   }
 
+  const admins = members?.filter((m) => isAdminishMemberRole(m.role)) ?? [];
+  const nonAdmins =
+    members?.filter((m) => !isAdminishMemberRole(m.role)) ?? [];
+
+  // 1) Onboarding / account owner
   if (creatorClerkId) {
-    const email = await resolveProfileEmailForUid(creatorClerkId);
-    if (email) {
-      return { ok: true, to: email, companyName, source: 'onboarding_creator_profile' };
+    const acctEmail = await resolveProfileEmailForUid(creatorClerkId);
+    if (acctEmail) {
+      // eslint-disable-next-line no-console
+      console.log('[FarmVault] workspace notify: recipient', { source: 'onboarding_account_profile', companyId: cid });
+      return { ok: true, to: acctEmail, companyName, source: 'onboarding_account_profile' };
     }
-    triedSteps.push(`onboarding_creator_profile(no_email_for:${creatorClerkId.slice(0, 8)}…)`);
+    triedSteps.push('onboarding_account_profile(no_email)');
   } else {
-    triedSteps.push('onboarding_creator(missing_created_by)');
+    triedSteps.push('onboarding_account(missing_created_by)');
   }
+
+  // 2) Company row email
+  if (rowEmail) {
+    // eslint-disable-next-line no-console
+    console.log('[FarmVault] workspace notify: recipient', { source: 'company_row_email', companyId: cid });
+    return { ok: true, to: rowEmail, companyName, source: 'company_row_email' };
+  }
+  triedSteps.push('company_row_email(empty)');
+
+  // 3) Admin / owner members
+  for (const m of admins) {
+    const uid =
+      (m.clerk_user_id && String(m.clerk_user_id).trim()) || (m.user_id && String(m.user_id).trim()) || '';
+    if (!uid) continue;
+    const email = await resolveProfileEmailForUid(uid);
+    if (email) {
+      // eslint-disable-next-line no-console
+      console.log('[FarmVault] workspace notify: recipient', {
+        source: 'company_admin_member_profile',
+        companyId: cid,
+      });
+      return { ok: true, to: email, companyName, source: 'company_admin_member_profile' };
+    }
+  }
+  triedSteps.push(admins.length ? 'admin_member_profiles(no_valid_email)' : 'admin_member_ids(empty)');
+
+  for (const m of nonAdmins) {
+    const uid =
+      (m.clerk_user_id && String(m.clerk_user_id).trim()) || (m.user_id && String(m.user_id).trim()) || '';
+    if (!uid) continue;
+    const email = await resolveProfileEmailForUid(uid);
+    if (email) {
+      // eslint-disable-next-line no-console
+      console.log('[FarmVault] workspace notify: recipient', { source: 'company_member_profile', companyId: cid });
+      return { ok: true, to: email, companyName, source: 'company_member_profile' };
+    }
+  }
+  triedSteps.push(nonAdmins.length ? 'other_member_profiles(no_valid_email)' : 'no_non_admin_members');
 
   // eslint-disable-next-line no-console
   console.warn('[DevAdmin] workspace notify: recipient unresolved', {
