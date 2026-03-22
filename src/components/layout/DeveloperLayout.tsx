@@ -73,17 +73,17 @@ export function DeveloperLayout() {
       <main
         className={cn(
           'pt-16 min-h-screen transition-all duration-300',
-          'pb-6',
+          'pb-24 lg:pb-6',
           sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-60',
         )}
       >
-        <div className="p-6 space-y-4">
-          <header className="flex flex-col gap-2 border-b border-border/50 pb-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-primary/80 uppercase tracking-[0.18em]">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px]">
+        <div className="px-3 py-3 sm:px-6 sm:py-4 space-y-3 sm:space-y-4 max-lg:max-w-[100vw] overflow-x-hidden">
+          <header className="flex flex-col gap-1.5 border-b border-border/50 pb-2.5 sm:pb-3">
+            <div className="flex items-center gap-2 text-[10px] font-medium text-primary/80 uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]">
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px]">
                 Dev
               </span>
-              <span>FarmVault Developer Console</span>
+              <span className="truncate">FarmVault Developer Console</span>
             </div>
           </header>
           <Outlet />

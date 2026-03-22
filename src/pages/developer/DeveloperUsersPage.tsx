@@ -112,8 +112,8 @@ export default function DeveloperUsersPage() {
       )}
 
       {filtered.length > 0 && (
-        <div className="fv-card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="fv-card overflow-x-visible md:overflow-x-auto">
+          <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[560px]">
             <thead className="border-b border-border/60 text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 text-left font-medium">User</th>
@@ -139,19 +139,23 @@ export default function DeveloperUsersPage() {
 
                 return (
                   <tr key={rowKey} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
-                    <td className="py-2 pr-4">
+                    <td className="max-md:items-start max-md:gap-2 py-2 pr-4" data-label="User">
                       <div className="font-medium text-foreground">{name}</div>
                       <div className="text-[11px] text-muted-foreground break-all">
                         {email} · {clerkUserId}
                       </div>
                     </td>
-                    <td className="py-2 pr-4 text-xs">
+                    <td className="max-md:items-start py-2 pr-4 text-xs" data-label="Company">
                       <div>{companyName}</div>
                       <div className="text-[11px] text-muted-foreground">{u.company_id ?? u.company?.company_id ?? ''}</div>
                     </td>
-                    <td className="py-2 pr-4 text-xs capitalize">{role}</td>
-                    <td className="py-2 pr-4 text-xs">{createdAt}</td>
-                    <td className="py-2 text-right">
+                    <td className="py-2 pr-4 text-xs capitalize" data-label="Role">
+                      {role}
+                    </td>
+                    <td className="py-2 pr-4 text-xs" data-label="Joined">
+                      {createdAt}
+                    </td>
+                    <td className="max-md:justify-end py-2 text-right" data-label="Actions">
                       <Button
                         variant="ghost"
                         size="sm"

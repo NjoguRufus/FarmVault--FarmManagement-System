@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { MessageCircle, X, Send, Bot } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { X, Send, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/contexts/ProjectContext';
-import { useAuth } from '@/contexts/AuthContext';
 
 export function AIChatButton() {
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([
@@ -15,7 +16,6 @@ export function AIChatButton() {
   ]);
 
   const { activeProject } = useProject();
-  const { user } = useAuth();
 
   const handleSend = () => {
     if (!message.trim()) return;
@@ -35,6 +35,10 @@ export function AIChatButton() {
 
     setMessage('');
   };
+
+  if (location.pathname.replace(/\/+/g, '/').startsWith('/developer')) {
+    return null;
+  }
 
   return (
     <>

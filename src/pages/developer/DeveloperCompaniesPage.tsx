@@ -523,7 +523,7 @@ export default function DeveloperCompaniesPage() {
       searchValue={search}
       onSearchChange={setSearch}
     >
-      <div className="fv-card space-y-3">
+      <div className="fv-card space-y-3 p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">New Companies:</span>
           <button
@@ -641,8 +641,8 @@ export default function DeveloperCompaniesPage() {
       )}
 
       {filtered.length > 0 && (
-        <div className="fv-card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="fv-card overflow-x-visible md:overflow-x-auto">
+          <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[800px]">
             <thead className="border-b border-border/60 text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
@@ -670,8 +670,8 @@ export default function DeveloperCompaniesPage() {
 
                 return (
                   <tr key={id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
+                    <td className="max-md:items-start max-md:gap-2 py-3 pr-4" data-label="Company">
+                      <div className="flex flex-wrap items-center gap-2">
                         <div className="font-medium text-foreground">{displayName}</div>
                         {isNewCompany(c.created_at, newWindowDays) && (
                           <span className="inline-flex items-center rounded-sm bg-emerald-500/15 text-emerald-700 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide">
@@ -684,7 +684,7 @@ export default function DeveloperCompaniesPage() {
                         Created: {formatCreatedTime(c.created_at)}
                       </div>
                     </td>
-                    <td className="py-3 pr-4">
+                    <td className="max-md:items-start py-3 pr-4" data-label="Plan / Status">
                       <span
                         className={cn(
                           'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border',
@@ -699,9 +699,9 @@ export default function DeveloperCompaniesPage() {
                         {label}
                       </span>
                     </td>
-                    <td className="py-3 pr-4 text-xs align-top">
+                    <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Latest M-Pesa">
                       {c.latest_subscription_payment ? (
-                        <div className="space-y-1 max-w-[200px]">
+                        <div className="max-w-[200px] space-y-1 md:max-w-[200px]">
                           <Badge
                             variant="outline"
                             className={cn('font-normal text-[10px] px-1.5 py-0', latestPaymentStatusStyles(c.latest_subscription_payment.status))}
@@ -728,16 +728,16 @@ export default function DeveloperCompaniesPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="py-3 pr-4 text-xs text-muted-foreground">
+                    <td className="py-3 pr-4 text-xs text-muted-foreground" data-label="Users">
                       {c.users_count ?? 0} / {c.employees_count ?? 0}
                     </td>
-                    <td className="py-3 pr-4 text-xs">
+                    <td className="py-3 pr-4 text-xs" data-label="Trial ends">
                       {formatDate(c.trial_ends_at ?? c.subscription?.trial_end)}
                     </td>
-                    <td className="py-3 pr-4 text-xs">
+                    <td className="py-3 pr-4 text-xs" data-label="Active until">
                       {formatDate(c.active_until ?? c.subscription?.period_end)}
                     </td>
-                    <td className="py-3">
+                    <td className="max-md:justify-end py-3" data-label="Actions">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
