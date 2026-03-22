@@ -17,6 +17,8 @@ type DbProjectRow = {
   notes: string | null;
   planning: unknown | null;
   created_at: string;
+  budget?: number | string | null;
+  budget_pool_id?: string | null;
 };
 
 type DbStageRow = {
@@ -55,7 +57,7 @@ function mapProjectRow(row: DbProjectRow): Project {
     endDate: expectedEnd,
     location: row.notes ?? '',
     acreage: row.field_size ?? 0,
-    budget: 0,
+    budget: Number(row.budget ?? 0),
     createdAt: new Date(row.created_at),
     plantingDate,
     startingStageIndex: undefined,
@@ -66,7 +68,7 @@ function mapProjectRow(row: DbProjectRow): Project {
     daysSincePlanting: undefined,
     setupComplete: true,
     useBlocks: false,
-    budgetPoolId: null,
+    budgetPoolId: row.budget_pool_id ?? null,
     planning: (row.planning as Project['planning']) ?? undefined,
   };
 }
@@ -113,7 +115,9 @@ export async function listProjects(companyId: string | null): Promise<Project[]>
       field_unit,
       notes,
       planning,
-      created_at
+      created_at,
+      budget,
+      budget_pool_id
     `,
     )
     .eq('company_id', companyId)
@@ -194,6 +198,10 @@ export interface CreateProjectInput {
   fieldSize?: number | null;
   fieldUnit?: string;
   notes?: string | null;
+  /** Allocated budget (KES) when not using a shared pool. */
+  budget?: number | null;
+  /** When set, expenses draw from this finance.budget_pools row. */
+  budgetPoolId?: string | null;
 }
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
@@ -213,6 +221,8 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
       field_size: input.fieldSize ?? null,
       field_unit: input.fieldUnit ?? 'acres',
       notes: input.notes ?? null,
+      budget: input.budget ?? 0,
+      budget_pool_id: input.budgetPoolId ?? null,
     })
     .select('*')
     .single();
@@ -226,13 +236,14 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 
 export async function updateProject(
   projectId: string,
-  updates: Partial<Pick<Project, 'name' | 'status' | 'location' | 'acreage'>>,
+  updates: Partial<Pick<Project, 'name' | 'status' | 'location' | 'acreage' | 'budget'>>,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   if (updates.name != null) payload.name = updates.name;
   if (updates.status != null) payload.status = updates.status;
   if (updates.location != null) payload.notes = updates.location;
   if (updates.acreage != null) payload.field_size = updates.acreage;
+  if (updates.budget !== undefined) payload.budget = updates.budget;
 
   if (Object.keys(payload).length === 0) return;
 

@@ -38,6 +38,9 @@ export default function EditProjectPage() {
   const [acreage, setAcreage] = useState(
     project?.acreage != null ? String(project.acreage) : '',
   );
+  const [budget, setBudget] = useState(
+    project?.budget != null ? String(project.budget) : '',
+  );
   const [saving, setSaving] = useState(false);
 
   React.useEffect(() => {
@@ -46,6 +49,7 @@ export default function EditProjectPage() {
       setStatus(project.status ?? 'active');
       setLocation(project.location ?? '');
       setAcreage(project.acreage != null ? String(project.acreage) : '');
+      setBudget(project.budget != null ? String(project.budget) : '');
     }
   }, [project]);
 
@@ -59,14 +63,26 @@ export default function EditProjectPage() {
       return;
     }
 
+    const patch: Parameters<typeof updateProject>[1] = {
+      name: name.trim() || undefined,
+      status,
+      location: location.trim() || undefined,
+      acreage: acreageNum,
+    };
+
+    if (!project.budgetPoolId) {
+      const budgetTrim = budget.trim();
+      const budgetNum = budgetTrim === '' ? 0 : parseFloat(budgetTrim);
+      if (budgetTrim !== '' && (Number.isNaN(budgetNum) || budgetNum < 0)) {
+        toast.error('Budget must be a valid amount (KES) of zero or more.');
+        return;
+      }
+      patch.budget = budgetNum;
+    }
+
     setSaving(true);
     try {
-      await updateProject(projectId, {
-        name: name.trim() || undefined,
-        status,
-        location: location.trim() || undefined,
-        acreage: acreageNum,
-      });
+      await updateProject(projectId, patch);
       await queryClient.invalidateQueries({ queryKey: ['project', projectId, companyId] });
       await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
       toast.success('Project updated.');
@@ -121,7 +137,7 @@ export default function EditProjectPage() {
       <div className="rounded-xl border border-border/60 bg-card p-6 shadow-sm">
         <h1 className="text-xl font-semibold text-foreground mb-1">Edit Project</h1>
         <p className="text-sm text-muted-foreground mb-6">
-          Update project name, status, location, and field size.
+          Update project name, status, location, field size, and budget (when not using a linked pool).
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -178,6 +194,26 @@ export default function EditProjectPage() {
               placeholder="e.g. 2.5"
               className="w-full"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="edit-budget">Budget (KES)</Label>
+            {project.budgetPoolId ? (
+              <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                This project uses a linked budget pool instead of a separate project budget.
+              </p>
+            ) : (
+              <Input
+                id="edit-budget"
+                type="number"
+                min={0}
+                step={1}
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                placeholder="e.g. 150000"
+                className="w-full"
+              />
+            )}
           </div>
 
           <div className="flex gap-3 pt-2">

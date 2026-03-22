@@ -74,7 +74,6 @@ export function CompanyDashboard() {
   const { startTour } = useTour();
   const isMobile = useIsMobile();
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
-  const [projectFilter, setProjectFilter] = useState<'all' | 'selected'>('selected');
 
   // Employee access: restrict projects and data to what this employee is allowed to see.
   const { hasProjectAccess, projectAccessIds } = useEmployeeAccess();
@@ -209,50 +208,54 @@ export function CompanyDashboard() {
   const filteredExpenses = useMemo(() => {
     let filtered = companyId ? allExpenses.filter((e) => e.companyId === companyId) : allExpenses;
     filtered = filtered.filter((e) => !e.projectId || hasProjectAccess(e.projectId));
-    if (projectFilter === 'selected' && activeProject) {
+    if (activeProject) {
       filtered = filtered.filter((e) => e.projectId === activeProject.id);
     }
     return filtered;
-  }, [allExpenses, companyId, activeProject, projectFilter, hasProjectAccess]);
+  }, [allExpenses, companyId, activeProject, hasProjectAccess]);
 
   const filteredHarvests = useMemo(() => {
     let filtered = companyId ? allHarvests.filter((h) => h.companyId === companyId) : allHarvests;
     filtered = filtered.filter((h) => !h.projectId || hasProjectAccess(h.projectId));
-    if (projectFilter === 'selected' && activeProject) {
+    if (activeProject) {
       filtered = filtered.filter((h) => h.projectId === activeProject.id);
     }
     return filtered;
-  }, [allHarvests, companyId, activeProject, projectFilter, hasProjectAccess]);
+  }, [allHarvests, companyId, activeProject, hasProjectAccess]);
 
   const filteredSales = useMemo(() => {
     let filtered = companyId ? allSales.filter((s) => s.companyId === companyId) : allSales;
     filtered = filtered.filter((s) => !s.projectId || hasProjectAccess(s.projectId));
-    if (projectFilter === 'selected' && activeProject) {
+    if (activeProject) {
       filtered = filtered.filter((s) => s.projectId === activeProject.id);
     }
     return filtered;
-  }, [allSales, companyId, activeProject, projectFilter, hasProjectAccess]);
+  }, [allSales, companyId, activeProject, hasProjectAccess]);
 
   const filteredProjects = useMemo(() => {
-    if (projectFilter === 'selected' && activeProject) return [activeProject];
+    if (activeProject) return [activeProject];
     return companyProjects;
-  }, [companyProjects, activeProject, projectFilter]);
+  }, [companyProjects, activeProject]);
 
   const filteredInventory = useMemo(() => {
     const scoped = companyId
       ? allInventory.filter((i) => i.companyId === companyId)
       : allInventory;
-    return scoped.filter((i) => !i.projectId || hasProjectAccess(i.projectId));
-  }, [allInventory, companyId, hasProjectAccess]);
+    let out = scoped.filter((i) => !i.projectId || hasProjectAccess(i.projectId));
+    if (activeProject) {
+      out = out.filter((i) => !i.projectId || i.projectId === activeProject.id);
+    }
+    return out;
+  }, [allInventory, companyId, hasProjectAccess, activeProject]);
 
   const filteredStages = useMemo(() => {
     let filtered = companyId ? allStages.filter((s) => s.companyId === companyId) : allStages;
     filtered = filtered.filter((s) => !s.projectId || hasProjectAccess(s.projectId));
-    if (projectFilter === 'selected' && activeProject) {
+    if (activeProject) {
       filtered = filtered.filter((s) => s.projectId === activeProject.id);
     }
     return filtered;
-  }, [allStages, companyId, activeProject, projectFilter, hasProjectAccess]);
+  }, [allStages, companyId, activeProject, hasProjectAccess]);
 
   const activeProjectStages = useMemo(() => {
     if (!activeProject) return [];
@@ -576,11 +579,25 @@ export function CompanyDashboard() {
     return 'normal';
   }, [filteredExpenses]);
 
+  const harvestFinancialsProjectId =
+    activeProject && companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
+
   const { data: fbTotals } = useQuery({
-    queryKey: ['dashboardFinancialTotals', companyId],
-    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? ''),
+    queryKey: ['dashboardFinancialTotals', companyId ?? '', harvestFinancialsProjectId ?? 'all'],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', harvestFinancialsProjectId),
     enabled: Boolean(companyId),
   });
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !user?.id) return;
+    // eslint-disable-next-line no-console
+    console.log('[Dashboard] aggregation scope', {
+      companyId,
+      selectedProjectId: activeProject?.id ?? null,
+      harvestCollectionsScopeProjectId: harvestFinancialsProjectId,
+      mode: activeProject ? 'single_project' : 'all_projects',
+    });
+  }, [user?.id, companyId, activeProject?.id, harvestFinancialsProjectId]);
 
   const firestoreExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const firestoreSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -682,14 +699,10 @@ export function CompanyDashboard() {
   const handleProjectChange = useCallback(
     (value: string) => {
       if (value === 'all') {
-        setProjectFilter('all');
         setActiveProject(null);
       } else {
         const proj = companyProjects.find((p) => p.id === value);
-        if (proj) {
-          setActiveProject(proj);
-          setProjectFilter('selected');
-        }
+        if (proj) setActiveProject(proj);
       }
     },
     [companyProjects, setActiveProject]
@@ -758,8 +771,7 @@ export function CompanyDashboard() {
     return <DashboardSkeleton />;
   }
 
-  const projectSelectorValue =
-    projectFilter === 'selected' && activeProject ? activeProject.id : 'all';
+  const projectSelectorValue = activeProject ? activeProject.id : 'all';
 
   const getCropIcon = (cropType?: CropType | null) => {
     const icons: Record<string, string> = {

@@ -16,6 +16,16 @@ export function writePendingApprovalSession(ctx: PendingApprovalSessionPayload) 
   }
 }
 
+/** Clears onboarding “pending approval” context (e.g. after developer deletes the company). */
+export function clearPendingApprovalSession() {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(PENDING_APPROVAL_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function readPendingApprovalSession(): Partial<PendingApprovalSessionPayload> | null {
   if (typeof window === 'undefined') return null;
   try {

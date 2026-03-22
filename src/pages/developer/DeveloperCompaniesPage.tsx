@@ -2,7 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { fetchDeveloperCompanies } from '@/services/developerService';
-import { overrideSubscription, deleteCompanySafely, updateCompanySubscriptionState, listDuplicateEmails, type OverrideMode } from '@/services/developerAdminService';
+import {
+  overrideSubscription,
+  deleteCompanySafely,
+  updateCompanySubscriptionState,
+  listDuplicateEmails,
+  fetchCompanyWorkspaceNotifyPayload,
+  type OverrideMode,
+} from '@/services/developerAdminService';
+import { getSupabaseAccessToken } from '@/lib/supabase';
+import { invokeNotifyCompanyWorkspaceReady } from '@/lib/email';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
 import { Button } from '@/components/ui/button';
 import {
@@ -328,11 +337,57 @@ export default function DeveloperCompaniesPage() {
   });
 
   const stateMutation = useMutation({
-    mutationFn: (params: { companyId: string; action: 'approve' | 'reject' | 'suspend' | 'activate' | 'start_trial' | 'extend' | 'set_plan'; planCode?: 'basic' | 'pro'; reason?: string; days?: number }) =>
-      updateCompanySubscriptionState(params),
-    onSuccess: () => {
+    mutationFn: async (params: {
+      companyId: string;
+      action: 'approve' | 'reject' | 'suspend' | 'activate' | 'start_trial' | 'extend' | 'set_plan';
+      planCode?: 'basic' | 'pro';
+      reason?: string;
+      days?: number;
+    }) => {
+      const rpcResult = await updateCompanySubscriptionState(params);
+      return { params, rpcResult };
+    },
+    onSuccess: async ({ params, rpcResult }) => {
       toast({ title: 'Subscription updated', description: 'Company subscription state has been updated.' });
       queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+
+      const shouldNotify =
+        rpcResult.workspace_ready_email &&
+        (params.action === 'approve' || params.action === 'activate');
+      if (!shouldNotify) return;
+
+      const token = await getSupabaseAccessToken();
+      if (!token) {
+        toast({
+          title: 'Workspace email skipped',
+          description: 'No session token; sign in again to send the welcome email.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const resolved = await fetchCompanyWorkspaceNotifyPayload(params.companyId);
+      if (!resolved) {
+        toast({
+          title: 'Workspace email skipped',
+          description: 'Could not resolve company admin email. Send the email manually or check company membership.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const notify = await invokeNotifyCompanyWorkspaceReady({
+        to: resolved.to,
+        companyName: resolved.companyName,
+        dashboardUrl: getTenantDashboardUrl(),
+      });
+      if (!notify.ok) {
+        toast({
+          title: 'Workspace email failed',
+          description: notify.detail || notify.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
     },
     onError: (err: Error) => {
       toast({ title: 'Update failed', description: err.message, variant: 'destructive' });

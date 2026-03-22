@@ -92,9 +92,13 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
   const [selectedInputId, setSelectedInputId] = useState('');
   const [inputQuantity, setInputQuantity] = useState('');
 
-  // Initialize form with existing data when editing
+  // Initialize form when the modal opens or the target card changes.
+  // Do not depend on `inventoryItems` here — React Query often returns a new array reference each render,
+  // which would retrigger this effect and cause "Maximum update depth exceeded".
+  const workCardId = workCard?.id;
   useEffect(() => {
-    if (workCard && isEdit) {
+    if (!open || !workCard) return;
+    if (isEdit) {
       setFormData({
         actualDate: workCard.actualDate ? new Date(workCard.actualDate) : new Date(),
         actualWorkers: workCard.actualWorkers ?? 1,
@@ -103,11 +107,15 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
         executionNotes: workCard.executionNotes ?? '',
         workerIds: workCard.workerIds ?? [],
       });
-      setInputs(workCard.inputsUsed?.map(i => ({
-        ...i,
-        currentStock: inventoryItems.find(inv => inv.id === i.itemId)?.current_stock,
-      })) ?? []);
-    } else if (workCard && !isEdit) {
+      setInputs(
+        workCard.inputsUsed?.map((i) => ({
+          itemId: i.itemId,
+          itemName: i.itemName,
+          quantity: i.quantity,
+          unit: i.unit,
+        })) ?? [],
+      );
+    } else {
       setFormData({
         actualDate: new Date(),
         actualWorkers: workCard.plannedWorkers,
@@ -118,7 +126,25 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       });
       setInputs([]);
     }
-  }, [workCard, isEdit, inventoryItems]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync when dialog/card identity changes only; full workCard read intentionally
+  }, [open, workCardId, isEdit]);
+
+  // Merge live stock levels from inventory without resetting the whole form.
+  useEffect(() => {
+    if (!open || !workCardId) return;
+    setInputs((prev) => {
+      if (!prev.length) return prev;
+      let changed = false;
+      const next = prev.map((row) => {
+        const stock = inventoryItems.find((inv) => inv.id === row.itemId)?.current_stock;
+        const merged = stock ?? row.currentStock;
+        if (merged === row.currentStock) return row;
+        changed = true;
+        return { ...row, currentStock: merged };
+      });
+      return changed ? next : prev;
+    });
+  }, [open, workCardId, inventoryItems]);
 
   const actualTotal = formData.actualWorkers * formData.actualRatePerPerson;
 

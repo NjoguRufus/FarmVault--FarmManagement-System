@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase';
-import { listDuplicateEmails, setCompanySubscriptionState, type DeveloperSubscriptionAction } from '@/services/subscriptionService';
+import {
+  listDuplicateEmails,
+  setCompanySubscriptionState,
+  type DeveloperSubscriptionAction,
+  type SetCompanySubscriptionStateResult,
+} from '@/services/subscriptionService';
 
 export interface DevDashboardKpis {
   // Shape is defined by RPC; keep flexible and only read known fields in UI.
@@ -193,8 +198,8 @@ export async function updateCompanySubscriptionState(input: {
   planCode?: 'basic' | 'pro' | null;
   reason?: string | null;
   days?: number | null;
-}): Promise<void> {
-  await setCompanySubscriptionState(input);
+}): Promise<SetCompanySubscriptionStateResult> {
+  return setCompanySubscriptionState(input);
 }
 
 export { listDuplicateEmails };
@@ -386,6 +391,106 @@ export async function renameCompany(companyId: string, name: string): Promise<vo
     });
     throw new Error(error.message ?? 'Failed to rename company');
   }
+}
+
+/** Resolve company-admin recipient + name for workspace-ready email (developer session; uses public tables). */
+export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Promise<{
+  to: string;
+  companyName: string;
+} | null> {
+  const cid = String(companyId ?? '').trim();
+  if (!cid) return null;
+
+  let companyName: string | null = null;
+  const { data: coPub, error: coPubErr } = await supabase.from('companies').select('name').eq('id', cid).maybeSingle();
+  if (coPub?.name && typeof coPub.name === 'string' && coPub.name.trim()) {
+    companyName = coPub.name.trim();
+  } else {
+    const { data: coCore } = await supabase.schema('core').from('companies').select('name').eq('id', cid).maybeSingle();
+    if (coCore?.name && typeof coCore.name === 'string' && coCore.name.trim()) {
+      companyName = coCore.name.trim();
+    }
+  }
+
+  if (!companyName) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevAdmin] fetchCompanyWorkspaceNotifyPayload: company not found', coPubErr);
+    }
+    return null;
+  }
+
+  let members: unknown[] | null = null;
+  const { data: memPub, error: mPubErr } = await supabase
+    .from('company_members')
+    .select('clerk_user_id, user_id, role')
+    .eq('company_id', cid)
+    .order('created_at', { ascending: true });
+
+  if (!mPubErr && Array.isArray(memPub) && memPub.length > 0) {
+    members = memPub;
+  } else {
+    const { data: memCore, error: mCoreErr } = await supabase
+      .schema('core')
+      .from('company_members')
+      .select('clerk_user_id, user_id, role')
+      .eq('company_id', cid)
+      .order('created_at', { ascending: true });
+    if (!mCoreErr && Array.isArray(memCore) && memCore.length > 0) {
+      members = memCore;
+    } else if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[DevAdmin] fetchCompanyWorkspaceNotifyPayload: members', mPubErr ?? mCoreErr);
+    }
+  }
+
+  if (!members || members.length === 0) {
+    return null;
+  }
+
+  const preferred = members.filter((m: { role?: string | null }) => {
+    const r = (m.role || '').toLowerCase().replace(/-/g, '_');
+    return r === 'company_admin' || r === 'companyadmin';
+  });
+  const ordered = preferred.length > 0 ? preferred : members;
+
+  for (const m of ordered) {
+    const row = m as { clerk_user_id?: string | null; user_id?: string | null };
+    const uid = (row.clerk_user_id && String(row.clerk_user_id).trim()) || (row.user_id && String(row.user_id).trim()) || '';
+    if (!uid) continue;
+
+    let email: string | null = null;
+
+    const { data: profByClerk } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('clerk_user_id', uid)
+      .maybeSingle();
+    if (profByClerk?.email && typeof profByClerk.email === 'string') {
+      email = profByClerk.email.trim();
+    }
+
+    if (!email || !email.includes('@')) {
+      const { data: profById } = await supabase.from('profiles').select('email').eq('id', uid).maybeSingle();
+      if (profById?.email && typeof profById.email === 'string') email = profById.email.trim();
+    }
+
+    if (!email || !email.includes('@')) {
+      const { data: coreProf } = await supabase
+        .schema('core')
+        .from('profiles')
+        .select('email')
+        .eq('clerk_user_id', uid)
+        .maybeSingle();
+      if (coreProf?.email && typeof coreProf.email === 'string') email = coreProf.email.trim();
+    }
+
+    if (email && email.includes('@')) {
+      return { to: email.toLowerCase(), companyName };
+    }
+  }
+
+  return null;
 }
 
 export {
