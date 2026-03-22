@@ -270,7 +270,7 @@ export default function SetupCompany() {
     );
   }
 
-  // Success state: pending manual approval (only this screen auto-redirects to WhatsApp)
+  // Success state: pending manual approval (email notification + access gate)
   if (success) {
     return (
       <PendingCompanyApprovalScreen

@@ -27,6 +27,7 @@ export const FARMVAULT_EMAIL_TYPES = [
   'workspace_ready',
   'submission_received',
   'submission_admin_notify',
+  'custom_manual',
 ] as const;
 
 export type FarmVaultEmailTypeFilter = (typeof FARMVAULT_EMAIL_TYPES)[number] | 'all';

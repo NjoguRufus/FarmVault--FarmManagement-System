@@ -70,7 +70,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Code Red', path: '/developer/code-red', icon: AlertTriangle, group: 'main' },
   { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'main' },
   { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'main' },
-  { label: 'Email Logs', path: '/developer/email-logs', icon: Mail, group: 'main' },
+  { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'main' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'main' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'main' },
 ];

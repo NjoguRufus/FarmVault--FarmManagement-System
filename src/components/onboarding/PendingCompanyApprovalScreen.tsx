@@ -1,12 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronRight } from 'lucide-react';
+import React from 'react';
+import { ChevronRight, Mail } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  buildFarmVaultActivationRequestMessage,
-  buildFarmVaultActivationWhatsAppUrl,
-} from '@/lib/whatsappClickToChat';
-
-const REDIRECT_COUNTDOWN_SECONDS = 2;
 
 export interface PendingCompanyApprovalScreenProps {
   companyName: string;
@@ -15,126 +9,83 @@ export interface PendingCompanyApprovalScreenProps {
   onContinueToAccessGate: () => void;
 }
 
+const bullets = [
+  "We've received your farm details",
+  "We're preparing your FarmVault workspace",
+  "You'll receive an email once your farm is ready",
+] as const;
+
 export function PendingCompanyApprovalScreen({
   companyName,
   companyEmail,
   planLabel,
   onContinueToAccessGate,
 }: PendingCompanyApprovalScreenProps) {
-  const [cancelAutoRedirect, setCancelAutoRedirect] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(REDIRECT_COUNTDOWN_SECONDS);
-
-  const message = buildFarmVaultActivationRequestMessage({
-    companyName: companyName.trim(),
-    planLabel: planLabel.trim() || '—',
-    companyEmail: companyEmail.trim(),
-  });
-  const waUrl = buildFarmVaultActivationWhatsAppUrl(message) ?? '';
-
-  useEffect(() => {
-    if (cancelAutoRedirect || !waUrl) return;
-
-    let remaining = REDIRECT_COUNTDOWN_SECONDS;
-    setSecondsLeft(remaining);
-
-    const id = window.setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        window.clearInterval(id);
-        setSecondsLeft(0);
-        window.open(waUrl, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      setSecondsLeft(remaining);
-    }, 1000);
-
-    return () => window.clearInterval(id);
-  }, [cancelAutoRedirect, waUrl]);
-
-  const openWhatsAppNow = () => {
-    if (!waUrl) return;
-    setCancelAutoRedirect(true);
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
-  };
-
-  const stayOnThisPage = () => {
-    setCancelAutoRedirect(true);
-  };
-
-  const showAutoRedirect = Boolean(waUrl) && !cancelAutoRedirect;
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
       <Card className="w-full max-w-md rounded-2xl shadow-xl border-primary/10 overflow-hidden">
         <CardContent className="p-8 sm:p-10 text-center">
-          <div className="flex justify-center mb-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary">
-              <CheckCircle2 className="h-10 w-10" />
+          <div className="relative mx-auto mb-6 flex h-[5.5rem] w-[5.5rem] items-center justify-center">
+            <div
+              className="absolute inset-0 rounded-2xl bg-primary/10 blur-xl"
+              aria-hidden
+            />
+            <div className="relative flex h-full w-full items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-primary/15 shadow-inner">
+              <Mail className="h-9 w-9 text-primary" strokeWidth={1.75} aria-hidden />
             </div>
+            <span
+              className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5"
+              aria-hidden
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/50" />
+              <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-card" />
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-foreground mb-2">
-            Welcome to FarmVault, {companyName}
+
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground mb-1">
+            You&apos;re Almost There 🌱
           </h1>
-          <p className="text-muted-foreground text-sm mb-4">
-            Your company has been submitted for manual approval. We will activate your workspace after
-            review.
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium mb-6">
+            {companyName}
           </p>
 
-          {showAutoRedirect && (
-            <p className="text-sm text-foreground font-medium mb-6" aria-live="polite">
-              Redirecting to WhatsApp in {secondsLeft} second{secondsLeft === 1 ? '' : 's'}...
-            </p>
-          )}
+          <ul className="text-left space-y-3 mb-8 px-1">
+            {bullets.map((line) => (
+              <li key={line} className="flex gap-3 text-sm text-muted-foreground leading-snug">
+                <span
+                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70"
+                  aria-hidden
+                />
+                <span className="text-foreground/90">{line}</span>
+              </li>
+            ))}
+          </ul>
 
-          {!waUrl && (
-            <p className="text-xs text-muted-foreground mb-6">
-              WhatsApp quick-open is not available yet. Use Continue below to proceed.
-              {import.meta.env.DEV && (
-                <>
-                  {' '}
-                  Set <span className="font-mono">VITE_FARMVAULT_ACTIVATION_WHATSAPP</span> to enable the countdown
-                  and WhatsApp button.
-                </>
-              )}
-            </p>
-          )}
-
-          {waUrl && cancelAutoRedirect && (
-            <p className="text-xs text-muted-foreground mb-6">
-              Automatic redirect cancelled. You can open WhatsApp when you are ready.
-            </p>
-          )}
-
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={openWhatsAppNow}
-              disabled={!waUrl}
-              title={!waUrl ? 'WhatsApp number not configured' : undefined}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-6 py-3 text-sm font-medium text-white shadow-[0_4px_24px_-4px_rgba(37,211,102,0.35)] hover:bg-[#20BD5A] transition-all disabled:opacity-50 disabled:pointer-events-none"
-            >
-              Open WhatsApp now
-            </button>
-
-            {!cancelAutoRedirect && (
-              <button
-                type="button"
-                onClick={stayOnThisPage}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-6 py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-all"
-              >
-                Stay on this page
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={onContinueToAccessGate}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_4px_24px_-4px_rgba(45,74,62,0.25)] hover:bg-primary/90 transition-all"
-            >
-              Continue to Access Gate
-              <ChevronRight className="h-4 w-4" />
-            </button>
+          <div className="rounded-xl border border-border/80 bg-muted/25 px-4 py-3 text-left text-xs text-muted-foreground mb-6 space-y-1.5">
+            <div className="flex justify-between gap-3">
+              <span>Email</span>
+              <span className="font-medium text-foreground text-right break-all">{companyEmail}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span>Plan</span>
+              <span className="font-medium text-foreground text-right">
+                {planLabel.trim() || '—'}
+              </span>
+            </div>
           </div>
+
+          <p className="text-sm text-muted-foreground mb-8 border-t border-border/60 pt-6">
+            No action needed — we&apos;ll notify you shortly.
+          </p>
+
+          <button
+            type="button"
+            onClick={onContinueToAccessGate}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-[0_4px_24px_-4px_rgba(45,74,62,0.25)] hover:bg-primary/90 transition-all"
+          >
+            Continue to Access Gate
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </CardContent>
       </Card>
     </div>
