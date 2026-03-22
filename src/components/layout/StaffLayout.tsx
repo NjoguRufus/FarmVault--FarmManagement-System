@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { useAuth } from '@/contexts/AuthContext';
 import { StaffProvider } from '@/contexts/StaffContext';
 import { StaffSidebar } from './StaffSidebar';
@@ -16,7 +17,7 @@ export function StaffLayout() {
   const location = useLocation();
 
   if (!user) {
-    return <Navigate to="/sign-in" replace state={{ from: location }} />;
+    return <SignInRedirect />;
   }
 
   // Company admins and developers should not use staff shell.

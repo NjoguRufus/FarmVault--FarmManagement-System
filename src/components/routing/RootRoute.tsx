@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import Index from '@/pages/Index';
 
 const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
@@ -7,12 +8,15 @@ const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
 /**
  * Handles the root path "/". Uses AuthContext so it works with or without Clerk.
  * Signed-in users are redirected to dashboard (RequireOnboarding will send to /onboarding if needed).
- * Does not block on Clerk or employee lookup; authReady timeout in AuthContext avoids indefinite loading.
+ * While Clerk reports a session but FarmVault auth is still hydrating, show a shell instead of the marketing page.
  */
 export function RootRoute() {
-  const { authReady, isAuthenticated } = useAuth();
+  const { authReady, isAuthenticated, hasClerkSession } = useAuth();
 
   if (!authReady) {
+    if (hasClerkSession) {
+      return <AuthLoadingScreen message="Signing you in…" />;
+    }
     return <Index />;
   }
 

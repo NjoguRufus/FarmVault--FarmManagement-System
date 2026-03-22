@@ -1,7 +1,7 @@
 import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
+import { SignInRedirect } from '@/components/auth/SignInRedirect';
 
 interface RequireAuthProps {
   children: React.ReactElement;
@@ -13,14 +13,13 @@ interface RequireAuthProps {
  */
 export function RequireAuth({ children }: RequireAuthProps) {
   const { isAuthenticated, authReady } = useAuth();
-  const location = useLocation();
 
   if (!authReady) {
     return <AuthLoadingScreen />;
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/sign-in" replace state={{ from: location }} />;
+    return <SignInRedirect />;
   }
 
   return children;

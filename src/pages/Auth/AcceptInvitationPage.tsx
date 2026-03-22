@@ -105,8 +105,8 @@ export default function AcceptInvitationPage() {
               routing="path"
               path="/accept-invitation"
               signInUrl="/sign-in"
-              afterSignUpUrl="/app"
-              afterSignInUrl="/app"
+              afterSignUpUrl="/auth/continue"
+              afterSignInUrl="/auth/continue"
             />
           </div>
         </div>

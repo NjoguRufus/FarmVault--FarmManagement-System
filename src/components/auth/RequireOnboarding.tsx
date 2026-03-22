@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
+import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
 import { readPendingApprovalSession } from '@/lib/pendingApprovalSession';
 
@@ -29,7 +30,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
       // eslint-disable-next-line no-console
       console.log('[RequireOnboarding] Redirect to /sign-in (no user)', { authReady });
     }
-    return <Navigate to="/sign-in" replace state={{ from: location }} />;
+    return <SignInRedirect />;
   }
 
   // Developers bypass onboarding; never redirect them to /onboarding.

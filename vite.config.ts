@@ -75,23 +75,41 @@ export default defineConfig(({ mode }) => ({
         navigateFallbackAllowlist: [/^\/.*/],
         navigateFallbackDenylist: [/^\/api\//, /^\/__/],
         runtimeCaching: [
-          // Clerk (and other third-party) scripts must not use CacheFirst — cross-origin
-          // dynamic chunks fail opaque/CORS handling and throw workbox "no-response" / ChunkLoadError.
+          // Clerk must never hit CacheFirst (opaque/CORS → workbox "no-response").
+          // NetworkOnly still intercepts; pairing with same-origin-only CacheFirst below avoids double-handling bugs.
           {
-            urlPattern: ({ url }) =>
-              url.hostname === "clerk.app.farmvault.africa" ||
-              url.hostname.endsWith(".clerk.accounts.dev") ||
-              url.hostname === "clerk.com" ||
-              url.hostname.endsWith(".clerk.com"),
+            urlPattern: ({ url }) => {
+              const h = url.hostname.toLowerCase();
+              return (
+                h === "clerk.app.farmvault.africa" ||
+                h.endsWith(".clerk.accounts.dev") ||
+                h === "clerk.com" ||
+                h.endsWith(".clerk.com") ||
+                h.endsWith(".clerk.app") ||
+                h.includes(".clerk.")
+              );
+            },
             handler: "NetworkOnly",
           },
           {
             urlPattern: ({ request, url }) => {
-              const origin = (globalThis as unknown as { location?: { origin: string } }).location
-                ?.origin;
+              const h = url.hostname.toLowerCase();
+              if (
+                h === "clerk.app.farmvault.africa" ||
+                h.endsWith(".clerk.accounts.dev") ||
+                h === "clerk.com" ||
+                h.endsWith(".clerk.com") ||
+                h.endsWith(".clerk.app") ||
+                h.includes(".clerk.")
+              ) {
+                return false;
+              }
+              // Service worker scope: prefer self.location.origin (globalThis.location is not always defined).
+              const swOrigin =
+                typeof self !== "undefined" && self.location?.origin ? self.location.origin : "";
               return (
-                !!origin &&
-                url.origin === origin &&
+                !!swOrigin &&
+                url.origin === swOrigin &&
                 ["script", "style", "image", "font", "worker"].includes(request.destination)
               );
             },
