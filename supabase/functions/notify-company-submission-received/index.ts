@@ -1,23 +1,23 @@
-// Developer-triggered: send workspace-ready email via Resend (no database reads in this function).
+// Public (anon-key) invoke: send “submission received” via Resend. No Supabase user JWT — Clerk RS256 is not verified here.
 //
-// Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs).
+// Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs), SUPABASE_ANON_KEY (caller check).
 // Optional: FARMVAULT_EMAIL_FROM
-// Auth: Authorization Bearer + Supabase anon + is_developer() RPC (no table reads here).
 //
-// Body JSON (caller resolves recipient — no company table reads here):
-//   { "to": "admin@farm.com", "companyName": "Wamugi Farm", "dashboardUrl": "https://app.../dashboard" }
+// Auth: Supabase project anon/publishable key only — `apikey` header and/or `Authorization: Bearer <anon>` (same key).
+// Do not pass Clerk session JWT; gateway: deploy with --no-verify-jwt (see config.toml).
 //
-// Deploy: npx supabase functions deploy notify-company-workspace-ready --no-verify-jwt
+// Body: { "to", "companyName", "dashboardUrl" } — caller supplies all fields (https URL required).
 //
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// Deploy: npx supabase functions deploy notify-company-submission-received --no-verify-jwt
+//
 import {
   getServiceRoleClientForEmailLogs,
   insertEmailLogRow,
   updateEmailLogRow,
 } from "../_shared/emailLogs.ts";
-import { buildCompanyApprovedEmail } from "../_shared/farmvault-email/companyApprovedTemplate.ts";
+import { buildSubmissionReceivedEmail } from "../_shared/farmvault-email/submissionReceivedTemplate.ts";
 
-const EMAIL_LOG_TYPE = "workspace_ready";
+const EMAIL_LOG_TYPE = "submission_received";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,7 +34,7 @@ function jsonResponse(body: unknown, status = 200): Response {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (stringifyErr) {
-    console.error("[notify-company-workspace-ready] JSON stringify failed", stringifyErr);
+    console.error("[notify-company-submission-received] JSON stringify failed", stringifyErr);
     return new Response(
       JSON.stringify({ error: "Internal error", detail: "Could not serialize response" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -53,7 +53,6 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
   }
 }
 
-/** Parse Resend (or any) HTTP body into a plain object for logging / detail. */
 async function readResponsePayload(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text().catch(() => "");
   if (!text.trim()) return {};
@@ -62,6 +61,24 @@ async function readResponsePayload(res: Response): Promise<Record<string, unknow
   } catch {
     return { message: text.slice(0, 500) };
   }
+}
+
+/** Require project anon/publishable key — not a user JWT. */
+function validateAnonInvoke(req: Request): { ok: true } | { ok: false; detail: string } {
+  const anon = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+  if (!anon) {
+    return { ok: false, detail: "Server misconfiguration: SUPABASE_ANON_KEY missing" };
+  }
+  const apikeyHdr = req.headers.get("apikey")?.trim();
+  const auth = req.headers.get("Authorization");
+  const bearer = auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (apikeyHdr === anon || bearer === anon) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    detail: "Missing or invalid apikey — use Supabase publishable/anon key (apikey header); do not send Clerk JWT",
+  };
 }
 
 Deno.serve(async (req: Request) => {
@@ -74,50 +91,16 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
-      return jsonResponse({ error: "Unauthorized", detail: "Missing Bearer token" }, 401);
-    }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error(
-        "[notify-company-workspace-ready] Missing SUPABASE_URL or SUPABASE_ANON_KEY (needed for is_developer only)",
-      );
-      return jsonResponse({ error: "Server misconfiguration", detail: "Supabase env missing" }, 500);
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    let isDev: boolean | null = null;
-    try {
-      const { data, error: devErr } = await userClient.rpc("is_developer");
-      if (devErr) {
-        console.error("[notify-company-workspace-ready] is_developer RPC error", devErr.message);
-        return jsonResponse(
-          { error: "Forbidden", detail: devErr.message || "Developer check failed" },
-          403,
-        );
-      }
-      isDev = data === true;
-    } catch (rpcErr) {
-      console.error("[notify-company-workspace-ready] is_developer threw", rpcErr);
-      return jsonResponse({ error: "Forbidden", detail: "Developer check failed" }, 403);
-    }
-
-    if (!isDev) {
-      console.warn("[notify-company-workspace-ready] Forbidden — not a developer");
-      return jsonResponse({ error: "Forbidden", detail: "Developer access required" }, 403);
+    const gate = validateAnonInvoke(req);
+    if (!gate.ok) {
+      return jsonResponse({ error: "Unauthorized", detail: gate.detail }, 401);
     }
 
     let raw: unknown;
     try {
       raw = await req.json();
     } catch (parseErr) {
-      console.error("[notify-company-workspace-ready] Invalid JSON body", parseErr);
+      console.error("[notify-company-submission-received] Invalid JSON body", parseErr);
       return jsonResponse({ error: "Invalid JSON body", detail: "Request body must be JSON" }, 400);
     }
 
@@ -157,21 +140,18 @@ Deno.serve(async (req: Request) => {
 
     const admin = getServiceRoleClientForEmailLogs();
     const logMeta = {
-      source: "notify-company-workspace-ready",
+      source: "notify-company-submission-received",
       dashboardUrl,
     };
 
     let subject: string;
     let html: string;
     try {
-      const built = buildCompanyApprovedEmail({
-        companyName,
-        dashboardUrl,
-      });
+      const built = buildSubmissionReceivedEmail({ companyName, dashboardUrl });
       subject = built.subject;
       html = built.html;
     } catch (e) {
-      console.error("[notify-company-workspace-ready] Template build failed", e);
+      console.error("[notify-company-submission-received] Template build failed", e);
       const errText = e instanceof Error ? e.message : String(e);
       if (admin) {
         await insertEmailLogRow(admin, {
@@ -194,7 +174,7 @@ Deno.serve(async (req: Request) => {
 
     const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
     if (!resendKey) {
-      console.error("[notify-company-workspace-ready] RESEND_API_KEY is not set");
+      console.error("[notify-company-submission-received] RESEND_API_KEY is not set");
       if (admin) {
         await insertEmailLogRow(admin, {
           company_id: null,
@@ -246,7 +226,7 @@ Deno.serve(async (req: Request) => {
         }),
       });
     } catch (fetchErr) {
-      console.error("[notify-company-workspace-ready] Resend fetch network error", fetchErr);
+      console.error("[notify-company-submission-received] Resend fetch network error", fetchErr);
       const detail = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       if (admin && logId) {
         await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
@@ -275,7 +255,7 @@ Deno.serve(async (req: Request) => {
     const resBody = await readResponsePayload(res);
 
     if (!res.ok) {
-      console.error("[notify-company-workspace-ready] Resend error", res.status, resBody);
+      console.error("[notify-company-submission-received] Resend error", res.status, resBody);
       const detail =
         typeof resBody.message === "string"
           ? resBody.message
@@ -325,7 +305,7 @@ Deno.serve(async (req: Request) => {
 
     return jsonResponse({ ok: true, id, to, logId: logId ?? undefined }, 200);
   } catch (unexpected) {
-    console.error("[notify-company-workspace-ready] Unhandled error", unexpected);
+    console.error("[notify-company-submission-received] Unhandled error", unexpected);
     return jsonResponse(
       {
         error: "Internal error",

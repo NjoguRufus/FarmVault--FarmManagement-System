@@ -1,8 +1,8 @@
 import { escapeHtml } from "./escapeHtml.ts";
 
-/** Light logo for email clients (hosted app asset). */
+/** Official hosted logo (farmvault.africa). */
 export const FARMVAULT_EMAIL_LOGO_URL =
-  "https://app.farmvault.africa/logo/FarmVault.png";
+  "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
 
 export type FarmVaultEmailShellOptions = {
   /** Inbox preview line (hidden in body). */
@@ -90,8 +90,14 @@ export function farmVaultEmailShell(opts: FarmVaultEmailShellOptions): string {
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding:40px 40px 28px 40px;background-color:${BRAND.primary};background-image:linear-gradient(135deg, ${BRAND.primary} 0%, ${BRAND.accent} 100%);">
-                    <img src="${FARMVAULT_EMAIL_LOGO_URL}" width="140" alt="FarmVault" border="0"
-                      style="display:block;width:140px;max-width:140px;height:auto;margin:0 auto 16px auto;border:0;outline:none;text-decoration:none;" />
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;">
+                      <tr>
+                        <td align="center" style="padding:0 0 16px 0;">
+                          <img src="${FARMVAULT_EMAIL_LOGO_URL}" width="140" alt="FarmVault" border="0"
+                            style="display:block;width:140px;max-width:140px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;" />
+                        </td>
+                      </tr>
+                    </table>
                     <h1 style="margin:0;padding:0;font-family:${fontStack};font-size:28px;line-height:1.25;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
                       ${safeTitle}
                     </h1>

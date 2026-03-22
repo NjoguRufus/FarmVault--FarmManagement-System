@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { BillingModeSelector } from '@/components/subscription/BillingModeSelector';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
+import { invokeNotifyCompanySubmissionReceived } from '@/lib/email';
+import { useToast } from '@/components/ui/use-toast';
 import { PendingCompanyApprovalScreen } from '@/components/onboarding/PendingCompanyApprovalScreen';
 
 const STEPS = 4;
@@ -202,6 +204,32 @@ export default function SetupCompany() {
         setLoading(false);
         return;
       }
+
+      const recipient = normalizedAdminEmail || normalizedCompanyEmail;
+      const base =
+        typeof window !== 'undefined' &&
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? 'https://app.farmvault.africa'
+          : typeof window !== 'undefined'
+            ? window.location.origin
+            : 'https://app.farmvault.africa';
+      const dashboardUrl = `${base}/pending-approval`;
+
+      void (async () => {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return;
+        const result = await invokeNotifyCompanySubmissionReceived({
+          to: recipient,
+          companyName: companyName.trim(),
+          dashboardUrl,
+        });
+        if (!result.ok) {
+          const msg = [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error';
+          toast({
+            title: 'Confirmation email not sent',
+            description: msg,
+          });
+        }
+      })();
 
       setSuccess(true);
     } catch (err: unknown) {

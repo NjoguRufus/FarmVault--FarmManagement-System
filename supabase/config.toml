@@ -36,3 +36,7 @@ verify_jwt = false
 
 [functions.notify-company-workspace-ready]
 verify_jwt = false
+
+# No user JWT: invoke with apikey (publishable/anon) only; do not verify Clerk RS256 at gateway.
+[functions.notify-company-submission-received]
+verify_jwt = false
