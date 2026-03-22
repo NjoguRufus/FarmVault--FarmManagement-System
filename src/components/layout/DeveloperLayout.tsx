@@ -10,17 +10,19 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export function DeveloperLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { user } = useAuth();
+  const { user, isDeveloper } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);
 
   // Hard guard: if a non-developer somehow reaches this shell, bounce them back to their landing page.
+  // Use `isDeveloper` (RPC + allowlist) — not only `user.role`, which can be a tenant role during hydration
+  // or for linked developer accounts — so approving a company never kicks the operator to /dashboard → onboarding.
   const redirectTarget = useMemo(() => {
     if (!user) return '/sign-in';
-    if (user.role === 'developer') return null;
+    if (isDeveloper || user.role === 'developer') return null;
     return '/dashboard';
-  }, [user]);
+  }, [user, isDeveloper]);
 
   useEffect(() => {
     if (!redirectTarget) {
@@ -29,19 +31,31 @@ export function DeveloperLayout() {
     }
     const key = `${location.pathname}->${redirectTarget}`;
     if (location.pathname !== redirectTarget && hasRedirectedRef.current !== key) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[DeveloperLayout] redirecting non-developer out of developer shell', {
+          path: location.pathname,
+          redirectTarget,
+          isDeveloper,
+          role: user?.role,
+        });
+      }
       hasRedirectedRef.current = key;
       navigate(redirectTarget, { replace: true });
     }
-  }, [redirectTarget, location.pathname, navigate]);
+  }, [redirectTarget, location.pathname, navigate, isDeveloper, user?.role]);
 
   if (import.meta.env.DEV) {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    console.log('[DeveloperLayout] breakpoint', {
+    console.log('[DeveloperLayout] shell', {
       width,
       isDesktop,
       path: location.pathname,
+      isDeveloper,
+      role: user?.role,
+      redirectTarget,
     });
   }
 

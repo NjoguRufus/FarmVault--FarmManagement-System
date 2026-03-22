@@ -1,4 +1,6 @@
 export const PENDING_APPROVAL_SESSION_KEY = 'farmvault.pendingApproval.v1';
+/** Same payload in localStorage so new tabs / restarts still avoid “create company again” loops. */
+export const PENDING_APPROVAL_LOCAL_KEY = 'farmvault.pendingApproval.local.v1';
 
 export type PendingApprovalSessionPayload = {
   companyName: string;
@@ -9,8 +11,14 @@ export type PendingApprovalSessionPayload = {
 
 export function writePendingApprovalSession(ctx: PendingApprovalSessionPayload) {
   if (typeof window === 'undefined') return;
+  const json = JSON.stringify(ctx);
   try {
-    sessionStorage.setItem(PENDING_APPROVAL_SESSION_KEY, JSON.stringify(ctx));
+    sessionStorage.setItem(PENDING_APPROVAL_SESSION_KEY, json);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem(PENDING_APPROVAL_LOCAL_KEY, json);
   } catch {
     /* ignore */
   }
@@ -24,15 +32,26 @@ export function clearPendingApprovalSession() {
   } catch {
     /* ignore */
   }
+  try {
+    localStorage.removeItem(PENDING_APPROVAL_LOCAL_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function readPendingApprovalSession(): Partial<PendingApprovalSessionPayload> | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(PENDING_APPROVAL_SESSION_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as Partial<PendingApprovalSessionPayload>;
+    const rawSession = sessionStorage.getItem(PENDING_APPROVAL_SESSION_KEY);
+    if (rawSession) return JSON.parse(rawSession) as Partial<PendingApprovalSessionPayload>;
   } catch {
-    return null;
+    /* ignore */
   }
+  try {
+    const rawLocal = localStorage.getItem(PENDING_APPROVAL_LOCAL_KEY);
+    if (rawLocal) return JSON.parse(rawLocal) as Partial<PendingApprovalSessionPayload>;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
