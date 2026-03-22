@@ -1,6 +1,7 @@
 export type {
   FarmVaultEmailType,
   FarmVaultEmailDataMap,
+  FarmVaultEmailQrOptions,
   SendFarmVaultEmailContext,
   SendFarmVaultEmailPayload,
   WelcomeEmailData,

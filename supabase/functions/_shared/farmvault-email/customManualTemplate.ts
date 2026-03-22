@@ -1,4 +1,5 @@
 import { escapeHtml } from "./escapeHtml.ts";
+import { resolveEmailQrShare } from "./emailQrShare.ts";
 import { farmVaultEmailShell } from "./farmVaultEmailShell.ts";
 import type { CustomManualEmailData } from "./types.ts";
 
@@ -35,11 +36,18 @@ export function buildCustomManualEmail(data: CustomManualEmailData): { subject: 
       ? data.html.trim()
       : bodyToHtml(typeof data.body === "string" ? data.body : "");
 
+  const qrShare = resolveEmailQrShare("manual_default_on", {
+    showQrCode: data.showQrCode,
+    qrCodeImageUrl: data.qrCodeImageUrl,
+    qrCodeTargetUrl: data.qrCodeTargetUrl,
+  });
+
   const html = farmVaultEmailShell({
     preheader: subject.length > 140 ? `${subject.slice(0, 137)}…` : subject,
     title: subject,
     subtitle,
     content: `${greeting}${bodyFragment}`,
+    qrShare,
   });
 
   return { subject, html };

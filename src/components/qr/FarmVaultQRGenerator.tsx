@@ -90,6 +90,7 @@ function buildQrOptions(
   };
 }
 
+/** Same qr-code-styling recipe as `npm run generate:email-qr` → `public/email/farmvault-scan-qr.png`. */
 export function FarmVaultQRGenerator({
   data = FARMVAULT_SCAN_URL,
   logoSrc,

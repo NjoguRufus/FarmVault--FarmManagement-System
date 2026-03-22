@@ -1,4 +1,5 @@
 import { farmVaultEmailShell } from "./farmVaultEmailShell.ts";
+import { resolveEmailQrShare } from "./emailQrShare.ts";
 import { escapeHtml } from "./escapeHtml.ts";
 import type { TrialEndingEmailData } from "./types.ts";
 
@@ -28,12 +29,19 @@ export function buildTrialEndingEmail(data: TrialEndingEmailData): { subject: st
 <p style="margin:0 0 18px 0;font-family:${fontStack};font-size:15px;line-height:1.7;color:#1f2937;">We hope the workspace has already made it easier to track projects, expenses, labor, inventory, harvests, and reports — without losing detail in spreadsheets or group chats.</p>
 <p style="margin:0;font-family:${fontStack};font-size:15px;line-height:1.7;color:#1f2937;">Upgrade before your trial ends to keep your team moving without a break.</p>`;
 
+  const qrShare = resolveEmailQrShare("transactional_default_off", {
+    showQrCode: data.showQrCode,
+    qrCodeImageUrl: data.qrCodeImageUrl,
+    qrCodeTargetUrl: data.qrCodeTargetUrl,
+  });
+
   const html = farmVaultEmailShell({
     preheader: `${days} ${dayWord} left on your FarmVault trial — upgrade to stay on track.`,
     title: headerTitle,
     subtitle: headerSubtitle,
     content,
     cta: { label: "Upgrade Now", href: data.upgradeUrl },
+    qrShare,
   });
 
   return { subject: trialEndingEmailSubject(days), html };

@@ -4,6 +4,7 @@ import { ClipboardCopy, Mail, RefreshCw, Send, X } from 'lucide-react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -159,6 +160,8 @@ export default function DeveloperEmailCenterPage() {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<string>('_none');
+  /** When false, payload sends `showQrCode: false` (manual emails default to QR on server-side). */
+  const [includeShareQr, setIncludeShareQr] = useState(true);
 
   const dateFromIso = useMemo(() => {
     if (!dateFrom) return null;
@@ -261,6 +264,7 @@ export default function DeveloperEmailCenterPage() {
             body: bodyTrim,
             ...(recipient.name ? { recipientName: recipient.name } : {}),
             ...(category !== '_none' ? { category } : {}),
+            ...(!includeShareQr ? { showQrCode: false as const } : {}),
           },
           ...(companyNameField.trim() ? { companyName: companyNameField.trim() } : {}),
           triggeredBy: 'developer_manual_send',
@@ -342,6 +346,7 @@ export default function DeveloperEmailCenterPage() {
     setSubject('');
     setBody('');
     setCategory('_none');
+    setIncludeShareQr(true);
   };
 
   const addRecipientRow = () => {
@@ -521,6 +526,23 @@ export default function DeveloperEmailCenterPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="flex items-start gap-3 rounded-lg border border-border/50 bg-muted/15 p-3 sm:col-span-2">
+                <Checkbox
+                  id="ec-share-qr"
+                  checked={includeShareQr}
+                  onCheckedChange={(v) => setIncludeShareQr(v === true)}
+                  className="mt-0.5"
+                />
+                <div className="min-w-0 space-y-1">
+                  <Label htmlFor="ec-share-qr" className="text-sm font-medium leading-snug cursor-pointer">
+                    Include share QR code
+                  </Label>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Adds a centered QR after your message so recipients can share FarmVault with someone else (before
+                    support and footer). Uncheck for a shorter email.
+                  </p>
+                </div>
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="ec-body">Message</Label>

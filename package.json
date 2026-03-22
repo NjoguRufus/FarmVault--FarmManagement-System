@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "generate:sitemap": "node scripts/generate-sitemap.mjs",
+    "generate:email-qr": "node scripts/generate-email-branded-qr.mjs",
     "generate:webp": "node scripts/generate-webp.mjs",
     "prebuild": "npm run generate:sitemap",
     "build": "vite build",
@@ -96,6 +97,7 @@
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
     "lovable-tagger": "^1.1.13",
+    "playwright": "^1.58.2",
     "postcss": "^8.5.6",
     "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",

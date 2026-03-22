@@ -6,29 +6,40 @@ export type FarmVaultEmailType =
   | "company_approved"
   | "custom_manual";
 
+/**
+ * Optional QR share strip (footer-adjacent in `farmVaultEmailShell`).
+ * Transactional templates: default off unless `showQrCode === true`.
+ * `custom_manual`: default on unless `showQrCode === false`.
+ */
+export type FarmVaultEmailQrOptions = {
+  showQrCode?: boolean;
+  qrCodeImageUrl?: string;
+  qrCodeTargetUrl?: string;
+};
+
 export type WelcomeEmailData = {
   companyName: string;
   dashboardUrl: string;
-};
+} & FarmVaultEmailQrOptions;
 
 export type SubscriptionActivatedEmailData = {
   companyName: string;
   planName: string;
   renewalDate: string;
   dashboardUrl: string;
-};
+} & FarmVaultEmailQrOptions;
 
 export type TrialEndingEmailData = {
   companyName: string;
   daysLeft: number;
   upgradeUrl: string;
-};
+} & FarmVaultEmailQrOptions;
 
 /** Sent when a company leaves pending approval and their workspace is ready (developer approval). */
 export type CompanyApprovedEmailData = {
   companyName: string;
   dashboardUrl: string;
-};
+} & FarmVaultEmailQrOptions;
 
 /** Developer console: manual send to any address (requires is_developer). */
 export type CustomManualEmailData = {
@@ -39,7 +50,7 @@ export type CustomManualEmailData = {
   html?: string;
   recipientName?: string;
   category?: string;
-};
+} & FarmVaultEmailQrOptions;
 
 export type FarmVaultEmailDataMap = {
   welcome: WelcomeEmailData;
