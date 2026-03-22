@@ -175,15 +175,17 @@ export default function OnboardingPage() {
           ? window.location.origin
           : 'https://app.farmvault.africa';
     const dashboardUrl = `${base}/pending-approval`;
+    const approvalDashboardUrl = `${base}/developer/companies`;
+    const submitterEmail = accountEmail.trim().toLowerCase() || recipient;
 
     void (async () => {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return;
-      const token = await getSupabaseAccessToken();
-      if (!token) return;
       const result = await invokeNotifyCompanySubmissionReceived({
         to: recipient,
         companyName: companyName.trim(),
         dashboardUrl,
+        userEmail: submitterEmail,
+        approvalDashboardUrl,
       });
       if (!result.ok) {
         const msg = [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error';

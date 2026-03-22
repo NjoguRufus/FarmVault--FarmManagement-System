@@ -8,6 +8,10 @@ export type NotifyCompanySubmissionReceivedPayload = {
   to: string;
   companyName: string;
   dashboardUrl: string;
+  /** Account / submitter email for the admin notification (defaults to `to` on the server if omitted). */
+  userEmail: string;
+  /** Developer console URL to review signups (https). */
+  approvalDashboardUrl: string;
 };
 
 type EdgeJson = {
@@ -15,6 +19,8 @@ type EdgeJson = {
   id?: string;
   error?: string;
   detail?: string;
+  adminNotifyOk?: boolean;
+  adminNotifyError?: string;
 };
 
 async function parseJsonResponse(res: Response): Promise<EdgeJson> {
@@ -28,8 +34,7 @@ async function parseJsonResponse(res: Response): Promise<EdgeJson> {
 }
 
 /**
- * After onboarding submission: sends “details received” email via Edge Function (Resend).
- * Uses fetch + project apikey only (no Clerk JWT) so the Edge Function is not given an RS256 user token.
+ * After onboarding submission: user confirmation + internal admin notify via the same Edge Function.
  */
 export async function invokeNotifyCompanySubmissionReceived(
   payload: NotifyCompanySubmissionReceivedPayload,
@@ -38,11 +43,20 @@ export async function invokeNotifyCompanySubmissionReceived(
   error?: string;
   detail?: string;
   id?: string;
+  adminNotifyOk?: boolean;
+  adminNotifyError?: string;
 }> {
-  const { to, companyName, dashboardUrl } = payload;
+  const { to, companyName, dashboardUrl, userEmail, approvalDashboardUrl } = payload;
 
   if (!to?.trim() || !companyName?.trim() || !dashboardUrl?.trim()) {
     return { ok: false, error: 'Invalid payload', detail: 'to, companyName, and dashboardUrl are required' };
+  }
+  if (!userEmail?.trim() || !approvalDashboardUrl?.trim()) {
+    return {
+      ok: false,
+      error: 'Invalid payload',
+      detail: 'userEmail and approvalDashboardUrl are required',
+    };
   }
 
   if (!supabaseUrl || !supabaseApiKey) {
@@ -57,6 +71,8 @@ export async function invokeNotifyCompanySubmissionReceived(
     to: to.trim(),
     companyName: companyName.trim(),
     dashboardUrl: dashboardUrl.trim(),
+    userEmail: userEmail.trim(),
+    approvalDashboardUrl: approvalDashboardUrl.trim(),
   };
 
   const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/notify-company-submission-received`, {
@@ -89,5 +105,7 @@ export async function invokeNotifyCompanySubmissionReceived(
   return {
     ok: !!data.ok,
     id: typeof data.id === 'string' ? data.id : undefined,
+    adminNotifyOk: data.adminNotifyOk,
+    adminNotifyError: typeof data.adminNotifyError === 'string' ? data.adminNotifyError : undefined,
   };
 }
