@@ -13,7 +13,6 @@ import {
   type OverrideMode,
 } from '@/services/developerAdminService';
 import { getSupabaseAccessToken } from '@/lib/supabase';
-import { getTenantDashboardUrl } from '@/lib/tenantDashboardUrl';
 import { invokeNotifyCompanyWorkspaceReady } from '@/lib/email';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
 import { Button } from '@/components/ui/button';
@@ -392,6 +391,10 @@ export default function DeveloperCompaniesPage() {
         rpcResult.workspace_ready_email && (isApprove || isActivate);
       if (!shouldNotify) return;
 
+      const emailLookupCompanyId = rpcResult.company_id ?? params.companyId;
+      // eslint-disable-next-line no-console
+      console.log('Approval email companyId:', emailLookupCompanyId);
+
       const token = await getSupabaseAccessToken();
       if (!token) {
         toast({
@@ -405,35 +408,40 @@ export default function DeveloperCompaniesPage() {
         return;
       }
 
-      const resolved = await fetchCompanyWorkspaceNotifyPayload(params.companyId);
+      const resolved = await fetchCompanyWorkspaceNotifyPayload(emailLookupCompanyId);
       if (!resolved.ok) {
+        // eslint-disable-next-line no-console
+        console.warn('[FarmVault] workspace email skipped — no recipient after lookup order (account → company row → admins → members)', resolved);
         toast({
-          title: 'Workspace email skipped',
+          title: 'Workspace email not sent',
           description:
             resolved.reason === 'company_not_found'
               ? 'Company record was not found for email lookup.'
-              : 'No recipient email found (company email, admin member, or creator profile). Send manually if needed.',
+              : 'No recipient found (owner account, company email, or team admin). Approval still completed — send the welcome email manually if needed.',
         });
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('[DevApproval] workspace email skipped (resolution)', resolved);
-        }
         return;
       }
 
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[DevApproval] workspace notify recipient', {
-          source: resolved.source,
-          to: `${resolved.to.slice(0, 3)}…`,
-          companyName: resolved.companyName,
-        });
-      }
+      // eslint-disable-next-line no-console
+      console.log('[FarmVault] workspace email will send', {
+        source: resolved.source,
+        companyName: resolved.companyName,
+      });
+
+      const to = resolved.to;
+      const companyName = resolved.companyName;
+      const dashboardUrl =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+          ? 'https://app.farmvault.africa/dashboard'
+          : `${window.location.origin}/dashboard`;
+
+      // eslint-disable-next-line no-console
+      console.log('Approval email payload', { to, companyName, dashboardUrl });
 
       const notify = await invokeNotifyCompanyWorkspaceReady({
-        to: resolved.to,
-        companyName: resolved.companyName,
-        dashboardUrl: getTenantDashboardUrl(),
+        to,
+        companyName,
+        dashboardUrl,
       });
       if (notify.ok) {
         toast({
@@ -441,10 +449,10 @@ export default function DeveloperCompaniesPage() {
           description: `Sent to ${resolved.to} (source: ${resolved.source.replace(/_/g, ' ')}).`,
         });
       } else {
+        const msg = [notify.detail, notify.error].filter(Boolean).join(' — ') || 'Unknown error';
         toast({
-          title: 'Workspace email failed',
-          description: notify.detail || notify.error || 'Unknown error',
-          variant: 'destructive',
+          title: 'Workspace email not sent',
+          description: msg,
         });
       }
     },

@@ -3,7 +3,7 @@
 // Secrets: RESEND_API_KEY (required). Optional: FARMVAULT_EMAIL_FROM
 // Auth: Authorization Bearer + Supabase anon + is_developer() RPC (no table reads here).
 //
-// Body JSON:
+// Body JSON (caller resolves recipient — no company table reads here):
 //   { "to": "admin@farm.com", "companyName": "Wamugi Farm", "dashboardUrl": "https://app.../dashboard" }
 //
 // Deploy: npx supabase functions deploy notify-company-workspace-ready --no-verify-jwt
@@ -20,10 +20,18 @@ const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+  try {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (stringifyErr) {
+    console.error("[notify-company-workspace-ready] JSON stringify failed", stringifyErr);
+    return new Response(
+      JSON.stringify({ error: "Internal error", detail: "Could not serialize response" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
 }
 
 function requireHttpsUrl(v: unknown, field: string): string | null {
@@ -37,122 +45,183 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
   }
 }
 
+/** Parse Resend (or any) HTTP body into a plain object for logging / detail. */
+async function readResponsePayload(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text().catch(() => "");
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { message: text.slice(0, 500) };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
-  }
-
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
-    return jsonResponse({ error: "Unauthorized", detail: "Missing Bearer token" }, 401);
-  }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error("[notify-company-workspace-ready] Missing SUPABASE_URL or SUPABASE_ANON_KEY (needed for is_developer only)");
-    return jsonResponse({ error: "Server misconfiguration" }, 500);
-  }
-
-  const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } },
-  });
-
-  const { data: isDev, error: devErr } = await userClient.rpc("is_developer");
-  if (devErr || !isDev) {
-    console.warn("[notify-company-workspace-ready] Forbidden", devErr?.message);
-    return jsonResponse({ error: "Forbidden", detail: "Developer access required" }, 403);
-  }
-
-  let raw: unknown;
   try {
-    raw = await req.json();
-  } catch {
-    return jsonResponse({ error: "Invalid JSON body" }, 400);
-  }
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
 
-  const body = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
-  if (!body) {
-    return jsonResponse({ error: "Invalid payload", detail: "Body must be a JSON object" }, 400);
-  }
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+      return jsonResponse({ error: "Unauthorized", detail: "Missing Bearer token" }, 401);
+    }
 
-  const to = typeof body.to === "string" ? body.to.trim() : "";
-  const companyName = typeof body.companyName === "string" ? body.companyName.trim() : "";
-  const dashboardUrl = typeof body.dashboardUrl === "string" ? body.dashboardUrl.trim() : "";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error(
+        "[notify-company-workspace-ready] Missing SUPABASE_URL or SUPABASE_ANON_KEY (needed for is_developer only)",
+      );
+      return jsonResponse({ error: "Server misconfiguration", detail: "Supabase env missing" }, 500);
+    }
 
-  if (!to || !EMAIL_RE.test(to)) {
-    return jsonResponse({ error: "Invalid payload", detail: "to must be a valid email address" }, 400);
-  }
-  if (!companyName || companyName.length < 2) {
-    return jsonResponse({ error: "Invalid payload", detail: "companyName is required (min 2 characters)" }, 400);
-  }
-  const urlErr = requireHttpsUrl(dashboardUrl, "dashboardUrl");
-  if (urlErr) {
-    return jsonResponse({ error: "Invalid payload", detail: urlErr }, 400);
-  }
-
-  const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
-  if (!resendKey) {
-    console.error("[notify-company-workspace-ready] RESEND_API_KEY is not set");
-    return jsonResponse({ error: "Email service not configured", detail: "RESEND_API_KEY missing" }, 500);
-  }
-
-  const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
-
-  let subject: string;
-  let html: string;
-  try {
-    const built = buildCompanyApprovedEmail({
-      companyName,
-      dashboardUrl,
-    });
-    subject = built.subject;
-    html = built.html;
-  } catch (e) {
-    console.error("[notify-company-workspace-ready] Template build failed", e);
-    return jsonResponse({ error: "Failed to build email" }, 500);
-  }
-
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject,
-        html,
-      }),
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
     });
 
-    const resBody = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    let isDev: boolean | null = null;
+    try {
+      const { data, error: devErr } = await userClient.rpc("is_developer");
+      if (devErr) {
+        console.error("[notify-company-workspace-ready] is_developer RPC error", devErr.message);
+        return jsonResponse(
+          { error: "Forbidden", detail: devErr.message || "Developer check failed" },
+          403,
+        );
+      }
+      isDev = data === true;
+    } catch (rpcErr) {
+      console.error("[notify-company-workspace-ready] is_developer threw", rpcErr);
+      return jsonResponse({ error: "Forbidden", detail: "Developer check failed" }, 403);
+    }
 
-    if (!res.ok) {
-      console.error("[notify-company-workspace-ready] Resend error", res.status, resBody);
+    if (!isDev) {
+      console.warn("[notify-company-workspace-ready] Forbidden — not a developer");
+      return jsonResponse({ error: "Forbidden", detail: "Developer access required" }, 403);
+    }
+
+    let raw: unknown;
+    try {
+      raw = await req.json();
+    } catch (parseErr) {
+      console.error("[notify-company-workspace-ready] Invalid JSON body", parseErr);
+      return jsonResponse({ error: "Invalid JSON body", detail: "Request body must be JSON" }, 400);
+    }
+
+    const payload =
+      raw !== null && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : null;
+    if (!payload) {
+      return jsonResponse({ error: "Invalid payload", detail: "Body must be a JSON object" }, 400);
+    }
+
+    const to = typeof payload.to === "string" ? payload.to.trim() : "";
+    const companyName = typeof payload.companyName === "string" ? payload.companyName.trim() : "";
+    const dashboardUrl = typeof payload.dashboardUrl === "string" ? payload.dashboardUrl.trim() : "";
+
+    if (!to) {
+      return jsonResponse(
+        { error: "Invalid payload", detail: "Recipient email (to) is required" },
+        400,
+      );
+    }
+    if (!EMAIL_RE.test(to)) {
+      return jsonResponse({ error: "Invalid payload", detail: "to must be a valid email address" }, 400);
+    }
+
+    if (!companyName || companyName.length < 2) {
+      return jsonResponse(
+        { error: "Invalid payload", detail: "companyName is required (min 2 characters)" },
+        400,
+      );
+    }
+
+    const urlErr = requireHttpsUrl(dashboardUrl, "dashboardUrl");
+    if (urlErr) {
+      return jsonResponse({ error: "Invalid payload", detail: urlErr }, 400);
+    }
+
+    const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
+    if (!resendKey) {
+      console.error("[notify-company-workspace-ready] RESEND_API_KEY is not set");
+      return jsonResponse(
+        { error: "Email service not configured", detail: "RESEND_API_KEY missing" },
+        500,
+      );
+    }
+
+    const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+
+    let subject: string;
+    let html: string;
+    try {
+      const built = buildCompanyApprovedEmail({
+        companyName,
+        dashboardUrl,
+      });
+      subject = built.subject;
+      html = built.html;
+    } catch (e) {
+      console.error("[notify-company-workspace-ready] Template build failed", e);
+      return jsonResponse(
+        { error: "Failed to build email", detail: e instanceof Error ? e.message : String(e) },
+        500,
+      );
+    }
+
+    let res: Response;
+    try {
+      res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [to],
+          subject,
+          html,
+        }),
+      });
+    } catch (fetchErr) {
+      console.error("[notify-company-workspace-ready] Resend fetch network error", fetchErr);
       return jsonResponse(
         {
           error: "Failed to send email",
-          detail: typeof resBody.message === "string" ? resBody.message : `HTTP ${res.status}`,
+          detail: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
         },
         500,
       );
     }
 
+    const resBody = await readResponsePayload(res);
+
+    if (!res.ok) {
+      console.error("[notify-company-workspace-ready] Resend error", res.status, resBody);
+      const detail =
+        typeof resBody.message === "string"
+          ? resBody.message
+          : typeof resBody.name === "string"
+            ? resBody.name
+            : `HTTP ${res.status}`;
+      return jsonResponse({ error: "Failed to send email", detail }, 500);
+    }
+
     const id = typeof resBody.id === "string" ? resBody.id : undefined;
-    return jsonResponse({ ok: true, id, to });
-  } catch (e) {
-    console.error("[notify-company-workspace-ready] Send failed", e);
+    return jsonResponse({ ok: true, id, to }, 200);
+  } catch (unexpected) {
+    console.error("[notify-company-workspace-ready] Unhandled error", unexpected);
     return jsonResponse(
       {
-        error: "Failed to send email",
-        detail: e instanceof Error ? e.message : String(e),
+        error: "Internal error",
+        detail: unexpected instanceof Error ? unexpected.message : String(unexpected),
       },
       500,
     );

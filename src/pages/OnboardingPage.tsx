@@ -37,14 +37,18 @@ export default function OnboardingPage() {
   const [projectCreated, setProjectCreated] = useState(false);
 
   const clerkId = clerkUser?.id ?? null;
-  const step1Valid = companyName.trim().length >= 2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail.trim());
+  const accountEmail = clerkUser?.primaryEmailAddress?.emailAddress?.trim() ?? '';
+  const companyEmailTrim = companyEmail.trim();
+  const companyEmailFormatOk =
+    companyEmailTrim === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmailTrim);
+  const step1Valid = companyName.trim().length >= 2 && companyEmailFormatOk;
 
-  // Pre-fill from Clerk user only (no organizations).
+  // Pre-fill from Clerk once; do not overwrite if the user cleared optional fields in-session.
   useEffect(() => {
     if (!clerkUser) return;
-    setCompanyEmail(clerkUser.primaryEmailAddress?.emailAddress ?? '');
-    setCompanyName(clerkUser.fullName ?? '');
-  }, [clerkUser]);
+    setCompanyEmail((prev) => (prev.trim() !== '' ? prev : accountEmail));
+    setCompanyName((prev) => (prev.trim() !== '' ? prev : clerkUser.fullName ?? ''));
+  }, [clerkUser, accountEmail]);
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
@@ -55,21 +59,37 @@ export default function OnboardingPage() {
 
   // AuthContext/RequireOnboarding already guard access; we don't need an extra membership check here.
 
+  const fillCompanyEmailFromAccount = () => {
+    if (!accountEmail) {
+      toast({
+        title: 'No account email',
+        description: 'Add an email to your FarmVault sign-in account, then try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCompanyEmail(accountEmail);
+  };
+
   const handleStep1CreateCompany = async () => {
     if (!step1Valid || !clerkId) return;
     setLoading(true);
     setError(null);
     try {
       const normalizedCompanyEmail = companyEmail.trim().toLowerCase();
-      const { data: companyCheck } = await supabase.rpc('validate_email_uniqueness', {
-        _email: normalizedCompanyEmail,
-        _company_id: null,
-      });
-      const companyValidation = companyCheck as EmailValidationResult | null;
-      if (companyValidation && companyValidation.ok === false) {
-        setError(companyValidation.message ?? 'Company email already exists.');
-        setLoading(false);
-        return;
+      if (normalizedCompanyEmail) {
+        const { data: companyCheck } = await supabase.rpc('validate_email_uniqueness', {
+          _email: normalizedCompanyEmail,
+          _company_id: null,
+          // Reusing your sign-in email for "company email" must not count as "another user".
+          _exclude_clerk_user_id: clerkId,
+        });
+        const companyValidation = companyCheck as EmailValidationResult | null;
+        if (companyValidation && companyValidation.ok === false) {
+          setError(companyValidation.message ?? 'Company email already exists.');
+          setLoading(false);
+          return;
+        }
       }
 
       const token = await getSupabaseAccessToken();
@@ -110,8 +130,19 @@ export default function OnboardingPage() {
         console.log('[Onboarding] company_created', {
           companyId: newId,
           companyName: companyName.trim(),
-          companyEmail: normalizedCompanyEmail,
+          companyEmail: normalizedCompanyEmail || null,
         });
+      }
+      if (normalizedCompanyEmail) {
+        const { error: emailUpErr } = await supabase
+          .schema('core')
+          .from('companies')
+          .update({ email: normalizedCompanyEmail, updated_at: new Date().toISOString() })
+          .eq('id', newId);
+        if (emailUpErr && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[Onboarding] optional company email not saved on core.companies', emailUpErr);
+        }
       }
       await syncTenantCompanyFromServer();
       setStep(2);
@@ -130,9 +161,11 @@ export default function OnboardingPage() {
 
   const navigateToPendingApproval = async () => {
     if (!companyId) return;
+    const payloadEmail =
+      companyEmail.trim().toLowerCase() || accountEmail.toLowerCase() || '';
     const payload: PendingApprovalSessionPayload = {
       companyName: companyName.trim(),
-      companyEmail: companyEmail.trim().toLowerCase(),
+      companyEmail: payloadEmail,
       companyId,
       startingPlanLabel: 'Pro Trial',
     };
@@ -285,14 +318,32 @@ export default function OnboardingPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="companyEmail">Company email</Label>
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <Label htmlFor="companyEmail" className="mb-0">
+                      Company email <span className="text-muted-foreground font-normal">(optional)</span>
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 shrink-0 text-xs w-full sm:w-auto"
+                      onClick={fillCompanyEmailFromAccount}
+                      disabled={!accountEmail}
+                    >
+                      Use my account email
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 mb-1.5">
+                    Optional. You can use your own email if your farm does not have a separate company email.
+                  </p>
                   <Input
                     id="companyEmail"
                     type="email"
                     value={companyEmail}
                     onChange={(e) => setCompanyEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    className="mt-1"
+                    placeholder={accountEmail || 'you@example.com'}
+                    className="mt-0"
+                    autoComplete="email"
                   />
                 </div>
               </div>
