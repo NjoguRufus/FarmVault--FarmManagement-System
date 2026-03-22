@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCopy, Mail, RefreshCw, Send, X } from 'lucide-react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
+import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -387,7 +388,7 @@ export default function DeveloperEmailCenterPage() {
       onSearchChange={tab === 'logs' ? setSearch : undefined}
     >
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'send' | 'logs')} className="space-y-6">
-        <TabsList className="grid w-full max-w-lg grid-cols-2 h-11 p-1 rounded-xl bg-muted/70 ring-1 ring-border/60">
+        <TabsList className="grid h-11 w-full max-w-lg grid-cols-2 p-1 rounded-xl bg-muted/70 ring-1 ring-border/60">
           <TabsTrigger value="send" className="gap-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Send className="h-3.5 w-3.5" />
             Send email
@@ -399,7 +400,7 @@ export default function DeveloperEmailCenterPage() {
         </TabsList>
 
         <TabsContent value="send" className="mt-0 space-y-6 outline-none">
-          <div className="fv-card border-primary/15 bg-gradient-to-br from-background via-background to-primary/[0.04] shadow-sm space-y-6 p-6 sm:p-8">
+          <div className="fv-card border-primary/15 bg-gradient-to-br from-background via-background to-primary/[0.04] shadow-sm space-y-5 p-4 sm:space-y-6 sm:p-8">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -606,49 +607,53 @@ export default function DeveloperEmailCenterPage() {
           )}
 
           {statsLoading && !stats && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <DeveloperStatGrid cols="5">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="fv-card h-24 animate-pulse bg-muted/25 rounded-xl" />
+                <div key={i} className="fv-card h-24 animate-pulse rounded-xl bg-muted/25" />
               ))}
-            </div>
+            </DeveloperStatGrid>
           )}
 
           {stats && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="fv-card relative overflow-hidden border-border/80 bg-gradient-to-br from-background via-background to-muted/20">
-                <p className="text-xs text-muted-foreground mb-1">Total emails</p>
-                <p className="text-2xl font-semibold tracking-tight">{stats.total.toLocaleString()}</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
+            <DeveloperStatGrid cols="5">
+              <div className="fv-card relative min-w-0 overflow-hidden border-border/80 bg-gradient-to-br from-background via-background to-muted/20 p-3 sm:p-4">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Total emails</p>
+                <p className="text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">
+                  {stats.total.toLocaleString()}
+                </p>
+                <p className="mt-1 text-[10px] text-muted-foreground sm:text-[11px]">
                   Pending pipeline:{' '}
                   <span className="font-medium text-amber-700 dark:text-amber-400">
                     {stats.pending.toLocaleString()}
                   </span>
                 </p>
               </div>
-              <div className="fv-card border-emerald-500/15 bg-emerald-500/[0.04]">
-                <p className="text-xs text-muted-foreground mb-1">Sent</p>
-                <p className="text-2xl font-semibold text-emerald-800 dark:text-emerald-300">
+              <div className="fv-card min-w-0 border-emerald-500/15 bg-emerald-500/[0.04] p-3 sm:p-4">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Sent</p>
+                <p className="text-xl font-semibold tabular-nums text-emerald-800 dark:text-emerald-300 sm:text-2xl">
                   {stats.sent.toLocaleString()}
                 </p>
               </div>
-              <div className="fv-card border-red-500/15 bg-red-500/[0.04]">
-                <p className="text-xs text-muted-foreground mb-1">Failed</p>
-                <p className="text-2xl font-semibold text-red-800 dark:text-red-300">
+              <div className="fv-card min-w-0 border-red-500/15 bg-red-500/[0.04] p-3 sm:p-4">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Failed</p>
+                <p className="text-xl font-semibold tabular-nums text-red-800 dark:text-red-300 sm:text-2xl">
                   {stats.failed.toLocaleString()}
                 </p>
               </div>
-              <div className="fv-card border-sky-500/15 bg-sky-500/[0.05]">
-                <p className="text-xs text-muted-foreground mb-1">Today (UTC)</p>
-                <p className="text-2xl font-semibold text-sky-900 dark:text-sky-200">
+              <div className="fv-card min-w-0 border-sky-500/15 bg-sky-500/[0.05] p-3 sm:p-4">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Today (UTC)</p>
+                <p className="text-xl font-semibold tabular-nums text-sky-900 dark:text-sky-200 sm:text-2xl">
                   {stats.today.toLocaleString()}
                 </p>
               </div>
-              <div className="fv-card border-violet-500/15 bg-violet-500/[0.05]">
-                <p className="text-xs text-muted-foreground mb-1">Provider</p>
-                <p className="text-lg font-semibold tracking-tight">Resend</p>
-                <p className="text-[11px] text-muted-foreground mt-1">Includes manual sends from this console.</p>
+              <div className="fv-card col-span-2 min-w-0 border-violet-500/15 bg-violet-500/[0.05] p-3 sm:p-4 lg:col-span-1">
+                <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Provider</p>
+                <p className="text-base font-semibold tracking-tight sm:text-lg">Resend</p>
+                <p className="mt-1 text-[10px] text-muted-foreground sm:text-[11px]">
+                  Includes manual sends from this console.
+                </p>
               </div>
-            </div>
+            </DeveloperStatGrid>
           )}
 
           <div className="fv-card space-y-4">
@@ -767,8 +772,8 @@ export default function DeveloperEmailCenterPage() {
           )}
 
           {list.length > 0 && (
-            <div className="fv-card overflow-x-auto p-0">
-              <table className="w-full text-sm">
+            <div className="fv-card overflow-x-visible p-0 md:overflow-x-auto">
+              <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[720px]">
                 <thead className="border-b border-border/60 bg-muted/20 text-xs text-muted-foreground">
                   <tr>
                     <th className="py-3 pl-4 pr-2 text-left font-medium">When</th>
@@ -788,31 +793,52 @@ export default function DeveloperEmailCenterPage() {
                       key={row.id}
                       className="border-b border-border/40 last:border-0 hover:bg-muted/30 transition-colors"
                     >
-                      <td className="py-2.5 pl-4 pr-2 whitespace-nowrap text-xs text-muted-foreground">
+                      <td
+                        className="max-md:items-start py-2.5 pl-4 pr-2 text-xs text-muted-foreground md:whitespace-nowrap"
+                        data-label="When"
+                      >
                         {formatWhen(row.sent_at ?? row.created_at)}
                       </td>
-                      <td className="py-2.5 px-2 font-medium text-foreground max-w-[180px] truncate">
-                        {row.recipient_email}
+                      <td
+                        className="max-md:items-start max-md:text-right py-2.5 px-2 font-medium text-foreground md:max-w-[180px] md:truncate"
+                        data-label="Recipient"
+                      >
+                        <span className="min-w-0 break-all md:truncate">{row.recipient_email}</span>
                       </td>
-                      <td className="py-2.5 px-2 text-muted-foreground max-w-[160px] truncate">
+                      <td
+                        className="max-md:items-start py-2.5 px-2 text-muted-foreground md:max-w-[160px] md:truncate"
+                        data-label="Company"
+                      >
                         {row.company_name ?? '—'}
                       </td>
-                      <td className="py-2.5 px-2 capitalize text-xs">{formatEmailType(row.email_type)}</td>
-                      <td className="py-2.5 px-2 text-xs text-muted-foreground max-w-[220px] truncate" title={row.subject}>
+                      <td className="py-2.5 px-2 text-xs capitalize" data-label="Type">
+                        {formatEmailType(row.email_type)}
+                      </td>
+                      <td
+                        className="max-md:items-start py-2.5 px-2 text-xs text-muted-foreground md:max-w-[220px] md:truncate"
+                        data-label="Subject"
+                        title={row.subject}
+                      >
                         {row.subject}
                       </td>
-                      <td className="py-2.5 px-2">
+                      <td className="py-2.5 px-2" data-label="Status">
                         <Badge variant="outline" className={statusBadgeClass(row.status)}>
                           {row.status}
                         </Badge>
                       </td>
-                      <td className="py-2.5 px-2 text-xs text-muted-foreground max-w-[120px] truncate">
+                      <td
+                        className="max-md:items-start py-2.5 px-2 text-xs text-muted-foreground md:max-w-[120px] md:truncate"
+                        data-label="Triggered by"
+                      >
                         {row.triggered_by ?? '—'}
                       </td>
-                      <td className="py-2.5 px-2 font-mono text-[11px] text-muted-foreground">
+                      <td
+                        className="max-md:items-start py-2.5 px-2 font-mono text-[11px] text-muted-foreground"
+                        data-label="Provider ID"
+                      >
                         {truncateId(row.provider_message_id)}
                       </td>
-                      <td className="py-2.5 pr-4 pl-2 text-right">
+                      <td className="max-md:justify-end py-2.5 pr-4 pl-2 text-right" data-label="Action">
                         <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDetail(row)}>
                           View
                         </Button>

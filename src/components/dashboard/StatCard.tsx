@@ -8,7 +8,7 @@ interface StatCardProps {
   change?: number;
   changeLabel?: string;
   icon?: React.ReactNode;
-  variant?: 'default' | 'primary' | 'gold';
+  variant?: 'default' | 'primary' | 'gold' | 'warning';
   compact?: boolean;
   responsive?: boolean;
 }
@@ -29,6 +29,7 @@ export function StatCard({
   const iconBgClasses = {
     primary: 'bg-primary/15 text-primary',
     gold: 'bg-fv-gold-soft/60 text-fv-olive',
+    warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     default: 'bg-muted/60 text-muted-foreground',
   };
 

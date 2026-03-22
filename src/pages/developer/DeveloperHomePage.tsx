@@ -1,23 +1,13 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation } from 'react-router-dom';
 import { Building2, Users, DollarSign, AlertTriangle } from 'lucide-react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
+import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { fetchDeveloperCompanies, fetchDeveloperKpis, fetchDeveloperUsers } from '@/services/developerService';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { useSeasonChallengesIntelligence } from '@/hooks/developer/useSeasonChallengesIntelligence';
 
 export default function DeveloperHomePage() {
-  const location = useLocation();
-  
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[DeveloperHomePage] Component MOUNTED at route:', location.pathname);
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log('[DeveloperHomePage] Component UNMOUNTED');
-    };
-  }, [location.pathname]);
   const {
     data: kpis,
     isLoading,
@@ -86,42 +76,46 @@ export default function DeveloperHomePage() {
       isRefetching={isFetching}
       onRefresh={() => void refetch()}
     >
-      <div className="space-y-8">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="space-y-6 md:space-y-8">
+        <DeveloperStatGrid cols="4">
           <StatCard
             title="Companies"
             value={totalCompanies.toLocaleString()}
-            icon={<Building2 className="h-5 w-5" />}
+            icon={<Building2 className="h-4 w-4 sm:h-5 sm:w-5" />}
             variant="primary"
+            compact
           />
           <StatCard
             title="Users"
             value={totalUsers.toLocaleString()}
-            icon={<Users className="h-5 w-5" />}
+            icon={<Users className="h-4 w-4 sm:h-5 sm:w-5" />}
             variant="default"
+            compact
           />
           <StatCard
             title="Employees"
             value={totalEmployees.toLocaleString()}
-            icon={<Users className="h-5 w-5" />}
+            icon={<Users className="h-4 w-4 sm:h-5 sm:w-5" />}
             variant="default"
+            compact
           />
           <StatCard
             title="Pending payments"
             value={pendingPayments.toLocaleString()}
-            icon={<DollarSign className="h-5 w-5" />}
+            icon={<DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />}
             variant={pendingPayments > 0 ? 'warning' : 'default'}
+            compact
           />
-        </div>
+        </DeveloperStatGrid>
 
         {/* Season challenges intelligence preview */}
         <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
               Season Challenges Intelligence
             </h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground sm:text-right sm:max-w-[55%]">
               Cross-company challenges by crop and stage (last 500 entries).
             </p>
           </div>
@@ -137,7 +131,7 @@ export default function DeveloperHomePage() {
               No season challenges have been reported yet across companies.
             </div>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               <div className="fv-card space-y-2">
                 <p className="text-xs text-muted-foreground">Total challenges (sampled)</p>
                 <p className="text-2xl font-semibold">{totalChallenges.toLocaleString()}</p>

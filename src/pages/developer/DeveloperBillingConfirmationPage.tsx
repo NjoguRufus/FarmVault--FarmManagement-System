@@ -126,8 +126,8 @@ export default function DeveloperBillingConfirmationPage() {
       )}
 
       {filtered && filtered.length > 0 && (
-        <div className="fv-card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="fv-card overflow-x-visible md:overflow-x-auto">
+          <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[720px]">
             <thead className="border-b border-border/60 text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
@@ -146,29 +146,31 @@ export default function DeveloperBillingConfirmationPage() {
                 const rejecting = rejectMutation.isPending && rejectMutation.variables === p.id;
                 return (
                   <tr key={p.id} className="border-b border-border/40 last:border-0">
-                    <td className="py-2 pr-4">
+                    <td className="max-md:items-start max-md:gap-2 py-2 pr-4" data-label="Company">
                       <div className="font-medium text-foreground">{p.company_name ?? 'Unknown company'}</div>
                       <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
                     </td>
-                    <td className="py-2 pr-4 text-xs">
+                    <td className="max-md:items-start py-2 pr-4 text-xs" data-label="Plan / cycle">
                       <div>{p.plan_id ?? '—'}</div>
                       <div className="text-[11px] text-muted-foreground">
                         {p.billing_cycle ?? '—'} · {p.billing_mode ?? '—'}
                       </div>
                     </td>
-                    <td className="py-2 pr-4 text-xs">
+                    <td className="py-2 pr-4 text-xs" data-label="Amount">
                       {p.amount != null
                         ? `${p.currency ?? 'KES'} ${Number(p.amount).toLocaleString()}`
                         : '—'}
                     </td>
-                    <td className="py-2 pr-4 text-xs">
-                      <div className="max-w-[140px] truncate" title={p.mpesa_name ?? ''}>
+                    <td className="max-md:items-start py-2 pr-4 text-xs" data-label="M-Pesa">
+                      <div className="max-w-[140px] truncate md:max-w-none" title={p.mpesa_name ?? ''}>
                         {p.mpesa_name ?? '—'}
                       </div>
                       <div className="text-[11px] text-muted-foreground font-mono">{p.mpesa_phone ?? '—'}</div>
                     </td>
-                    <td className="py-2 pr-4 text-xs font-mono">{p.transaction_code ?? '—'}</td>
-                    <td className="py-2 pr-4 text-xs">
+                    <td className="max-md:items-start py-2 pr-4 font-mono text-xs" data-label="Transaction">
+                      {p.transaction_code ?? '—'}
+                    </td>
+                    <td className="py-2 pr-4 text-xs" data-label="Status">
                       <Badge
                         variant="outline"
                         className={cn('font-normal capitalize', paymentStatusBadgeClass(p.status))}
@@ -176,11 +178,11 @@ export default function DeveloperBillingConfirmationPage() {
                         {paymentStatusLabel(p.status)}
                       </Badge>
                     </td>
-                    <td className="py-2 pr-4 text-xs whitespace-nowrap">
+                    <td className="py-2 pr-4 text-xs md:whitespace-nowrap" data-label="Submitted">
                       {p.submitted_at ?? p.created_at ?? '—'}
                     </td>
-                    <td className="py-2 pr-4 text-xs">
-                      <div className="flex gap-2">
+                    <td className="max-md:justify-end py-2 pr-4 text-xs" data-label="Actions">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <Button
                           type="button"
                           size="xs"

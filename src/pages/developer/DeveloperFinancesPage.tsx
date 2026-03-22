@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
+import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { fetchPayments, fetchDeveloperKpis } from '@/services/developerService';
 
 export default function DeveloperFinancesPage() {
@@ -51,24 +52,24 @@ export default function DeveloperFinancesPage() {
       searchValue={search}
       onSearchChange={setSearch}
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 mb-4">
-        <div className="fv-card">
-          <p className="text-xs text-muted-foreground mb-1">Monthly revenue (Supabase)</p>
-          <p className="text-lg font-semibold">
+      <DeveloperStatGrid cols="3" className="mb-4">
+        <div className="fv-card min-w-0 p-3 sm:p-4">
+          <p className="text-[11px] sm:text-xs text-muted-foreground mb-1 leading-snug">Monthly revenue (Supabase)</p>
+          <p className="text-base font-semibold tabular-nums sm:text-lg break-words">
             KES {Number(kpis?.monthly_revenue ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
         </div>
-        <div className="fv-card">
-          <p className="text-xs text-muted-foreground mb-1">Payments in view</p>
-          <p className="text-lg font-semibold">{payments.length.toLocaleString()}</p>
+        <div className="fv-card min-w-0 p-3 sm:p-4">
+          <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Payments in view</p>
+          <p className="text-base font-semibold tabular-nums sm:text-lg">{payments.length.toLocaleString()}</p>
         </div>
-        <div className="fv-card">
-          <p className="text-xs text-muted-foreground mb-1">Total volume in view</p>
-          <p className="text-lg font-semibold">
+        <div className="fv-card col-span-2 min-w-0 p-3 sm:p-4 md:col-span-1">
+          <p className="text-[11px] sm:text-xs text-muted-foreground mb-1 leading-snug">Total volume in view</p>
+          <p className="text-base font-semibold tabular-nums sm:text-lg break-words">
             KES {totalVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
         </div>
-      </div>
+      </DeveloperStatGrid>
 
       <div className="fv-card mb-4 flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted-foreground mr-2">Status:</span>
@@ -101,8 +102,8 @@ export default function DeveloperFinancesPage() {
       )}
 
       {payments.length > 0 && (
-        <div className="fv-card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="fv-card overflow-x-visible md:overflow-x-auto">
+          <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[640px]">
             <thead className="border-b border-border/60 text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
@@ -117,18 +118,28 @@ export default function DeveloperFinancesPage() {
             <tbody>
               {payments.map((p) => (
                 <tr key={p.id} className="border-b border-border/40 last:border-0">
-                  <td className="py-2 pr-4">
+                  <td className="max-md:items-start max-md:gap-2 py-2 pr-4" data-label="Company">
                     <div className="font-medium text-foreground">{p.company_name ?? 'Unknown company'}</div>
                     <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
                   </td>
-                  <td className="py-2 pr-4 text-xs">{p.plan_id ?? '—'}</td>
-                  <td className="py-2 pr-4 text-xs">
+                  <td className="py-2 pr-4 text-xs" data-label="Plan">
+                    {p.plan_id ?? '—'}
+                  </td>
+                  <td className="py-2 pr-4 text-xs" data-label="Amount">
                     {p.amount != null ? `KES ${Number(p.amount).toLocaleString()}` : '—'}
                   </td>
-                  <td className="py-2 pr-4 text-xs capitalize">{p.status}</td>
-                  <td className="py-2 pr-4 text-xs">{p.billing_mode ?? '—'}</td>
-                  <td className="py-2 pr-4 text-xs">{p.created_at ?? '—'}</td>
-                  <td className="py-2 pr-4 text-xs">{p.approved_at ?? '—'}</td>
+                  <td className="py-2 pr-4 text-xs capitalize" data-label="Status">
+                    {p.status}
+                  </td>
+                  <td className="py-2 pr-4 text-xs" data-label="Billing mode">
+                    {p.billing_mode ?? '—'}
+                  </td>
+                  <td className="py-2 pr-4 text-xs" data-label="Created">
+                    {p.created_at ?? '—'}
+                  </td>
+                  <td className="py-2 pr-4 text-xs" data-label="Approved at">
+                    {p.approved_at ?? '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>

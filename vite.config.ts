@@ -75,9 +75,26 @@ export default defineConfig(({ mode }) => ({
         navigateFallbackAllowlist: [/^\/.*/],
         navigateFallbackDenylist: [/^\/api\//, /^\/__/],
         runtimeCaching: [
+          // Clerk (and other third-party) scripts must not use CacheFirst — cross-origin
+          // dynamic chunks fail opaque/CORS handling and throw workbox "no-response" / ChunkLoadError.
           {
-            urlPattern: ({ request }) =>
-              ["script", "style", "image", "font", "worker"].includes(request.destination),
+            urlPattern: ({ url }) =>
+              url.hostname === "clerk.app.farmvault.africa" ||
+              url.hostname.endsWith(".clerk.accounts.dev") ||
+              url.hostname === "clerk.com" ||
+              url.hostname.endsWith(".clerk.com"),
+            handler: "NetworkOnly",
+          },
+          {
+            urlPattern: ({ request, url }) => {
+              const origin = (globalThis as unknown as { location?: { origin: string } }).location
+                ?.origin;
+              return (
+                !!origin &&
+                url.origin === origin &&
+                ["script", "style", "image", "font", "worker"].includes(request.destination)
+              );
+            },
             handler: "CacheFirst",
             options: {
               cacheName: "app-assets",
