@@ -35,7 +35,7 @@ import {
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 
-const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '123456';
+const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '5334350';
 const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
 
 function gatePlanToWorkspacePlan(
@@ -363,7 +363,7 @@ export default function BillingPage() {
               </div>
             </div>
 
-            <dl className="grid gap-3 sm:grid-cols-2">
+            <dl className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-muted/30 px-3 py-2.5">
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Plan</dt>
                 <dd className="mt-0.5 text-sm font-medium text-foreground">{isDeveloper ? '—' : planTitle}</dd>

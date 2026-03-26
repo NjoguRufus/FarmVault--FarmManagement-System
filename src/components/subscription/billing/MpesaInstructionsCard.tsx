@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { extractMpesaCodeFromPastedMessage } from '@/lib/mpesaExtract';
 
 interface MpesaInstructionsCardProps {
   tillNumber: string;
@@ -20,13 +22,17 @@ export function MpesaInstructionsCard({
 }: MpesaInstructionsCardProps) {
   const [open, setOpen] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [mpesaCode, setMpesaCode] = useState('');
+  const [mpesaMessage, setMpesaMessage] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
+
+  const extractedCode = useMemo(() => extractMpesaCodeFromPastedMessage(mpesaMessage), [mpesaMessage]);
 
   const reset = () => {
     setPhoneNumber('');
-    setMpesaCode('');
+    setMpesaMessage('');
     setPhoneError(null);
+    setMessageError(null);
   };
 
   const handleSubmit = async () => {
@@ -36,9 +42,17 @@ export function MpesaInstructionsCard({
       return;
     }
     setPhoneError(null);
+
+    const trimmedMsg = mpesaMessage.trim();
+    if (trimmedMsg.length > 0 && extractedCode.length < 10) {
+      setMessageError('We could not find 10 characters for the M-PESA code. Paste the full SMS or the confirmation code.');
+      return;
+    }
+    setMessageError(null);
+
     await onPaidSubmit({
       phoneNumber: normalizedPhone,
-      mpesaCode: mpesaCode.trim() || null,
+      mpesaCode: extractedCode.length === 10 ? extractedCode : null,
     });
   };
 
@@ -64,6 +78,7 @@ export function MpesaInstructionsCard({
         <Button type="button" className="w-full rounded-xl" onClick={() => setOpen(true)} disabled={submitLoading}>
           I&apos;ve Paid
         </Button>
+        <p className="text-center text-[11px] text-muted-foreground">STK coming soon</p>
       </div>
 
       <Dialog
@@ -77,9 +92,7 @@ export function MpesaInstructionsCard({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirm your payment</DialogTitle>
-            <DialogDescription>
-              Enter the M-PESA phone number used for payment. M-PESA code is optional.
-            </DialogDescription>
+            <DialogDescription>Enter the M-PESA phone number used for payment.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
@@ -97,15 +110,32 @@ export function MpesaInstructionsCard({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">M-PESA Code (optional)</label>
-              <input
-                type="text"
-                value={mpesaCode}
-                onChange={(e) => setMpesaCode(e.target.value.toUpperCase())}
-                placeholder="e.g. QWE123ABC"
-                className="fv-input uppercase"
+              <label className="text-xs font-medium text-muted-foreground">M-PESA message (optional)</label>
+              <Textarea
+                value={mpesaMessage}
+                onChange={(e) => {
+                  setMpesaMessage(e.target.value);
+                  setMessageError(null);
+                }}
+                placeholder="Paste the full M-PESA SMS (recommended). System detects the 10-character confirmation code and only store those 10 characters (the rest is ignored)."
+                className="min-h-[100px] resize-y text-sm"
                 disabled={submitLoading}
+                rows={4}
               />
+              {extractedCode ? (
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Code we&apos;ll use:</span>{' '}
+                  <span className="font-mono font-semibold tracking-wide text-foreground">{extractedCode}</span>
+                  {extractedCode.length < 10 ? (
+                    <span className="block pt-0.5 text-amber-700 dark:text-amber-400">
+                      Need 10 characters — paste a bit more of the SMS if this looks short.
+                    </span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="text-[11px] leading-snug text-muted-foreground">STK coming soon</p>
+              )}
+              {messageError ? <p className="text-xs text-destructive">{messageError}</p> : null}
             </div>
 
             {submitError ? <p className="text-xs text-destructive">{submitError}</p> : null}
