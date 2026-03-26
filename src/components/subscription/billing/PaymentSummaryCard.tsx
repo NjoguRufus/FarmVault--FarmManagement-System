@@ -107,11 +107,6 @@ export function PaymentSummaryCard({
             <dd className="font-medium text-foreground">{businessName}</dd>
           </div>
         </dl>
-
-        <p className="rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[10px] leading-snug text-amber-950 dark:text-amber-100/90 lg:px-3 lg:py-2 lg:text-[11px] lg:leading-relaxed">
-          Payments are reviewed manually. Send the <strong>exact amount</strong> above; activation happens after we
-          verify your M-Pesa transaction.
-        </p>
       </div>
     </div>
   );
