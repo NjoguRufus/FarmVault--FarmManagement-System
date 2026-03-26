@@ -10,9 +10,9 @@ import { getBillingAmountKes } from '@/lib/billingPricing';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 import { PaymentSummaryCard } from '@/components/subscription/billing/PaymentSummaryCard';
-import { MpesaPaymentForm, type MpesaFieldErrors } from '@/components/subscription/billing/MpesaPaymentForm';
+import { MpesaInstructionsCard } from '@/components/subscription/billing/MpesaInstructionsCard';
 import {
-  createPaymentSubmission,
+  createPaymentRequest,
   getPendingPaymentStatus,
 } from '@/services/billingSubmissionService';
 import { getCompany } from '@/services/companyService';
@@ -28,13 +28,8 @@ export interface BillingModalProps {
   checkoutCycle?: BillingSubmissionCycle;
 }
 
-const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '123456';
-const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
-
-function normalizeTransactionCode(raw: string): string {
-  const cleaned = raw.replace(/[^A-Za-z0-9]/g, '');
-  return cleaned.slice(0, 10).toUpperCase();
-}
+const TILL = '5334350';
+const BUSINESS = 'FarmVault';
 
 export function BillingModal({
   open,
@@ -59,10 +54,6 @@ export function BillingModal({
 
   const [plan, setPlan] = useState<BillingSubmissionPlan>('basic');
   const [cycle, setCycle] = useState<BillingSubmissionCycle>('monthly');
-  const [mpesaName, setMpesaName] = useState('');
-  const [mpesaPhone, setMpesaPhone] = useState('');
-  const [transactionCode, setTransactionCode] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<MpesaFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -74,7 +65,7 @@ export function BillingModal({
   });
 
   const mutation = useMutation({
-    mutationFn: createPaymentSubmission,
+    mutationFn: createPaymentRequest,
     onSuccess: async () => {
       setSuccess(true);
       const cid = companyId;
@@ -96,10 +87,6 @@ export function BillingModal({
   useEffect(() => {
     if (!open) {
       setSuccess(false);
-      setMpesaName('');
-      setMpesaPhone('');
-      setTransactionCode('');
-      setFieldErrors({});
       setFormError(null);
     }
   }, [open]);
@@ -124,38 +111,18 @@ export function BillingModal({
 
   const amount = useMemo(() => getBillingAmountKes(plan, cycle), [plan, cycle]);
 
-  const validate = (): boolean => {
-    const next: MpesaFieldErrors = {};
-    if (mpesaName.trim().length < 2) {
-      next.mpesaName = 'Enter the name shown on your M-Pesa message.';
-    }
-    if (mpesaPhone.trim().length < 8) {
-      next.mpesaPhone = 'Enter a valid phone number.';
-    }
-    const tx = normalizeTransactionCode(transactionCode);
-    if (tx.length < 8) {
-      next.transactionCode = 'Enter or paste a valid transaction code.';
-    }
-    setFieldErrors(next);
-    return Object.keys(next).length === 0;
-  };
-
-  const handleSubmit = () => {
+  const handleSubmit = async (payload: { phoneNumber: string; mpesaCode: string | null }) => {
     setFormError(null);
     if (!companyId) {
       onOpenChange(false);
       return;
     }
-    if (!validate()) return;
-
-    mutation.mutate({
-      planCode: plan,
-      billingCycle: cycle,
+    await mutation.mutateAsync({
+      companyId,
+      plan,
       amount,
-      mpesaName: mpesaName.trim(),
-      mpesaPhone: mpesaPhone.trim(),
-      transactionCode: normalizeTransactionCode(transactionCode),
-      currency: 'KES',
+      phoneNumber: payload.phoneNumber,
+      mpesaCode: payload.mpesaCode,
     });
   };
 
@@ -183,8 +150,7 @@ export function BillingModal({
               </div>
               <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Payment submitted successfully</h2>
               <div className="mt-4 max-w-md space-y-2 text-sm leading-relaxed text-muted-foreground">
-                <p>Your payment is pending verification.</p>
-                <p>We will activate your account after review.</p>
+                <p>Payment submitted. We&apos;ll activate your subscription after verification.</p>
               </div>
               <Button className="mt-8 rounded-lg px-8 font-semibold" type="button" onClick={() => onOpenChange(false)}>
                 Done
@@ -227,21 +193,21 @@ export function BillingModal({
                 <div
                   className={cn(
                     'flex flex-col gap-3.5 sm:gap-4',
-                    'lg:grid lg:grid-cols-5 lg:gap-x-10 lg:gap-y-5',
+                    'lg:grid lg:grid-cols-6 lg:gap-x-5 lg:gap-y-5',
                   )}
                 >
                   <PlanSelector
                     value={plan}
                     onChange={setPlan}
                     disabled={busy}
-                    className="order-1 shrink-0 lg:order-none lg:col-span-3 lg:col-start-1 lg:row-start-1"
+                    className="order-1 shrink-0 lg:order-none lg:col-span-6 lg:col-start-1 lg:row-start-1"
                   />
 
                   <BillingCycleSelector
                     value={cycle}
                     onChange={setCycle}
                     disabled={busy}
-                    className="order-2 shrink-0 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-1 lg:row-start-2 lg:border-t-0 lg:pt-0"
+                    className="order-2 shrink-0 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-6 lg:col-start-1 lg:row-start-2 lg:border-t-0 lg:pt-0"
                   />
 
                   <PaymentSummaryCard
@@ -251,38 +217,16 @@ export function BillingModal({
                     businessName={BUSINESS}
                     workspaceName={workspaceName}
                     className={cn(
-                      'order-3 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-2 lg:col-start-4 lg:row-start-1 lg:self-start lg:border-t-0 lg:pt-0',
-                      formError ? 'lg:row-span-4' : 'lg:row-span-3',
+                      'order-3 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-1 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0',
                     )}
                   />
 
-                  {formError ? (
-                    <p
-                      className={cn(
-                        'order-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive',
-                        'lg:col-span-3 lg:col-start-1 lg:row-start-3',
-                      )}
-                    >
-                      {formError}
-                    </p>
-                  ) : null}
-
-                  <MpesaPaymentForm
-                    mpesaName={mpesaName}
-                    mpesaPhone={mpesaPhone}
-                    transactionCode={transactionCode}
-                    onMpesaNameChange={setMpesaName}
-                    onMpesaPhoneChange={setMpesaPhone}
-                    onTransactionCodeChange={(v) => setTransactionCode(normalizeTransactionCode(v))}
-                    fieldErrors={fieldErrors}
-                    disabled={busy}
+                  <MpesaInstructionsCard
+                    tillNumber={TILL}
+                    onPaidSubmit={handleSubmit}
                     submitLoading={busy}
-                    onSubmit={() => void handleSubmit()}
-                    onDismiss={() => onOpenChange(false)}
-                    className={cn(
-                      'order-5 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:col-span-3 lg:col-start-1 lg:border-t-0 lg:pt-0',
-                      formError ? 'lg:row-start-4' : 'lg:row-start-3',
-                    )}
+                    submitError={formError}
+                    className="order-4 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start"
                   />
                 </div>
               </div>

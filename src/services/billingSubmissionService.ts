@@ -14,6 +14,14 @@ export interface CreatePaymentSubmissionInput {
   notes?: string | null;
 }
 
+export interface CreatePaymentRequestInput {
+  companyId: string;
+  plan: 'basic' | 'pro';
+  amount: number;
+  phoneNumber: string;
+  mpesaCode?: string | null;
+}
+
 export interface CompanySubscriptionRow {
   company_id: string;
   plan_id: string | null;
@@ -83,6 +91,26 @@ export async function createPaymentSubmission(input: CreatePaymentSubmissionInpu
   }
   // eslint-disable-next-line no-console
   console.log('[BillingSubmit] submit_manual_subscription_payment → public.subscription_payments id:', id);
+  return id;
+}
+
+export async function createPaymentRequest(input: CreatePaymentRequestInput): Promise<string> {
+  const id = crypto.randomUUID();
+  const payload = {
+    id,
+    company_id: input.companyId,
+    plan: input.plan,
+    amount: input.amount,
+    phone_number: input.phoneNumber.trim(),
+    mpesa_code: input.mpesaCode?.trim() || null,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
+
+  const { error } = await db.public().from('payment_requests').insert(payload);
+  if (error) {
+    throw new Error(error.message ?? 'Failed to submit payment request');
+  }
   return id;
 }
 
