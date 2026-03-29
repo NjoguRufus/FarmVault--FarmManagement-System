@@ -2,7 +2,10 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle, AlertTriangle, Activity } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { StatCard } from '@/components/dashboard/StatCard';
-import { CropStageProgressCard } from '@/components/dashboard/CropStageProgressCard';
+import {
+  CropStageProgressCard,
+  type FarmProgressDashboardFilter,
+} from '@/components/dashboard/CropStageProgressCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ProjectsTable } from '@/components/dashboard/ProjectsTable';
@@ -44,7 +47,12 @@ import { Button } from '@/components/ui/button';
 import { useTour } from '@/tour/TourProvider';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
-import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
+import {
+  subscribeActivity,
+  mapSupabaseActivityToActivityLogDoc,
+  type ActivityLogDoc,
+} from '@/services/activityLogService';
+import { listActivityLogs } from '@/services/employeeAccessService';
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { cn } from '@/lib/utils';
 import { useProjectBlocks } from '@/hooks/useProjectBlocks';
@@ -52,13 +60,23 @@ import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince } from '@/utils/cropStages';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { NewProjectForm } from '@/components/projects/NewProjectForm';
 import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
 import { useNavigate } from 'react-router-dom';
 import { listAdminAlerts, type StoredAdminAlert } from '@/services/adminAlertService';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
 import { getFinanceExpenses, type ExpenseLike } from '@/services/financeExpenseService';
 import { listInventoryStock, type InventoryStockRow } from '@/services/inventoryReadModelService';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  buildCropStageCardPropsForProject,
+  buildFarmProgressRowForProject,
+  projectFarmLifecycle,
+} from '@/lib/farmProgressFromProject';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -68,9 +86,21 @@ function isActivityToday(log: ActivityLogDoc): boolean {
 }
 
 export function CompanyDashboard() {
-  const { activeProject, setActiveProject } = useProject();
+  const queryClient = useQueryClient();
+  const {
+    activeProject,
+    setActiveProject,
+    projects: supabaseProjects,
+    isLoadingProjects,
+    projectsFetchError,
+  } = useProject();
   const { user } = useAuth();
-  const { canSee } = usePermissions();
+  const { canSee, can } = usePermissions();
+  const [welcomeWizardOpen, setWelcomeWizardOpen] = useState(false);
+  /** When navbar is “All Projects”, clicking a row in Your Farm Progress scopes the four financial stat cards to this project (toggle off by clicking again or Show All). */
+  const [dashboardFocusProjectId, setDashboardFocusProjectId] = useState<string | null>(null);
+  const [farmProgressDashboardFilter, setFarmProgressDashboardFilter] =
+    useState<FarmProgressDashboardFilter>('all');
   const { startTour } = useTour();
   const isMobile = useIsMobile();
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
@@ -82,7 +112,24 @@ export function CompanyDashboard() {
   const isDeveloper = user?.role === 'developer';
   const canLoadProjects = Boolean(isDeveloper || companyId);
 
-  const { data: allProjects = [], isLoading: projectsLoading } = useCollection<Project>(
+  useEffect(() => {
+    if (!companyId) return;
+    captureEvent(AnalyticsEvents.DASHBOARD_VIEWED, {
+      company_id: companyId,
+      module_name: 'dashboard',
+      route_path: '/dashboard',
+    });
+  }, [companyId]);
+
+  useEffect(() => {
+    if (activeProject) setDashboardFocusProjectId(null);
+  }, [activeProject]);
+
+  const handleFarmProgressDashboardFocusToggle = useCallback((projectId: string) => {
+    setDashboardFocusProjectId((prev) => (prev === projectId ? null : projectId));
+  }, []);
+
+  const { data: firestoreProjects = [], isLoading: firestoreProjectsLoading } = useCollection<Project>(
     'dashboard-projects',
     'projects',
     {
@@ -92,8 +139,25 @@ export function CompanyDashboard() {
       isDeveloper,
     },
   );
+
+  const mergedProjects = useMemo(() => {
+    const m = new Map<string, Project>();
+    for (const p of firestoreProjects) {
+      if (!companyId || p.companyId === companyId) m.set(p.id, p);
+    }
+    for (const p of supabaseProjects) {
+      if (p.companyId === companyId) m.set(p.id, p);
+    }
+    return Array.from(m.values());
+  }, [firestoreProjects, supabaseProjects, companyId]);
+
+  const projectsLoading = isLoadingProjects || firestoreProjectsLoading;
   // Expenses from Supabase (canonical source)
-  const { data: allExpensesSupa = [] } = useQuery({
+  const {
+    data: allExpensesSupa = [],
+    isLoading: expensesSupaLoading,
+    isError: expensesSupaError,
+  } = useQuery({
     queryKey: ['dashboard-expenses-supa', companyId ?? ''],
     queryFn: () => getFinanceExpenses(companyId ?? ''),
     enabled: Boolean(companyId),
@@ -186,6 +250,35 @@ export function CompanyDashboard() {
     };
   }, [companyId, activeProject?.id]);
 
+  const { data: sqlActivityRows = [] } = useQuery({
+    queryKey: ['company-activity-logs', companyId ?? ''],
+    queryFn: () => listActivityLogs({ companyId: companyId!, limit: 20 }),
+    enabled: Boolean(companyId),
+    staleTime: 15_000,
+  });
+
+  const mergedActivityLogs = useMemo(() => {
+    const fromSql = sqlActivityRows.map(mapSupabaseActivityToActivityLogDoc);
+    const combined = [...fromSql, ...activityLogs];
+    combined.sort((a, b) => {
+      const ta = a.createdAt?.getTime() ?? (typeof a.clientCreatedAt === 'number' ? a.clientCreatedAt : 0);
+      const tb = b.createdAt?.getTime() ?? (typeof b.clientCreatedAt === 'number' ? b.clientCreatedAt : 0);
+      return tb - ta;
+    });
+    const seen = new Set<string>();
+    const deduped: ActivityLogDoc[] = [];
+    for (const row of combined) {
+      const t =
+        row.createdAt?.getTime() ?? (typeof row.clientCreatedAt === 'number' ? row.clientCreatedAt : 0);
+      const key = `${row.message}-${t}-${row.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(row);
+      if (deduped.length >= 15) break;
+    }
+    return deduped;
+  }, [sqlActivityRows, activityLogs]);
+
   // Fetch admin alerts for the unified Recent Activities feed
   const [adminAlerts, setAdminAlerts] = useState<StoredAdminAlert[]>([]);
   useEffect(() => {
@@ -199,11 +292,86 @@ export function CompanyDashboard() {
 
   const companyProjects = useMemo(
     () => {
-      const scoped = companyId ? allProjects.filter((p) => p.companyId === companyId) : allProjects;
+      const scoped = companyId ? mergedProjects.filter((p) => p.companyId === companyId) : mergedProjects;
       return scoped.filter((p) => hasProjectAccess(p.id));
     },
-    [allProjects, companyId, hasProjectAccess]
+    [mergedProjects, companyId, hasProjectAccess]
   );
+
+  const dashboardSelectableProjects = useMemo(
+    () => companyProjects.filter((p) => !isProjectClosed(p)),
+    [companyProjects],
+  );
+
+  const farmProgressRowsForAllProjects = useMemo(() => {
+    if (activeProject || companyProjects.length <= 1) return null;
+    return companyProjects.map((p) => buildFarmProgressRowForProject(p, allStages, cropCatalog));
+  }, [activeProject, companyProjects, allStages, cropCatalog]);
+
+  const loneProjectCropCardProps = useMemo(() => {
+    if (activeProject || companyProjects.length !== 1) return null;
+    return buildCropStageCardPropsForProject(companyProjects[0], allStages, cropCatalog);
+  }, [activeProject, companyProjects, allStages, cropCatalog]);
+
+  const statCardsScopeValid = useMemo(() => {
+    if (activeProject) {
+      return companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
+    }
+    if (dashboardFocusProjectId && companyProjects.some((p) => p.id === dashboardFocusProjectId)) {
+      return dashboardFocusProjectId;
+    }
+    return null;
+  }, [activeProject, dashboardFocusProjectId, companyProjects]);
+
+  /** When “All Projects” and no row focus: limit stat-card totals to farms visible in the Your Farm Progress filter. */
+  const farmProgressVisibleProjectIds = useMemo(() => {
+    if (activeProject != null || dashboardFocusProjectId != null) return null;
+    const base = companyProjects;
+    if (farmProgressDashboardFilter === 'all') return new Set(base.map((p) => p.id));
+    if (farmProgressDashboardFilter === 'ongoing') {
+      return new Set(base.filter((p) => projectFarmLifecycle(p) === 'ongoing').map((p) => p.id));
+    }
+    return new Set(base.filter((p) => projectFarmLifecycle(p) === 'completed').map((p) => p.id));
+  }, [activeProject, dashboardFocusProjectId, companyProjects, farmProgressDashboardFilter]);
+
+  const financialLedgerExpenses = useMemo(() => {
+    let filtered = companyId ? allExpenses.filter((e) => e.companyId === companyId) : allExpenses;
+    filtered = filtered.filter((e) => !e.projectId || hasProjectAccess(e.projectId));
+    if (statCardsScopeValid) {
+      filtered = filtered.filter((e) => e.projectId === statCardsScopeValid);
+    } else if (farmProgressVisibleProjectIds) {
+      filtered = filtered.filter(
+        (e) => !e.projectId || farmProgressVisibleProjectIds.has(e.projectId),
+      );
+    }
+    return filtered;
+  }, [allExpenses, companyId, hasProjectAccess, statCardsScopeValid, farmProgressVisibleProjectIds]);
+
+  const financialLedgerSales = useMemo(() => {
+    let filtered = companyId ? allSales.filter((s) => s.companyId === companyId) : allSales;
+    filtered = filtered.filter((s) => !s.projectId || hasProjectAccess(s.projectId));
+    if (statCardsScopeValid) {
+      filtered = filtered.filter((s) => s.projectId === statCardsScopeValid);
+    } else if (farmProgressVisibleProjectIds) {
+      filtered = filtered.filter(
+        (s) => !s.projectId || farmProgressVisibleProjectIds.has(s.projectId),
+      );
+    }
+    return filtered;
+  }, [allSales, companyId, hasProjectAccess, statCardsScopeValid, farmProgressVisibleProjectIds]);
+
+  const statCardsBudgetTotal = useMemo(() => {
+    if (statCardsScopeValid) {
+      const p = companyProjects.find((x) => x.id === statCardsScopeValid);
+      return p ? p.budget || 0 : 0;
+    }
+    if (farmProgressVisibleProjectIds) {
+      return companyProjects
+        .filter((p) => farmProgressVisibleProjectIds.has(p.id))
+        .reduce((sum, p) => sum + (p.budget || 0), 0);
+    }
+    return companyProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
+  }, [statCardsScopeValid, companyProjects, farmProgressVisibleProjectIds]);
 
   const filteredExpenses = useMemo(() => {
     let filtered = companyId ? allExpenses.filter((e) => e.companyId === companyId) : allExpenses;
@@ -579,14 +747,48 @@ export function CompanyDashboard() {
     return 'normal';
   }, [filteredExpenses]);
 
-  const harvestFinancialsProjectId =
+  const harvestFinancialsProjectIdGlobal =
     activeProject && companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
 
-  const { data: fbTotals } = useQuery({
-    queryKey: ['dashboardFinancialTotals', companyId ?? '', harvestFinancialsProjectId ?? 'all'],
-    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', harvestFinancialsProjectId),
+  const { data: fbTotalsGlobal } = useQuery({
+    queryKey: ['dashboardFinancialTotals', companyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all'],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', harvestFinancialsProjectIdGlobal),
     enabled: Boolean(companyId),
   });
+
+  const { data: fbTotalsStatCards } = useQuery({
+    queryKey: ['dashboardFinancialTotals', companyId ?? '', statCardsScopeValid ?? 'all'],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', statCardsScopeValid),
+    enabled: Boolean(companyId),
+  });
+
+  const effectiveFbTotalsForStatCards = useMemo(() => {
+    const raw = fbTotalsStatCards;
+    if (!raw) return null;
+    if (statCardsScopeValid) return raw;
+    if (farmProgressDashboardFilter === 'all' || !farmProgressVisibleProjectIds) return raw;
+    let tr = 0;
+    let te = 0;
+    for (const row of raw.collections) {
+      const pid = row.projectId;
+      if (pid && farmProgressVisibleProjectIds.has(pid)) {
+        tr += row.revenue;
+        te += row.totalPaidOut;
+      }
+    }
+    return {
+      ...raw,
+      totalRevenue: tr,
+      totalExpenses: te,
+      profitLoss: tr - te,
+      totalSales: tr,
+    };
+  }, [
+    fbTotalsStatCards,
+    statCardsScopeValid,
+    farmProgressDashboardFilter,
+    farmProgressVisibleProjectIds,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !user?.id) return;
@@ -594,32 +796,51 @@ export function CompanyDashboard() {
     console.log('[Dashboard] aggregation scope', {
       companyId,
       selectedProjectId: activeProject?.id ?? null,
-      harvestCollectionsScopeProjectId: harvestFinancialsProjectId,
+      harvestCollectionsScopeProjectId: harvestFinancialsProjectIdGlobal,
+      statCardsHarvestScope: statCardsScopeValid,
+      dashboardFocusProjectId,
       mode: activeProject ? 'single_project' : 'all_projects',
     });
-  }, [user?.id, companyId, activeProject?.id, harvestFinancialsProjectId]);
+  }, [
+    user?.id,
+    companyId,
+    activeProject?.id,
+    harvestFinancialsProjectIdGlobal,
+    statCardsScopeValid,
+    dashboardFocusProjectId,
+  ]);
 
   const firestoreExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const firestoreSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalRevenue = firestoreSales + (fbTotals?.totalRevenue ?? 0);
-  const totalExpenses = firestoreExpenses + (fbTotals?.totalExpenses ?? 0);
+  const totalRevenue = firestoreSales + (fbTotalsGlobal?.totalRevenue ?? 0);
+  const totalExpenses = firestoreExpenses + (fbTotalsGlobal?.totalExpenses ?? 0);
   const profitLoss = totalRevenue - totalExpenses;
   const netBalance = profitLoss;
   const totalSales = totalRevenue;
   const totalBudget = filteredProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
   const remainingBudget = totalBudget - totalExpenses;
 
+  const statCardsFirestoreExpenses = financialLedgerExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const statCardsFirestoreSales = financialLedgerSales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const displayTotalRevenue = statCardsFirestoreSales + (effectiveFbTotalsForStatCards?.totalRevenue ?? 0);
+  const displayTotalExpenses = statCardsFirestoreExpenses + (effectiveFbTotalsForStatCards?.totalExpenses ?? 0);
+  const displayNetBalance = displayTotalRevenue - displayTotalExpenses;
+  const displayRemainingBudget = statCardsBudgetTotal - displayTotalExpenses;
+
   useEffect(() => {
-    if (import.meta.env.DEV && (fbTotals?.totalRevenue !== undefined || fbTotals?.totalExpenses !== undefined)) {
+    if (
+      import.meta.env.DEV &&
+      (fbTotalsGlobal?.totalRevenue !== undefined || fbTotalsGlobal?.totalExpenses !== undefined)
+    ) {
       console.log('[Dashboard Financial Totals]', {
         totalRevenue,
         totalExpenses,
         profitLoss,
-        fbRevenue: fbTotals?.totalRevenue,
-        fbExpenses: fbTotals?.totalExpenses,
+        fbRevenue: fbTotalsGlobal?.totalRevenue,
+        fbExpenses: fbTotalsGlobal?.totalExpenses,
       });
     }
-  }, [fbTotals?.totalRevenue, fbTotals?.totalExpenses, totalRevenue, totalExpenses, profitLoss]);
+  }, [fbTotalsGlobal?.totalRevenue, fbTotalsGlobal?.totalExpenses, totalRevenue, totalExpenses, profitLoss]);
 
   const recentTransactions = useMemo((): RecentTransactionItem[] => {
     const items: RecentTransactionItem[] = [];
@@ -701,15 +922,15 @@ export function CompanyDashboard() {
       if (value === 'all') {
         setActiveProject(null);
       } else {
-        const proj = companyProjects.find((p) => p.id === value);
+        const proj = dashboardSelectableProjects.find((p) => p.id === value);
         if (proj) setActiveProject(proj);
       }
     },
-    [companyProjects, setActiveProject]
+    [dashboardSelectableProjects, setActiveProject]
   );
 
   const advisorySummary = useMemo(() => {
-    const hasActivityToday = activityLogs.some(isActivityToday);
+    const hasActivityToday = mergedActivityLogs.some(isActivityToday);
     return buildSmartAdvisoryCardSummary({
       hasActivityToday,
       pendingTasksCount: advisoryTasks.overdue.length + advisoryTasks.dueSoon.length,
@@ -722,7 +943,7 @@ export function CompanyDashboard() {
         activeProjectEnvironment === 'greenhouse' ? 'greenhouse' : 'openField',
     });
   }, [
-    activityLogs,
+    mergedActivityLogs,
     advisoryTasks.overdue.length,
     advisoryTasks.dueSoon.length,
     activeProjectDaysRemainingToNextStage,
@@ -769,6 +990,47 @@ export function CompanyDashboard() {
 
   if (projectsLoading) {
     return <DashboardSkeleton />;
+  }
+
+  const companyProjectCount =
+    companyId != null ? mergedProjects.filter((p) => p.companyId === companyId).length : 0;
+  const canCreateFarmProject = can('projects', 'create');
+  const tenantDataLikelyExists =
+    allExpensesSupa.length > 0 || Boolean(projectsFetchError) || expensesSupaError;
+  const showFirstProjectOnboarding =
+    !isDeveloper &&
+    companyId &&
+    companyProjectCount === 0 &&
+    canCreateFarmProject &&
+    !tenantDataLikelyExists &&
+    !expensesSupaLoading;
+
+  if (showFirstProjectOnboarding) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-lg flex-col items-center justify-center px-4 text-center animate-fade-in">
+        <div className="rounded-2xl border border-border/60 bg-card/80 p-8 shadow-sm backdrop-blur-sm">
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">Welcome to FarmVault</h1>
+          <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+            Start by creating a new or existing farm project to begin tracking your farm.
+          </p>
+          <Button className="mt-6 w-full sm:w-auto" size="lg" onClick={() => setWelcomeWizardOpen(true)}>
+            Create New or Existing Project
+          </Button>
+        </div>
+        <Dialog open={welcomeWizardOpen} onOpenChange={setWelcomeWizardOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+            <DialogTitle className="sr-only">Create project</DialogTitle>
+            <DialogDescription className="sr-only">
+              Create a new farm project using crop setup, blocks or planting date, and details.
+            </DialogDescription>
+            <NewProjectForm
+              onCancel={() => setWelcomeWizardOpen(false)}
+              onSuccess={() => setWelcomeWizardOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
   }
 
   const projectSelectorValue = activeProject ? activeProject.id : 'all';
@@ -818,8 +1080,40 @@ export function CompanyDashboard() {
     });
   }
 
+  const showTenantLoadIssueBanner =
+    Boolean(companyId) &&
+    !isDeveloper &&
+    (Boolean(projectsFetchError) || expensesSupaError || (allExpensesSupa.length > 0 && companyProjectCount === 0));
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {showTenantLoadIssueBanner && (
+        <Alert variant="destructive" className="border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <AlertTitle>Company data may not have loaded fully</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              Developer tools show records for this company, but the dashboard did not load projects or expenses from
+              your session. This is usually a membership or sign-in mismatch (Clerk user id must match{' '}
+              <code className="rounded bg-background/60 px-1">core.company_members</code>). Try refresh; if it persists,
+              confirm your account is listed under this company in Supabase or contact support.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0 border-amber-700/40"
+              onClick={() => {
+                void queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
+                void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses-supa', companyId ?? ''] });
+              }}
+            >
+              Retry load
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
       <div className="flex flex-col gap-2 md:flex-row md:items-center">
         <DashboardGreeting firstName={firstName} />
@@ -833,7 +1127,7 @@ export function CompanyDashboard() {
             </SelectTrigger>
             <SelectContent className="rounded-md">
               <SelectItem value="all">All Projects</SelectItem>
-              {companyProjects.map((p) => (
+              {dashboardSelectableProjects.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   <span className="flex items-center gap-2">
                     <span className="text-base" aria-hidden>{getCropIcon(p.cropType)}</span>
@@ -860,6 +1154,26 @@ export function CompanyDashboard() {
 
       {/* Stats Grid */}
       <div className="space-y-3" data-tour="dashboard-stats">
+        {!activeProject && dashboardFocusProjectId ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/[0.07] px-3 py-2 text-sm shadow-sm backdrop-blur-sm transition-colors"
+            role="status"
+          >
+            <p className="min-w-0 text-foreground">
+              <span className="text-muted-foreground">Now viewing:</span>{' '}
+              <span className="font-semibold tracking-tight">
+                {companyProjects.find((p) => p.id === dashboardFocusProjectId)?.name ?? 'Project'}
+              </span>
+            </p>
+            <button
+              type="button"
+              className="shrink-0 text-xs font-semibold text-primary transition-colors hover:text-primary/85 hover:underline"
+              onClick={() => setDashboardFocusProjectId(null)}
+            >
+              Show All
+            </button>
+          </div>
+        ) : null}
         {!isHarvestActive ? (
           <div
             className={cn(
@@ -877,11 +1191,18 @@ export function CompanyDashboard() {
                   </div>
                 )}
                 <CropStageProgressCard
-                  projectName={activeProject?.name}
-                  stages={effectiveActiveProjectStages}
-                  activeStageOverride={activeStageOverride}
-                  knowledgeDetection={activeProjectKnowledgeDetection}
-                  recentActivityLogs={activityLogs}
+                  farmProgressRows={farmProgressRowsForAllProjects}
+                  farmProgressDashboardFocusProjectId={!activeProject ? dashboardFocusProjectId : null}
+                  onFarmProgressDashboardFocusToggle={handleFarmProgressDashboardFocusToggle}
+                  farmProgressStatusFilter={farmProgressDashboardFilter}
+                  onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
+                  projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
+                  stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
+                  activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
+                  knowledgeDetection={
+                    loneProjectCropCardProps?.knowledgeDetection ?? activeProjectKnowledgeDetection
+                  }
+                  recentActivityLogs={mergedActivityLogs}
                   advisorySummary={advisorySummary}
                   compact={user?.role === 'employee'}
                 />
@@ -889,7 +1210,7 @@ export function CompanyDashboard() {
             ) : showRevenueCard ? (
               <StatCard
                 title="Total Revenue"
-                value={`KES ${totalSales.toLocaleString()}`}
+                value={`KES ${displayTotalRevenue.toLocaleString()}`}
                 change={15.3}
                 changeLabel="vs last month"
                 icon={<TrendingUp className="h-4 w-4" />}
@@ -900,7 +1221,7 @@ export function CompanyDashboard() {
               <div data-tour="expenses-summary-card">
                 <StatCard
                   title="Total Expenses"
-                  value={`KES ${totalExpenses.toLocaleString()}`}
+                  value={`KES ${displayTotalExpenses.toLocaleString()}`}
                   change={12.5}
                   changeLabel="vs last month"
                   icon={<DollarSign className="h-4 w-4" />}
@@ -920,7 +1241,7 @@ export function CompanyDashboard() {
                   <div data-tour="revenue-summary-card" className={cn('h-full', showExpensesCard ? 'md:row-start-1' : '')}>
                     <StatCard
                       title="Total Revenue"
-                      value={`KES ${totalSales.toLocaleString()}`}
+                      value={`KES ${displayTotalRevenue.toLocaleString()}`}
                       change={15.3}
                       changeLabel="vs last month"
                       icon={<TrendingUp className="h-4 w-4" />}
@@ -933,7 +1254,7 @@ export function CompanyDashboard() {
                   <div data-tour="expenses-summary-card" className="h-full">
                     <StatCard
                       title="Total Expenses"
-                      value={`KES ${totalExpenses.toLocaleString()}`}
+                      value={`KES ${displayTotalExpenses.toLocaleString()}`}
                       change={12.5}
                       changeLabel="vs last month"
                       icon={<DollarSign className="h-4 w-4" />}
@@ -955,7 +1276,7 @@ export function CompanyDashboard() {
             {showRevenueCard && (
               <StatCard
                 title="Total Revenue"
-                value={`KES ${totalSales.toLocaleString()}`}
+                value={`KES ${displayTotalRevenue.toLocaleString()}`}
                 change={15.3}
                 changeLabel="Harvest revenue (current cycle)"
                 icon={<TrendingUp className="h-4 w-4" />}
@@ -967,7 +1288,7 @@ export function CompanyDashboard() {
               <div data-tour="expenses-summary-card">
                 <StatCard
                   title="Total Expenses"
-                  value={`KES ${totalExpenses.toLocaleString()}`}
+                  value={`KES ${displayTotalExpenses.toLocaleString()}`}
                   change={12.5}
                   changeLabel="vs last month"
                   icon={<DollarSign className="h-4 w-4" />}
@@ -994,11 +1315,11 @@ export function CompanyDashboard() {
               <div data-tour="profit-loss-card">
                 <StatCard
                   title="Profit and Loss"
-                  value={`KES ${netBalance.toLocaleString()}`}
-                  change={netBalance >= 0 ? 22.1 : -5.2}
+                  value={`KES ${displayNetBalance.toLocaleString()}`}
+                  change={displayNetBalance >= 0 ? 22.1 : -5.2}
                   changeLabel="vs last month"
                   icon={<Wallet className="h-4 w-4" />}
-                  variant={netBalance >= 0 ? 'primary' : 'default'}
+                  variant={displayNetBalance >= 0 ? 'primary' : 'default'}
                   compact
                 />
               </div>
@@ -1006,11 +1327,11 @@ export function CompanyDashboard() {
             {showBudgetCard && (
               <StatCard
                 title="Remaining Budget"
-                value={`KES ${remainingBudget.toLocaleString()}`}
+                value={`KES ${displayRemainingBudget.toLocaleString()}`}
                 change={undefined}
-                changeLabel={`of KES ${totalBudget.toLocaleString()}`}
+                changeLabel={`of KES ${statCardsBudgetTotal.toLocaleString()}`}
                 icon={<CalendarIcon className="h-4 w-4" />}
-                variant={remainingBudget >= 0 ? 'primary' : 'default'}
+                variant={displayRemainingBudget >= 0 ? 'primary' : 'default'}
                 compact
               />
             )}
@@ -1060,7 +1381,7 @@ export function CompanyDashboard() {
       </div>
 
       {/* Recent Activities — merged stream of activity logs + admin alerts */}
-      {(activityLogs.length > 0 || adminAlerts.length > 0) && (
+      {(mergedActivityLogs.length > 0 || adminAlerts.length > 0) && (
         <div className="fv-card">
           <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
             <Activity className="h-5 w-5" />
@@ -1071,7 +1392,7 @@ export function CompanyDashboard() {
               // Merge activity logs and alerts into a single sorted stream
               type FeedItem = { id: string; time: number; kind: 'activity' | 'alert'; data: any };
               const items: FeedItem[] = [];
-              activityLogs.forEach((log) => {
+              mergedActivityLogs.forEach((log) => {
                 const t = log.createdAt ? new Date(log.createdAt).getTime() : (log.clientCreatedAt ?? 0);
                 items.push({ id: `act-${log.id}`, time: t, kind: 'activity', data: log });
               });

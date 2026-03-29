@@ -29,6 +29,8 @@ export interface ProjectHeroCardProps {
   fieldSize: string;
   /** Optional hero/banner image URL (e.g. farm or crop image) */
   heroImageUrl?: string | null;
+  /** When true, hide edit/plan actions (e.g. closed project). */
+  readOnly?: boolean;
 }
 
 export function ProjectHeroCard({
@@ -43,6 +45,7 @@ export function ProjectHeroCard({
   location,
   fieldSize,
   heroImageUrl,
+  readOnly = false,
 }: ProjectHeroCardProps) {
   const cropLabel = project.cropType?.replace(/-/g, ' ') ?? 'Crop';
   const plantingDateStr = project.plantingDate
@@ -58,7 +61,8 @@ export function ProjectHeroCard({
     project.status === 'active' && 'bg-emerald-100/90 text-emerald-950',
     project.status === 'planning' && 'bg-amber-100/90 text-amber-900',
     project.status === 'completed' && 'bg-emerald-100/70 text-emerald-900',
-    project.status === 'archived' && 'bg-emerald-100/60 text-emerald-800'
+    project.status === 'archived' && 'bg-emerald-100/60 text-emerald-800',
+    project.status === 'closed' && 'bg-rose-100/80 text-rose-900'
   );
 
   return (
@@ -101,27 +105,31 @@ export function ProjectHeroCard({
             <ChevronLeft className="h-4 w-4 mr-1" />
             Back
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="secondary"
-                size="icon"
-                className="shrink-0 rounded-full bg-background/90 text-foreground hover:bg-background shadow-sm"
-              >
-                <MoreHorizontal className="h-5 w-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEditProject}>
-                <Pencil className="h-4 w-4 mr-2" />
-                Edit Project
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onPlanSeason}>
-                <Calendar className="h-4 w-4 mr-2" />
-                Plan Season
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {!readOnly ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="shrink-0 rounded-full bg-background/90 text-foreground hover:bg-background shadow-sm"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={onEditProject}>
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit Project
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onPlanSeason}>
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Plan Season
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="h-9 w-9 shrink-0" aria-hidden />
+          )}
         </div>
 
         {/* Title and identity (Active · crop · acreage) in one row – darker green text */}

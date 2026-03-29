@@ -9,6 +9,7 @@ export interface ProjectQuickActionsProps {
   onViewInventory: () => void;
   onAddChallenge: () => void;
   showPlanSeason?: boolean;
+  showAddChallenge?: boolean;
 }
 
 export function ProjectQuickActions({
@@ -18,6 +19,7 @@ export function ProjectQuickActions({
   onViewInventory,
   onAddChallenge,
   showPlanSeason = true,
+  showAddChallenge = true,
 }: ProjectQuickActionsProps) {
   const actions = [
     ...(showPlanSeason
@@ -26,7 +28,9 @@ export function ProjectQuickActions({
     { label: 'View Work Logs', icon: FileText, onClick: onViewWorkLogs },
     { label: 'View Expenses', icon: Wallet, onClick: onViewExpenses },
     { label: 'View Inventory Usage', icon: Package, onClick: onViewInventory },
-    { label: 'Add Challenge', icon: ListChecks, onClick: onAddChallenge },
+    ...(showAddChallenge
+      ? [{ label: 'Add Challenge', icon: ListChecks, onClick: onAddChallenge }]
+      : []),
   ];
 
   return (

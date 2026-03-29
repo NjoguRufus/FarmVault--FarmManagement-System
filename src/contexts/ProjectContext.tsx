@@ -12,9 +12,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Project } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { listProjects } from '@/services/projectsService';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 interface ProjectContextType {
   projects: Project[];
+  /** True while the Supabase projects query for the active company is loading. */
+  isLoadingProjects: boolean;
+  /** Set when listProjects fails (e.g. RLS) so UI can avoid a false “no projects” onboarding state. */
+  projectsFetchError: Error | null;
   activeProject: Project | null;
   setActiveProject: (project: Project | null) => void;
   getProjectsByCompany: (companyId: string) => Project[];
@@ -49,8 +54,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const {
     data: projectsData = [],
-    isLoading,
-    error,
+    isLoading: isLoadingProjects,
+    error: projectsQueryError,
   } = useQuery({
     queryKey: ['projects', companyId],
     queryFn: () => listProjects(companyId),
@@ -66,11 +71,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const setActiveProject = useCallback(
     (project: Project | null) => {
-      setActiveProjectState(project);
+      const next = project && !isProjectClosed(project) ? project : null;
+      setActiveProjectState(next);
       if (typeof window === 'undefined' || !companyId) return;
       try {
         const key = activeProjectStorageKey(companyId);
-        if (project) window.localStorage.setItem(key, project.id);
+        if (next) window.localStorage.setItem(key, next.id);
         else window.localStorage.removeItem(key);
       } catch {
         // ignore
@@ -107,8 +113,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [companyId, isDeveloper, queryClient]);
 
   useEffect(() => {
-    if (!canSubscribeProjects || isLoading) return;
-    if (error) return;
+    if (!canSubscribeProjects || isLoadingProjects) return;
+    if (projectsQueryError) return;
 
     // Avoid infinite update loop: only update cache when data actually changes.
     const sameLength = cachedProjects.length === projectsData.length;
@@ -125,7 +131,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         // Ignore quota/private mode failures.
       }
     }
-  }, [projectsData, cachedProjects, isLoading, error, canSubscribeProjects]);
+  }, [projectsData, cachedProjects, isLoadingProjects, projectsQueryError, canSubscribeProjects]);
+
+  const projectsFetchError = (projectsQueryError as Error | null) ?? null;
 
   const projects = useMemo(() => {
     if (!canSubscribeProjects) {
@@ -136,10 +144,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const shouldUseCache =
       projectsData.length === 0 &&
       cachedProjects.length > 0 &&
-      (isOffline || error !== null);
+      (isOffline || projectsQueryError !== null);
 
     return shouldUseCache ? cachedProjects : projectsData;
-  }, [projectsData, cachedProjects, error, canSubscribeProjects]);
+  }, [projectsData, cachedProjects, projectsQueryError, canSubscribeProjects]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -151,17 +159,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!activeProject) return;
     const fresh = projects.find((p) => p.id === activeProject.id);
     if (!fresh) return;
+    if (isProjectClosed(fresh)) {
+      setActiveProject(null);
+      return;
+    }
     if (
       fresh.budget !== activeProject.budget ||
       fresh.budgetPoolId !== activeProject.budgetPoolId ||
-      fresh.name !== activeProject.name
+      fresh.name !== activeProject.name ||
+      fresh.status !== activeProject.status
     ) {
       setActiveProjectState(fresh);
     }
-  }, [projects, activeProject]);
+  }, [projects, activeProject, setActiveProject]);
 
   useEffect(() => {
-    if (!companyId || !canSubscribeProjects || isLoading || error) return;
+    if (!companyId || !canSubscribeProjects || isLoadingProjects || projectsQueryError) return;
     if (!projects.length) return;
     if (restoredActiveForCompanyRef.current === companyId) return;
     restoredActiveForCompanyRef.current = companyId;
@@ -169,11 +182,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const raw = window.localStorage.getItem(activeProjectStorageKey(companyId));
       if (!raw?.trim()) return;
       const match = projects.find((p) => p.id === raw.trim());
-      if (match) setActiveProjectState(match);
+      if (match && !isProjectClosed(match)) setActiveProjectState(match);
     } catch {
       // ignore
     }
-  }, [companyId, canSubscribeProjects, isLoading, error, projects]);
+  }, [companyId, canSubscribeProjects, isLoadingProjects, projectsQueryError, projects]);
 
   const getProjectsByCompany = (companyId: string) => {
     return projects.filter((p) => p.companyId === companyId);
@@ -183,6 +196,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     <ProjectContext.Provider
       value={{
         projects,
+        isLoadingProjects,
+        projectsFetchError,
         activeProject,
         setActiveProject,
         getProjectsByCompany,

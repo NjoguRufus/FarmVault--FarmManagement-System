@@ -13,6 +13,7 @@ import { QuickUnlockSettings } from '@/components/settings/QuickUnlockSettings';
 import { db } from '@/lib/db';
 import { useUser } from '@clerk/react';
 import { resolveUserDisplayNameFromSources } from '@/lib/userDisplayName';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -184,6 +185,13 @@ export default function SettingsPage() {
         message: 'Your name has been saved and updated everywhere.', 
         type: 'success' 
       });
+      captureEvent(AnalyticsEvents.SETTINGS_UPDATED, {
+        user_id: user.id,
+        company_id: user.companyId ?? undefined,
+        settings_section: 'profile',
+        module_name: 'settings',
+        route_path: '/settings',
+      });
     } catch (e: any) {
       setProfileError(e?.message || 'Failed to save profile');
     } finally {
@@ -295,6 +303,13 @@ export default function SettingsPage() {
       await refetchCompany();
       
       addNotification({ title: 'Company updated', message: 'Your company details have been saved.', type: 'success' });
+      captureEvent(AnalyticsEvents.SETTINGS_UPDATED, {
+        user_id: user?.id,
+        company_id: companyId,
+        settings_section: 'company',
+        module_name: 'settings',
+        route_path: '/settings',
+      });
     } catch (e: any) {
       setSaveError(e?.message || 'Failed to save company details');
     } finally {

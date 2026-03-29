@@ -1,26 +1,32 @@
 /**
- * Onboarding wizard: Step 1 create company + membership + profile, Step 2 trial, Step 3 optional project.
- * Guard: redirect to /dashboard if user has active_company_id and membership; else show onboarding.
+ * Onboarding: create company + membership + profile, start trial, then optional project (same NewProjectForm as Projects).
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { CheckCircle2, ChevronRight, FolderPlus } from 'lucide-react';
+import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
 import { invokeNotifyCompanySubmissionReceived } from '@/lib/email';
-import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+  clearOnboardingSessionProgress,
+  readOnboardingSessionProgress,
+  saveOnboardingSessionProgress,
+} from '@/lib/onboardingSessionProgress';
 import { writePendingApprovalSession, type PendingApprovalSessionPayload } from '@/lib/pendingApprovalSession';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { NewProjectForm } from '@/components/projects/NewProjectForm';
+import { setPostOnboardingFirstProjectWelcomeFlag } from '@/lib/postOnboardingProjectWelcome';
 
 type EmailValidationResult = { ok: boolean; message?: string | null };
 
 export default function OnboardingPage() {
-  const { resetRequired, refreshAuthState, syncTenantCompanyFromServer } = useAuth();
+  const { resetRequired, refreshAuthState, syncTenantCompanyFromServer, authReady, user: fvUser } = useAuth();
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
@@ -32,10 +38,9 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
-
-  const [projectName, setProjectName] = useState('');
-  const [createProject, setCreateProject] = useState(false);
-  const [projectCreated, setProjectCreated] = useState(false);
+  const startedTracked = useRef(false);
+  const onboardingRestoredRef = useRef(false);
+  const exitingOnboardingRef = useRef(false);
 
   const clerkId = clerkUser?.id ?? null;
   const accountEmail = clerkUser?.primaryEmailAddress?.emailAddress?.trim() ?? '';
@@ -44,7 +49,6 @@ export default function OnboardingPage() {
     companyEmailTrim === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmailTrim);
   const step1Valid = companyName.trim().length >= 2 && companyEmailFormatOk;
 
-  // Pre-fill company email from the sign-in account only. Farm/company name must be entered explicitly (never from Google name).
   useEffect(() => {
     if (!clerkUser) return;
     setCompanyEmail((prev) => (prev.trim() !== '' ? prev : accountEmail));
@@ -57,7 +61,65 @@ export default function OnboardingPage() {
     }
   }, [isLoaded, isSignedIn, navigate]);
 
-  // AuthContext/RequireOnboarding already guard access; we don't need an extra membership check here.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || startedTracked.current) return;
+    startedTracked.current = true;
+    captureEvent(AnalyticsEvents.ONBOARDING_STARTED, {
+      user_id: clerkId ?? undefined,
+      module_name: 'onboarding',
+      route_path: '/onboarding',
+    });
+  }, [isLoaded, isSignedIn, clerkId]);
+
+  useEffect(() => {
+    if (!authReady || !isLoaded || !isSignedIn || !clerkId || onboardingRestoredRef.current) return;
+
+    const saved = readOnboardingSessionProgress(clerkId);
+    if (!saved) {
+      onboardingRestoredRef.current = true;
+      return;
+    }
+
+    if (saved.step === 1) {
+      onboardingRestoredRef.current = true;
+      setStep(1);
+      if (saved.companyName) setCompanyName(saved.companyName);
+      if (saved.companyEmail) setCompanyEmail(saved.companyEmail);
+      return;
+    }
+
+    if (!saved.companyId) {
+      clearOnboardingSessionProgress();
+      onboardingRestoredRef.current = true;
+      return;
+    }
+
+    const activeCo = fvUser?.companyId ?? null;
+    if (!activeCo) return;
+
+    if (activeCo !== saved.companyId) {
+      clearOnboardingSessionProgress();
+      onboardingRestoredRef.current = true;
+      return;
+    }
+
+    onboardingRestoredRef.current = true;
+    setCompanyId(saved.companyId);
+    setCompanyName(saved.companyName);
+    setCompanyEmail(saved.companyEmail);
+    setStep(saved.step);
+  }, [authReady, isLoaded, isSignedIn, clerkId, fvUser?.companyId]);
+
+  useEffect(() => {
+    if (exitingOnboardingRef.current || !clerkId || !isSignedIn) return;
+    saveOnboardingSessionProgress({
+      clerkUserId: clerkId,
+      step: step as 1 | 2 | 3,
+      companyId,
+      companyName: companyName.trim(),
+      companyEmail: companyEmail.trim(),
+    });
+  }, [clerkId, isSignedIn, step, companyId, companyName, companyEmail]);
 
   const fillCompanyEmailFromAccount = () => {
     if (!accountEmail) {
@@ -88,7 +150,6 @@ export default function OnboardingPage() {
         const { data: companyCheck } = await supabase.rpc('validate_email_uniqueness', {
           _email: normalizedCompanyEmail,
           _company_id: null,
-          // Reusing your sign-in email for "company email" must not count as "another user".
           _exclude_clerk_user_id: clerkId,
         });
         const companyValidation = companyCheck as EmailValidationResult | null;
@@ -113,7 +174,6 @@ export default function OnboardingPage() {
         return;
       }
 
-      // Single RPC: creates core.companies, core.company_members (role=company_admin), core.profiles with active_company_id
       const { data: cid, error: rpcErr } = await supabase.rpc('create_company_with_admin', {
         _name: trimmedFarm,
       });
@@ -132,6 +192,12 @@ export default function OnboardingPage() {
 
       const newId = cid as string;
       setCompanyId(newId);
+      captureEvent(AnalyticsEvents.COMPANY_CREATED, {
+        company_id: newId,
+        company_name: trimmedFarm,
+        user_id: clerkId ?? undefined,
+        module_name: 'onboarding',
+      });
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[Onboarding] company_created', {
@@ -166,7 +232,7 @@ export default function OnboardingPage() {
     }
   };
 
-  const navigateToPendingApproval = async () => {
+  const sendSubmissionEmailsAndSession = async () => {
     if (!companyId) return;
 
     const recipient =
@@ -180,7 +246,7 @@ export default function OnboardingPage() {
         : typeof window !== 'undefined'
           ? window.location.origin
           : 'https://app.farmvault.africa';
-    const dashboardUrl = `${base}/pending-approval`;
+    const dashboardUrl = `${base}/dashboard`;
     const approvalDashboardUrl = `${base}/developer/companies`;
     const submitterEmail = accountEmail.trim().toLowerCase() || recipient;
 
@@ -213,18 +279,17 @@ export default function OnboardingPage() {
     writePendingApprovalSession(payload);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Onboarding] pending_approval_navigation', payload);
+      console.log('[Onboarding] handoff_to_dashboard', payload);
     }
     try {
       await syncTenantCompanyFromServer();
       await refreshAuthState();
     } catch {
-      /* non-fatal: session will catch up on next load */
+      /* non-fatal */
     }
-    navigate('/pending-approval', { state: payload, replace: true });
   };
 
-  const handleStep2SubmitForApproval = async () => {
+  const handleStep2Continue = async () => {
     if (!companyId || !clerkId) {
       setError('Missing company or session. Try creating your company again.');
       return;
@@ -254,56 +319,23 @@ export default function OnboardingPage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Onboarding] subscription_saved_pending_approval', { companyId });
+        console.log('[Onboarding] subscription_initialized', { companyId });
       }
 
-      if (createProject && projectName.trim()) {
-        setStep(3);
-      } else {
-        await navigateToPendingApproval();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to submit for approval');
-    } finally {
-      setLoading(false);
-    }
-  };
+      captureEvent(AnalyticsEvents.TRIAL_STARTED, {
+        company_id: companyId,
+        subscription_plan: 'pro',
+        module_name: 'onboarding',
+      });
+      captureEvent(AnalyticsEvents.ONBOARDING_COMPLETED, {
+        company_id: companyId,
+        module_name: 'onboarding',
+      });
 
-  const handleStep3CreateProject = async () => {
-    if (!companyId || !projectName.trim()) {
-      await navigateToPendingApproval();
-      return;
-    }
-    if (!clerkUser?.id) {
-      setError('User not loaded');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const { error: insertError } = await db
-        .projects()
-        .from('projects')
-        .insert({
-          company_id: companyId,
-          created_by: clerkUser.id,
-          name: projectName.trim(),
-          crop_type: 'Other',
-          environment: 'open_field',
-          status: 'active',
-          planting_date: new Date().toISOString().slice(0, 10),
-        });
-      if (insertError) throw insertError;
-      setProjectCreated(true);
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[Onboarding] first_project_created', { companyId, projectName: projectName.trim() });
-      }
-      setTimeout(() => {
-        void navigateToPendingApproval();
-      }, 1200);
+      await sendSubmissionEmailsAndSession();
+      setStep(3);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create project');
+      setError(e instanceof Error ? e.message : 'Failed to continue');
     } finally {
       setLoading(false);
     }
@@ -321,9 +353,24 @@ export default function OnboardingPage() {
     return <Navigate to="/start-fresh" replace />;
   }
 
+  const goDashboard = () => {
+    exitingOnboardingRef.current = true;
+    clearOnboardingSessionProgress();
+    navigate('/dashboard', { replace: true });
+  };
+
+  const handleOnboardingProjectSuccess = () => {
+    setPostOnboardingFirstProjectWelcomeFlag();
+    goDashboard();
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
-      <Card className="w-full max-w-lg rounded-2xl shadow-xl border-primary/10 overflow-hidden">
+      <Card
+        className={`w-full rounded-2xl shadow-xl border-primary/10 overflow-hidden ${
+          step === 3 ? 'max-w-2xl' : 'max-w-lg'
+        }`}
+      >
         <CardContent className="p-6 sm:p-8">
           <div className="flex items-center gap-3 mb-8">
             <img src="/Logo/FarmVault_Logo dark mode.png" alt="FarmVault" className="h-10 w-auto rounded-lg object-contain bg-sidebar-primary/10 p-1" />
@@ -337,7 +384,7 @@ export default function OnboardingPage() {
           {step === 1 && (
             <>
               <h2 className="text-xl font-semibold text-foreground mb-2">Create your company</h2>
-              <p className="text-sm text-muted-foreground mb-6">You’ll get a 7-day Pro trial in the next step.</p>
+              <p className="text-sm text-muted-foreground mb-6">You’ll get a 7-day Pro trial once you continue. You can open your dashboard right away.</p>
               {orgLogoUrl && (
                 <div className="flex justify-center mb-4">
                   <img
@@ -409,69 +456,33 @@ export default function OnboardingPage() {
                   <CheckCircle2 className="h-10 w-10" />
                 </div>
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-2">Almost there</h2>
+              <h2 className="text-xl font-semibold text-foreground mb-2">You’re in</h2>
               <p className="text-sm text-muted-foreground mb-6">
                 <strong>{companyName}</strong> is set to <strong>Pro</strong> with a <strong>7-day trial</strong> after our team
-                approves your workspace. No plan pick is needed here.
+                approves your workspace. Next, you can create your first project here, or skip and do it from the dashboard.
               </p>
-              <div className="flex items-center gap-2 mb-4">
-                <input
-                  type="checkbox"
-                  id="createProject"
-                  checked={createProject}
-                  onChange={(e) => setCreateProject(e.target.checked)}
-                  className="rounded border-input"
-                />
-                <Label htmlFor="createProject">Create first project</Label>
-              </div>
-              {createProject && (
-                <div className="mb-6">
-                  <Label htmlFor="projectName">Project name</Label>
-                  <Input
-                    id="projectName"
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    placeholder="e.g. Tomato Season 2025"
-                    className="mt-1"
-                  />
-                </div>
-              )}
-              <Button className="w-full" onClick={() => void handleStep2SubmitForApproval()} disabled={loading}>
-                {loading ? 'Submitting…' : 'Submit for Approval'}
+              <Button className="w-full" onClick={() => void handleStep2Continue()} disabled={loading}>
+                {loading ? 'Preparing…' : 'Continue'}
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </>
           )}
 
           {step === 3 && (
-            <>
-              <h2 className="text-xl font-semibold text-foreground mb-2 flex items-center gap-2">
-                <FolderPlus className="h-5 w-5" />
-                First project
-              </h2>
-              <p className="text-sm text-muted-foreground mb-6">Create a project to start tracking stages and expenses.</p>
-              <div className="mb-6">
-                <Label htmlFor="projectName2">Project name</Label>
-                <Input
-                  id="projectName2"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="e.g. Tomato Season 2025"
-                  className="mt-1"
-                />
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={() => void navigateToPendingApproval()} disabled={loading}>
-                  Skip
-                </Button>
-                <Button className="flex-1" onClick={handleStep3CreateProject} disabled={!projectName.trim() || loading}>
-                  {loading ? 'Creating…' : 'Create project'}
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-foreground">Create New or Existing Project</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Same steps you will use from the Projects page — crop, blocks or planting date, then details.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={goDashboard}>
+                  Skip for now
                 </Button>
               </div>
-              {projectCreated && (
-                <p className="mt-4 text-sm text-green-600 text-center">Project created. Continuing to approval…</p>
-              )}
-            </>
+              <NewProjectForm onCancel={goDashboard} onSuccess={handleOnboardingProjectSuccess} />
+            </div>
           )}
         </CardContent>
       </Card>

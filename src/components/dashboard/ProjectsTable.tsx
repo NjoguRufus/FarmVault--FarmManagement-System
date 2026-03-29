@@ -29,6 +29,7 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
       planning: 'fv-badge--info',
       completed: 'fv-badge--gold',
       archived: 'bg-muted text-muted-foreground',
+      closed: 'bg-rose-100/90 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100',
     };
     return styles[status];
   };

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { Plus, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,6 +22,7 @@ import { ArchiveConfirmDialog } from '@/components/inventory/ArchiveConfirmDialo
 import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer';
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 export default function InventoryPage() {
   const { activeProject } = useProject();
@@ -56,6 +57,17 @@ export default function InventoryPage() {
   const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
   const [supplierId, setSupplierId] = useState<string | undefined>(undefined);
   const [stockStatus, setStockStatus] = useState<'all' | 'ok' | 'low' | 'out'>('all');
+
+  useEffect(() => {
+    if (!companyId) return;
+    if (stockStatus !== 'low' && stockStatus !== 'out') return;
+    captureEvent(AnalyticsEvents.INVENTORY_LOW_STOCK_VIEWED, {
+      company_id: companyId,
+      stock_filter: stockStatus,
+      module_name: 'inventory',
+      route_path: '/inventory',
+    });
+  }, [companyId, stockStatus]);
 
   const { categories: allCategories, isLoading: categoriesLoading } = useInventoryCategories(companyId);
   const {

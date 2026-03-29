@@ -34,6 +34,7 @@ import {
 } from '@/lib/billingPricing';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '5334350';
 const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
@@ -116,6 +117,16 @@ export default function BillingPage() {
   });
 
   const workspacePlan = useMemo(() => gatePlanToWorkspacePlan(gatePlan), [gatePlan]);
+
+  useEffect(() => {
+    if (!companyId || isDeveloper) return;
+    captureEvent(AnalyticsEvents.SUBSCRIPTION_PAGE_VIEWED, {
+      company_id: companyId,
+      subscription_plan: workspacePlan,
+      module_name: 'billing',
+      route_path: '/billing',
+    });
+  }, [companyId, isDeveloper, workspacePlan]);
 
   const latestApprovedBillingCycle = useMemo(() => {
     const approved = (payments as PaymentSubmissionRow[]).find((p) => (p.status ?? '').toLowerCase() === 'approved');

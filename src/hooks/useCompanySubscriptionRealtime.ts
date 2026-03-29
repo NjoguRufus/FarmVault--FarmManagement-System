@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { companyWorkspaceStatusQueryKey } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 
 /**
  * When `company_subscriptions` updates for this company (e.g. dev clicks Activate),
@@ -33,6 +34,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
           void queryClient.invalidateQueries({ queryKey: ['company-subscription-row', companyId] });
           void queryClient.invalidateQueries({ queryKey: ['subscription-payments-supabase', companyId] });
           void queryClient.invalidateQueries({ queryKey: ['company-billing', companyId] });
+          void queryClient.invalidateQueries({ queryKey: companyWorkspaceStatusQueryKey(companyId) });
         },
       )
       .subscribe((status) => {

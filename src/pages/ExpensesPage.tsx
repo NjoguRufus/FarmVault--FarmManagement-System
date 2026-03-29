@@ -50,6 +50,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, getHarvestCollection, listHarvestCollections, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -162,6 +163,16 @@ export default function ExpensesPage() {
     queryFn: () => getFinanceExpenses(companyId ?? '', activeProject?.id ?? null),
     enabled: Boolean(companyId),
   });
+
+  useEffect(() => {
+    if (!companyId) return;
+    captureEvent(AnalyticsEvents.EXPENSE_VIEWED, {
+      company_id: companyId,
+      project_id: activeProject?.id,
+      module_name: 'expenses',
+      route_path: '/expenses',
+    });
+  }, [companyId, activeProject?.id]);
 
   // Stages and work logs still used for stage detection in expense form
   const allStages: CropStage[] = [];
@@ -537,6 +548,12 @@ export default function ExpensesPage() {
 
     const dateTag = new Date().toISOString().slice(0, 10);
     exportToExcel(rows, `expenses-${dateTag}`);
+    captureEvent(AnalyticsEvents.REPORT_EXPORTED_EXCEL, {
+      company_id: companyId ?? undefined,
+      project_id: activeProject?.id,
+      report_type: 'expenses',
+      module_name: 'expenses',
+    });
     toast.success('Expenses exported.');
   };
 

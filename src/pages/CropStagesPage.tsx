@@ -6,9 +6,9 @@ import { useCollection } from '@/hooks/useCollection';
 import { CropStage, WorkLog, SeasonChallenge, InventoryUsage, InventoryItem, ChallengeType } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { getCropTimeline } from '@/config/cropTimelines';
+import { effectiveCurrentStage, resolveManualStageIndex } from '@/lib/seasonStageOverride';
 import {
   calculateDaysSince,
-  getStageForDay,
   buildTimeline,
   getStageEndDate,
   type StageRule,
@@ -145,17 +145,22 @@ export default function CropStagesPage() {
     () => (plantingDateNorm != null ? calculateDaysSince(plantingDateNorm) : null),
     [plantingDateNorm],
   );
-  const timelineItems = useMemo(
-    () =>
-      templateStages.length && daysSincePlanting != null
-        ? buildTimeline(templateStages, daysSincePlanting)
-        : [],
-    [templateStages, daysSincePlanting],
+  const manualStageKey = activeProject?.planning?.manualCurrentStage?.stageKey ?? null;
+  const manualTimelineOverrideIndex = useMemo(
+    () => resolveManualStageIndex(templateStages, manualStageKey),
+    [templateStages, manualStageKey],
   );
+  const timelineItems = useMemo(() => {
+    if (!templateStages.length) return [];
+    if (daysSincePlanting == null && manualTimelineOverrideIndex == null) return [];
+    const day = daysSincePlanting ?? 0;
+    return buildTimeline(templateStages, day, {
+      currentStageIndexOverride: manualTimelineOverrideIndex,
+    });
+  }, [templateStages, daysSincePlanting, manualTimelineOverrideIndex]);
   const currentStageForDay = useMemo(() => {
-    if (daysSincePlanting == null || daysSincePlanting < 0 || !templateStages.length) return null;
-    return getStageForDay(templateStages, daysSincePlanting);
-  }, [templateStages, daysSincePlanting]);
+    return effectiveCurrentStage(templateStages, daysSincePlanting, manualStageKey);
+  }, [templateStages, daysSincePlanting, manualStageKey]);
 
   const getStatusBadge = (startDate?: any, endDate?: any) => {
     const start = toDate(startDate);

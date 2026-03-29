@@ -1,5 +1,6 @@
 import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import type {
   InventoryItem,
   InventoryCategory,
@@ -385,7 +386,14 @@ export async function addInventoryItem(
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
   });
 
-  return mapRowToInventoryItem(data);
+  const mapped = mapRowToInventoryItem(data);
+  captureEvent(AnalyticsEvents.INVENTORY_ITEM_CREATED, {
+    company_id: companyId,
+    inventory_item_id: mapped.id,
+    inventory_category: String(mapped.category ?? ''),
+    module_name: 'inventory',
+  });
+  return mapped;
 }
 
 export async function updateInventoryItem(
@@ -447,7 +455,14 @@ export async function updateInventoryItem(
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
   });
 
-  return mapRowToInventoryItem(data);
+  const updated = mapRowToInventoryItem(data);
+  captureEvent(AnalyticsEvents.INVENTORY_ITEM_UPDATED, {
+    company_id: companyId,
+    inventory_item_id: updated.id,
+    inventory_category: String(updated.category ?? ''),
+    module_name: 'inventory',
+  });
+  return updated;
 }
 
 export async function deleteInventoryItem(
@@ -554,6 +569,11 @@ export async function restockInventory(
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
   });
 
+  captureEvent(AnalyticsEvents.INVENTORY_STOCK_ADDED, {
+    company_id: companyId,
+    inventory_item_id: input.itemId,
+    module_name: 'inventory',
+  });
   return item;
 }
 
@@ -584,6 +604,11 @@ export async function deductInventoryManual(
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
   });
 
+  captureEvent(AnalyticsEvents.INVENTORY_STOCK_USED, {
+    company_id: companyId,
+    inventory_item_id: input.itemId,
+    module_name: 'inventory',
+  });
   return item;
 }
 

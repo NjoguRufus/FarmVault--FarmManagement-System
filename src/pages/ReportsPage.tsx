@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Download, FileText, BarChart2, PieChart, TrendingUp, Info } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { mockExpensesByCategory, mockActivityData } from '@/data/mockData';
@@ -9,8 +11,18 @@ import { usePermissions } from '@/hooks/usePermissions';
 
 export default function ReportsPage() {
   const { activeProject } = useProject();
+  const { user } = useAuth();
   const { can } = usePermissions();
   const canExportReports = can('reports', 'export');
+
+  useEffect(() => {
+    captureEvent(AnalyticsEvents.REPORT_VIEWED, {
+      company_id: user?.companyId ?? undefined,
+      project_id: activeProject?.id,
+      module_name: 'reports',
+      route_path: '/reports',
+    });
+  }, [user?.companyId, activeProject?.id]);
 
   const reportTypes = [
     {
@@ -98,7 +110,15 @@ export default function ReportsPage() {
               <button
                 type="button"
                 className="fv-btn fv-btn--secondary w-full sm:w-auto self-start p-1.5 md:px-3 md:py-2 text-xs md:text-sm"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  captureEvent(AnalyticsEvents.REPORT_EXPORTED_EXCEL, {
+                    company_id: user?.companyId ?? undefined,
+                    project_id: activeProject?.id,
+                    report_type: report.title,
+                    module_name: 'reports',
+                  });
+                }}
               >
                 <Download className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5" />
                 <span>Export</span>

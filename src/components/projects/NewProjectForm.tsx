@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { generateStageTimeline, getCropStages } from '@/lib/cropStageConfig';
 import { EnvironmentType } from '@/types';
 import { cn } from '@/lib/utils';
@@ -107,6 +108,7 @@ function StepIndicator({ step }: { step: WizardStep }) {
 
 export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const { user } = useAuth();
+  const { setActiveProject } = useProject();
   const queryClient = useQueryClient();
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
 
@@ -395,6 +397,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
       await queryClient.invalidateQueries({ queryKey: ['projects', user.companyId] });
       await queryClient.invalidateQueries({ queryKey: ['budget-pools', user.companyId] });
+      setActiveProject(project);
       onSuccess?.();
     } catch (e) {
       console.error('[Project Create Error]', e);
@@ -753,7 +756,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
               {challengeTemplates.length > 0 && (
                 <div className="space-y-2 rounded-lg border border-border/70 px-3 py-3">
                   <p className="text-sm font-medium text-foreground">Suggested Pre-Season Challenges</p>
-                  <p className="text-xs text-muted-foreground">These will be added to the project. Uncheck any you don’t want.</p>
+                  <p className="text-xs text-muted-foreground">These will be added to the project. Uncheck any you donÔÇÖt want.</p>
                   <ul className="space-y-2">
                     {challengeTemplates.map((t) => (
                       <li key={t.id} className="flex items-start gap-2">
@@ -830,7 +833,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                         <SelectItem value="_none">Select a pool</SelectItem>
                         {budgetPools.map((p) => (
                           <SelectItem key={p.id} value={p.id}>
-                            {p.name} — {Number(p.remainingAmount ?? 0).toLocaleString()} KES left
+                            {p.name} ÔÇö {Number(p.remainingAmount ?? 0).toLocaleString()} KES left
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -839,7 +842,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                   <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/30">
                     <p className="text-xs text-muted-foreground">
                       {budgetPools.length > 0
-                        ? 'Need another pool? Create one here — it will be selected for this project.'
+                        ? 'Need another pool? Create one here ÔÇö it will be selected for this project.'
                         : 'No budget pools yet. Create one below.'}
                     </p>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -890,7 +893,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                         }
                       }}
                     >
-                      {creatingPool ? 'Creating…' : 'Create pool'}
+                      {creatingPool ? 'CreatingÔÇª' : 'Create pool'}
                     </Button>
                   </div>
                 </div>

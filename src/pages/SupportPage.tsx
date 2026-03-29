@@ -12,6 +12,7 @@ import {
 } from '@/services/codeRedService';
 import { format } from 'date-fns';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 export default function SupportPage() {
   const { user } = useAuth();
@@ -31,6 +32,14 @@ export default function SupportPage() {
   const [showNewCodeRed, setShowNewCodeRed] = useState(false);
   const [newCodeRedMessage, setNewCodeRedMessage] = useState('');
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    captureEvent(AnalyticsEvents.SUPPORT_PAGE_VIEWED, {
+      company_id: user?.companyId ?? undefined,
+      module_name: 'support',
+      route_path: '/support',
+    });
+  }, [user?.companyId]);
 
   useEffect(() => {
     if (!isCompanyAdmin || !user?.companyId) {

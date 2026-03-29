@@ -13,6 +13,8 @@ export type CompanySubscriptionGateStatus =
 export interface CompanySubscriptionGateState {
   company_id: string;
   company_name: string | null;
+  /** core.companies.status: pending | active | suspended */
+  company_status?: string | null;
   selected_plan: 'basic' | 'pro' | string;
   billing_mode: 'manual' | string;
   status: CompanySubscriptionGateStatus | string;

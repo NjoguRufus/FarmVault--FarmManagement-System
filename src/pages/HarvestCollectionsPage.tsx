@@ -39,6 +39,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { buildHarvestCollectionAutoName } from '@/lib/harvestCollectionNaming';
 import { cn } from '@/lib/utils';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import type { HarvestCollection, HarvestPicker, PickerWeighEntry } from '@/types';
 import {
   createHarvestCollection,
@@ -126,6 +127,7 @@ import {
 import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTour';
 import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestCollectionModal';
 import { HarvestCollectionTransferModal } from '@/components/modals/HarvestCollectionTransferModal';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 const HARVEST_COLLECTION_BASE_NAME = 'test';
@@ -162,11 +164,34 @@ export default function HarvestCollectionsPage() {
     return activeProject;
   }, [routeProjectId, projects, activeProject]);
 
-  useEffect(() => {
-    if (routeProjectId && effectiveProject && effectiveProject.id === routeProjectId && activeProject?.id !== routeProjectId) {
-      setActiveProject(effectiveProject);
+  const harvestProjectSelectOptions = useMemo(() => {
+    const open = companyProjects.filter((p) => !isProjectClosed(p));
+    if (
+      effectiveProject &&
+      isProjectClosed(effectiveProject) &&
+      !open.some((p) => p.id === effectiveProject.id)
+    ) {
+      return [effectiveProject, ...open];
     }
+    return open;
+  }, [companyProjects, effectiveProject]);
+
+  useEffect(() => {
+    if (!routeProjectId || !effectiveProject || effectiveProject.id !== routeProjectId) return;
+    if (activeProject?.id === routeProjectId) return;
+    if (isProjectClosed(effectiveProject)) return;
+    setActiveProject(effectiveProject);
   }, [routeProjectId, effectiveProject, activeProject?.id, setActiveProject]);
+
+  useEffect(() => {
+    if (!userCompanyId) return;
+    captureEvent(AnalyticsEvents.HARVEST_COLLECTION_VIEWED, {
+      company_id: userCompanyId,
+      project_id: effectiveProject?.id,
+      module_name: 'harvest',
+      route_path: routeProjectId ? `/harvest-collections/${routeProjectId}` : '/harvest-collections',
+    });
+  }, [userCompanyId, effectiveProject?.id, routeProjectId]);
 
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -554,7 +579,8 @@ export default function HarvestCollectionsPage() {
     const validTarget = companyProjects.some(
       (project) => project.companyId === companyId &&
         project.id === params.targetProjectId &&
-        project.id !== transferTargetCollection.projectId,
+        project.id !== transferTargetCollection.projectId &&
+        !isProjectClosed(project),
     );
     if (!validTarget) {
       throw new Error('Target project must belong to the same company.');
@@ -957,7 +983,7 @@ export default function HarvestCollectionsPage() {
   const transferTargetProjects = useMemo(() => {
     if (!companyId) return [];
     return companyProjects
-      .filter((project) => project.companyId === companyId)
+      .filter((project) => project.companyId === companyId && !isProjectClosed(project))
       .map((project) => ({ id: project.id, name: project.name }));
   }, [companyProjects, companyId]);
 
@@ -2536,8 +2562,8 @@ export default function HarvestCollectionsPage() {
           <UiSelect
             value={activeProject?.id ?? undefined}
             onValueChange={(projectId) => {
-              const next = companyProjects.find((p) => p.id === projectId) ?? null;
-              if (next) {
+              const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
+              if (next && !isProjectClosed(next)) {
                 setActiveProject(next);
               }
             }}
@@ -2546,9 +2572,15 @@ export default function HarvestCollectionsPage() {
               <SelectValue placeholder="Choose a project" />
             </SelectTrigger>
             <SelectContent>
-              {companyProjects.map((project) => (
-                <SelectItem key={project.id} value={project.id}>
+              {harvestProjectSelectOptions.map((project) => (
+                <SelectItem
+                  key={project.id}
+                  value={project.id}
+                  disabled={isProjectClosed(project)}
+                  className={isProjectClosed(project) ? 'opacity-70' : undefined}
+                >
                   {project.name}
+                  {isProjectClosed(project) ? ' (closed)' : ''}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -2614,8 +2646,8 @@ export default function HarvestCollectionsPage() {
             <UiSelect
               value={effectiveProject?.id ?? undefined}
               onValueChange={(projectId) => {
-                const next = companyProjects.find((p) => p.id === projectId) ?? null;
-                if (next) {
+                const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
+                if (next && !isProjectClosed(next)) {
                   setActiveProject(next);
                 }
               }}
@@ -2624,9 +2656,15 @@ export default function HarvestCollectionsPage() {
                 <SelectValue placeholder="Select project" />
               </SelectTrigger>
               <SelectContent>
-                {companyProjects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
+                {harvestProjectSelectOptions.map((project) => (
+                  <SelectItem
+                    key={project.id}
+                    value={project.id}
+                    disabled={isProjectClosed(project)}
+                    className={isProjectClosed(project) ? 'opacity-70' : undefined}
+                  >
                     {project.name}
+                    {isProjectClosed(project) ? ' (closed)' : ''}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -161,11 +161,14 @@ export function resolveWorkspaceSubscriptionState(
     daysRemaining = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   }
 
+  // Include pending_approval: hybrid onboarding lets new farms use the app (create projects, etc.)
+  // while admin approval is pending — same as SubscriptionAccessGate allowing that status.
   const hasWorkspaceAccess =
     subStatus === 'trial' ||
     subStatus === 'trialing' ||
     subStatus === 'active' ||
-    subStatus === 'pending_payment';
+    subStatus === 'pending_payment' ||
+    subStatus === 'pending_approval';
 
   const canWrite =
     hasWorkspaceAccess && subStatus !== 'expired' && subStatus !== 'suspended' && subStatus !== 'rejected';

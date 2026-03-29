@@ -5,6 +5,7 @@
  */
 
 import { db, requireCompanyId } from '@/lib/db';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 export type FinanceExpenseRow = {
   id: string;
@@ -135,6 +136,12 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
 
   if (error) throw error;
   const row = data as FinanceExpenseRow;
+  captureEvent(AnalyticsEvents.EXPENSE_CREATED, {
+    company_id: row.company_id,
+    project_id: row.project_id ?? undefined,
+    expense_category: row.category,
+    module_name: 'expenses',
+  });
   return {
     id: row.id,
     companyId: row.company_id,

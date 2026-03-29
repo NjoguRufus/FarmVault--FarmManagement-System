@@ -287,7 +287,7 @@ export interface Project {
   cropType: CropType;
   cropTypeKey?: string;
   environmentType?: EnvironmentType;
-  status: 'planning' | 'active' | 'completed' | 'archived';
+  status: 'planning' | 'active' | 'completed' | 'archived' | 'closed';
   startDate: Date;
   endDate?: Date;
   location: string;
@@ -335,6 +335,12 @@ export interface Project {
       changedAt: Date;
       changedBy: string;
     }[];
+    /** Optional: stage key from crop template — use when the field is ahead/behind the calendar estimate. */
+    manualCurrentStage?: {
+      stageKey: string;
+      updatedAt?: string;
+      reason?: string;
+    } | null;
   };
 }
 

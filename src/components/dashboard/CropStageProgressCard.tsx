@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Sprout, ChevronRight, Circle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { toDate } from '@/lib/dateUtils';
-import type { CropStage } from '@/types';
 import type { ActivityLogDoc, ActivityLogStatus } from '@/services/activityLogService';
 import {
   Sheet,
@@ -11,8 +9,17 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import { Progress } from '@/components/ui/progress';
 import { CropProgressCard } from './CropProgressCard';
 import { cn } from '@/lib/utils';
+import {
+  clamp,
+  computeSeasonProgressPercent,
+  resolveCurrentStage,
+  startOfDay,
+  type StageLike,
+} from '@/lib/cropStageResolve';
+import type { FarmProgressRow } from '@/lib/farmProgressFromProject';
 
 const RECENT_COUNT = 5;
 
@@ -45,19 +52,21 @@ function getStatusDot(status: ActivityLogStatus): { className: string; Icon: Rea
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-type StageLike = CropStage & {
-  name?: string;
-  status?: CropStage['status'] | 'active' | 'ongoing' | string;
-};
-
-interface StageDetails {
-  stage: StageLike;
-  stageName: string;
-  start: Date;
-  end: Date;
-}
+/** Matches dashboard farm list filter (All / Ongoing / Completed). */
+export type FarmProgressDashboardFilter = 'all' | 'ongoing' | 'completed';
 
 export interface CropStageProgressCardProps {
+  /**
+   * When the dashboard is on “All Projects” and the farm has 2+ projects, show this compact list
+   * instead of the single-project crop stage UI. Omitted or fewer than 2 rows → normal behavior.
+   */
+  farmProgressRows?: FarmProgressRow[] | null;
+  /** Dashboard-only: highlight row and sync financial stat cards to this project (navbar must be All Projects). */
+  farmProgressDashboardFocusProjectId?: string | null;
+  onFarmProgressDashboardFocusToggle?: (projectId: string) => void;
+  /** When set with `onFarmProgressStatusFilterChange`, farm filter is controlled by the parent (stat cards use same scope). */
+  farmProgressStatusFilter?: FarmProgressDashboardFilter;
+  onFarmProgressStatusFilterChange?: (filter: FarmProgressDashboardFilter) => void;
   projectName?: string | null;
   stages?: StageLike[];
   activeStageOverride?: StageLike | null;
@@ -81,105 +90,143 @@ export interface CropStageProgressCardProps {
   compact?: boolean;
 }
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-const startOfDay = (input: Date) =>
-  new Date(input.getFullYear(), input.getMonth(), input.getDate());
-
 const formatStageDate = (date: Date) =>
   date.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
 
 const resolveCropNameForImage = (cropType?: string | null) =>
   String(cropType || '').trim() || 'tomatoes';
 
-function getStageLabel(stage: StageLike, fallbackIndex: number) {
-  return stage.stageName || stage.name || `Stage ${stage.stageIndex ?? fallbackIndex + 1}`;
-}
-
-function resolveCurrentStage(
-  stages: StageLike[],
-  activeStageOverride?: StageLike | null
-): StageDetails | null {
-  if (!stages.length && !activeStageOverride) {
-    return null;
-  }
-
-  const today = startOfDay(new Date());
-  const normalized = stages.map((stage, index) => {
-    const start = toDate(stage.startDate);
-    const end = toDate(stage.endDate);
-    return {
-      stage,
-      stageName: getStageLabel(stage, index),
-      start: start ? startOfDay(start) : null,
-      end: end ? startOfDay(end) : null,
-      stageOrder: stage.stageIndex ?? index,
-      index,
-    };
-  });
-
-  const override = activeStageOverride
-    ? {
-        stage: activeStageOverride,
-        stageName: getStageLabel(activeStageOverride, 0),
-        start: toDate(activeStageOverride.startDate),
-        end: toDate(activeStageOverride.endDate),
-      }
-    : null;
-  const overrideNormalized = override
-    ? {
-        stage: override.stage,
-        stageName: override.stageName,
-        start: override.start ? startOfDay(override.start) : null,
-        end: override.end ? startOfDay(override.end) : null,
-        stageOrder: override.stage.stageIndex ?? 0,
-        index: 0,
-      }
-    : null;
-
-  const activeByStatus = normalized.find(({ stage }) => {
-    const status = String(stage.status || '').toLowerCase();
-    return status === 'active';
-  });
-
-  const activeByDateRange = normalized.find(({ start, end }) => {
-    if (!start || !end) return false;
-    return start.getTime() <= today.getTime() && today.getTime() <= end.getTime();
-  });
-
-  const latestByStartDate = normalized.reduce<(typeof normalized)[number] | null>((latest, current) => {
-    if (!current.start) return latest;
-    if (!latest || !latest.start) return current;
-    return current.start.getTime() > latest.start.getTime() ? current : latest;
-  }, null);
-
-  const sortedByOrder = [...normalized].sort((a, b) => a.stageOrder - b.stageOrder);
-  const latestByOrder = sortedByOrder.length ? sortedByOrder[sortedByOrder.length - 1] : null;
-  const chosen =
-    overrideNormalized ??
-    activeByStatus ??
-    activeByDateRange ??
-    latestByStartDate ??
-    latestByOrder;
-
-  if (!chosen) return null;
-
-  const start = chosen.start ?? today;
-  const endCandidate = chosen.end ?? chosen.start ?? today;
-  const end = endCandidate.getTime() < start.getTime() ? start : endCandidate;
-
-  return {
-    stage: chosen.stage,
-    stageName: chosen.stageName,
-    start,
-    end,
-  };
-}
-
 const cardClasses =
   'relative overflow-hidden rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 transition-all after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-gradient-to-r after:from-primary/60 after:via-primary/20 after:to-transparent';
 
 const MODAL_LIMIT = 15;
+
+type FarmProgressFilter = FarmProgressDashboardFilter;
+
+const FARM_FILTER_OPTIONS: {
+  id: FarmProgressFilter;
+  label: string;
+  shortLabel: string;
+}[] = [
+  { id: 'all', label: 'All Farms', shortLabel: 'All' },
+  { id: 'ongoing', label: 'Ongoing Farms', shortLabel: 'Ongoing' },
+  { id: 'completed', label: 'Completed Farms', shortLabel: 'Done' },
+];
+
+function FarmProgressMultiView({
+  rows,
+  focusProjectId = null,
+  onRowFocusToggle,
+  filter: controlledFilter,
+  onFilterChange,
+}: {
+  rows: FarmProgressRow[];
+  focusProjectId?: string | null;
+  onRowFocusToggle?: (projectId: string) => void;
+  filter?: FarmProgressFilter;
+  onFilterChange?: (f: FarmProgressFilter) => void;
+}) {
+  const [internalFilter, setInternalFilter] = useState<FarmProgressFilter>('all');
+  const filter = controlledFilter ?? internalFilter;
+  const setFilter = onFilterChange ?? setInternalFilter;
+  const rowInteractive = Boolean(onRowFocusToggle);
+
+  const filteredRows = useMemo(() => {
+    if (filter === 'all') return rows;
+    if (filter === 'ongoing') return rows.filter((r) => r.farmLifecycle === 'ongoing');
+    return rows.filter((r) => r.farmLifecycle === 'completed');
+  }, [rows, filter]);
+
+  const emptyMessage =
+    filter === 'ongoing'
+      ? 'No ongoing farms match this filter. Try “All Farms” or “Completed Farms”.'
+      : filter === 'completed'
+        ? 'No completed farms yet. Finished seasons appear here when you close a project.'
+        : 'No farms to show.';
+
+  return (
+    <div className={cardClasses}>
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sprout className="h-4 w-4 text-primary shrink-0" aria-hidden />
+          <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Your Farm Progress
+          </span>
+        </div>
+        <div
+          role="group"
+          aria-label="Filter farms by status"
+          className="inline-flex flex-wrap items-center justify-end gap-0.5 self-end sm:self-auto rounded-lg border border-border/60 bg-muted/40 p-0.5 shadow-sm"
+        >
+          {FARM_FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setFilter(opt.id)}
+              aria-pressed={filter === opt.id}
+              className={cn(
+                'rounded-md px-2 py-1.5 text-[11px] sm:px-2.5 sm:py-1.5 sm:text-xs font-medium transition-all border',
+                filter === opt.id
+                  ? 'border-border/70 bg-background text-foreground shadow-sm'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-background/70',
+              )}
+            >
+              <span className="sm:hidden">{opt.shortLabel}</span>
+              <span className="hidden sm:inline">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filteredRows.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground text-center leading-relaxed py-5 px-1">{emptyMessage}</p>
+      ) : (
+        <ul className="mt-3 space-y-2.5 sm:space-y-3" role="list">
+          {filteredRows.map((row) => {
+            const selected = focusProjectId === row.projectId;
+            const RowShell = rowInteractive ? 'button' : 'div';
+            return (
+              <li key={row.projectId} className="min-w-0">
+                <RowShell
+                  {...(rowInteractive
+                    ? {
+                        type: 'button' as const,
+                        onClick: () => onRowFocusToggle?.(row.projectId),
+                        'aria-pressed': selected,
+                      }
+                    : {})}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg border text-left transition-colors duration-200 sm:gap-3',
+                    'px-2 py-2 sm:px-2.5 sm:py-2.5',
+                    rowInteractive &&
+                      'cursor-pointer border-transparent hover:border-border/45 hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                    selected &&
+                      rowInteractive &&
+                      'border-primary/35 bg-primary/[0.09] shadow-sm ring-1 ring-primary/15',
+                  )}
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="truncate text-sm font-medium leading-snug text-foreground">
+                      {row.projectName}
+                      <span className="font-normal text-muted-foreground"> – {row.stageLabel}</span>
+                    </p>
+                    <Progress
+                      value={clamp(row.progressPercent, 0, 100)}
+                      className="h-1.5 bg-muted/80 [&>div]:bg-primary/85"
+                    />
+                  </div>
+                  <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+                    {clamp(Math.round(row.progressPercent), 0, 100)}%
+                  </span>
+                </RowShell>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function RecentsListContent({ logs, compact = false }: { logs: ActivityLogDoc[]; compact?: boolean }) {
   const list = logs.slice(0, compact ? RECENT_COUNT : MODAL_LIMIT);
@@ -213,6 +260,11 @@ function RecentsListContent({ logs, compact = false }: { logs: ActivityLogDoc[];
 }
 
 export function CropStageProgressCard({
+  farmProgressRows = null,
+  farmProgressDashboardFocusProjectId = null,
+  onFarmProgressDashboardFocusToggle,
+  farmProgressStatusFilter,
+  onFarmProgressStatusFilterChange,
   projectName,
   stages = [],
   activeStageOverride = null,
@@ -248,22 +300,10 @@ export function CropStageProgressCard({
     const day = Math.ceil((today.getTime() - stageDetails.start.getTime()) / MS_PER_DAY) + 1;
     return clamp(Number.isFinite(day) ? day : 0, 1, totalDays);
   }, [stageDetails, totalDays]);
-  const seasonProgressFromStages = useMemo(() => {
-    const allStages = stages?.length ? stages : (activeStageOverride ? [activeStageOverride] : []);
-    if (!allStages.length) return 0;
-    const dates = allStages
-      .flatMap((s) => [toDate(s.startDate), toDate(s.endDate)])
-      .filter((d): d is Date => d != null);
-    if (!dates.length) return 0;
-    const cycleStart = new Date(Math.min(...dates.map((d) => d.getTime())));
-    const cycleEnd = new Date(Math.max(...dates.map((d) => d.getTime())));
-    const totalCycleDays = Math.ceil((cycleEnd.getTime() - cycleStart.getTime()) / MS_PER_DAY);
-    if (totalCycleDays <= 0) return 0;
-    const today = startOfDay(new Date());
-    const daysIntoCycle = Math.ceil((today.getTime() - cycleStart.getTime()) / MS_PER_DAY);
-    const pct = Math.round((daysIntoCycle / totalCycleDays) * 100);
-    return clamp(Number.isFinite(pct) ? pct : 0, 0, 100);
-  }, [stages, activeStageOverride]);
+  const seasonProgressFromStages = useMemo(
+    () => computeSeasonProgressPercent(stages, activeStageOverride),
+    [stages, activeStageOverride],
+  );
   const progressPct = useMemo(() => {
     if (!stageDetails) return seasonProgressFromStages;
     const normalizedStatus = String(stageDetails.stage.status || '').toLowerCase();
@@ -271,6 +311,18 @@ export function CropStageProgressCard({
     if (normalizedStatus === 'pending') return seasonProgressFromStages;
     return seasonProgressFromStages;
   }, [stageDetails, seasonProgressFromStages]);
+
+  if (farmProgressRows && farmProgressRows.length >= 2) {
+    return (
+      <FarmProgressMultiView
+        rows={farmProgressRows}
+        focusProjectId={farmProgressDashboardFocusProjectId}
+        onRowFocusToggle={onFarmProgressDashboardFocusToggle}
+        filter={farmProgressStatusFilter}
+        onFilterChange={onFarmProgressStatusFilterChange}
+      />
+    );
+  }
 
   if (knowledgeDetection) {
     const dayOf = Math.max(

@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getGreetingText } from '@/lib/getTimeGreeting';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { Project } from '@/types';
 
 const NEW_OPERATION_OPTIONS = [
@@ -40,15 +42,33 @@ export function MobileDashboardHeader({
   onProjectChange,
 }: MobileDashboardHeaderProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const {
+    isWorkspacePending,
+    isWorkspaceActive,
+    isLoading: workspaceStatusLoading,
+  } = useCompanyWorkspaceApprovalStatus();
   const greeting = getGreetingText(firstName);
   const projectFilterValue = selectedProjectId || 'all';
+
+  const isDeveloper = user?.role === 'developer';
+  const workspaceApprovalTone =
+    !user?.companyId || isDeveloper
+      ? 'unknown'
+      : workspaceStatusLoading
+        ? 'loading'
+        : isWorkspacePending
+          ? 'pending'
+          : isWorkspaceActive
+            ? 'active'
+            : 'unknown';
 
   return (
     <div className="space-y-3">
       {/* Greeting + status */}
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-foreground">{greeting}</h2>
-        <ConnectivityStatusPill />
+        <ConnectivityStatusPill workspaceApprovalTone={workspaceApprovalTone} />
       </div>
 
       {/* Project selector (left) + New Operation button (right) */}

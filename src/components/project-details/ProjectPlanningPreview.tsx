@@ -10,6 +10,7 @@ export interface ProjectPlanningPreviewProps {
   lastUpdated?: string | null;
   onPlanSeason: () => void;
   onViewFullPlan: () => void;
+  readOnly?: boolean;
 }
 
 export function ProjectPlanningPreview({
@@ -20,6 +21,7 @@ export function ProjectPlanningPreview({
   lastUpdated,
   onPlanSeason,
   onViewFullPlan,
+  readOnly = false,
 }: ProjectPlanningPreviewProps) {
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
@@ -32,10 +34,16 @@ export function ProjectPlanningPreview({
           <p className="text-sm text-muted-foreground">
             No season plan yet. Set your planting date, seed or variety, and expected challenges to track progress.
           </p>
-          <Button onClick={onPlanSeason} className="min-w-[140px]">
-            <Calendar className="h-4 w-4 mr-2" />
-            Plan Season
-          </Button>
+          {!readOnly ? (
+            <Button onClick={onPlanSeason} className="min-w-[140px]">
+              <Calendar className="h-4 w-4 mr-2" />
+              Plan Season
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              Reopen this project from your Projects list to set or change the season plan.
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -61,9 +69,11 @@ export function ProjectPlanningPreview({
           {lastUpdated && (
             <p className="text-xs text-muted-foreground">Last updated: {lastUpdated}</p>
           )}
-          <Button variant="outline" size="sm" onClick={onViewFullPlan}>
-            View Full Plan
-          </Button>
+          {!readOnly ? (
+            <Button variant="outline" size="sm" onClick={onViewFullPlan}>
+              View Full Plan
+            </Button>
+          ) : null}
         </div>
       )}
     </div>

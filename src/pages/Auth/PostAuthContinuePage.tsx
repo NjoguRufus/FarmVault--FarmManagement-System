@@ -7,7 +7,6 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth as useClerkAuth } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
-import { readPendingApprovalSession } from '@/lib/pendingApprovalSession';
 import {
   pickIntendedRoute,
   readIntendedRouteFromStorage,
@@ -57,8 +56,10 @@ export default function PostAuthContinuePage() {
     return <AuthLoadingScreen message="Preparing your workspace…" />;
   }
 
+  // At this point Clerk is signed in and authReady is true. FarmVault user should exist; if not,
+  // keep loading instead of bouncing to /sign-in (that looked like a failed password sign-in).
   if (!user) {
-    return <Navigate to="/sign-in" replace />;
+    return <AuthLoadingScreen message="Finishing sign-in…" />;
   }
 
   if (isEmergencySession) {
@@ -71,11 +72,6 @@ export default function PostAuthContinuePage() {
   }
 
   if (setupIncomplete && !employeeProfile) {
-    const pending = readPendingApprovalSession();
-    const pendingCompanyId = pending?.companyId != null ? String(pending.companyId).trim() : '';
-    if (pendingCompanyId) {
-      return <Navigate to="/pending-approval" replace state={pending} />;
-    }
     if (resetRequired) {
       return <Navigate to="/start-fresh" replace state={{ from: location }} />;
     }

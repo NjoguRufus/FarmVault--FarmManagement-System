@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Plus, AlertTriangle, CheckCircle, Clock, MoreHorizontal, Edit, ChevronDown, ChevronUp, Cloud, Bug, DollarSign, Users, Wrench as WrenchIcon, Droplets, Package, X } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
@@ -38,25 +38,31 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 
 export default function SeasonChallengesPage() {
-  const { activeProject } = useProject();
+  const { activeProject, projects } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
+  // Company-wide list: navbar project must not hide challenges from other projects.
   const { challenges: challengesFromHook, isLoading } = useSeasonChallenges(
     companyId,
-    activeProject?.id ?? null
+    null
   );
   if (import.meta.env?.DEV && companyId) {
     console.log('[SeasonChallengesPage] season challenges fetch', {
-      projectId: activeProject?.id ?? 'all',
+      scope: 'all-projects',
       count: challengesFromHook.length,
     });
   }
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
   const challenges = challengesFromHook;
+  const projectNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projects) m.set(p.id, p.name);
+    return m;
+  }, [projects]);
 
   const [expandedChallenges, setExpandedChallenges] = useState<Set<string>>(new Set());
   const [editingChallenge, setEditingChallenge] = useState<SeasonChallenge | null>(null);
@@ -416,9 +422,16 @@ export default function SeasonChallengesPage() {
           <h1 className="text-2xl font-bold text-foreground">Season Challenges</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {activeProject ? (
-              <>Track challenges for <span className="font-medium">{activeProject.name}</span></>
+              <>
+                Challenges from all projects. New reports use{' '}
+                <span className="font-medium text-foreground/90">{activeProject.name}</span> (nav selection).
+              </>
             ) : (
-              'Document and manage seasonal challenges'
+              <>
+                Challenges from all projects.{' '}
+                <span className="font-medium text-foreground/90">Select a project in the nav</span> to report a
+                new one.
+              </>
             )}
           </p>
         </div>
@@ -586,6 +599,14 @@ export default function SeasonChallengesPage() {
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
+                    {challenge.projectId ? (
+                      <span className="text-xs">
+                        Project:{' '}
+                        <span className="font-medium text-foreground/80">
+                          {projectNameById.get(challenge.projectId) ?? 'Unknown project'}
+                        </span>
+                      </span>
+                    ) : null}
                     <span>
                       Identified: {formatDate(challenge.dateIdentified)}
                     </span>

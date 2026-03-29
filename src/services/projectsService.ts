@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { db, requireCompanyId } from '@/lib/db';
 import type { CropStage, Project } from '@/types';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 type DbProjectRow = {
   id: string;
@@ -231,7 +232,15 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     throw error;
   }
 
-  return mapProjectRow(data as DbProjectRow);
+  const created = mapProjectRow(data as DbProjectRow);
+  captureEvent(AnalyticsEvents.PROJECT_CREATED, {
+    company_id: companyId,
+    project_id: created.id,
+    project_name: created.name,
+    crop_type: created.cropTypeKey ?? String(input.cropType),
+    module_name: 'projects',
+  });
+  return created;
 }
 
 export async function updateProject(
@@ -255,6 +264,10 @@ export async function updateProject(
   if (error) {
     throw error;
   }
+  captureEvent(AnalyticsEvents.PROJECT_UPDATED, {
+    project_id: projectId,
+    module_name: 'projects',
+  });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
@@ -262,6 +275,10 @@ export async function deleteProject(projectId: string): Promise<void> {
   if (error) {
     throw error;
   }
+  captureEvent(AnalyticsEvents.PROJECT_ARCHIVED, {
+    project_id: projectId,
+    module_name: 'projects',
+  });
 }
 
 export async function listProjectStages(projectId: string): Promise<CropStage[]> {

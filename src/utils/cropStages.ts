@@ -98,19 +98,50 @@ export interface TimelineItem {
   estimatedEndDay: number;
 }
 
+export type BuildTimelineOptions = {
+  /** When set, that stage is "current", all prior are completed, all later upcoming (fixes wrong calendar stage). */
+  currentStageIndexOverride?: number | null;
+};
+
 /**
  * Build timeline items with status and progress from stages and daysSincePlanting.
  * completed: day > endDay; current: startDay <= day <= endDay; upcoming: day < startDay.
+ * With currentStageIndexOverride, statuses follow the override instead of day ranges.
  */
 export function buildTimeline(
   stages: StageRule[],
   day: number,
+  options?: BuildTimelineOptions | null,
 ): TimelineItem[] {
+  const override =
+    options?.currentStageIndexOverride != null &&
+    options.currentStageIndexOverride >= 0 &&
+    options.currentStageIndexOverride < stages.length
+      ? options.currentStageIndexOverride
+      : null;
+
   return stages.map((stage, index) => {
-    let status: TimelineItemStatus = 'upcoming';
-    if (day > stage.dayEnd) status = 'completed';
-    else if (day >= stage.dayStart && day <= stage.dayEnd) status = 'current';
-    const progress = getProgressWithinStage(stage, day);
+    let status: TimelineItemStatus;
+    let progress: number;
+
+    if (override != null) {
+      if (index < override) {
+        status = 'completed';
+        progress = 1;
+      } else if (index === override) {
+        status = 'current';
+        progress = getProgressWithinStage(stage, day);
+      } else {
+        status = 'upcoming';
+        progress = 0;
+      }
+    } else {
+      if (day > stage.dayEnd) status = 'completed';
+      else if (day >= stage.dayStart && day <= stage.dayEnd) status = 'current';
+      else status = 'upcoming';
+      progress = getProgressWithinStage(stage, day);
+    }
+
     return {
       stage,
       index,

@@ -1,12 +1,15 @@
+import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { ClerkProvider } from "@clerk/react";
+import { PostHogProvider } from "@posthog/react";
 import App from "./App.tsx";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
 import { initPwaInstall } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
+import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
 import "./index.css";
 
 // Initialize PWA install prompt capture EARLY (before React mounts)
@@ -92,14 +95,11 @@ if (pk) {
   } catch {
     clerkDomain = 'could not decode';
   }
-  
-  // eslint-disable-next-line no-console
+
   console.log(`[Clerk Config] Key prefix: ${keyPrefix}, Live: ${isLiveKey}, Test: ${isTestKey}`);
-  // eslint-disable-next-line no-console
   console.log(`[Clerk Config] Frontend API domain: ${clerkDomain}`);
-  
+
   if (isTestKey && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-    // eslint-disable-next-line no-console
     console.warn('[Clerk Config] ⚠️ USING TEST KEY IN NON-LOCALHOST ENVIRONMENT! Production should use pk_live_');
   }
 }
@@ -112,27 +112,43 @@ if (!pk && !emergencyAccess) {
 
 if (shouldRenderApp) {
   const root = document.getElementById("root")!;
+  // PostHog: set VITE_PUBLIC_POSTHOG_PROJECT_TOKEN (+ optional VITE_PUBLIC_POSTHOG_HOST) in .env — restart `npm run dev` after changes.
+  const posthogKey = getPosthogProjectToken();
+
+  const wrapPostHog = (node: ReactElement) =>
+    posthogKey ? (
+      <PostHogProvider apiKey={posthogKey} options={getPosthogClientOptions()}>
+        {node}
+      </PostHogProvider>
+    ) : (
+      node
+    );
+
   try {
     if (pk) {
       createRoot(root).render(
-        <ClerkLoadErrorBoundary>
-          <ClerkProvider
-            publishableKey={pk}
-            signInUrl="/sign-in"
-            signUpUrl="/sign-up"
-            afterSignInUrl="/auth/continue"
-            afterSignUpUrl="/auth/continue"
-            afterSignOutUrl="/"
-          >
-            <ClerkAuthBridge />
-          </ClerkProvider>
-        </ClerkLoadErrorBoundary>,
+        wrapPostHog(
+          <ClerkLoadErrorBoundary>
+            <ClerkProvider
+              publishableKey={pk}
+              signInUrl="/sign-in"
+              signUpUrl="/sign-up"
+              afterSignInUrl="/auth/continue"
+              afterSignUpUrl="/auth/continue"
+              afterSignOutUrl="/"
+            >
+              <ClerkAuthBridge />
+            </ClerkProvider>
+          </ClerkLoadErrorBoundary>,
+        ),
       );
     } else {
       createRoot(root).render(
-        <AuthProvider clerkState={null}>
-          <App />
-        </AuthProvider>,
+        wrapPostHog(
+          <AuthProvider clerkState={null}>
+            <App />
+          </AuthProvider>,
+        ),
       );
     }
   } catch (error) {

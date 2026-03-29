@@ -11,7 +11,7 @@ export default function NewProjectPage() {
         <div className="fv-card">
           <NewProjectForm
             onCancel={() => navigate('/projects')}
-            onSuccess={() => navigate('/projects', { replace: true })}
+            onSuccess={() => navigate('/dashboard', { replace: true })}
           />
         </div>
       </div>
