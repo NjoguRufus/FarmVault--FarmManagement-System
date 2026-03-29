@@ -1,11 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Search, Star, Phone, Mail, List, LayoutGrid, Pencil, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
-import { useCollection } from '@/hooks/useCollection';
-import { Supplier, InventoryItem } from '@/types';
-import { useQueryClient } from '@tanstack/react-query';
+import { Supplier } from '@/types';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createSupplier, listSuppliers, updateSupplier } from '@/services/suppliersService';
+import { useInventoryItems } from '@/hooks/useInventory';
 import {
   Dialog,
   DialogTrigger,
@@ -32,20 +31,31 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 const CATEGORIES = ['Seeds', 'Fertilizers', 'Pesticides', 'Equipment'];
 
 export default function SuppliersPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const cid = user?.companyId;
+    if (!cid) return;
+    captureEvent(AnalyticsEvents.SUPPLIER_VIEWED, {
+      company_id: cid,
+      module_name: 'projects',
+      route_path: '/suppliers',
+    });
+  }, [user?.companyId]);
   const [viewMode, setViewMode] = useState<'list' | 'card'>('card');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
 
   const formatRating = (rating: number) => rating.toFixed(1);
 
-  const getStatusBadge = (status: string) =>
-    status === 'active' ? 'fv-badge--active' : 'bg-muted text-muted-foreground';
+  const getStatusBadge = (status: string | undefined) =>
+    (status ?? 'active') === 'active' ? 'fv-badge--active' : 'bg-muted text-muted-foreground';
 
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
@@ -68,14 +78,19 @@ export default function SuppliersPage() {
   const [reviewSaving, setReviewSaving] = useState(false);
 
   const companyId = user?.companyId ?? null;
-  const isDeveloper = user?.role === 'developer';
-  const scope = { companyScoped: true, companyId, isDeveloper };
-  const { data: suppliers = [], isLoading } = useCollection<Supplier>('suppliers', 'suppliers', scope);
-  const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
+
+  const { data: suppliers = [], isLoading } = useQuery({
+    queryKey: ['suppliers', companyId ?? 'none'],
+    queryFn: () => listSuppliers(companyId!),
+    enabled: Boolean(companyId),
+    staleTime: 60_000,
+  });
+
+  const { items: allInventoryItems } = useInventoryItems(companyId);
 
   const companySuppliers = useMemo(
-    () => (user?.companyId ? suppliers.filter((s) => s.companyId === user.companyId) : suppliers),
-    [suppliers, user?.companyId],
+    () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
+    [suppliers, companyId],
   );
 
   const filteredSuppliers = useMemo(() => {
@@ -132,85 +147,69 @@ export default function SuppliersPage() {
     e.preventDefault();
     if (!user?.companyId) return;
     setSaving(true);
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-    setAddOpen(false);
     try {
-      await addDoc(collection(db, 'suppliers'), {
+      await createSupplier({
+        companyId: user.companyId,
         name,
         contact,
-        email: email || null,
+        email: email || undefined,
         category: categories[0] ?? null,
         categories: categories.length ? categories : null,
         rating: 0,
         status: 'active',
-        companyId: user.companyId,
-        createdAt: serverTimestamp(),
       });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      await queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       setName('');
       setContact('');
       setEmail('');
       setCategories(['Seeds']);
-      toast.success(
-        isOffline
-          ? 'Supplier saved offline. It will sync when online.'
-          : 'Supplier added.',
-      );
+      setAddOpen(false);
+      toast.success('Supplier added.');
     } catch (error) {
       console.error('Failed to add supplier:', error);
-      toast.error('Failed to add supplier.');
+      toast.error('Failed to add supplier. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleSaveEdit = async () => {
-    if (!selectedSupplier) return;
+    if (!selectedSupplier || !user?.companyId) return;
     setEditSaving(true);
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
-      await updateDoc(doc(db, 'suppliers', selectedSupplier.id), {
+      const updated = await updateSupplier(user.companyId, selectedSupplier.id, {
         name: editName.trim(),
         contact: editContact.trim(),
         email: editEmail.trim() || null,
         category: editCategories[0] ?? null,
         categories: editCategories.length ? editCategories : null,
       });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      setSelectedSupplier({ ...selectedSupplier, name: editName.trim(), contact: editContact.trim(), email: editEmail.trim() || undefined, category: editCategories[0], categories: editCategories });
+      await queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      setSelectedSupplier(updated);
       setIsEditingSupplier(false);
-      toast.success(
-        isOffline
-          ? 'Supplier changes saved offline. They will sync when online.'
-          : 'Supplier updated.',
-      );
+      toast.success('Supplier updated.');
     } catch (error) {
       console.error('Failed to update supplier:', error);
-      toast.error('Failed to update supplier.');
+      toast.error('Failed to update supplier. Please try again.');
     } finally {
       setEditSaving(false);
     }
   };
 
   const handleSaveReview = async () => {
-    if (!selectedSupplier) return;
+    if (!selectedSupplier || !user?.companyId) return;
     setReviewSaving(true);
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     try {
-      await updateDoc(doc(db, 'suppliers', selectedSupplier.id), {
+      const updated = await updateSupplier(user.companyId, selectedSupplier.id, {
         rating: reviewRating,
         reviewNotes: reviewNotes.trim() || null,
       });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      setSelectedSupplier({ ...selectedSupplier, rating: reviewRating, reviewNotes: reviewNotes.trim() || undefined });
-      toast.success(
-        isOffline
-          ? 'Review saved offline. It will sync when online.'
-          : 'Review saved.',
-      );
+      await queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      setSelectedSupplier(updated);
+      toast.success('Review saved.');
     } catch (error) {
       console.error('Failed to save supplier review:', error);
-      toast.error('Failed to save review.');
+      toast.error('Failed to save review. Please try again.');
     } finally {
       setReviewSaving(false);
     }
@@ -346,7 +345,7 @@ export default function SuppliersPage() {
                     <td>{formatRating(supplier.rating)}/5</td>
                     <td>
                       <span className={cn('fv-badge capitalize text-xs', getStatusBadge(supplier.status))}>
-                        {supplier.status}
+                        {supplier.status ?? 'active'}
                       </span>
                     </td>
                   </tr>
@@ -377,11 +376,13 @@ export default function SuppliersPage() {
                   {supplier.name.charAt(0)}
                 </div>
                 <span className={cn('fv-badge capitalize text-xs shrink-0', getStatusBadge(supplier.status))}>
-                  {supplier.status}
+                  {supplier.status ?? 'active'}
                 </span>
               </div>
               <h3 className="font-semibold text-foreground text-lg mb-0.5">{supplier.name}</h3>
-              <p className="text-sm text-muted-foreground mb-4">{supplier.category}</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                {supplierCategories(supplier).join(', ') || '—'}
+              </p>
               <div className="space-y-2 mb-4">
                 <div className="flex items-center gap-2 text-sm text-foreground">
                   <Phone className="h-4 w-4 text-muted-foreground shrink-0" />

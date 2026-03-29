@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
@@ -49,6 +49,7 @@ import {
   XOctagon,
   Copy,
   Search,
+  Eye,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -738,6 +739,13 @@ export default function DeveloperCompaniesPage() {
                       {formatDate(c.active_until ?? c.subscription?.period_end)}
                     </td>
                     <td className="max-md:justify-end py-3" data-label="Actions">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="outline" size="sm" className="h-8 gap-1 px-2 text-xs" asChild>
+                          <Link to={`/developer/companies/${encodeURIComponent(id)}`}>
+                            <Eye className="h-3.5 w-3.5" />
+                            View
+                          </Link>
+                        </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -901,6 +909,7 @@ export default function DeveloperCompaniesPage() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      </div>
                     </td>
                   </tr>
                 );

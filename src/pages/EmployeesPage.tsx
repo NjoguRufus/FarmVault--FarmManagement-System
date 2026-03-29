@@ -63,6 +63,7 @@ import { EMPLOYEE_ROLES, PERMISSION_GROUPS, type EmployeeRoleKey, type Permissio
 import { ROLE_PRESET_LABELS, ROLE_PRESET_KEYS, roleToPreset, presetToLegacyRole } from '@/lib/access';
 import { logActivity } from '@/services/employeeAccessService';
 import { UserAvatar } from '@/components/UserAvatar';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
@@ -191,6 +192,15 @@ export default function EmployeesPage() {
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
+
+  useEffect(() => {
+    if (!companyId) return;
+    captureEvent(AnalyticsEvents.EMPLOYEE_VIEWED, {
+      company_id: companyId,
+      module_name: 'employees',
+      route_path: '/employees',
+    });
+  }, [companyId]);
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees', scope);
   const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users', scope);
 

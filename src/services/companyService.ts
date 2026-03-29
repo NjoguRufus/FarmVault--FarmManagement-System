@@ -278,7 +278,6 @@ export async function createCompanyUserProfile(params: {
     .from('profiles')
     .upsert(
       {
-        id: uid,
         clerk_user_id: uid,
         active_company_id: companyId,
       },

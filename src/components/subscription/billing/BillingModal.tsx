@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -16,6 +16,7 @@ import {
   getPendingPaymentStatus,
 } from '@/services/billingSubmissionService';
 import { getCompany } from '@/services/companyService';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 export interface BillingModalProps {
   open: boolean;
@@ -56,6 +57,9 @@ export function BillingModal({
   const [cycle, setCycle] = useState<BillingSubmissionCycle>('monthly');
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const upgradeOpenTrackedRef = useRef(false);
+  const planRef = useRef(plan);
+  planRef.current = plan;
 
   const { data: pendingStatus, isLoading: pendingLoading } = useQuery({
     queryKey: ['subscription-payment-pending', companyId],
@@ -68,6 +72,13 @@ export function BillingModal({
     mutationFn: createPaymentRequest,
     onSuccess: async () => {
       setSuccess(true);
+      if (companyId) {
+        captureEvent(AnalyticsEvents.UPGRADE_COMPLETED, {
+          company_id: companyId,
+          subscription_plan: planRef.current,
+          module_name: 'billing',
+        });
+      }
       const cid = companyId;
       if (cid) {
         await Promise.all([
@@ -90,6 +101,21 @@ export function BillingModal({
       setFormError(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      upgradeOpenTrackedRef.current = false;
+      return;
+    }
+    if (!companyId || upgradeOpenTrackedRef.current) return;
+    upgradeOpenTrackedRef.current = true;
+    captureEvent(AnalyticsEvents.UPGRADE_STARTED, {
+      company_id: companyId,
+      subscription_plan: planRef.current,
+      module_name: 'billing',
+      route_path: '/billing',
+    });
+  }, [open, companyId]);
 
   useEffect(() => {
     if (!open) return;

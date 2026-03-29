@@ -13,6 +13,7 @@ import { db } from '@/lib/db';
 import type { HarvestCollectionStatus } from '@/types';
 import { addToOfflineQueue } from '@/lib/offlineQueue';
 import { logActivity } from '@/services/employeeAccessService';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
@@ -297,7 +298,15 @@ export async function createHarvestCollection(params: {
   }
 
   if (!row?.id) throw new Error('Create harvest collection failed');
-  return String(row.id);
+  const collectionId = String(row.id);
+  captureEvent(AnalyticsEvents.HARVEST_COLLECTION_CREATED, {
+    company_id: params.companyId,
+    project_id: params.projectId,
+    collection_id: collectionId,
+    crop_type: params.cropType ?? 'french_beans',
+    module_name: 'harvest',
+  });
+  return collectionId;
 }
 
 // Explicit columns matching harvest.harvest_collections; do not use select('*') to avoid schema cache errors.
@@ -593,7 +602,15 @@ export async function addPickerIntake(params: {
         p_unit: params.unit ?? 'kg',
       });
 
-    if (!rpcError) return 'rpc-ok';
+    if (!rpcError) {
+      captureEvent(AnalyticsEvents.PICKER_WEIGHT_RECORDED, {
+        company_id: params.companyId,
+        collection_id: params.collectionId,
+        picker_id: params.pickerId,
+        module_name: 'harvest',
+      });
+      return 'rpc-ok';
+    }
 
     const insertPayload: Record<string, unknown> = {
       company_id: params.companyId,
@@ -612,6 +629,12 @@ export async function addPickerIntake(params: {
 
     if (error) throw error;
     if (!data?.id) throw new Error('Add picker intake failed');
+    captureEvent(AnalyticsEvents.PICKER_WEIGHT_RECORDED, {
+      company_id: params.companyId,
+      collection_id: params.collectionId,
+      picker_id: params.pickerId,
+      module_name: 'harvest',
+    });
     return data.id;
   } catch (_) {
     await queueAndReturn();
@@ -1066,6 +1089,12 @@ export async function recordPickerPayment(params: {
 
     if (error) throw error;
     if (!data?.id) throw new Error('Record payment failed');
+    captureEvent(AnalyticsEvents.PICKER_PAYMENT_RECORDED, {
+      company_id: params.companyId,
+      collection_id: params.collectionId,
+      picker_id: params.pickerId,
+      module_name: 'harvest',
+    });
     return data.id;
   } catch (err) {
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -1084,6 +1113,10 @@ export async function closeCollection(collectionId: string): Promise<void> {
     p_collection_id: collectionId,
   });
   if (error) throw error;
+  captureEvent(AnalyticsEvents.COLLECTION_CLOSED, {
+    collection_id: collectionId,
+    module_name: 'harvest',
+  });
 }
 
 /** Update collection: set buyer price and optionally close. */
@@ -1107,6 +1140,16 @@ export async function setBuyerPriceAndClose(params: {
     .eq('id', params.collectionId);
 
   if (error) throw error;
+  captureEvent(AnalyticsEvents.BUYER_SETTLEMENT_RECORDED, {
+    collection_id: params.collectionId,
+    module_name: 'harvest',
+  });
+  if (params.markBuyerPaid) {
+    captureEvent(AnalyticsEvents.COLLECTION_CLOSED, {
+      collection_id: params.collectionId,
+      module_name: 'harvest',
+    });
+  }
 }
 
 // ---- Legacy-compat names (same as old Firebase service) ----
@@ -1188,6 +1231,13 @@ export async function syncPickerPaymentToExpenseForOffline(params: {
     console.error('[Picker Payment Expense Error]', error);
     throw error;
   }
+  captureEvent(AnalyticsEvents.EXPENSE_SYNCED_TO_INVENTORY, {
+    company_id: params.companyId,
+    project_id: params.projectId,
+    collection_id: params.collectionId,
+    expense_category: 'picker_payout',
+    module_name: 'harvest',
+  });
 }
 
 /** Mark one picker as paid by recording a payment entry and syncing to finance.expenses. */

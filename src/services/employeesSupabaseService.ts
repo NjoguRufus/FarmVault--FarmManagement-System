@@ -10,6 +10,7 @@ import { getPresetPermissions } from '@/lib/employees/permissionPresets';
 import { flattenPermissionMap } from '@/lib/permissions';
 import type { EmployeeRoleKey } from '@/config/accessControl';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 /** Payload for Clerk-based invite (Edge Function). No Supabase Auth. */
 export type InviteEmployeePayload = {
@@ -236,7 +237,13 @@ export async function saveEmployeeDraft(input: SaveEmployeeDraftInput): Promise<
     throw new Error(insertError.message ?? 'Failed to create draft employee');
   }
 
-  return { employee_id: String(inserted.id) };
+  const newId = String(inserted.id);
+  captureEvent(AnalyticsEvents.EMPLOYEE_CREATED, {
+    company_id: companyId,
+    employee_id: newId,
+    module_name: 'employees',
+  });
+  return { employee_id: newId };
 }
 
 export type InviteEmployeeResult = { employee_id: string; message?: string };

@@ -20,6 +20,14 @@ import { createSupplier, listSuppliers } from '@/services/suppliersService';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince, getStageForDay } from '@/utils/cropStages';
 import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
+import { effectiveCurrentStage } from '@/lib/seasonStageOverride';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   PlanningHero,
   SeasonStagesBuilder,
@@ -118,6 +126,8 @@ export default function ProjectPlanningPage() {
   const [plantingReason, setPlantingReason] = useState('');
   const [savingPlanting, setSavingPlanting] = useState(false);
   const [changePlantingModalOpen, setChangePlantingModalOpen] = useState(false);
+  /** `__calendar__` = stage follows days since this planting date; else template stage key (e.g. transplanting). */
+  const [plantingStageSelectKey, setPlantingStageSelectKey] = useState<string>('__calendar__');
 
   const seed = project?.planning?.seed;
   const [seedName, setSeedName] = useState(seed?.name ?? '');
@@ -271,26 +281,17 @@ export default function ProjectPlanningPage() {
 
     const rawOld = project.plantingDate as any;
     const oldDate = rawOld instanceof Date ? rawOld : rawOld ? new Date(rawOld) : null;
-    const changed =
-      !oldDate || oldDate.getTime() !== newDate.getTime();
-    if (!changed) return;
-    // Reason required only when changing an existing date (not first time)
+    const dateChanged = !oldDate || oldDate.getTime() !== newDate.getTime();
+
+    const wantsCalendarStage = plantingStageSelectKey === '__calendar__';
+    const selectedStageKey =
+      !wantsCalendarStage && plantingStageSelectKey.trim() ? plantingStageSelectKey.trim() : null;
+
     if (oldDate && !plantingReason.trim()) return;
 
     setSavingPlanting(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-    setChangePlantingModalOpen(false);
     try {
-      const changedAt = new Date().toISOString();
-      const historyEntry = {
-        field: 'plantingDate',
-        oldValue: oldDate && !isNaN(oldDate.getTime()) ? oldDate.toISOString() : null,
-        newValue: newDate.toISOString(),
-        reason: plantingReason.trim() || (oldDate ? '' : 'Initial planting date'),
-        changedAt,
-        changedBy: user?.id ?? 'unknown',
-      };
-
       const { data, error } = await db
         .projects()
         .from('projects')
@@ -300,11 +301,59 @@ export default function ProjectPlanningPage() {
       if (error) throw error;
 
       const planning = (data?.planning as Project['planning']) ?? {};
+      const oldManualKey = planning.manualCurrentStage?.stageKey ?? null;
+      const nextManualKey = wantsCalendarStage ? null : selectedStageKey;
+      const stagePlanningChanged = (nextManualKey ?? null) !== (oldManualKey ?? null);
+
+      if (!dateChanged && !stagePlanningChanged) {
+        toast.message('No changes to save.');
+        return;
+      }
+
+      setChangePlantingModalOpen(false);
+
+      const changedAt = new Date().toISOString();
       const existingHistory = planning?.planHistory ?? [];
+      const historyExtras: NonNullable<Project['planning']>['planHistory'] = [];
+
+      if (dateChanged) {
+        historyExtras.push({
+          field: 'plantingDate',
+          oldValue: oldDate && !isNaN(oldDate.getTime()) ? oldDate.toISOString() : null,
+          newValue: newDate.toISOString(),
+          reason: plantingReason.trim() || (oldDate ? '' : 'Initial planting date'),
+          changedAt,
+          changedBy: user?.id ?? 'unknown',
+        });
+      }
+
+      if (stagePlanningChanged) {
+        historyExtras.push({
+          field: 'planning.manualCurrentStage',
+          oldValue: oldManualKey,
+          newValue: nextManualKey,
+          reason:
+            plantingReason.trim() ||
+            (oldDate ? 'Planting plan update' : 'Initial planting plan'),
+          changedAt,
+          changedBy: user?.id ?? 'unknown',
+        });
+      }
+
       const nextPlanning: Project['planning'] = {
         ...planning,
-        planHistory: [...existingHistory, historyEntry],
+        planHistory: [...(existingHistory ?? []), ...historyExtras],
       };
+
+      if (wantsCalendarStage) {
+        delete nextPlanning.manualCurrentStage;
+      } else if (selectedStageKey) {
+        nextPlanning.manualCurrentStage = {
+          stageKey: selectedStageKey,
+          updatedAt: changedAt,
+          reason: plantingReason.trim() || undefined,
+        };
+      }
 
       const { error: updateError } = await db
         .projects()
@@ -317,16 +366,23 @@ export default function ProjectPlanningPage() {
       if (updateError) throw updateError;
 
       await queryClient.invalidateQueries({ queryKey: ['project', companyId, projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['project', projectId, companyId] });
+      await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
 
       setPlantingReason('');
+      setPlantingStageSelectKey(wantsCalendarStage ? '__calendar__' : selectedStageKey ?? '__calendar__');
       toast.success(
         isOffline
-          ? 'Planting date change saved. (Offline mode – will reflect after sync.)'
-          : 'Planting date updated.',
+          ? 'Planting plan saved. (Offline mode – will reflect after sync.)'
+          : dateChanged && stagePlanningChanged
+            ? 'Planting date and stage updated.'
+            : dateChanged
+              ? 'Planting date updated.'
+              : 'Growth stage updated.',
       );
     } catch (error) {
-      console.error('Failed to save planting date:', error);
-      toast.error('Failed to save planting date change.');
+      console.error('Failed to save planting plan:', error);
+      toast.error('Failed to save planting plan.');
     } finally {
       setSavingPlanting(false);
     }
@@ -556,6 +612,7 @@ export default function ProjectPlanningPage() {
   const totalExpectedChallenges = preSeasonChallenges.length;
 
   const templateStages = cropTimeline?.stages ?? [];
+  const manualStageKey = project.planning?.manualCurrentStage?.stageKey ?? null;
   const seasonLengthDays = (() => {
     const maxDay = templateStages.reduce((m, s) => Math.max(m, Number(s.dayEnd ?? 0)), 0);
     return maxDay > 0 ? maxDay : null;
@@ -575,10 +632,58 @@ export default function ProjectPlanningPage() {
     daysSincePlanting != null && templateStages.length
       ? getStageForDay(templateStages, daysSincePlanting)
       : null;
+  const effectiveStage = effectiveCurrentStage(templateStages, daysSincePlanting, manualStageKey);
   const expectedHarvestDate = getExpectedHarvestDate(project, undefined);
-  const nextStageLabel =
-    currentStageForDay?.stage.label ?? templateStages[0]?.label ?? null;
+  const summaryNextStage =
+    effectiveStage != null && templateStages[effectiveStage.index + 1]
+      ? templateStages[effectiveStage.index + 1].label
+      : null;
   const harvestWindowStr = expectedHarvestDate ? formatDate(expectedHarvestDate) : null;
+
+  const calendarStageHint = (() => {
+    if (!plantingDateInput) return '';
+    const d = new Date(plantingDateInput);
+    if (isNaN(d.getTime()) || !templateStages.length) return '';
+    const sug = getStageForDay(templateStages, calculateDaysSince(d));
+    return sug ? ` (suggested: ${sug.stage.label})` : '';
+  })();
+
+  const renderPlantingStageSelect = (idPrefix: string) =>
+    templateStages.length > 0 ? (
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-stage`}>Stage for this date</Label>
+        <p className="text-xs text-muted-foreground">
+          If you meant a different step (for example transplanting instead of planting), choose it here. Use
+          &quot;Use calendar from this date&quot; to match days from this date only.
+        </p>
+        <Select value={plantingStageSelectKey} onValueChange={setPlantingStageSelectKey}>
+          <SelectTrigger id={`${idPrefix}-stage`} className="w-full">
+            <SelectValue placeholder="Stage" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__calendar__">{`Use calendar from this date${calendarStageHint}`}</SelectItem>
+            {templateStages.map((s) => (
+              <SelectItem key={s.key} value={s.key}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    ) : null;
+
+  const openPlantingEditModal = () => {
+    setPlantingReason('');
+    setPlantingStageSelectKey(manualStageKey ?? '__calendar__');
+    setChangePlantingModalOpen(true);
+  };
+
+  const closePlantingModal = () => {
+    setChangePlantingModalOpen(false);
+    setPlantingReason('');
+    const k = project.planning?.manualCurrentStage?.stageKey;
+    setPlantingStageSelectKey(k ?? '__calendar__');
+  };
 
   const expectedChallengeItems = preSeasonChallenges.map((c) => ({
     id: c.id,
@@ -677,7 +782,7 @@ export default function ProjectPlanningPage() {
         plantingDate={plantingDateObj ? formatDate(plantingDateObj) : 'Not set'}
         expectedHarvest={harvestWindowStr}
         seasonLength={seasonLengthDays ? `${seasonLengthDays} days` : null}
-        currentStage={currentStageForDay?.stage.label ?? null}
+        currentStage={effectiveStage?.stage.label ?? null}
         onBack={() => navigate(`/projects/${project.id}`)}
       />
 
@@ -699,7 +804,10 @@ export default function ProjectPlanningPage() {
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-xs">
-                    <p>Set the season start date. Changes are logged and stage timings recalculate automatically.</p>
+                    <p>
+                      Set the season start date. Use Edit to fix the date and, if needed, the growth step (for example
+                      transplanting vs planting). Changes are logged and the season timeline updates.
+                    </p>
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -707,7 +815,7 @@ export default function ProjectPlanningPage() {
                 <button
                   type="button"
                   className="text-xs font-medium text-primary hover:underline"
-                  onClick={() => setChangePlantingModalOpen(true)}
+                  onClick={openPlantingEditModal}
                 >
                   Edit
                 </button>
@@ -731,21 +839,35 @@ export default function ProjectPlanningPage() {
                     required
                   />
                 </div>
+                {renderPlantingStageSelect('planting-first')}
                 <button type="submit" className="fv-btn fv-btn--primary" disabled={savingPlanting || !plantingDateInput}>
                   {savingPlanting ? 'Saving…' : 'Set planting date'}
                 </button>
               </form>
             ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium">{formatDate(project.plantingDate)}</span>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm font-medium">{formatDate(project.plantingDate)}</span>
+                </div>
+                {templateStages.length > 0 ? (
+                  <p className="text-xs text-muted-foreground pl-6">
+                    <span>Growth stage: </span>
+                    <span className="font-medium text-foreground">{effectiveStage?.stage.label ?? '—'}</span>
+                    {manualStageKey ? (
+                      <span className="ml-1">— adjusted; calendar would suggest {currentStageForDay?.stage.label ?? '—'}.</span>
+                    ) : (
+                      <span className="ml-1">— from days since this date.</span>
+                    )}
+                  </p>
+                ) : null}
               </div>
             )}
 
             {changePlantingModalOpen && (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
-                onClick={() => { setChangePlantingModalOpen(false); setPlantingReason(''); }}
+                onClick={closePlantingModal}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="planting-modal-title"
@@ -771,6 +893,7 @@ export default function ProjectPlanningPage() {
                         onChange={(e) => setPlantingDateInput(e.target.value)}
                       />
                     </div>
+                    {renderPlantingStageSelect('planting-modal')}
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-foreground">Reason for change</label>
                       <textarea
@@ -786,7 +909,7 @@ export default function ProjectPlanningPage() {
                       <button
                         type="button"
                         className="fv-btn fv-btn--secondary"
-                        onClick={() => { setChangePlantingModalOpen(false); setPlantingReason(''); }}
+                        onClick={closePlantingModal}
                       >
                         Cancel
                       </button>
@@ -1182,14 +1305,14 @@ export default function ProjectPlanningPage() {
               dayEnd: s.dayEnd,
               color: s.color,
             }))}
-            currentStageIndex={currentStageForDay?.index ?? null}
+            currentStageIndex={effectiveStage?.index ?? null}
           />
         </div>
 
         {/* Right: summary & history */}
         <div className="space-y-6">
           <PlanningSummaryCard
-            nextStage={nextStageLabel}
+            nextStage={summaryNextStage}
             expectedHarvestWindow={harvestWindowStr}
             totalStages={templateStages.length}
             seasonDuration={seasonLengthDays ? `${seasonLengthDays} days` : null}

@@ -4,8 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
-import { readPendingApprovalSession } from '@/lib/pendingApprovalSession';
-
 interface RequireOnboardingProps {
   children: React.ReactElement;
 }
@@ -55,18 +53,6 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   // Redirect ONLY when setupIncomplete is true AND there is no employee profile
   // (no invite match). Re-signup blocked (allow_resignup=false) still uses /start-fresh.
   if (setupIncomplete && !employeeProfile) {
-    const pending = readPendingApprovalSession();
-    const pendingCompanyId = pending?.companyId != null ? String(pending.companyId).trim() : '';
-    if (pendingCompanyId) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('[RequireOnboarding] Pending approval handoff → /pending-approval (avoid create-company loop)', {
-          companyId: pendingCompanyId,
-          setupIncomplete,
-        });
-      }
-      return <Navigate to="/pending-approval" replace state={pending} />;
-    }
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.log('[RequireOnboarding] Owner onboarding path → /onboarding', {

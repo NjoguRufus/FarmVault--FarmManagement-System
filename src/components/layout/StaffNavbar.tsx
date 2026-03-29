@@ -18,7 +18,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useStaffTour } from '@/tour/StaffTourProvider';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { Button } from '@/components/ui/button';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -39,6 +41,20 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
     isOverrideActive,
     status,
   } = useSubscriptionStatus();
+
+  const {
+    isWorkspacePending,
+    isWorkspaceActive,
+    isLoading: workspaceStatusLoading,
+  } = useCompanyWorkspaceApprovalStatus();
+
+  const workspacePending = Boolean(companyId) && isWorkspacePending;
+  const workspaceApproved = Boolean(companyId) && isWorkspaceActive;
+  const trialWorkspaceAccent: 'rose' | 'emerald' | 'amber' = workspacePending
+    ? 'rose'
+    : workspaceApproved
+      ? 'emerald'
+      : 'amber';
   const location = useLocation();
 
   useEffect(() => {
@@ -62,6 +78,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   const displayRole = roleLabel ?? 'Staff';
 
   const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
+  const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
 
   const getCropEmoji = (cropType: string) => {
     const emojis: Record<string, string> = {
@@ -166,10 +183,10 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                 </Button>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {companyProjects.length === 0 ? (
+              {selectableCompanyProjects.length === 0 ? (
                 <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>
               ) : (
-                companyProjects.map((project) => (
+                selectableCompanyProjects.map((project) => (
                   <DropdownMenuItem
                     key={project.id}
                     onClick={() => setActiveProject(project)}
@@ -194,7 +211,20 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
         {/* Right: status + user menu */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
+          <ConnectivityStatusPill
+            className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]"
+            workspaceApprovalTone={
+              !companyId
+                ? 'unknown'
+                : workspaceStatusLoading
+                  ? 'loading'
+                  : workspacePending
+                    ? 'pending'
+                    : workspaceApproved
+                      ? 'active'
+                      : 'unknown'
+            }
+          />
 
           {isActivePaid && !isOverrideActive && (
             <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
@@ -212,10 +242,37 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                   : `Your Pro trial ends in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`
               }
             >
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900 border border-amber-200">
-                <Crown className="h-3 w-3 shrink-0" />
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                  trialWorkspaceAccent === 'rose' &&
+                    'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100',
+                  trialWorkspaceAccent === 'emerald' &&
+                    'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200',
+                  trialWorkspaceAccent === 'amber' &&
+                    'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/35 dark:text-amber-100',
+                )}
+              >
+                <Crown
+                  className={cn(
+                    'h-3 w-3 shrink-0',
+                    trialWorkspaceAccent === 'rose' && 'text-rose-700 dark:text-rose-300',
+                    trialWorkspaceAccent === 'emerald' && 'text-emerald-700 dark:text-emerald-300',
+                    trialWorkspaceAccent === 'amber' && 'text-amber-700 dark:text-amber-300',
+                  )}
+                />
                 Pro trial · {daysRemaining}d
               </span>
+            </div>
+          )}
+          {Boolean(companyId) && workspacePending && !isTrial && !workspaceStatusLoading && (
+            <div
+              className="hidden sm:inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100"
+              role="status"
+              title="Workspace waiting for approval"
+            >
+              <span className="flex h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" aria-hidden />
+              Pending
             </div>
           )}
           {trialExpiredNeedsPlan && (

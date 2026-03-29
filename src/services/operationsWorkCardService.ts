@@ -1,4 +1,5 @@
 import { db, requireCompanyId } from '@/lib/db';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 // New simplified status model: no approval workflow
 export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
@@ -445,7 +446,13 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
     },
   });
 
-  return mapRowToWorkCard(data);
+  const card = mapRowToWorkCard(data);
+  captureEvent(AnalyticsEvents.OPERATION_RECORDED, {
+    company_id: companyId,
+    project_id: input.projectId,
+    module_name: 'operations',
+  });
+  return card;
 }
 
 export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCard> {
@@ -596,7 +603,13 @@ export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
     },
   });
 
-  return mapRowToWorkCard(data);
+  const logged = mapRowToWorkCard(data);
+  captureEvent(AnalyticsEvents.WORK_LOG_CREATED, {
+    company_id: card.companyId,
+    project_id: card.projectId ?? undefined,
+    module_name: 'operations',
+  });
+  return logged;
 }
 
 export async function editWork(input: EditWorkInput): Promise<WorkCard> {

@@ -163,3 +163,33 @@ export function subscribeActivity(
   });
 }
 
+/** Map Postgres `public.activity_logs` rows into the shape used by dashboard “Recent updates”. */
+export function mapSupabaseActivityToActivityLogDoc(entry: {
+  id: string;
+  company_id: string;
+  action: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}): ActivityLogDoc {
+  const meta = entry.metadata ?? null;
+  const projectId =
+    meta && typeof meta.project_id === 'string' ? (meta.project_id as string) : null;
+  const projectName =
+    meta && typeof meta.project_name === 'string' ? (meta.project_name as string) : null;
+  return {
+    id: entry.id,
+    companyId: entry.company_id,
+    projectId,
+    projectName,
+    actorId: '',
+    actorName: null,
+    actorRole: null,
+    type: 'PROJECT_ACTIVITY',
+    message: entry.action,
+    status: 'success',
+    createdAt: new Date(entry.created_at),
+    clientCreatedAt: null,
+    meta,
+  };
+}
+

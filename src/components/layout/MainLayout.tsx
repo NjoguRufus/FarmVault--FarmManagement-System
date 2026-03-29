@@ -4,6 +4,8 @@ import { AppSidebar } from './AppSidebar';
 import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
+import { PendingCompanyApprovalBanner } from './PendingCompanyApprovalBanner';
+import { PostOnboardingProjectWelcomeBanner } from './PostOnboardingProjectWelcomeBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { NotificationSetupPrompt } from '@/components/notifications/NotificationSetupPrompt';
@@ -125,6 +127,8 @@ export function MainLayout() {
         sidebarCollapsed={sidebarCollapsed} 
         onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
+      <PostOnboardingProjectWelcomeBanner />
+      <PendingCompanyApprovalBanner />
       <OfflineSyncBanner />
 
       <PaymentReminderBanner />

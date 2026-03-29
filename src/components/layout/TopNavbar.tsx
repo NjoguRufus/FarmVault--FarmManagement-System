@@ -18,8 +18,10 @@ import {
 import { UserAvatar } from '@/components/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { Button } from '@/components/ui/button';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -42,6 +44,11 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     plan: subPlan,
     isOverrideActive,
   } = useSubscriptionStatus();
+  const {
+    isWorkspacePending,
+    isWorkspaceActive,
+    isLoading: workspaceStatusLoading,
+  } = useCompanyWorkspaceApprovalStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   useEffect(() => {
@@ -60,7 +67,20 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     user?.role === 'company-admin' || (user as { role?: string } | null)?.role === 'company_admin';
   const hidePaymentUpgradeModal = trialExpiredNeedsPlan && isCompanyAdmin;
 
+  const isDeveloperNav = user?.role === 'developer';
+  const workspacePending =
+    !isDeveloperNav && Boolean(user?.companyId) && isWorkspacePending;
+  const workspaceApproved =
+    !isDeveloperNav && Boolean(user?.companyId) && isWorkspaceActive;
+  /** Pending → red accent on trial days; approved → green; loading/unknown → amber. */
+  const trialWorkspaceAccent: 'rose' | 'emerald' | 'amber' = workspacePending
+    ? 'rose'
+    : workspaceApproved
+      ? 'emerald'
+      : 'amber';
+
   const companyProjects = user ? projects.filter(p => p.companyId === user.companyId) : [];
+  const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
 
   useEffect(() => {
     if (import.meta.env.DEV && user) {
@@ -154,10 +174,10 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                 </Button>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {companyProjects.length === 0 ? (
+              {selectableCompanyProjects.length === 0 ? (
                 <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>
               ) : (
-                companyProjects.map((project) => (
+                selectableCompanyProjects.map((project) => (
                   <DropdownMenuItem
                     key={project.id}
                     onClick={() => setActiveProject(project)}
@@ -203,7 +223,20 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           >
             <Menu className="h-5 w-5 text-foreground" />
           </button>
-          <ConnectivityStatusPill className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]" />
+          <ConnectivityStatusPill
+            className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]"
+            workspaceApprovalTone={
+              !user?.companyId || isDeveloperNav
+                ? 'unknown'
+                : workspaceStatusLoading
+                  ? 'loading'
+                  : workspacePending
+                    ? 'pending'
+                    : workspaceApproved
+                      ? 'active'
+                      : 'unknown'
+            }
+          />
 
           {status === 'pending_payment' && (
             <div className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200">
@@ -224,18 +257,40 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </>
           )}
 
-          {/* Pro trial countdown + warning */}
+          {/* Pro trial countdown — rose while workspace pending approval, emerald when approved, amber if status unknown */}
           {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
             <div className="hidden md:flex flex-col items-end gap-0.5 max-w-[220px]">
               <button
                 type="button"
                 onClick={() => setUpgradeOpen(true)}
-                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200 hover:bg-amber-100"
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border',
+                  trialWorkspaceAccent === 'rose' &&
+                    'border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100 dark:hover:bg-rose-950/65',
+                  trialWorkspaceAccent === 'emerald' &&
+                    'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 hover:bg-emerald-500/15 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20',
+                  trialWorkspaceAccent === 'amber' &&
+                    'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-950/50',
+                )}
               >
-                <Crown className="h-3 w-3 shrink-0" />
+                <Crown
+                  className={cn(
+                    'h-3 w-3 shrink-0',
+                    trialWorkspaceAccent === 'rose' && 'text-rose-700 dark:text-rose-300',
+                    trialWorkspaceAccent === 'emerald' && 'text-emerald-700 dark:text-emerald-300',
+                    trialWorkspaceAccent === 'amber' && 'text-amber-700 dark:text-amber-300',
+                  )}
+                />
                 Pro trial · {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
               </button>
-              <span className="text-[10px] text-amber-800/90 text-right leading-tight">
+              <span
+                className={cn(
+                  'text-[10px] text-right leading-tight',
+                  trialWorkspaceAccent === 'rose' && 'text-rose-800/90 dark:text-rose-200/85',
+                  trialWorkspaceAccent === 'emerald' && 'text-emerald-800/90 dark:text-emerald-200/85',
+                  trialWorkspaceAccent === 'amber' && 'text-amber-800/90 dark:text-amber-200/85',
+                )}
+              >
                 {daysRemaining === 0
                   ? 'Your Pro trial ends today'
                   : `Your Pro trial ends in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`}
@@ -246,12 +301,42 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             <button
               type="button"
               onClick={() => setUpgradeOpen(true)}
-              className="md:hidden inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 border border-amber-200"
+              className={cn(
+                'md:hidden inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border',
+                trialWorkspaceAccent === 'rose' &&
+                  'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100',
+                trialWorkspaceAccent === 'emerald' &&
+                  'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:border-emerald-500/35 dark:text-emerald-200',
+                trialWorkspaceAccent === 'amber' &&
+                  'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/35 dark:text-amber-100',
+              )}
             >
-              <Crown className="h-3 w-3" />
+              <Crown
+                className={cn(
+                  'h-3 w-3',
+                  trialWorkspaceAccent === 'rose' && 'text-rose-700 dark:text-rose-300',
+                  trialWorkspaceAccent === 'emerald' && 'text-emerald-700 dark:text-emerald-300',
+                  trialWorkspaceAccent === 'amber' && 'text-amber-700 dark:text-amber-300',
+                )}
+              />
               {daysRemaining}d Pro trial
             </button>
           )}
+
+          {!isDeveloperNav &&
+            Boolean(user?.companyId) &&
+            workspacePending &&
+            !isTrial &&
+            !workspaceStatusLoading && (
+              <div
+                className="hidden sm:inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100"
+                role="status"
+                title="Your workspace is waiting for team approval"
+              >
+                <span className="flex h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-hidden />
+                Approval pending
+              </div>
+            )}
 
           {trialExpiredNeedsPlan && (
             <div

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays, X, Banknote, List, Grid, Package, Info, Star, Trash2 } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
+import { isProjectClosed } from '@/lib/projectClosed';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
@@ -252,7 +253,7 @@ export default function OperationsPage() {
   useEffect(() => {
     if (addCardOpen) {
       const cid = activeProject?.companyId ?? user?.companyId;
-      const companyProjects = cid ? projects.filter((p) => p.companyId === cid) : [];
+      const companyProjects = cid ? projects.filter((p) => p.companyId === cid && !isProjectClosed(p)) : [];
       setCardProjectId(activeProject?.id ?? companyProjects[0]?.id ?? '');
       setCardBlockId('');
       setCardPlannedDate(new Date());
@@ -702,7 +703,7 @@ export default function OperationsPage() {
   const companyProjectsForCard = useMemo(() => {
     const cid = activeProject?.companyId ?? user?.companyId ?? null;
     if (!cid) return [];
-    return projects.filter((p) => p.companyId === cid);
+    return projects.filter((p) => p.companyId === cid && !isProjectClosed(p));
   }, [projects, activeProject?.companyId, user?.companyId]);
 
   const { data: projectBlocksForCard = [] } = useProjectBlocks(

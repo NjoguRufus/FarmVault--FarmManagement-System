@@ -18,4 +18,12 @@ interface ImportMetaEnv {
   readonly VITE_MPESA_TILL_NUMBER?: string;
   /** Display name for M-Pesa till (e.g. FarmVault). */
   readonly VITE_MPESA_BUSINESS_NAME?: string;
+  /** PostHog project API key (public). Preferred name for new setups. */
+  readonly VITE_PUBLIC_POSTHOG_PROJECT_TOKEN?: string;
+  /** @deprecated use VITE_PUBLIC_POSTHOG_PROJECT_TOKEN */
+  readonly VITE_PUBLIC_POSTHOG_KEY?: string;
+  /** PostHog API host, e.g. https://us.i.posthog.com or EU equivalent. */
+  readonly VITE_PUBLIC_POSTHOG_HOST?: string;
+  /** When "1" / "true", enables session replay with input masking (opt-in). */
+  readonly VITE_PUBLIC_POSTHOG_SESSION_REPLAY?: string;
 }

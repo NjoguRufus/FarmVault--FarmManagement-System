@@ -4,6 +4,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDisplayRole } from '@/lib/utils';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 export default function FeedbackPage() {
   const { user } = useAuth();
@@ -44,6 +45,15 @@ export default function FeedbackPage() {
         userRoleLabel: roleLabel,
         employeeRole: (user as { employeeRole?: string })?.employeeRole ?? null,
         createdAt: serverTimestamp(),
+      });
+
+      captureEvent(AnalyticsEvents.FEEDBACK_SUBMITTED, {
+        company_id: user?.companyId ?? undefined,
+        user_id: user?.id ?? undefined,
+        feedback_type: feedbackType,
+        rating,
+        module_name: 'feedback',
+        route_path: '/feedback',
       });
 
       setRating(0);

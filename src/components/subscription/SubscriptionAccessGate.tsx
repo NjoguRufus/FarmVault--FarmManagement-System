@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Clock3, Ban, AlertTriangle, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSubscriptionGateState } from '@/services/subscriptionService';
@@ -26,18 +26,16 @@ export function SubscriptionAccessGate({ children }: { children: React.ReactElem
 
   const status = (data.status || 'pending_approval').toLowerCase();
   // Include `trial`: approved Pro trial (running or ended — post-trial plan modal handles expiry).
-  const fullAccess = status === 'trialing' || status === 'trial' || status === 'active' || status === 'pending_payment';
+  // Hybrid approval: pending_approval still enters the app (banner + limited UX); no redirect to holding page.
+  const fullAccess =
+    status === 'trialing' ||
+    status === 'trial' ||
+    status === 'active' ||
+    status === 'pending_payment' ||
+    status === 'pending_approval';
   if (fullAccess) {
     clearPendingApprovalSession();
     return children;
-  }
-
-  if (status === 'pending_approval') {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('[SubscriptionAccessGate] pending_approval → /pending-approval');
-    }
-    return <Navigate to="/pending-approval" replace />;
   }
 
   const titleByStatus: Record<string, string> = {

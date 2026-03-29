@@ -44,14 +44,21 @@ export function useEmployeeAccess(): UseEmployeeAccessResult {
     (user as { role?: string })?.role === 'company_admin';
 
   useEffect(() => {
-    if (!companyId || !employeeId) {
+    if (!companyId) {
       setEffectivePermissionKeys(new Set());
       setProjectAccessIds([]);
       setIsLoading(false);
       return;
     }
+    // Company admins / developers often have no employees row — must not require employeeId.
     if (isAdminOrDev) {
       setEffectivePermissionKeys(new Set(['*']));
+      setProjectAccessIds([]);
+      setIsLoading(false);
+      return;
+    }
+    if (!employeeId) {
+      setEffectivePermissionKeys(new Set());
       setProjectAccessIds([]);
       setIsLoading(false);
       return;

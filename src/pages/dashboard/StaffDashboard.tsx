@@ -24,6 +24,7 @@ import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 export function StaffDashboard() {
   const { user, employeeProfile } = useAuth();
@@ -50,6 +51,11 @@ export function StaffDashboard() {
     const byCompany = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
     return byCompany.filter((p) => hasProjectAccess(p.id));
   }, [projects, companyId, hasProjectAccess]);
+
+  const staffSelectableProjects = useMemo(
+    () => companyProjects.filter((p) => !isProjectClosed(p)),
+    [companyProjects],
+  );
 
   const activeProjectStages = useMemo(() => {
     if (!activeProject || !companyId) return [];
@@ -284,7 +290,7 @@ export function StaffDashboard() {
         <UiSelect
           value={activeProject?.id ?? undefined}
           onValueChange={(projectId) => {
-            const next = companyProjects.find((p) => p.id === projectId) ?? null;
+            const next = staffSelectableProjects.find((p) => p.id === projectId) ?? null;
             if (next) {
               setActiveProject(next);
             }
@@ -294,7 +300,7 @@ export function StaffDashboard() {
             <SelectValue placeholder="Select project" />
           </SelectTrigger>
           <SelectContent>
-            {companyProjects.map((project) => (
+            {staffSelectableProjects.map((project) => (
               <SelectItem key={project.id} value={project.id}>
                 {project.name}
               </SelectItem>

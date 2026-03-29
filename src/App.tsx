@@ -134,6 +134,7 @@ import DevDiagnosticsPage from "@/pages/dev/DevDiagnosticsPage";
 import DevQRGeneratorPage from "@/pages/dev/DevQRGeneratorPage";
 import { DeveloperLayout } from "@/components/layout/DeveloperLayout";
 import DeveloperCompaniesPage from "@/pages/developer/DeveloperCompaniesPage";
+import DeveloperCompanyDetailsPage from "@/pages/developer/DeveloperCompanyDetailsPage";
 import DeveloperUsersPage from "@/pages/developer/DeveloperUsersPage";
 import DeveloperBillingConfirmationPage from "@/pages/developer/DeveloperBillingConfirmationPage";
 import DeveloperFinancesPage from "@/pages/developer/DeveloperFinancesPage";
@@ -149,6 +150,7 @@ import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
 import DeveloperSettingsPage from "@/pages/developer/DeveloperSettingsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
+import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
 
 const queryClient = new QueryClient();
 
@@ -454,6 +456,7 @@ const AppRoutesWithLock = () => {
       >
         <Route index element={<DeveloperHomePage />} />
         <Route path="companies" element={<DeveloperCompaniesPage />} />
+        <Route path="companies/:companyId" element={<DeveloperCompanyDetailsPage />} />
         <Route path="users" element={<DeveloperUsersPage />} />
         <Route path="settings" element={<DeveloperSettingsPage />} />
         <Route path="billing-confirmation" element={<DeveloperBillingConfirmationPage />} />
@@ -501,6 +504,7 @@ const App = () => (
                   <HelmetProvider>
                     {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
                     <RoutePersistence />
+                    <PosthogAnalytics />
                     <TourProvider>
                       <AppRoutesWithLock />
                     </TourProvider>

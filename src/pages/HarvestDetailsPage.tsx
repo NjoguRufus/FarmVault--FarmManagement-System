@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
@@ -9,6 +9,7 @@ import { Harvest, Sale, Expense } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
 import { formatDate, toDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -32,6 +33,18 @@ export default function HarvestDetailsPage() {
     () => allHarvests.find((h) => h.id === harvestId && (!activeProject || h.projectId === activeProject.id)),
     [allHarvests, harvestId, activeProject?.id],
   );
+
+  useEffect(() => {
+    if (!harvest?.id || !companyId) return;
+    captureEvent(AnalyticsEvents.HARVEST_RECORD_VIEWED, {
+      company_id: companyId,
+      project_id: harvest.projectId,
+      harvest_id: harvest.id,
+      crop_type: String(harvest.cropType ?? ''),
+      module_name: 'harvest',
+      route_path: `/harvest-sales/harvest/${harvest.id}`,
+    });
+  }, [harvest?.id, harvest?.projectId, harvest?.cropType, companyId]);
 
   const harvestSales = useMemo(
     () => (harvestId ? allSales.filter((s) => s.harvestId === harvestId) : []),

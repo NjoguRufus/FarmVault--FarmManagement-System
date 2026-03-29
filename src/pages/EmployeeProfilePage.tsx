@@ -29,6 +29,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { Employee } from '@/types';
 import { UserAvatar } from '@/components/UserAvatar';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
 type TabId = 'profile' | 'access' | 'projects' | 'activity' | 'security';
 
@@ -54,6 +55,16 @@ export default function EmployeeProfilePage() {
     () => employees.find((e) => e.id === employeeId) ?? null,
     [employees, employeeId]
   );
+
+  useEffect(() => {
+    if (!companyId || !employeeId) return;
+    captureEvent(AnalyticsEvents.EMPLOYEE_VIEWED, {
+      company_id: companyId,
+      employee_id: employeeId,
+      module_name: 'employees',
+      route_path: `/employees/${employeeId}`,
+    });
+  }, [companyId, employeeId]);
 
   const [activeTab, setActiveTab] = useState<TabId>('profile');
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());

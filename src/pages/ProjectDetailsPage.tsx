@@ -9,13 +9,13 @@ import { toDate, formatDate } from '@/lib/dateUtils';
 import { getCropTimeline } from '@/config/cropTimelines';
 import {
   calculateDaysSince,
-  getStageForDay,
   buildTimeline,
   getProgressWithinStage,
   assertCropStagesDev,
   type StageRule,
 } from '@/utils/cropStages';
 import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
+import { effectiveCurrentStage, resolveManualStageIndex } from '@/lib/seasonStageOverride';
 import { getProject, deleteProject as deleteProjectService } from '@/services/projectsService';
 import { getFinanceExpenses } from '@/services/financeExpenseService';
 import { getBudgetPool } from '@/services/budgetPoolService';
@@ -43,6 +43,9 @@ import {
 } from '@/components/ui/dialog';
 import { StageEditModal } from '@/components/projects/StageEditModal';
 import { Button } from '@/components/ui/button';
+import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { isProjectClosed } from '@/lib/projectClosed';
 
 if (import.meta.env?.DEV) {
   assertCropStagesDev();
@@ -73,6 +76,19 @@ export default function ProjectDetailsPage() {
     },
     enabled: Boolean(projectId && (companyId || isDeveloper)),
   });
+
+  useEffect(() => {
+    if (!project?.id || !companyId) return;
+    captureEvent(AnalyticsEvents.PROJECT_VIEWED, {
+      company_id: companyId,
+      project_id: project.id,
+      project_name: project.name,
+      crop_type: project.cropTypeKey ?? String(project.cropType ?? ''),
+      module_name: 'projects',
+      route_path: `/projects/${project.id}`,
+    });
+  }, [project?.id, project?.name, project?.cropType, project?.cropTypeKey, companyId]);
+
   if (import.meta.env.DEV && projectId && !projectsLoading && project) {
     console.log('[ProjectDetailsPage] project details loaded', { projectId, name: project.name });
   }
@@ -197,6 +213,7 @@ export default function ProjectDetailsPage() {
   );
   const plantingDate = normalizeDate(project?.plantingDate as any);
   const daysSincePlanting = plantingDate != null ? calculateDaysSince(plantingDate) : null;
+  const manualStageKey = project?.planning?.manualCurrentStage?.stageKey ?? null;
 
   const expectedHarvestDate = useMemo(() => {
     if (!project) return undefined;
@@ -204,27 +221,38 @@ export default function ProjectDetailsPage() {
     return date ?? undefined;
   }, [project, projectBlocks]);
 
-  const currentStageForDay = useMemo(() => {
-    if (daysSincePlanting == null || daysSincePlanting < 0 || !templateStages.length) return null;
-    return getStageForDay(templateStages, daysSincePlanting);
-  }, [templateStages, daysSincePlanting]);
+  const effectiveStageResult = useMemo(
+    () => effectiveCurrentStage(templateStages, daysSincePlanting, manualStageKey),
+    [templateStages, daysSincePlanting, manualStageKey],
+  );
+
+  const manualTimelineOverrideIndex = useMemo(
+    () => resolveManualStageIndex(templateStages, manualStageKey),
+    [templateStages, manualStageKey],
+  );
 
   const currentStageLabel = useMemo(() => {
-    if (!plantingDate) return 'Set planting date';
+    if (!plantingDate) {
+      return effectiveStageResult ? effectiveStageResult.stage.label : 'Set planting date';
+    }
     if (daysSincePlanting != null && daysSincePlanting < 0) return 'Not planted yet';
     if (!templateStages.length) return 'No stage template';
-    return currentStageForDay?.stage.label ?? '—';
-  }, [plantingDate, daysSincePlanting, templateStages.length, currentStageForDay]);
+    return effectiveStageResult?.stage.label ?? '—';
+  }, [plantingDate, daysSincePlanting, templateStages.length, effectiveStageResult]);
 
   const stageProgressPercent = useMemo(() => {
-    if (!currentStageForDay || daysSincePlanting == null) return 0;
-    return Math.round(getProgressWithinStage(currentStageForDay.stage, daysSincePlanting) * 100);
-  }, [currentStageForDay, daysSincePlanting]);
+    if (!effectiveStageResult || daysSincePlanting == null) return 0;
+    return Math.round(getProgressWithinStage(effectiveStageResult.stage, daysSincePlanting) * 100);
+  }, [effectiveStageResult, daysSincePlanting]);
 
-  const timelineItems = useMemo(
-    () => (templateStages.length && daysSincePlanting != null ? buildTimeline(templateStages, daysSincePlanting) : []),
-    [templateStages, daysSincePlanting],
-  );
+  const timelineItems = useMemo(() => {
+    if (!templateStages.length) return [];
+    if (daysSincePlanting == null && manualTimelineOverrideIndex == null) return [];
+    const day = daysSincePlanting ?? 0;
+    return buildTimeline(templateStages, day, {
+      currentStageIndexOverride: manualTimelineOverrideIndex,
+    });
+  }, [templateStages, daysSincePlanting, manualTimelineOverrideIndex]);
 
   const expenseSpanDays = useMemo(() => {
     if (!expenses.length) return 0;
@@ -414,11 +442,14 @@ export default function ProjectDetailsPage() {
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
+  const isClosed = isProjectClosed(project);
+
   const fieldSize = project.acreage != null ? `${Number(project.acreage)} ac` : '—';
   const expectedHarvestStr = expectedHarvestDate ? formatDate(expectedHarvestDate) : null;
   const openChallengesCount = challenges.filter((c) => String(c.status).toLowerCase() !== 'resolved').length;
 
   const handleStageClick = (index: number) => {
+    if (isClosed) return;
     const item = timelineItems[index];
     if (!item || !projectId || !companyId) return;
     const existingStage = projectStages.find((s) => s.stageIndex === index);
@@ -437,6 +468,14 @@ export default function ProjectDetailsPage() {
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 lg:gap-8 animate-fade-in pb-8">
+      {isClosed && (
+        <Alert className="order-0 border-rose-200/80 bg-rose-50/80 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/25 dark:text-rose-50">
+          <AlertTitle className="text-sm font-semibold">This project is closed</AlertTitle>
+          <AlertDescription className="text-sm text-rose-900/90 dark:text-rose-100/90">
+            Records stay on file for your records. Reopen it from the Projects list when you want to make changes or set it as your active farm again.
+          </AlertDescription>
+        </Alert>
+      )}
       {/* 1. Hero – full width; fill gap under navbar on mobile and PC */}
       <div className="-mt-6 -mx-6 w-[calc(100%+3rem)] order-1">
         <ProjectHeroCard
@@ -451,6 +490,7 @@ export default function ProjectDetailsPage() {
         location={project.location ?? '—'}
         fieldSize={fieldSize}
         heroImageUrl={(project as { heroImageUrl?: string })?.heroImageUrl ?? getCropHeroImage(project.cropType)}
+        readOnly={isClosed}
         />
       </div>
 
@@ -459,7 +499,7 @@ export default function ProjectDetailsPage() {
         <div className="order-3 lg:order-2">
           <SeasonProgressTimeline
             items={timelineItems}
-            onStageClick={handleStageClick}
+            onStageClick={isClosed ? undefined : handleStageClick}
           />
         </div>
       )}
@@ -514,6 +554,7 @@ export default function ProjectDetailsPage() {
             onViewInventory={() => setDetailsDialog('inventory')}
             onAddChallenge={() => navigate('/challenges')}
             showPlanSeason={project.status === 'active'}
+            showAddChallenge={!isClosed}
           />
         </div>
       </div>
@@ -528,6 +569,7 @@ export default function ProjectDetailsPage() {
         lastUpdated={(project.planning as any)?.planHistory?.[0] ? 'Recently' : null}
         onPlanSeason={() => navigate(`/projects/${project.id}/planning`)}
         onViewFullPlan={() => navigate(`/projects/${project.id}/planning`)}
+        readOnly={isClosed}
       />
       </div>
 

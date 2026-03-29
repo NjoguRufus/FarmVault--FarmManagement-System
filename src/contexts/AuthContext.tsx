@@ -7,6 +7,7 @@ import { resolveEffectiveAccess, type EffectiveAccess } from '@/lib/access';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
+import { resolveOrCreatePlatformUser } from '@/lib/auth/resolveOrCreatePlatformUser';
 import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
 import { clearQuickUnlockState } from '@/services/appLockService';
 import { clearPendingApprovalSession } from '@/lib/pendingApprovalSession';
@@ -15,6 +16,7 @@ import {
   resolveUserDisplayName,
   seedFullNameFromClerk,
 } from '@/lib/userDisplayName';
+import { AnalyticsEvents, captureEvent, resetAnalyticsUser } from '@/lib/analytics';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -306,9 +308,7 @@ function buildEffectivePermissions(
   // Priority 2: Company admin gets full access even if employee profile exists
   // This is the key fix - company admins should NOT be downgraded by employee profiles
   const isCompanyAdmin =
-    user.role === 'company-admin' ||
-    (user as { role?: string }).role === 'company_admin' ||
-    options?.forceCompanyAdmin === true;
+    options?.forceCompanyAdmin === true || normalizeRole(user.role) === 'company-admin';
 
   if (isCompanyAdmin) {
     if (import.meta.env.DEV) {
@@ -370,9 +370,7 @@ function buildEffectiveAccess(
 
   const isDeveloper = user.role === 'developer';
   const isCompanyAdmin =
-    user.role === 'company-admin' ||
-    (user as { role?: string }).role === 'company_admin' ||
-    options?.forceCompanyAdmin === true;
+    options?.forceCompanyAdmin === true || normalizeRole(user.role) === 'company-admin';
 
   // For company admins, don't use employee role for routing - they should get admin landing
   const legacyRole = isCompanyAdmin ? null : getPermissionRole(user, employeeProfile);
@@ -400,12 +398,25 @@ function buildEffectiveAccess(
   });
 }
 
-/** Maps DB role (core.company_members.role) to app UserRole. company_admin/admin → company-admin; do not default to employee when membership has a role. */
+/** Maps DB role (core.company_members.role) to app UserRole. company_admin/admin/owner → company-admin; do not default to employee when membership has a role. */
 function normalizeRole(role: string | null | undefined): UserRole {
   if (!role) return 'employee';
   const r = role.toString().trim().toLowerCase();
-  if (r === 'company_admin' || r === 'company-admin' || r === 'admin') return 'company-admin';
   if (r === 'developer' || r === 'manager' || r === 'broker' || r === 'employee') return r as UserRole;
+
+  const compact = r.replace(/[-_\s]/g, '');
+  if (
+    r === 'owner' ||
+    r === 'company_admin' ||
+    r === 'company-admin' ||
+    r === 'admin' ||
+    r === 'super_admin' ||
+    compact === 'companyadmin' ||
+    compact === 'superadmin'
+  ) {
+    return 'company-admin';
+  }
+
   return 'employee';
 }
 
@@ -463,9 +474,7 @@ export function AuthProvider({
   // Compute effectiveAccess with proper role priority
   // Company admins should NOT be routed based on employee profile
   const effectiveAccess = React.useMemo(() => {
-    const isCompanyAdmin =
-      user?.role === 'company-admin' ||
-      (user as { role?: string } | null)?.role === 'company_admin';
+    const isCompanyAdmin = normalizeRole(user?.role) === 'company-admin';
 
     // For company admins, don't use employee profile for access computation
     return buildEffectiveAccess(
@@ -620,14 +629,19 @@ export function AuthProvider({
       return;
     }
 
+    // Clerk can report isSignedIn before userId (sub) is available. If we return here without
+    // resetting the gate, authReady may stay true from the signed-out branch while user stays null —
+    // PostAuth then redirects to /sign-in even after a successful password sign-in.
     if (!userId) {
+      setActivationResolved(false);
+      setAuthReady(false);
       return;
     }
 
     let cancelled = false;
     setAuthReady(false);
     setSetupIncomplete(false);
-      setResetRequired(false);
+    setResetRequired(false);
     setActivationResolved(false);
 
     (async () => {
@@ -810,24 +824,34 @@ export function AuthProvider({
 
         setResetRequired(false);
 
-        // 3b) Ensure profiles row exists so current_context can read active_company_id.
-        // IMPORTANT: Do NOT overwrite full_name here – it is user-editable from Settings.
-        // We only ensure the row + email exist; name is managed by core.profiles.full_name.
-        const { error: upsertError } = await db
-          .core()
-          .from('profiles')
-          .upsert(
-            {
-              clerk_user_id: userId,
-              email: fallbackEmail || null,
-            },
-            { onConflict: 'clerk_user_id' },
-          );
-
-        if (upsertError && import.meta.env.DEV) {
+        // 3a) Idempotent platform user: match by Clerk id, else merge by normalized email (single core.profiles row per person).
+        const resolvedProfile = await resolveOrCreatePlatformUser({
+          clerkUserId: userId,
+          email: fallbackEmail,
+        });
+        if (!resolvedProfile) {
+          const { error: upsertError } = await db
+            .core()
+            .from('profiles')
+            .upsert(
+              {
+                clerk_user_id: userId,
+                email: fallbackEmail || null,
+              },
+              { onConflict: 'clerk_user_id' },
+            );
+          if (upsertError && import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] Profile upsert fallback (resolve_or_ensure_platform_profile unavailable):', upsertError);
+          }
+        } else if (import.meta.env.DEV && resolvedProfile.action === 'merged_from_email') {
           // eslint-disable-next-line no-console
-          console.warn('[Auth] Profile upsert warning:', upsertError);
+          console.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
+            clerk_user_id: resolvedProfile.clerk_user_id,
+          });
         }
+
+        // 3b) full_name / avatar loaded below; row ensured by resolve (or upsert fallback).
 
         // 3b) Load profile full_name + avatar_url (user display + avatar priority)
         let profileAvatarUrl: string | null = null;
@@ -919,6 +943,35 @@ export function AuthProvider({
           }
         }
 
+        // 4b) If RPC returned empty context, recover from profile.active_company_id + company_members (reload / transient gaps).
+        if (userId && (!contextCompanyId || !contextRole)) {
+          try {
+            const { data: profRow } = await db
+              .core()
+              .from('profiles')
+              .select('active_company_id')
+              .eq('clerk_user_id', userId)
+              .maybeSingle();
+            const aid = profRow?.active_company_id != null ? String(profRow.active_company_id) : null;
+            if (aid) {
+              if (!contextCompanyId) contextCompanyId = aid;
+              if (!contextRole) {
+                const { data: memRow } = await db
+                  .core()
+                  .from('company_members')
+                  .select('role')
+                  .eq('clerk_user_id', userId)
+                  .eq('company_id', aid)
+                  .maybeSingle();
+                const r = memRow?.role != null ? String(memRow.role).trim() : '';
+                if (r) contextRole = r;
+              }
+            }
+          } catch {
+            // non-blocking
+          }
+        }
+
         const normalizedRole = normalizeRole(contextRole) as UserRole;
         const hasCompanyId = contextCompanyId != null && contextCompanyId !== '';
         const hasRole = contextRole != null && contextRole !== '';
@@ -976,11 +1029,7 @@ export function AuthProvider({
         //
         // Company admins should NEVER go through employee linking or be routed to staff dashboard.
         // Only run employee activation when user has NO valid company context.
-        const isContextCompanyAdmin =
-          normalizedRole === 'company-admin' ||
-          contextRole === 'company_admin' ||
-          contextRole === 'company-admin' ||
-          contextRole === 'admin';
+        const isContextCompanyAdmin = normalizedRole === 'company-admin';
 
         let effectiveCompanyId = contextCompanyId;
         let employeeFromRpc: Employee | null = null;
@@ -995,6 +1044,12 @@ export function AuthProvider({
             });
             if (linkResult.matched) {
               effectiveCompanyId = linkResult.company_id ?? effectiveCompanyId;
+              captureEvent(AnalyticsEvents.INVITED_USER_JOINED, {
+                user_id: userId,
+                company_id: linkResult.company_id ?? undefined,
+                employee_id: linkResult.employee_id ?? undefined,
+                role: linkResult.role ?? undefined,
+              });
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
                 console.log('[Auth] Employee invite activation matched', {
@@ -1231,6 +1286,9 @@ export function AuthProvider({
           confirmedSignedInRef.current = true;
         } else {
           const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
+          if (userId) {
+            await resolveOrCreatePlatformUser({ clerkUserId: userId, email: fallbackEmail });
+          }
           const errOauth = clerkOAuthDisplayHints(clerkUser);
           const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
           const fallbackUser: User = {
@@ -1255,6 +1313,7 @@ export function AuthProvider({
           setResetRequired(false);
           writeCachedUser(null);
           setActivationResolved(true);
+          confirmedSignedInRef.current = true;
         }
         const errMsg = (error as Error)?.message ?? String(error);
         if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
@@ -1312,6 +1371,7 @@ export function AuthProvider({
   };
 
   const logout = () => {
+    resetAnalyticsUser();
     // Clear Quick Unlock state on logout so next login requires full authentication
     clearQuickUnlockState();
 
@@ -1426,14 +1486,11 @@ export function AuthProvider({
       const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
       const contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
       const contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+
       if (!contextCompanyId || !contextRole) return false;
 
       const normalizedRole = normalizeRole(contextRole) as UserRole;
-      const isContextCompanyAdmin =
-        normalizedRole === 'company-admin' ||
-        contextRole === 'company_admin' ||
-        contextRole === 'company-admin' ||
-        contextRole === 'admin';
+      const isContextCompanyAdmin = normalizedRole === 'company-admin';
 
       let employee: Employee | null = null;
       if (!isContextCompanyAdmin) {
@@ -1480,9 +1537,7 @@ export function AuthProvider({
     if (isEmergencySession || !userId || !user) return null;
     try {
       // Check if user is company admin - they should NOT have their role overridden by employee profile
-      const isCompanyAdmin =
-        user.role === 'company-admin' ||
-        (user as { role?: string }).role === 'company_admin';
+      const isCompanyAdmin = normalizeRole(user.role) === 'company-admin';
 
       // Only load employee profile for non-admin users (for routing purposes)
       const employee = isCompanyAdmin ? null : await loadEmployeeProfile(userId);

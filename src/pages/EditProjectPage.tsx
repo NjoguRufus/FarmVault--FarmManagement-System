@@ -53,6 +53,14 @@ export default function EditProjectPage() {
     }
   }, [project]);
 
+  React.useEffect(() => {
+    if (!project || project.status !== 'closed' || !projectId) return;
+    toast.message('This project is closed', {
+      description: 'Reopen it from the Projects list to edit details.',
+    });
+    navigate(`/projects/${projectId}`, { replace: true });
+  }, [project, projectId, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectId || !project) return;

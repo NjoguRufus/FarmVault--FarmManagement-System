@@ -23,6 +23,7 @@
   "dependencies": {
     "@clerk/react": "^6.0.1",
     "@hookform/resolvers": "^3.10.0",
+    "@posthog/react": "^1.8.2",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-aspect-ratio": "^1.1.7",
@@ -63,6 +64,7 @@
     "lucide-react": "^0.462.0",
     "mongodb": "^7.1.0",
     "next-themes": "^0.3.0",
+    "posthog-js": "^1.364.1",
     "qr-code-styling": "^1.9.2",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
