@@ -1,6 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Eye, FileText, Package, Tag, Truck } from 'lucide-react';
 import { EmptyStateBlock } from './EmptyStateBlock';
 import { formatDevDateShort, formatNumber } from './utils';
+import { Button } from '@/components/ui/button';
+import { DeveloperRecordDetailsSheet } from './DeveloperRecordDetailsSheet';
 
 type Row = Record<string, unknown>;
 
@@ -11,6 +14,9 @@ type Props = {
 };
 
 export function CompanyInventoryTab({ items, audit, metrics }: Props) {
+  const [selectedItem, setSelectedItem] = useState<Row | null>(null);
+  const [selectedAudit, setSelectedAudit] = useState<Row | null>(null);
+
   const categories = useMemo(() => {
     const s = new Set<string>();
     for (const i of items) {
@@ -50,9 +56,27 @@ export function CompanyInventoryTab({ items, audit, metrics }: Props) {
           <h3 className="mb-2 text-sm font-semibold">Recent stock audit events</h3>
           <div className="fv-card max-h-48 overflow-y-auto p-3 text-xs space-y-2">
             {audit.map((a) => (
-              <div key={String(a.id)} className="flex justify-between gap-2 border-b border-border/30 pb-2 last:border-0">
-                <span className="font-medium">{String(a.action ?? '—')}</span>
-                <span className="text-muted-foreground tabular-nums">{formatDevDateShort(a.created_at as string)}</span>
+              <div
+                key={String(a.id)}
+                className="flex items-center justify-between gap-2 border-b border-border/30 pb-2 last:border-0"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{String(a.action ?? '—')}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{String(a.item_name ?? a.inventory_item_name ?? '—')}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground tabular-nums">{formatDevDateShort(a.created_at as string)}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    onClick={() => setSelectedAudit(a)}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -70,6 +94,7 @@ export function CompanyInventoryTab({ items, audit, metrics }: Props) {
               <th className="py-2 text-left font-medium">Status</th>
               <th className="py-2 text-left font-medium">Supplier</th>
               <th className="py-2 text-left font-medium">Updated</th>
+              <th className="py-2 text-right font-medium">Details</th>
             </tr>
           </thead>
           <tbody>
@@ -82,11 +107,76 @@ export function CompanyInventoryTab({ items, audit, metrics }: Props) {
                 <td className="py-2 text-xs">{String(i.stock_status ?? '—')}</td>
                 <td className="py-2 text-xs max-w-[120px] truncate">{String(i.supplier_name ?? '—')}</td>
                 <td className="py-2 text-xs text-muted-foreground">{formatDevDateShort(i.last_updated as string)}</td>
+                <td className="py-2 text-right">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2 text-xs"
+                    onClick={() => setSelectedItem(i)}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <DeveloperRecordDetailsSheet
+        open={Boolean(selectedItem)}
+        onOpenChange={(o) => !o && setSelectedItem(null)}
+        title={String(selectedItem?.name ?? 'Inventory item')}
+        description="Inventory inspection (read-only)."
+        recordId={selectedItem ? String(selectedItem.id ?? '') : null}
+        sections={[
+          {
+            title: 'Item',
+            items: [
+              { label: 'Name', value: <Inline icon={<Package className="h-4 w-4" />} value={String(selectedItem?.name ?? '—')} /> },
+              { label: 'Category', value: <Inline icon={<Tag className="h-4 w-4" />} value={String(selectedItem?.category ?? '—')} /> },
+              { label: 'Quantity', value: formatNumber(selectedItem?.current_quantity, 2) },
+              { label: 'Units', value: String(selectedItem?.unit ?? '—') },
+              { label: 'Stock status', value: String(selectedItem?.stock_status ?? '—') },
+              { label: 'Supplier', value: <Inline icon={<Truck className="h-4 w-4" />} value={String(selectedItem?.supplier_name ?? '—')} /> },
+            ],
+          },
+          {
+            title: 'Usage / movement (if available)',
+            items: [
+              { label: 'Last updated', value: formatDevDateShort(selectedItem?.last_updated as string) },
+              { label: 'Min threshold', value: String(selectedItem?.min_threshold ?? selectedItem?.minThreshold ?? '—') },
+              { label: 'Notes', value: String(selectedItem?.notes ?? '—') },
+              { label: 'History pointer', value: String(selectedItem?.history ?? selectedItem?.movement ?? '—') },
+            ],
+          },
+        ]}
+        raw={selectedItem ?? undefined}
+      />
+
+      <DeveloperRecordDetailsSheet
+        open={Boolean(selectedAudit)}
+        onOpenChange={(o) => !o && setSelectedAudit(null)}
+        title={String(selectedAudit?.action ?? 'Inventory audit')}
+        description="Inventory audit event inspection (read-only)."
+        recordId={selectedAudit ? String(selectedAudit.id ?? '') : null}
+        sections={[
+          {
+            title: 'Event',
+            items: [
+              { label: 'Action', value: <Inline icon={<FileText className="h-4 w-4" />} value={String(selectedAudit?.action ?? '—')} /> },
+              { label: 'Item', value: String(selectedAudit?.item_name ?? selectedAudit?.inventory_item_name ?? '—') },
+              { label: 'Quantity', value: String(selectedAudit?.quantity ?? selectedAudit?.delta ?? '—') },
+              { label: 'At', value: formatDevDateShort(selectedAudit?.created_at as string) },
+              { label: 'Actor', value: String(selectedAudit?.created_by ?? selectedAudit?.actor ?? '—'), mono: true },
+              { label: 'Notes', value: String(selectedAudit?.notes ?? '—') },
+            ],
+          },
+        ]}
+        raw={selectedAudit ?? undefined}
+      />
     </div>
   );
 }
@@ -97,5 +187,14 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</p>
       <p className="text-lg font-semibold tabular-nums">{value}</p>
     </div>
+  );
+}
+
+function Inline({ icon, value }: { icon: React.ReactNode; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="min-w-0">{value}</span>
+    </span>
   );
 }

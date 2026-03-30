@@ -1,8 +1,6 @@
 import { CropStage, CropType } from '@/types';
-import { collection, query, where } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
 import { safeToDate } from '@/lib/safeTime';
-import { getDocsWithCache } from '@/lib/firestoreCache';
+import { listProjectStages } from '@/services/projectsService';
 
 /** Derive display status: respect stored status first, then dates (aligned with CropStagesPage). */
 function getDerivedStatus(
@@ -43,14 +41,11 @@ export function getCurrentStageForProject(
     : null;
 }
 
-export async function fetchProjectStages(companyId: string, projectId: string, cropType: CropType) {
-  const q = query(
-    collection(db, 'projectStages'),
-    where('companyId', '==', companyId),
-    where('projectId', '==', projectId),
-    where('cropType', '==', cropType),
-  );
-  const snap = await getDocsWithCache(q);
-  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as any) })) as CropStage[];
+export async function fetchProjectStages(
+  companyId: string,
+  projectId: string,
+  cropType: CropType,
+): Promise<CropStage[]> {
+  void companyId;
+  return listProjectStages(projectId, { cropType: String(cropType) });
 }
-

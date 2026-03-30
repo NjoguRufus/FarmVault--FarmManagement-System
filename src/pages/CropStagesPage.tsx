@@ -3,6 +3,7 @@ import { Search, MoreHorizontal, AlertCircle, CheckCircle, Clock, X, Package, Wr
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { CropStage, WorkLog, SeasonChallenge, InventoryUsage, InventoryItem, ChallengeType } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { getCropTimeline } from '@/config/cropTimelines';
@@ -16,9 +17,10 @@ import {
 import { getCropStages } from '@/lib/cropStageConfig';
 import { addDays } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
-import { db } from '@/lib/firebase';
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from '@/lib/firestore-stub';
 import { useQueryClient } from '@tanstack/react-query';
+import { completeProjectStageAndAdvanceNext } from '@/services/projectsService';
+import { createSeasonChallenge } from '@/services/seasonChallengesService';
+import { useSeasonChallenges, invalidateSeasonChallengesQuery } from '@/hooks/useSeasonChallenges';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Dialog,
@@ -44,9 +46,13 @@ export default function CropStagesPage() {
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
-  const { data: allStages = [], isLoading } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allStages = [], isLoading } = useCompanyProjectStages(companyId);
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
-  const { data: allChallenges = [] } = useCollection<SeasonChallenge>('seasonChallenges', 'seasonChallenges', scope);
+  const { challenges: challengesFromSupabase = [] } = useSeasonChallenges(
+    companyId,
+    activeProject?.id ?? null,
+  );
+  const allChallenges = challengesFromSupabase;
   const { data: allInventoryUsage = [] } = useCollection<InventoryUsage>('inventoryUsage', 'inventoryUsage', scope);
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
 
@@ -242,53 +248,35 @@ export default function CropStagesPage() {
       return;
     }
     setMarkingComplete(true);
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setDetailsOpen(false);
     try {
       const today = new Date();
-      const stageRef = doc(db, 'projectStages', selectedStage.id);
-      await updateDoc(stageRef, {
-        endDate: today,
-        status: 'completed',
-        updatedAt: serverTimestamp(),
-      });
-
-      // Start the next stage automatically (current becomes next)
-      const nextStageIndex = selectedStageIndex + 1;
-      const nextStage = projectStages.find((s) => s.stageIndex === nextStageIndex);
       const stageDefs = getCropStages(activeProject.cropType);
+      const nextStageIndex = selectedStageIndex + 1;
       const nextDef = stageDefs.find((d) => d.order === nextStageIndex);
 
+      let next:
+        | { stageKey: string; stageName: string; endDate: string | null }
+        | undefined;
       if (nextDef) {
-        const endDate = addDays(today, nextDef.expectedDurationDays);
-        if (nextStage && !nextStage.id.startsWith('placeholder-')) {
-          await updateDoc(doc(db, 'projectStages', nextStage.id), {
-            startDate: today,
-            endDate,
-            status: 'in-progress',
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          await addDoc(collection(db, 'projectStages'), {
-            projectId: activeProject.id,
-            companyId: activeProject.companyId,
-            cropType: activeProject.cropType,
-            stageName: nextDef.name,
-            stageIndex: nextDef.order,
-            startDate: today,
-            endDate,
-            status: 'in-progress',
-            createdAt: serverTimestamp(),
-          });
-        }
+        const endDate = addDays(today, nextDef.expectedDurationDays).toISOString().slice(0, 10);
+        const rawKey = `${nextDef.order}_${nextDef.name.toLowerCase().replace(/[^a-z0-9]+/gi, '_')}`;
+        next = {
+          stageKey: rawKey.replace(/^_|_$/g, '').slice(0, 80) || `stage_${nextDef.order}`,
+          stageName: nextDef.name,
+          endDate,
+        };
       }
 
-      queryClient.invalidateQueries({ queryKey: ['projectStages'] });
-      toast.success(
-        isOffline
-          ? 'Stage update saved offline. It will sync when online.'
-          : 'Stage marked complete.',
-      );
+      await completeProjectStageAndAdvanceNext({
+        companyId: activeProject.companyId,
+        projectId: activeProject.id,
+        completedStageId: selectedStage.id,
+        next,
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['projectStages'] });
+      toast.success('Stage marked complete.');
     } catch (error) {
       console.error('Error marking stage complete:', error);
       toast.error('Failed to update stage.');
@@ -300,33 +288,28 @@ export default function CropStagesPage() {
   const handleAddChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStage || !activeProject || !user) return;
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddChallengeOpen(false);
     try {
-      await addDoc(collection(db, 'seasonChallenges'), {
-        title: challengeTitle,
-        description: challengeDescription,
+      await createSeasonChallenge({
+        companyId: activeProject.companyId,
+        projectId: activeProject.id,
+        cropType: String(activeProject.cropType ?? ''),
+        title: challengeTitle.trim(),
+        description: challengeDescription.trim(),
         challengeType,
         severity: challengeSeverity,
         status: 'identified',
-        projectId: activeProject.id,
-        companyId: activeProject.companyId,
-        cropType: activeProject.cropType,
         stageIndex: selectedStage.stageIndex,
         stageName: selectedStage.stageName,
-        dateIdentified: serverTimestamp(),
-        createdAt: serverTimestamp(),
+        createdBy: user.id,
+        createdByName: user.name ?? user.email ?? undefined,
       });
-      queryClient.invalidateQueries({ queryKey: ['seasonChallenges'] });
+      invalidateSeasonChallengesQuery(queryClient);
       setChallengeTitle('');
       setChallengeDescription('');
       setChallengeType('other');
       setChallengeSeverity('medium');
-      toast.success(
-        isOffline
-          ? 'Challenge saved offline. It will sync when online.'
-          : 'Challenge added.',
-      );
+      toast.success('Challenge added.');
     } catch (error) {
       console.error('Error adding challenge:', error);
       toast.error('Failed to add challenge.');

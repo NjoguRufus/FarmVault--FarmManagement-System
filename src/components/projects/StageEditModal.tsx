@@ -87,7 +87,7 @@ export function StageEditModal({
         });
         toast.success('Stage updated.');
       }
-      queryClient.invalidateQueries({ queryKey: ['projectStages', project.companyId, project.id] });
+      queryClient.invalidateQueries({ queryKey: ['projectStages'] });
       onSaved?.();
       onOpenChange(false);
     } catch (err) {

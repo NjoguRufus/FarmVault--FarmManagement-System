@@ -3,6 +3,7 @@ import { Plus, Wrench, CheckCircle, Calendar, TrendingUp, Users, DollarSign, Spr
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { WorkLog, CropStage, Employee, OperationsWorkCard } from '@/types';
 import { LuxuryStatCard } from '@/components/dashboard/LuxuryStatCard';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
@@ -35,7 +36,7 @@ export function ManagerDashboard() {
   const scope = { companyScoped: true, companyId, isDeveloper };
   // Data sources
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
 
   // Work can be allocated to manager by user id (auth uid) or by employee doc id (operations-manager). Match both.

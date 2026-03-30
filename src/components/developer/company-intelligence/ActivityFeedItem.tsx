@@ -1,4 +1,5 @@
 import React from 'react';
+import { Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDevDate } from './utils';
 
@@ -26,6 +27,9 @@ export function ActivityFeedItem({ item, className }: { item: ActivityFeedItemDa
   const mod = (item.module ?? 'activity').toLowerCase();
   const badgeClass = moduleColors[mod] ?? moduleColors.activity;
 
+  const clickable = typeof (item as any).__onViewDetails === 'function';
+  const onView = clickable ? ((item as any).__onViewDetails as () => void) : null;
+
   return (
     <div
       className={cn(
@@ -40,6 +44,16 @@ export function ActivityFeedItem({ item, className }: { item: ActivityFeedItemDa
             {(item.module ?? 'event').replace(/_/g, ' ')}
           </span>
           <span className="text-[11px] text-muted-foreground tabular-nums">{formatDevDate(item.at)}</span>
+          {onView ? (
+            <button
+              type="button"
+              onClick={onView}
+              className="ml-auto inline-flex items-center gap-1 rounded-md border border-border/60 bg-background px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted/30"
+            >
+              <Eye className="h-3 w-3" />
+              View details
+            </button>
+          ) : null}
         </div>
         <p className="text-sm font-medium text-foreground">{item.title ?? 'Activity'}</p>
         {item.subtitle ? (

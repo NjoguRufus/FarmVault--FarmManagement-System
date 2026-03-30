@@ -203,16 +203,18 @@ export function ProjectHeroCard({
           <p className="text-sm text-primary font-medium">{nextMilestone}</p>
         )}
 
-        <div className="flex flex-wrap gap-2 pt-1 border-t border-border/50">
-          <Button variant="outline" size="sm" onClick={onEditProject}>
-            <Pencil className="h-4 w-4 mr-2" />
-            Edit Project
-          </Button>
-          <Button size="sm" onClick={onPlanSeason}>
-            <Calendar className="h-4 w-4 mr-2" />
-            Plan Season
-          </Button>
-        </div>
+        {!readOnly ? (
+          <div className="flex flex-wrap gap-2 pt-1 border-t border-border/50">
+            <Button variant="outline" size="sm" onClick={onEditProject}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit Project
+            </Button>
+            <Button size="sm" onClick={onPlanSeason}>
+              <Calendar className="h-4 w-4 mr-2" />
+              Plan Season
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

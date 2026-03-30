@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, RotateCw } from 'lucide-react';
@@ -14,14 +14,17 @@ import { CompanyExpensesTab } from '@/components/developer/company-intelligence/
 import { CompanyInventoryTab } from '@/components/developer/company-intelligence/CompanyInventoryTab';
 import { CompanyEmployeesTab } from '@/components/developer/company-intelligence/CompanyEmployeesTab';
 import { CompanyActivityTimelineTab } from '@/components/developer/company-intelligence/CompanyActivityTimelineTab';
+import { CompanySeasonChallengesTab } from '@/components/developer/company-intelligence/CompanySeasonChallengesTab';
 import { CompanySubscriptionTab } from '@/components/developer/company-intelligence/CompanySubscriptionTab';
 import { CompanyAuditLogsTab } from '@/components/developer/company-intelligence/CompanyAuditLogsTab';
 import { LoadingSkeletonBlock } from '@/components/developer/company-intelligence/LoadingSkeletonBlock';
+import { EmptyStateBlock } from '@/components/developer/company-intelligence/EmptyStateBlock';
 import type { ActivityFeedItemData } from '@/components/developer/company-intelligence/ActivityFeedItem';
 
 export default function DeveloperCompanyDetailsPage() {
   const { companyId = '' } = useParams<{ companyId: string }>();
   const id = companyId.trim();
+  const [tab, setTab] = useState('overview');
 
   const {
     data,
@@ -98,91 +101,106 @@ export default function DeveloperCompanyDetailsPage() {
         <>
           <CompanyDetailsHeader header={data.header as Record<string, unknown> | undefined} />
           <CompanyOverviewCards metrics={data.metrics as Record<string, unknown> | undefined} />
-
-          <Tabs defaultValue="overview" className="w-full">
-            <div className="overflow-x-auto pb-2 -mx-1 px-1">
-              <TabsList className="inline-flex h-auto min-w-min flex-nowrap justify-start gap-1 bg-muted/40 p-1 rounded-xl">
-                <TabsTrigger value="overview" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Overview
-                </TabsTrigger>
-                <TabsTrigger value="projects" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Projects
-                </TabsTrigger>
-                <TabsTrigger value="harvest" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Harvest
-                </TabsTrigger>
-                <TabsTrigger value="expenses" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Expenses
-                </TabsTrigger>
-                <TabsTrigger value="inventory" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Inventory
-                </TabsTrigger>
-                <TabsTrigger value="employees" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Employees
-                </TabsTrigger>
-                <TabsTrigger value="activity" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Activity
-                </TabsTrigger>
-                <TabsTrigger value="subscription" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Subscription
-                </TabsTrigger>
-                <TabsTrigger value="audit" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
-                  Audit logs
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="overview" className="mt-4 focus-visible:outline-none">
-              <CompanyOverviewTab data={data} />
-            </TabsContent>
-            <TabsContent value="projects" className="mt-4 focus-visible:outline-none">
-              <CompanyProjectsTab projects={(data.projects ?? []) as Record<string, unknown>[]} />
-            </TabsContent>
-            <TabsContent value="harvest" className="mt-4 focus-visible:outline-none">
-              <CompanyHarvestTab
-                harvests={(data.harvests ?? []) as Record<string, unknown>[]}
-                collections={(data.harvest_collections ?? []) as Record<string, unknown>[]}
-                metrics={data.metrics as Record<string, unknown> | undefined}
-              />
-            </TabsContent>
-            <TabsContent value="expenses" className="mt-4 focus-visible:outline-none">
-              <CompanyExpensesTab
-                expenses={(data.expenses ?? []) as Record<string, unknown>[]}
-                byCategory={(data.expense_by_category ?? []) as Record<string, unknown>[]}
-                metrics={data.metrics as Record<string, unknown> | undefined}
-              />
-            </TabsContent>
-            <TabsContent value="inventory" className="mt-4 focus-visible:outline-none">
-              <CompanyInventoryTab
-                items={(data.inventory ?? []) as Record<string, unknown>[]}
-                audit={(data.inventory_audit_recent ?? []) as Record<string, unknown>[]}
-                metrics={data.metrics as Record<string, unknown> | undefined}
-              />
-            </TabsContent>
-            <TabsContent value="employees" className="mt-4 focus-visible:outline-none">
-              <CompanyEmployeesTab
-                employees={(data.employees ?? []) as Record<string, unknown>[]}
-                metrics={data.metrics as Record<string, unknown> | undefined}
-              />
-            </TabsContent>
-            <TabsContent value="activity" className="mt-4 focus-visible:outline-none">
-              <CompanyActivityTimelineTab
-                timeline={timeline}
-                activityLogs={activityLogs}
-                employeeActivity={employeeActivity}
-              />
-            </TabsContent>
-            <TabsContent value="subscription" className="mt-4 focus-visible:outline-none">
-              <CompanySubscriptionTab
-                header={data.header as Record<string, unknown> | undefined}
-                payments={(data.subscription_payments ?? []) as Record<string, unknown>[]}
-              />
-            </TabsContent>
-            <TabsContent value="audit" className="mt-4 focus-visible:outline-none">
-              <CompanyAuditLogsTab companyId={id} />
-            </TabsContent>
-          </Tabs>
         </>
+      )}
+
+      {!isLoading && (
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
+          <div className="overflow-x-auto pb-2 -mx-1 px-1">
+            <TabsList className="inline-flex h-auto min-w-min flex-nowrap justify-start gap-1 bg-muted/40 p-1 rounded-xl">
+              <TabsTrigger value="overview" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="projects" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Projects
+              </TabsTrigger>
+              <TabsTrigger value="harvest" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Harvest
+              </TabsTrigger>
+              <TabsTrigger value="expenses" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Expenses
+              </TabsTrigger>
+              <TabsTrigger value="inventory" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Inventory
+              </TabsTrigger>
+              <TabsTrigger value="employees" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Employees
+              </TabsTrigger>
+              <TabsTrigger value="activity" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Activity
+              </TabsTrigger>
+              <TabsTrigger value="season-challenges" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Season Challenges
+              </TabsTrigger>
+              <TabsTrigger value="audit" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Audit Logs
+              </TabsTrigger>
+              <TabsTrigger value="subscription" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Subscription
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="overview" className="mt-4 focus-visible:outline-none">
+            {data && !error ? (
+              <CompanyOverviewTab data={data} />
+            ) : (
+              <EmptyStateBlock
+                title="Farm intelligence unavailable"
+                description="This overview could not be loaded. Season Challenges and Audit Logs still use the company id from the URL."
+              />
+            )}
+          </TabsContent>
+          <TabsContent value="projects" className="mt-4 focus-visible:outline-none">
+            <CompanyProjectsTab companyId={id} projects={(data?.projects ?? []) as Record<string, unknown>[]} />
+          </TabsContent>
+          <TabsContent value="harvest" className="mt-4 focus-visible:outline-none">
+            <CompanyHarvestTab
+              harvests={(data?.harvests ?? []) as Record<string, unknown>[]}
+              collections={(data?.harvest_collections ?? []) as Record<string, unknown>[]}
+              metrics={data?.metrics as Record<string, unknown> | undefined}
+            />
+          </TabsContent>
+          <TabsContent value="expenses" className="mt-4 focus-visible:outline-none">
+            <CompanyExpensesTab
+              expenses={(data?.expenses ?? []) as Record<string, unknown>[]}
+              byCategory={(data?.expense_by_category ?? []) as Record<string, unknown>[]}
+              metrics={data?.metrics as Record<string, unknown> | undefined}
+            />
+          </TabsContent>
+          <TabsContent value="inventory" className="mt-4 focus-visible:outline-none">
+            <CompanyInventoryTab
+              items={(data?.inventory ?? []) as Record<string, unknown>[]}
+              audit={(data?.inventory_audit_recent ?? []) as Record<string, unknown>[]}
+              metrics={data?.metrics as Record<string, unknown> | undefined}
+            />
+          </TabsContent>
+          <TabsContent value="employees" className="mt-4 focus-visible:outline-none">
+            <CompanyEmployeesTab
+              employees={(data?.employees ?? []) as Record<string, unknown>[]}
+              metrics={data?.metrics as Record<string, unknown> | undefined}
+            />
+          </TabsContent>
+          <TabsContent value="activity" className="mt-4 focus-visible:outline-none">
+            <CompanyActivityTimelineTab
+              timeline={timeline}
+              activityLogs={activityLogs}
+              employeeActivity={employeeActivity}
+            />
+          </TabsContent>
+          <TabsContent value="season-challenges" className="mt-4 focus-visible:outline-none">
+            <CompanySeasonChallengesTab companyId={id} active={tab === 'season-challenges'} />
+          </TabsContent>
+          <TabsContent value="audit" className="mt-4 focus-visible:outline-none">
+            <CompanyAuditLogsTab companyId={id} active={tab === 'audit'} />
+          </TabsContent>
+          <TabsContent value="subscription" className="mt-4 focus-visible:outline-none">
+            <CompanySubscriptionTab
+              header={data?.header as Record<string, unknown> | undefined}
+              payments={(data?.subscription_payments ?? []) as Record<string, unknown>[]}
+            />
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   );

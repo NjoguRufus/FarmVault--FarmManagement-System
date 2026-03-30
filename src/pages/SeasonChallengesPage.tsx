@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, AlertTriangle, CheckCircle, Clock, MoreHorizontal, Edit, ChevronDown, ChevronUp, Cloud, Bug, DollarSign, Users, Wrench as WrenchIcon, Droplets, Package, X } from 'lucide-react';
+import { Plus, AlertTriangle, CheckCircle, Clock, MoreHorizontal, Edit, ChevronDown, ChevronUp, Cloud, DollarSign, Users, Wrench as WrenchIcon, Droplets, Package, X, Flag } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { SeasonChallenge, ChallengeType, InventoryItem, InventoryCategory, NeededItem } from '@/types';
@@ -49,6 +49,7 @@ export default function SeasonChallengesPage() {
     companyId,
     null
   );
+
   if (import.meta.env?.DEV && companyId) {
     console.log('[SeasonChallengesPage] season challenges fetch', {
       scope: 'all-projects',
@@ -161,7 +162,7 @@ export default function SeasonChallengesPage() {
       if (import.meta.env?.DEV) {
         console.log('[SeasonChallengesPage] challenge create', { projectId: activeProject.id, title });
       }
-      await createSeasonChallenge({
+      const created = await createSeasonChallenge({
         companyId: activeProject.companyId,
         projectId: activeProject.id,
         cropType: activeProject.cropType,
@@ -173,12 +174,13 @@ export default function SeasonChallengesPage() {
         stageIndex: activeProject.startingStageIndex ?? 0,
         source: 'field-report',
         createdBy: user?.id,
+        savedAsReusable: false,
       });
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
         console.log('[SeasonChallengesPage] challenge create success, invalidated queries');
       }
-      if (saveAsReusable && activeProject?.companyId && user?.id) {
+      if (saveAsReusable && created?.id && activeProject?.companyId && user?.id) {
         try {
           const { isUpdate } = await upsertChallengeTemplate({
             companyId: activeProject.companyId,
@@ -189,6 +191,7 @@ export default function SeasonChallengesPage() {
             severity,
             createdBy: user.id,
           });
+          await updateSeasonChallenge(created.id, { isReusable: true });
           queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
           toast.success(isUpdate ? 'Reusable template updated.' : 'Reusable template saved.');
         } catch (templateErr) {
@@ -243,6 +246,7 @@ export default function SeasonChallengesPage() {
     } else {
       setEditItemsUsed([]);
     }
+    setSaveAsReusableEdit(Boolean(challenge.isReusable));
     setEditOpen(true);
   };
 
@@ -348,6 +352,8 @@ export default function SeasonChallengesPage() {
           editStatus === 'resolved' && editingChallenge.status !== 'resolved'
             ? new Date().toISOString().slice(0, 10)
             : undefined,
+        // If they uncheck, remove the marker (does not delete the template row).
+        isReusable: Boolean(saveAsReusableEdit),
       });
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
@@ -370,6 +376,8 @@ export default function SeasonChallengesPage() {
             recommendedInput: itemsUsedSummary || undefined,
             createdBy: user.id,
           });
+          // Ensure the marker is set even if the first update was blocked by stale RLS/session.
+          await updateSeasonChallenge(editingChallenge.id, { isReusable: true });
           queryClient.invalidateQueries({ queryKey: ['challengeTemplates'] });
           toast.success(isUpdate ? 'Reusable template updated.' : 'Reusable template saved.');
         } catch (templateErr) {
@@ -585,6 +593,15 @@ export default function SeasonChallengesPage() {
                       <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">{challenge.description}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {challenge.isReusable && (
+                        <span
+                          className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-fv-success/15 text-fv-success border border-fv-success/30"
+                          title="Saved as reusable template"
+                          aria-label="Saved as reusable template"
+                        >
+                          <Flag className="h-3.5 w-3.5" />
+                        </span>
+                      )}
                       {challenge.challengeType && (
                         <span className="fv-badge text-xs bg-muted text-muted-foreground capitalize">
                           {challenge.challengeType}

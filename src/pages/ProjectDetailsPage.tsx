@@ -33,6 +33,7 @@ import {
   SeasonInsightPanel,
 } from '@/components/project-details';
 import { useCollection } from '@/hooks/useCollection';
+import { useProjectStages } from '@/hooks/useProjectStages';
 import { useSeasonChallenges } from '@/hooks/useSeasonChallenges';
 import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import {
@@ -124,19 +125,10 @@ export default function ProjectDetailsPage() {
     'inventoryUsage',
     { ...scope, projectId: projectId ?? null },
   );
-  const { data: allStages = [] } = useCollection<CropStage>(
-    'project-details-stages',
-    'projectStages',
-    { ...scope, projectId: projectId ?? null },
-  );
+  const { data: projectStagesRaw = [] } = useProjectStages(companyId ?? undefined, projectId ?? undefined);
   const projectStages = useMemo(
-    () =>
-      companyId && projectId
-        ? [...allStages]
-            .filter((s) => s.companyId === companyId && s.projectId === projectId)
-            .sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0))
-        : [],
-    [allStages, companyId, projectId],
+    () => [...projectStagesRaw].sort((a, b) => (a.stageIndex ?? 0) - (b.stageIndex ?? 0)),
+    [projectStagesRaw],
   );
   const { data: projectBlocks = [] } = useProjectBlocks(
     companyId,
@@ -721,7 +713,7 @@ export default function ProjectDetailsPage() {
         stage={selectedStageForEdit}
         project={project ? { id: project.id, companyId: project.companyId, cropType: project.cropType } : null}
         createdBy={user?.id ?? ''}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages', companyId, project?.id] })}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
       />
     </div>
   );
