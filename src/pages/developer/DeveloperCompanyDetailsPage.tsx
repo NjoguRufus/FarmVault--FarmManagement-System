@@ -49,6 +49,27 @@ export default function DeveloperCompanyDetailsPage() {
   );
   const timeline = useMemo(() => (data?.timeline ?? []) as ActivityFeedItemData[], [data?.timeline]);
 
+  const projects = useMemo(
+    () => (Array.isArray(data?.projects) ? (data?.projects as Record<string, unknown>[]) : []),
+    [data?.projects],
+  );
+  const harvests = useMemo(
+    () => (Array.isArray(data?.harvests) ? (data?.harvests as Record<string, unknown>[]) : []),
+    [data?.harvests],
+  );
+  const harvestCollections = useMemo(
+    () => (Array.isArray(data?.harvest_collections) ? (data?.harvest_collections as Record<string, unknown>[]) : []),
+    [data?.harvest_collections],
+  );
+  const inventoryItems = useMemo(
+    () => (Array.isArray(data?.inventory) ? (data?.inventory as Record<string, unknown>[]) : []),
+    [data?.inventory],
+  );
+  const inventoryAudit = useMemo(
+    () => (Array.isArray(data?.inventory_audit_recent) ? (data?.inventory_audit_recent as Record<string, unknown>[]) : []),
+    [data?.inventory_audit_recent],
+  );
+
   if (!id) {
     return (
       <div className="fv-card border-destructive/40 bg-destructive/5 p-6 text-destructive text-sm">
@@ -152,12 +173,13 @@ export default function DeveloperCompanyDetailsPage() {
             )}
           </TabsContent>
           <TabsContent value="projects" className="mt-4 focus-visible:outline-none">
-            <CompanyProjectsTab companyId={id} projects={(data?.projects ?? []) as Record<string, unknown>[]} />
+            <CompanyProjectsTab companyId={id} projects={projects} />
           </TabsContent>
           <TabsContent value="harvest" className="mt-4 focus-visible:outline-none">
             <CompanyHarvestTab
-              harvests={(data?.harvests ?? []) as Record<string, unknown>[]}
-              collections={(data?.harvest_collections ?? []) as Record<string, unknown>[]}
+              companyId={id}
+              harvests={harvests}
+              collections={harvestCollections}
               metrics={data?.metrics as Record<string, unknown> | undefined}
             />
           </TabsContent>
@@ -170,8 +192,9 @@ export default function DeveloperCompanyDetailsPage() {
           </TabsContent>
           <TabsContent value="inventory" className="mt-4 focus-visible:outline-none">
             <CompanyInventoryTab
-              items={(data?.inventory ?? []) as Record<string, unknown>[]}
-              audit={(data?.inventory_audit_recent ?? []) as Record<string, unknown>[]}
+              companyId={id}
+              items={inventoryItems}
+              audit={inventoryAudit}
               metrics={data?.metrics as Record<string, unknown> | undefined}
             />
           </TabsContent>

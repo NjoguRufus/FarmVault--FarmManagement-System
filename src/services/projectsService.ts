@@ -240,6 +240,26 @@ export async function getProject(
   return mapProjectRow(data as DbProjectRow);
 }
 
+/** Developer-only: bypass tenant RLS and fetch a project by id (SECURITY DEFINER RPC). */
+export async function developerGetProjectById(projectId: string): Promise<Project | null> {
+  const id = String(projectId ?? '').trim();
+  if (!id) return null;
+
+  const { data, error } = await supabase.rpc('developer_get_project_by_id', {
+    p_project_id: id,
+  });
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      console.warn('[developerGetProjectById] failed', { projectId: id, errorCode: error.code, errorMessage: error.message });
+    }
+    throw error;
+  }
+
+  if (!data) return null;
+  return mapProjectRow(data as DbProjectRow);
+}
+
 export interface CreateProjectInput {
   companyId: string;
   createdBy: string;

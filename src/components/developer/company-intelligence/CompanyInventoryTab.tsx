@@ -4,16 +4,18 @@ import { EmptyStateBlock } from './EmptyStateBlock';
 import { formatDevDateShort, formatNumber } from './utils';
 import { Button } from '@/components/ui/button';
 import { DeveloperRecordDetailsSheet } from './DeveloperRecordDetailsSheet';
+import { DeveloperInventoryItemDetailsSheet } from './DeveloperInventoryItemDetailsSheet';
 
 type Row = Record<string, unknown>;
 
 type Props = {
+  companyId: string;
   items: Row[];
   audit: Row[];
   metrics: Record<string, unknown> | undefined;
 };
 
-export function CompanyInventoryTab({ items, audit, metrics }: Props) {
+export function CompanyInventoryTab({ companyId, items, audit, metrics }: Props) {
   const [selectedItem, setSelectedItem] = useState<Row | null>(null);
   const [selectedAudit, setSelectedAudit] = useState<Row | null>(null);
 
@@ -125,35 +127,12 @@ export function CompanyInventoryTab({ items, audit, metrics }: Props) {
         </table>
       </div>
 
-      <DeveloperRecordDetailsSheet
+      <DeveloperInventoryItemDetailsSheet
         open={Boolean(selectedItem)}
         onOpenChange={(o) => !o && setSelectedItem(null)}
-        title={String(selectedItem?.name ?? 'Inventory item')}
-        description="Inventory inspection (read-only)."
-        recordId={selectedItem ? String(selectedItem.id ?? '') : null}
-        sections={[
-          {
-            title: 'Item',
-            items: [
-              { label: 'Name', value: <Inline icon={<Package className="h-4 w-4" />} value={String(selectedItem?.name ?? '—')} /> },
-              { label: 'Category', value: <Inline icon={<Tag className="h-4 w-4" />} value={String(selectedItem?.category ?? '—')} /> },
-              { label: 'Quantity', value: formatNumber(selectedItem?.current_quantity, 2) },
-              { label: 'Units', value: String(selectedItem?.unit ?? '—') },
-              { label: 'Stock status', value: String(selectedItem?.stock_status ?? '—') },
-              { label: 'Supplier', value: <Inline icon={<Truck className="h-4 w-4" />} value={String(selectedItem?.supplier_name ?? '—')} /> },
-            ],
-          },
-          {
-            title: 'Usage / movement (if available)',
-            items: [
-              { label: 'Last updated', value: formatDevDateShort(selectedItem?.last_updated as string) },
-              { label: 'Min threshold', value: String(selectedItem?.min_threshold ?? selectedItem?.minThreshold ?? '—') },
-              { label: 'Notes', value: String(selectedItem?.notes ?? '—') },
-              { label: 'History pointer', value: String(selectedItem?.history ?? selectedItem?.movement ?? '—') },
-            ],
-          },
-        ]}
-        raw={selectedItem ?? undefined}
+        companyId={companyId}
+        itemId={selectedItem ? String(selectedItem.id ?? '') : ''}
+        summary={selectedItem}
       />
 
       <DeveloperRecordDetailsSheet
