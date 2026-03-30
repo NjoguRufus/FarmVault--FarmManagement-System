@@ -195,7 +195,9 @@ export function buildCropStageCardPropsForProject(
 ): CropStageCardPropsSlice {
   const stages = effectiveStagesForProject(project, allStages);
   const kd = knowledgeDetectionForProject(project, catalog);
-  if (kd) {
+  // Prefer DB or computed planting-date timeline everywhere (Crop Stages, details, dashboard).
+  // Knowledge detection is only for projects with no stage timeline rows at all.
+  if (kd && stages.length === 0) {
     return {
       projectName: project.name,
       stages,

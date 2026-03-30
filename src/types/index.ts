@@ -790,6 +790,8 @@ export interface SeasonChallenge {
   cropType: CropType;
   title: string;
   description: string;
+  /** True when this challenge was saved as a reusable template for future projects. */
+  isReusable?: boolean;
   challengeType?: ChallengeType; // Type of challenge (weather, pests, prices, etc.)
   stageIndex?: number; // Link to crop stage
   stageName?: string; // Denormalized stage name

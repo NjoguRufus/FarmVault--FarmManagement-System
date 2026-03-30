@@ -1,6 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Calendar, Eye, HandCoins, Leaf, Package, Scale, UserRound } from 'lucide-react';
 import { EmptyStateBlock } from './EmptyStateBlock';
 import { formatDevDateShort, formatMoney, formatNumber } from './utils';
+import { Button } from '@/components/ui/button';
+import { DeveloperRecordDetailsSheet } from './DeveloperRecordDetailsSheet';
 
 type Row = Record<string, unknown>;
 
@@ -11,6 +14,8 @@ type Props = {
 };
 
 export function CompanyHarvestTab({ harvests, collections, metrics }: Props) {
+  const [selected, setSelected] = useState<{ kind: 'collection' | 'harvest'; row: Row } | null>(null);
+
   const cropMix = useMemo(() => {
     const m = new Map<string, number>();
     for (const h of harvests) {
@@ -72,6 +77,7 @@ export function CompanyHarvestTab({ harvests, collections, metrics }: Props) {
                 <th className="py-2 text-right font-medium">Buyer / unit</th>
                 <th className="py-2 text-left font-medium">Status</th>
                 <th className="py-2 text-left font-medium">Crop</th>
+                <th className="py-2 text-right font-medium">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -88,6 +94,18 @@ export function CompanyHarvestTab({ harvests, collections, metrics }: Props) {
                   </td>
                   <td className="py-2 text-xs">{String(c.status ?? '—')}</td>
                   <td className="py-2 text-xs text-muted-foreground">{String(c.crop_type ?? '—')}</td>
+                  <td className="py-2 text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 px-2 text-xs"
+                      onClick={() => setSelected({ kind: 'collection', row: c })}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -111,6 +129,7 @@ export function CompanyHarvestTab({ harvests, collections, metrics }: Props) {
                 <th className="py-2 text-left font-medium">Buyer</th>
                 <th className="py-2 text-left font-medium">Paid</th>
                 <th className="py-2 text-left font-medium">Recorded by</th>
+                <th className="py-2 text-right font-medium">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -126,12 +145,88 @@ export function CompanyHarvestTab({ harvests, collections, metrics }: Props) {
                   <td className="py-2 text-xs max-w-[100px] truncate">{String(h.buyer_name ?? '—')}</td>
                   <td className="py-2 text-xs">{h.buyer_paid === true ? 'Yes' : 'No'}</td>
                   <td className="py-2 font-mono text-[11px] text-muted-foreground">{String(h.created_by ?? '—')}</td>
+                  <td className="py-2 text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 px-2 text-xs"
+                      onClick={() => setSelected({ kind: 'harvest', row: h })}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      <DeveloperRecordDetailsSheet
+        open={Boolean(selected)}
+        onOpenChange={(o) => !o && setSelected(null)}
+        title={
+          selected?.kind === 'collection'
+            ? String(selected?.row.collection_label ?? 'Harvest collection')
+            : String(selected?.row.project_name ?? 'Harvest record')
+        }
+        description={selected?.kind === 'collection' ? 'Harvest collection inspection (read-only).' : 'Harvest record inspection (read-only).'}
+        recordId={selected ? String(selected.row.id ?? '') : null}
+        sections={
+          selected?.kind === 'collection'
+            ? [
+                {
+                  title: 'Collection',
+                  items: [
+                    { label: 'Collection', value: <Inline icon={<Package className="h-4 w-4" />} value={String(selected.row.collection_label ?? '—')} /> },
+                    { label: 'Project', value: String(selected.row.project_name ?? '—') },
+                    { label: 'Status', value: String(selected.row.status ?? '—') },
+                    { label: 'Crop', value: <Inline icon={<Leaf className="h-4 w-4" />} value={String(selected.row.crop_type ?? '—')} /> },
+                  ],
+                },
+                {
+                  title: 'Totals',
+                  items: [
+                    { label: 'Total kg', value: <Inline icon={<Scale className="h-4 w-4" />} value={formatNumber(selected.row.total_kg, 2)} /> },
+                    { label: 'Pickers', value: <Inline icon={<UserRound className="h-4 w-4" />} value={formatNumber(selected.row.picker_count)} /> },
+                    { label: 'Paid out', value: <Inline icon={<HandCoins className="h-4 w-4" />} value={formatMoney(selected.row.total_paid)} /> },
+                    { label: 'Buyer price', value: formatMoney(selected.row.buyer_price_per_unit) },
+                    { label: 'Unit', value: String(selected.row.unit ?? '—') },
+                  ],
+                },
+              ]
+            : [
+                {
+                  title: 'Harvest record',
+                  items: [
+                    { label: 'Project', value: String(selected?.row.project_name ?? '—') },
+                    { label: 'Crop', value: <Inline icon={<Leaf className="h-4 w-4" />} value={String(selected?.row.project_crop ?? '—')} /> },
+                    { label: 'Date', value: <Inline icon={<Calendar className="h-4 w-4" />} value={formatDevDateShort(selected?.row.harvest_date as string)} /> },
+                    { label: 'Recorded by', value: String(selected?.row.created_by ?? '—'), mono: true },
+                  ],
+                },
+                {
+                  title: 'Quantity & pricing',
+                  items: [
+                    { label: 'Quantity', value: <Inline icon={<Scale className="h-4 w-4" />} value={formatNumber(selected?.row.quantity, 2)} /> },
+                    { label: 'Unit', value: String(selected?.row.unit ?? '—') },
+                    { label: 'Price / unit', value: formatMoney(selected?.row.price_per_unit) },
+                    { label: 'Total value', value: formatMoney(selected?.row.total_value) },
+                  ],
+                },
+                {
+                  title: 'Buyer & settlement',
+                  items: [
+                    { label: 'Buyer', value: String(selected?.row.buyer_name ?? '—') },
+                    { label: 'Buyer paid', value: selected?.row.buyer_paid === true ? 'Yes' : 'No' },
+                  ],
+                },
+              ]
+        }
+        raw={selected?.row ?? undefined}
+      />
     </div>
   );
 }
@@ -142,5 +237,14 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</p>
       <p className="text-lg font-semibold tabular-nums">{value}</p>
     </div>
+  );
+}
+
+function Inline({ icon, value }: { icon: React.ReactNode; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="min-w-0">{value}</span>
+    </span>
   );
 }

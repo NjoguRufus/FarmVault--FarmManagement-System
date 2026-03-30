@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Plus, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Plus, ChevronRight, Flag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { SeasonChallenge } from '@/types';
@@ -21,6 +21,8 @@ export interface ProjectChallengesPanelProps {
   onViewAll: () => void;
   /** Limit how many to show in the panel */
   limit?: number;
+  /** When true, hides mutation actions (e.g. Developer Console view). */
+  readOnly?: boolean;
 }
 
 export function ProjectChallengesPanel({
@@ -28,6 +30,7 @@ export function ProjectChallengesPanel({
   onAddChallenge,
   onViewAll,
   limit = 5,
+  readOnly = false,
 }: ProjectChallengesPanelProps) {
   const openChallenges = challenges.filter(
     (c) => String(c.status).toLowerCase() !== 'resolved'
@@ -47,10 +50,12 @@ export function ProjectChallengesPanel({
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           Season Challenges
         </h3>
-        <Button variant="ghost" size="sm" onClick={onAddChallenge}>
-          <Plus className="h-4 w-4 mr-1" />
-          Add Challenge
-        </Button>
+        {!readOnly ? (
+          <Button variant="ghost" size="sm" onClick={onAddChallenge}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add Challenge
+          </Button>
+        ) : null}
       </div>
 
       {!challenges.length ? (
@@ -86,9 +91,20 @@ export function ProjectChallengesPanel({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-foreground truncate">{c.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground capitalize">
-                    {c.severity} · {c.status}
-                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                    {c.isReusable && (
+                      <span
+                        className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-fv-success/15 text-fv-success border border-fv-success/30"
+                        title="Saved as reusable template"
+                        aria-label="Saved as reusable template"
+                      >
+                        <Flag className="h-3 w-3" />
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground capitalize">
+                      {c.severity} · {c.status}
+                    </span>
+                  </div>
                 </div>
               </li>
             );

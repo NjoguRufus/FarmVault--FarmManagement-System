@@ -4,6 +4,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { useProject } from '@/contexts/ProjectContext';
 import { cn, parseQuantityOrFraction } from '@/lib/utils';
 import { useCollection } from '@/hooks/useCollection';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, Expense, ExpenseCategory, OperationsWorkCard } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWorkCardsForCompany, useWorkCardsForManager, useInvalidateWorkCards } from '@/hooks/useWorkCards';
@@ -68,7 +69,7 @@ export default function ManagerOperationsPage() {
   // Fetch data from Firestore
   const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
   const { data: company } = useQuery({
     queryKey: ['company', user?.companyId],

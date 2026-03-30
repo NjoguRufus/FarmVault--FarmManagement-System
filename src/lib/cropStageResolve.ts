@@ -67,7 +67,13 @@ export function resolveCurrentStage(
 
   const activeByStatus = normalized.find(({ stage }) => {
     const status = String(stage.status || '').toLowerCase();
-    return status === 'active';
+    return (
+      status === 'active' ||
+      status === 'in-progress' ||
+      status === 'in_progress' ||
+      status === 'ongoing' ||
+      status === 'current'
+    );
   });
 
   const activeByDateRange = normalized.find(({ start, end }) => {

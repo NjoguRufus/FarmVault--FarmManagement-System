@@ -663,8 +663,6 @@ export default function DeveloperCompaniesPage() {
                 const displayName = c.company_name ?? c.name ?? '—';
                 const lowerName = displayName.trim().toLowerCase();
                 const isProtectedCompany =
-                  // KeyFarm is always protected
-                  id === 'fa61d13d-3466-48db-a39c-4a474ccfed58' ||
                   lowerName === 'keyfarm' ||
                   // Any company that is currently active in this session
                   (activeCompanyId != null && id === activeCompanyId);

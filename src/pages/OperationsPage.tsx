@@ -7,6 +7,7 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
 import { useCollection } from '@/hooks/useCollection';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, User, Expense, ExpenseCategory, OperationsWorkCard } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -76,7 +77,7 @@ export default function OperationsPage() {
   const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
   const { data: allUsers = [] } = useCollection<User>('ops-users', 'users', scope);
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
   const { data: allInventoryItems = [] } = useCollection<InventoryItem>('inventoryItems', 'inventoryItems', scope);
   // Available categories = only those that exist in company inventory (for plan work / inputs)
   const availableCategories = useMemo(() => {

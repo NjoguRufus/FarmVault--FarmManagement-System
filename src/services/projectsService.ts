@@ -38,8 +38,29 @@ type DbStageRow = {
   actual_end_date: string | null;
 };
 
-function toDate(value: string | null): Date {
-  return value ? new Date(value) : (undefined as unknown as Date);
+function parseDay(value: string | null | undefined): Date | undefined {
+  if (value == null || String(value).trim() === '') return undefined;
+  const d = new Date(`${String(value).slice(0, 10)}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function deriveStageStatus(row: DbStageRow): CropStage['status'] {
+  const progress = Number(row.progress ?? 0);
+  if (progress >= 100) return 'completed';
+  if (row.is_current) return 'in-progress';
+  const start = parseDay(row.start_date);
+  const end = parseDay(row.end_date);
+  if (start && end) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const s = new Date(start);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(end);
+    e.setHours(0, 0, 0, 0);
+    if (today > e) return 'completed';
+    if (today >= s && today <= e) return 'in-progress';
+  }
+  return 'pending';
 }
 
 function mapProjectRow(row: DbProjectRow): Project {
@@ -74,26 +95,58 @@ function mapProjectRow(row: DbProjectRow): Project {
   };
 }
 
-function mapStageRow(row: DbStageRow): CropStage {
+function mapStageRow(row: DbStageRow, stageIndex: number, cropType?: string): CropStage {
   return {
     id: row.id,
     projectId: row.project_id,
     companyId: row.company_id,
-    cropType: '' as any,
+    cropType: (cropType ?? '') as Project['cropType'],
     stageName: row.stage_name,
-    stageIndex: 0,
-    startDate: row.start_date ? new Date(row.start_date) : undefined,
-    endDate: row.end_date ? new Date(row.end_date) : undefined,
-    plannedStartDate: row.planned_start_date ? new Date(row.planned_start_date) : undefined,
-    plannedEndDate: row.planned_end_date ? new Date(row.planned_end_date) : undefined,
-    actualStartDate: row.actual_start_date ? new Date(row.actual_start_date) : undefined,
-    actualEndDate: row.actual_end_date ? new Date(row.actual_end_date) : undefined,
-    status: row.is_current ? 'in-progress' : 'pending',
+    stageIndex,
+    startDate: parseDay(row.start_date),
+    endDate: parseDay(row.end_date),
+    plannedStartDate: parseDay(row.planned_start_date),
+    plannedEndDate: parseDay(row.planned_end_date),
+    actualStartDate: parseDay(row.actual_start_date),
+    actualEndDate: parseDay(row.actual_end_date),
+    status: deriveStageStatus(row),
     notes: undefined,
     recalculated: false,
     recalculatedAt: undefined,
     recalculationReason: undefined,
   };
+}
+
+const STAGE_SELECT = `
+  id,
+  company_id,
+  project_id,
+  stage_key,
+  stage_name,
+  start_date,
+  end_date,
+  is_current,
+  progress,
+  planned_start_date,
+  planned_end_date,
+  actual_start_date,
+  actual_end_date
+`;
+
+function sortStageRows(rows: DbStageRow[]): DbStageRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = a.start_date ? new Date(`${a.start_date}T12:00:00`).getTime() : 0;
+    const tb = b.start_date ? new Date(`${b.start_date}T12:00:00`).getTime() : 0;
+    if (ta !== tb) return ta - tb;
+    const ea = a.end_date ? new Date(`${a.end_date}T12:00:00`).getTime() : 0;
+    const eb = b.end_date ? new Date(`${b.end_date}T12:00:00`).getTime() : 0;
+    if (ea !== eb) return ea - eb;
+    return String(a.stage_name ?? '').localeCompare(String(b.stage_name ?? ''));
+  });
+}
+
+function mapSortedStageRows(rows: DbStageRow[], cropType?: string): CropStage[] {
+  return sortStageRows(rows).map((row, index) => mapStageRow(row, index, cropType));
 }
 
 export async function listProjects(companyId: string | null): Promise<Project[]> {
@@ -281,22 +334,13 @@ export async function deleteProject(projectId: string): Promise<void> {
   });
 }
 
-export async function listProjectStages(projectId: string): Promise<CropStage[]> {
+export async function listProjectStages(
+  projectId: string,
+  options?: { cropType?: string },
+): Promise<CropStage[]> {
   const { data, error } = await db.projects()
     .from('project_stages')
-    .select(
-      `
-      id,
-      company_id,
-      project_id,
-      stage_key,
-      stage_name,
-      start_date,
-      end_date,
-      is_current,
-      progress
-    `,
-    )
+    .select(STAGE_SELECT)
     .eq('project_id', projectId)
     .order('start_date', { ascending: true });
 
@@ -304,7 +348,174 @@ export async function listProjectStages(projectId: string): Promise<CropStage[]>
     throw error;
   }
 
-  return (data ?? []).map((row) => mapStageRow(row as DbStageRow));
+  let cropType = options?.cropType;
+  if (cropType == null) {
+    const { data: prow } = await db.projects()
+      .from('projects')
+      .select('crop_type')
+      .eq('id', projectId)
+      .maybeSingle();
+    cropType = (prow as { crop_type?: string } | null)?.crop_type;
+  }
+
+  return mapSortedStageRows((data ?? []) as DbStageRow[], cropType);
+}
+
+/** All `projects.project_stages` rows for a company (dashboards, crop stages list). */
+export async function listCompanyProjectStages(companyId: string): Promise<CropStage[]> {
+  const cid = requireCompanyId(companyId);
+  const { data, error } = await db.projects()
+    .from('project_stages')
+    .select(STAGE_SELECT)
+    .eq('company_id', cid)
+    .order('project_id', { ascending: true })
+    .order('start_date', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = (data ?? []) as DbStageRow[];
+  const byProject = new Map<string, DbStageRow[]>();
+  for (const row of rows) {
+    const list = byProject.get(row.project_id) ?? [];
+    list.push(row);
+    byProject.set(row.project_id, list);
+  }
+
+  const out: CropStage[] = [];
+  for (const [, group] of byProject) {
+    out.push(...mapSortedStageRows(group));
+  }
+
+  const projectIds = [...new Set(out.map((s) => s.projectId))];
+  if (projectIds.length === 0) return out;
+
+  const { data: prows, error: projErr } = await db.projects()
+    .from('projects')
+    .select('id,crop_type')
+    .in('id', projectIds);
+  if (projErr || !prows?.length) return out;
+
+  const cmap = new Map((prows as { id: string; crop_type: string }[]).map((p) => [p.id, p.crop_type]));
+  return out.map((s) => ({
+    ...s,
+    cropType: (cmap.get(s.projectId) ?? s.cropType) as Project['cropType'],
+  }));
+}
+
+export async function updateProjectStageRecord(
+  stageId: string,
+  patch: {
+    startDate?: string | null;
+    endDate?: string | null;
+    isCurrent?: boolean;
+    progress?: number;
+  },
+): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (patch.startDate !== undefined) payload.start_date = patch.startDate;
+  if (patch.endDate !== undefined) payload.end_date = patch.endDate;
+  if (patch.isCurrent !== undefined) payload.is_current = patch.isCurrent;
+  if (patch.progress !== undefined) payload.progress = patch.progress;
+  if (Object.keys(payload).length === 0) return;
+
+  const { error } = await db.projects().from('project_stages').update(payload).eq('id', stageId);
+  if (error) {
+    throw error;
+  }
+}
+
+export async function insertProjectStage(input: {
+  companyId: string;
+  projectId: string;
+  stageKey: string;
+  stageName: string;
+  startDate: string;
+  endDate: string | null;
+  isCurrent: boolean;
+}): Promise<CropStage> {
+  const companyId = requireCompanyId(input.companyId);
+  const { data, error } = await db.projects()
+    .from('project_stages')
+    .insert({
+      company_id: companyId,
+      project_id: input.projectId,
+      stage_key: input.stageKey,
+      stage_name: input.stageName,
+      start_date: input.startDate,
+      end_date: input.endDate,
+      is_current: input.isCurrent,
+      progress: 0,
+    })
+    .select(STAGE_SELECT)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const row = data as DbStageRow;
+  return mapStageRow(row, 0, undefined);
+}
+
+/**
+ * Mark one stage complete (today), clear `is_current` on all project stages, then activate the next row or insert it.
+ */
+export async function completeProjectStageAndAdvanceNext(params: {
+  companyId: string;
+  projectId: string;
+  completedStageId: string;
+  next?: {
+    stageKey: string;
+    stageName: string;
+    endDate: string | null;
+  };
+}): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const stages = await listProjectStages(params.projectId);
+  const orderedIds = stages.map((s) => s.id);
+  const completedIdx = orderedIds.indexOf(params.completedStageId);
+  if (completedIdx < 0) {
+    throw new Error('Stage not found for project');
+  }
+
+  await db.projects()
+    .from('project_stages')
+    .update({ is_current: false })
+    .eq('project_id', params.projectId);
+
+  await updateProjectStageRecord(params.completedStageId, {
+    endDate: today,
+    progress: 100,
+    isCurrent: false,
+  });
+
+  const nextStage = stages[completedIdx + 1] ?? null;
+  if (nextStage && !String(nextStage.id).startsWith('placeholder')) {
+    const end =
+      params.next?.endDate ??
+      (nextStage.endDate ? nextStage.endDate.toISOString().slice(0, 10) : null);
+    await updateProjectStageRecord(nextStage.id, {
+      startDate: today,
+      endDate: end,
+      isCurrent: true,
+      progress: 0,
+    });
+    return;
+  }
+
+  if (params.next) {
+    await insertProjectStage({
+      companyId: params.companyId,
+      projectId: params.projectId,
+      stageKey: params.next.stageKey,
+      stageName: params.next.stageName,
+      startDate: today,
+      endDate: params.next.endDate,
+      isCurrent: true,
+    });
+  }
 }
 
 export async function updateStageDates(

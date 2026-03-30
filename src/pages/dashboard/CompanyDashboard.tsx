@@ -76,6 +76,7 @@ import {
   buildFarmProgressRowForProject,
   projectFarmLifecycle,
 } from '@/lib/farmProgressFromProject';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { isProjectClosed } from '@/lib/projectClosed';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
@@ -203,11 +204,7 @@ export function CompanyDashboard() {
       pricePerUnit: row.average_cost ?? 0,
     })) as InventoryItem[],
   [inventoryStockRows]);
-  const { data: allStages = [] } = useCollection<CropStage>(
-    'dashboard-stages',
-    'projectStages',
-    { companyScoped: true, companyId, isDeveloper }
-  );
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
   const { data: projectWorkCards = [] } = useWorkCardsForProject(
     activeProject?.id ?? null,
     companyId || null
@@ -575,6 +572,8 @@ export function CompanyDashboard() {
   }, [activeProject, activeProjectKnowledge, activeProjectDetectedStage?.environmentDayAdjustment]);
   const activeProjectKnowledgeDetection = useMemo(() => {
     if (!activeProjectDetectedStage || !activeProject) return null;
+    // Match farmProgressFromProject: timeline (saved stages or computed from planting) wins over catalog detection.
+    if (effectiveActiveProjectStages.length > 0) return null;
     const stageDurationDays = Math.max(
       1,
       activeProjectDetectedStage.stage.baseDayEnd - activeProjectDetectedStage.stage.baseDayStart + 1,
@@ -606,6 +605,7 @@ export function CompanyDashboard() {
     activeProjectDaysRemainingToNextStage,
     activeProjectKnowledge?.baseCycleDays,
     activeProjectEstimatedHarvestStartDate,
+    effectiveActiveProjectStages.length,
   ]);
   const activeStageOverride = useMemo<CropStage | null>(() => {
     if (!activeProject || !activeProjectStageLabel || activeProjectDetectedStage) return null;

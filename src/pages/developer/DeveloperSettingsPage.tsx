@@ -124,7 +124,7 @@ export default function DeveloperSettingsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { user, isDeveloper, effectiveAccess, forceDeveloperMode } = useAuth();
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [companySearch, setCompanySearch] = useState<string>('');
   const [roleDraft, setRoleDraft] = useState<string>('');
   const [companyNameDraft, setCompanyNameDraft] = useState<string>('');
@@ -608,7 +608,7 @@ export default function DeveloperSettingsPage() {
                 className="h-8 text-xs mb-2"
               />
               <Select
-                value={selectedCompanyId}
+                value={selectedCompanyId ?? ''}
                 onValueChange={(val) => setSelectedCompanyId(val)}
               >
                 <SelectTrigger className="h-9 text-sm">

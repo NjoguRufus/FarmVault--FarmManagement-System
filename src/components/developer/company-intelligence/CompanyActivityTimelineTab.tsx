@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { EmptyStateBlock } from './EmptyStateBlock';
 import { ActivityFeedItem, type ActivityFeedItemData } from './ActivityFeedItem';
+import { DeveloperRecordDetailsSheet } from './DeveloperRecordDetailsSheet';
 
 type Props = {
   timeline: ActivityFeedItemData[];
@@ -15,6 +16,8 @@ function toTime(v: unknown): number {
 }
 
 export function CompanyActivityTimelineTab({ timeline, activityLogs, employeeActivity }: Props) {
+  const [selected, setSelected] = useState<ActivityFeedItemData | null>(null);
+
   const merged = useMemo(() => {
     const rows: ActivityFeedItemData[] = [...timeline, ...activityLogs, ...employeeActivity];
     rows.sort((x, y) => toTime(y.at) - toTime(x.at));
@@ -30,6 +33,13 @@ export function CompanyActivityTimelineTab({ timeline, activityLogs, employeeAct
 
     return deduped.slice(0, 180);
   }, [timeline, activityLogs, employeeActivity]);
+
+  const wired = useMemo(() => {
+    return merged.map((item) => ({
+      ...item,
+      __onViewDetails: () => setSelected(item),
+    })) as ActivityFeedItemData[];
+  }, [merged]);
 
   if (!merged.length) {
     return (
@@ -47,10 +57,37 @@ export function CompanyActivityTimelineTab({ timeline, activityLogs, employeeAct
         Aggregated from module tables plus activity logs. Read-only intelligence for developers.
       </p>
       <div className="mt-4 divide-y divide-border/40">
-        {merged.map((item, i) => (
+        {wired.map((item, i) => (
           <ActivityFeedItem key={`${item.at}-${i}`} item={item} />
         ))}
       </div>
+
+      <DeveloperRecordDetailsSheet
+        open={Boolean(selected)}
+        onOpenChange={(o) => !o && setSelected(null)}
+        title={String(selected?.title ?? 'Activity')}
+        description="Activity inspection (read-only)."
+        sections={[
+          {
+            title: 'Event',
+            items: [
+              { label: 'Action', value: String(selected?.event_type ?? '—') },
+              { label: 'Module', value: String(selected?.module ?? '—') },
+              { label: 'Actor', value: String(selected?.actor ?? '—'), mono: true },
+              { label: 'Date/time', value: String(selected?.at ?? '—') },
+              { label: 'Project', value: String(selected?.project_name ?? '—') },
+            ],
+          },
+          {
+            title: 'Message',
+            items: [
+              { label: 'Title', value: String(selected?.title ?? '—') },
+              { label: 'Subtitle', value: String(selected?.subtitle ?? '—') },
+            ],
+          },
+        ]}
+        raw={selected ?? undefined}
+      />
     </div>
   );
 }

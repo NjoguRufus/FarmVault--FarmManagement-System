@@ -6,7 +6,7 @@ import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { useStaff } from '@/contexts/StaffContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { CropStageProgressCard } from '@/components/dashboard';
-import { useCollection } from '@/hooks/useCollection';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import type { CropStage } from '@/types';
 import type { EnvironmentType } from '@/types';
 import {
@@ -25,6 +25,7 @@ import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogSe
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { computedTimelineStagesForProject } from '@/lib/farmProgressFromProject';
 
 export function StaffDashboard() {
   const { user, employeeProfile } = useAuth();
@@ -35,17 +36,8 @@ export function StaffDashboard() {
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
 
   const companyId = user?.companyId ?? null;
-  const isDeveloper = user?.role === 'developer';
 
-  const { data: allStages = [] } = useCollection<CropStage>(
-    'staff-dashboard-stages',
-    'projectStages',
-    {
-      companyScoped: true,
-      companyId,
-      isDeveloper,
-    },
-  );
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
 
   const companyProjects = useMemo(() => {
     const byCompany = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
@@ -66,6 +58,13 @@ export function StaffDashboard() {
         hasProjectAccess(s.projectId),
     );
   }, [allStages, activeProject, companyId, hasProjectAccess]);
+
+  /** Same as company dashboard: saved stages, else planting-date timeline from config. */
+  const effectiveActiveProjectStages = useMemo(() => {
+    if (!activeProject) return [];
+    if (activeProjectStages.length > 0) return activeProjectStages;
+    return computedTimelineStagesForProject(activeProject);
+  }, [activeProject, activeProjectStages]);
 
   const canSeeCropStage =
     can('planning', 'view') ||
@@ -178,8 +177,13 @@ export function StaffDashboard() {
   ]);
 
   const resolvedKnowledgeDetection = useMemo(() => {
+    if (effectiveActiveProjectStages.length > 0) return null;
     return activeProjectKnowledgeDetection ?? fallbackKnowledgeDetection;
-  }, [activeProjectKnowledgeDetection, fallbackKnowledgeDetection]);
+  }, [
+    effectiveActiveProjectStages.length,
+    activeProjectKnowledgeDetection,
+    fallbackKnowledgeDetection,
+  ]);
   const activeStageOverride = useMemo<CropStage | null>(() => {
     if (!activeProject || !activeProjectStageLabel || activeProjectDetectedStage) return null;
     return {
@@ -313,7 +317,7 @@ export function StaffDashboard() {
       <div className="space-y-3">
         <CropStageProgressCard
           projectName={activeProject?.name}
-          stages={activeProjectStages}
+          stages={effectiveActiveProjectStages}
           activeStageOverride={canSeeCropStage ? activeStageOverride : undefined}
           knowledgeDetection={canSeeCropStage ? resolvedKnowledgeDetection ?? undefined : undefined}
           recentActivityLogs={canSeeCropStage ? activityLogs : undefined}

@@ -2,7 +2,8 @@ import React, { useMemo } from 'react';
 import { CalendarDays, CheckCircle, Clock, TrendingUp, Wrench, Package } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
-import { WorkLog, Project, CropStage, Employee } from '@/types';
+import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
+import { WorkLog, Project, Employee } from '@/types';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -17,7 +18,7 @@ export function EmployeeDashboard() {
 
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
   const { data: allProjects = [] } = useCollection<Project>('projects', 'projects', scope);
-  const { data: allStages = [] } = useCollection<CropStage>('projectStages', 'projectStages', scope);
+  const { data: allStages = [] } = useCompanyProjectStages(companyId);
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
 
   // Find employee record for current user (match by name or email)
