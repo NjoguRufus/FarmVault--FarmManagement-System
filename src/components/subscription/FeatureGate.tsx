@@ -7,13 +7,15 @@
 import React from 'react';
 import { Lock, Sparkles, ArrowRight } from 'lucide-react';
 import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
-import { getFeatureInfo, type FeatureKey } from '@/config/featureAccess';
+import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import type { SubscriptionFeatureKey } from '@/config/subscriptionFeatureMatrix';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 
 export interface FeatureGateProps {
   /** The feature key to check access for */
-  feature: FeatureKey;
+  feature: SubscriptionFeatureKey;
   /** Optional custom title for the lock overlay */
   title?: string;
   /** Optional custom description */
@@ -37,8 +39,8 @@ export function FeatureGate({
   className,
   onUpgradeClick,
 }: FeatureGateProps) {
-  const { canAccessFeature, plan, isTrial, status, isLoading, isDeveloper } =
-    useEffectivePlanAccess();
+  const { plan, isTrial, status, isLoading, isDeveloper } = useEffectivePlanAccess();
+  const { canAccess } = useFeatureAccess(feature);
 
   // Loading state
   if (isLoading) {
@@ -54,26 +56,22 @@ export function FeatureGate({
     return <>{children}</>;
   }
 
-  const allowed = canAccessFeature(feature);
-
   // If allowed, render children normally
-  if (allowed) {
+  if (canAccess) {
     return <>{children}</>;
   }
 
-  // Get feature info for display
-  const featureInfo = getFeatureInfo(feature);
-  const displayTitle = title ?? featureInfo?.label ?? 'Pro Feature';
+  const displayTitle = title ?? 'This feature is available on Pro';
   const displayDescription =
     description ??
-    featureInfo?.description ??
-    'This feature requires a Pro subscription.';
+    'Upgrade to Pro to unlock advanced tools and insights.';
 
   const handleUpgrade = () => {
     if (onUpgradeClick) {
       onUpgradeClick();
     } else {
-      window.location.href = '/billing';
+      // Default: open upgrade prompt (billing modal) without hiding locked pages/features.
+      openUpgradeModal({ checkoutPlan: 'pro' });
     }
   };
 
@@ -166,7 +164,7 @@ export function ProBadge({ className }: { className?: string }) {
  * FeatureLockedButton - A button that shows locked state for Basic users.
  */
 export interface FeatureLockedButtonProps {
-  feature: FeatureKey;
+  feature: SubscriptionFeatureKey;
   children: React.ReactNode;
   onClick?: () => void;
   className?: string;
@@ -180,10 +178,9 @@ export function FeatureLockedButton({
   className,
   disabled,
 }: FeatureLockedButtonProps) {
-  const { canAccessFeature, isDeveloper, isLoading } = useEffectivePlanAccess();
-  const featureInfo = getFeatureInfo(feature);
-
-  const canAccess = isDeveloper || canAccessFeature(feature);
+  const { isDeveloper, isLoading } = useEffectivePlanAccess();
+  const { canAccess } = useFeatureAccess(feature);
+  const allowed = isDeveloper || canAccess;
 
   if (isLoading) {
     return (
@@ -193,13 +190,13 @@ export function FeatureLockedButton({
     );
   }
 
-  if (!canAccess) {
+  if (!allowed) {
     return (
       <Button
         className={cn('gap-2 cursor-not-allowed', className)}
         variant="outline"
         disabled
-        title={`${featureInfo?.label ?? 'This feature'} requires Pro`}
+        title="This feature requires Pro"
       >
         <Lock className="h-3.5 w-3.5" />
         {children}

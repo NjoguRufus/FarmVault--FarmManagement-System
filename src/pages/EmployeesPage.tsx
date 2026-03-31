@@ -64,6 +64,9 @@ import { ROLE_PRESET_LABELS, ROLE_PRESET_KEYS, roleToPreset, presetToLegacyRole 
 import { logActivity } from '@/services/employeeAccessService';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { BASIC_LIMITS } from '@/config/basicLimits';
+import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 
 type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
@@ -261,6 +264,14 @@ export default function EmployeesPage() {
   const [editPermissionsFlat, setEditPermissionsFlat] = useState<Record<string, boolean>>({});
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const planAccess = useEffectivePlanAccess();
+  const isProTier =
+    planAccess.isDeveloper || planAccess.plan === 'enterprise' || planAccess.isOverride || planAccess.plan === 'pro';
+
+  const openUpgrade = () => {
+    openUpgradeModal({ checkoutPlan: 'pro' });
+    setUpgradeOpen(true);
+  };
 
   type EmployeeSection = 'active' | 'invited' | 'draft' | 'archived';
   const [section, setSection] = useState<EmployeeSection>('active');
@@ -560,7 +571,7 @@ export default function EmployeesPage() {
       return;
     }
     if (!canWrite) {
-      setUpgradeOpen(true);
+      openUpgrade();
       return;
     }
     setSaving(true);
@@ -570,6 +581,16 @@ export default function EmployeesPage() {
         toast.error('Cannot add employee', {
           description: 'Your account is not linked to a company. Please contact support or sign in with a company admin account.',
         });
+        return;
+      }
+
+      // Basic plan enforcement: cap employees unless Pro.
+      const countedEmployees = companyEmployees.filter((emp) => emp.status !== 'archived').length;
+      if (!isProTier && countedEmployees >= BASIC_LIMITS.maxEmployees) {
+        toast.error('Employee limit reached', {
+          description: `Basic allows up to ${BASIC_LIMITS.maxEmployees} employees. Upgrade to Pro for unlimited employees.`,
+        });
+        openUpgrade();
         return;
       }
 

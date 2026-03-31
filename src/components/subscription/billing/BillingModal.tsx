@@ -53,8 +53,8 @@ export function BillingModal({
   });
   const workspaceName = companyDoc?.name ?? null;
 
-  const [plan, setPlan] = useState<BillingSubmissionPlan>('basic');
-  const [cycle, setCycle] = useState<BillingSubmissionCycle>('monthly');
+  const [plan, setPlan] = useState<BillingSubmissionPlan>(() => checkoutPlan ?? 'basic');
+  const [cycle, setCycle] = useState<BillingSubmissionCycle>(() => checkoutCycle ?? 'monthly');
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const upgradeOpenTrackedRef = useRef(false);

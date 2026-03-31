@@ -755,6 +755,60 @@ export async function getCompanyRecordCrops(companyId: string): Promise<RecordCr
   return (data as RecordCropCard[] | null) ?? [];
 }
 
+export type ResolvedRecordCrop = {
+  crop_id: string;
+  crop_name: string;
+  slug: string;
+  is_global: boolean;
+};
+
+function looksLikeSlug(value: string): boolean {
+  const v = (value ?? '').trim();
+  if (!v) return false;
+  // Heuristic: our slugs are lowercase, often contain hyphens.
+  // Accept raw ids too (e.g. "tomatoes").
+  return v === v.toLowerCase() && !/\s/.test(v);
+}
+
+/**
+ * Resolve a crop identifier that may be either:
+ * - `crop_id` (slug like "french-beans")
+ * - `crop_name` (display like "French Beans")
+ *
+ * This exists to keep crop note surfaces consistent when routes/params
+ * accidentally pass names instead of slugs.
+ */
+export async function resolveRecordCrop(
+  companyId: string,
+  cropIdOrName: string,
+): Promise<ResolvedRecordCrop | null> {
+  const raw = (cropIdOrName ?? '').trim();
+  if (!companyId || !raw) return null;
+
+  // Source of truth for available crops in the notebook is the same RPC used for crop cards.
+  // Never throw from this helper: it should be safe to use opportunistically.
+  let crops: RecordCropCard[] = [];
+  try {
+    crops = await getCompanyRecordCrops(companyId);
+  } catch (err) {
+    console.warn('resolveRecordCrop: failed to load company record crops; skipping resolution', err);
+    return null;
+  }
+
+  // Fast path: exact id match (slug/id).
+  const byId = crops.find((c) => c.crop_id === raw);
+  if (byId) return byId;
+
+  // Heuristic: if it looks like a slug but not found, still try name match.
+  const rawLower = raw.toLowerCase();
+  const byName = crops.find((c) => (c.crop_name ?? '').trim().toLowerCase() === rawLower);
+  if (byName) return byName;
+
+  // Some routes might pass `slug` instead of `crop_id` (depending on DB shape); handle both.
+  const bySlug = looksLikeSlug(raw) ? crops.find((c) => c.slug === raw) : undefined;
+  return bySlug ?? null;
+}
+
 export async function createCompanyRecordCrop(companyId: string, name: string): Promise<void> {
   const { error } = await supabase.rpc('create_company_record_crop', {
     p_company_id: companyId,

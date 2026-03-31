@@ -128,6 +128,7 @@ import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTou
 import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestCollectionModal';
 import { HarvestCollectionTransferModal } from '@/components/modals/HarvestCollectionTransferModal';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { FeatureGate } from '@/components/subscription';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 const HARVEST_COLLECTION_BASE_NAME = 'test';
@@ -2553,54 +2554,67 @@ export default function HarvestCollectionsPage() {
 
   if (!effectiveProject) {
     return (
-      <div className="p-4 md:p-6 space-y-4" data-tour="staff-harvest-root">
-        <h1 className="text-2xl font-bold text-foreground" data-tour="staff-harvest-header">
-          Harvest Collections
-        </h1>
-        <div className="mt-2 max-w-xs md:hidden">
-          <p className="text-xs text-muted-foreground mb-1.5">Select project</p>
-          <UiSelect
-            value={activeProject?.id ?? undefined}
-            onValueChange={(projectId) => {
-              const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
-              if (next && !isProjectClosed(next)) {
-                setActiveProject(next);
-              }
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Choose a project" />
-            </SelectTrigger>
-            <SelectContent>
-              {harvestProjectSelectOptions.map((project) => (
-                <SelectItem
-                  key={project.id}
-                  value={project.id}
-                  disabled={isProjectClosed(project)}
-                  className={isProjectClosed(project) ? 'opacity-70' : undefined}
-                >
-                  {project.name}
-                  {isProjectClosed(project) ? ' (closed)' : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </UiSelect>
+      <FeatureGate
+        feature="frenchBeansCollections"
+        title="This feature is available on Pro."
+        description="Upgrade to Pro to continue using advanced tools and insights."
+        className="p-4 md:p-6 space-y-4"
+      >
+        <div className="p-4 md:p-6 space-y-4" data-tour="staff-harvest-root">
+          <h1 className="text-2xl font-bold text-foreground" data-tour="staff-harvest-header">
+            Harvest Collections
+          </h1>
+          <div className="mt-2 max-w-xs md:hidden">
+            <p className="text-xs text-muted-foreground mb-1.5">Select project</p>
+            <UiSelect
+              value={activeProject?.id ?? undefined}
+              onValueChange={(projectId) => {
+                const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
+                if (next && !isProjectClosed(next)) {
+                  setActiveProject(next);
+                }
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a project" />
+              </SelectTrigger>
+              <SelectContent>
+                {harvestProjectSelectOptions.map((project) => (
+                  <SelectItem
+                    key={project.id}
+                    value={project.id}
+                    disabled={isProjectClosed(project)}
+                    className={isProjectClosed(project) ? 'opacity-70' : undefined}
+                  >
+                    {project.name}
+                    {isProjectClosed(project) ? ' (closed)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </UiSelect>
+          </div>
+          <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+            <CardContent className="pt-6">
+              <p className="text-foreground">
+                {routeProjectId
+                  ? 'Project not found or you don’t have access. Select a project above or open Harvest Collections from the Harvest page for a French Beans project.'
+                  : 'Select a project above to manage field harvest collections (pickers, weigh-in, cash payouts, buyer settlement).'}
+              </p>
+            </CardContent>
+          </Card>
         </div>
-        <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
-          <CardContent className="pt-6">
-            <p className="text-foreground">
-              {routeProjectId
-                ? 'Project not found or you don’t have access. Select a project above or open Harvest Collections from the Harvest page for a French Beans project.'
-                : 'Select a project above to manage field harvest collections (pickers, weigh-in, cash payouts, buyer settlement).'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      </FeatureGate>
     );
   }
 
   return (
-    <>
+    <FeatureGate
+      feature="frenchBeansCollections"
+      title="This feature is available on Pro."
+      description="Upgrade to Pro to continue using advanced tools and insights."
+      className="w-full min-w-0"
+    >
+      <>
       <div
         className="px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-6 space-y-3 sm:space-y-4 w-full min-w-0"
         data-tour="staff-harvest-root"
@@ -5328,6 +5342,7 @@ export default function HarvestCollectionsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+      </>
+    </FeatureGate>
   );
 }

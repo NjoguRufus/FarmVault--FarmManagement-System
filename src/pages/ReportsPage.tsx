@@ -8,12 +8,16 @@ import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { mockExpensesByCategory, mockActivityData } from '@/data/mockData';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { Lock } from 'lucide-react';
 
 export default function ReportsPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const canExportReports = can('reports', 'export');
+  const exportAccess = useFeatureAccess('exportReports');
 
   useEffect(() => {
     captureEvent(AnalyticsEvents.REPORT_VIEWED, {
@@ -109,9 +113,13 @@ export default function ReportsPage() {
             {canExportReports && (
               <button
                 type="button"
-                className="fv-btn fv-btn--secondary w-full sm:w-auto self-start p-1.5 md:px-3 md:py-2 text-xs md:text-sm"
+                className="fv-btn fv-btn--secondary w-full sm:w-auto self-start p-1.5 md:px-3 md:py-2 text-xs md:text-sm flex items-center justify-center gap-1.5"
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (exportAccess.isLocked) {
+                    openUpgradeModal({ checkoutPlan: 'pro' });
+                    return;
+                  }
                   captureEvent(AnalyticsEvents.REPORT_EXPORTED_EXCEL, {
                     company_id: user?.companyId ?? undefined,
                     project_id: activeProject?.id,
@@ -120,7 +128,11 @@ export default function ReportsPage() {
                   });
                 }}
               >
-                <Download className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5" />
+                {exportAccess.isLocked ? (
+                  <Lock className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                )}
                 <span>Export</span>
               </button>
             )}

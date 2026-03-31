@@ -7,7 +7,6 @@ import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
 import { invokeNotifyCompanySubmissionReceived } from '@/lib/email';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +21,17 @@ import { writePendingApprovalSession, type PendingApprovalSessionPayload } from 
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
 import { setPostOnboardingFirstProjectWelcomeFlag } from '@/lib/postOnboardingProjectWelcome';
+import { PremiumOnboardingShell } from '@/components/onboarding/PremiumOnboardingShell';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 type EmailValidationResult = { ok: boolean; message?: string | null };
 
@@ -38,6 +48,7 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [skipConfirmOpen, setSkipConfirmOpen] = useState(false);
   const startedTracked = useRef(false);
   const onboardingRestoredRef = useRef(false);
   const exitingOnboardingRef = useRef(false);
@@ -365,127 +376,187 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-primary/10 px-4 py-12">
-      <Card
-        className={`w-full rounded-2xl shadow-xl border-primary/10 overflow-hidden ${
-          step === 3 ? 'max-w-2xl' : 'max-w-lg'
-        }`}
-      >
-        <CardContent className="p-6 sm:p-8">
-          <div className="flex items-center gap-3 mb-8">
-            <img src="/Logo/FarmVault_Logo dark mode.png" alt="FarmVault" className="h-10 w-auto rounded-lg object-contain bg-sidebar-primary/10 p-1" />
-            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Onboarding</span>
+    <PremiumOnboardingShell
+      step={step}
+      rightTitle={step === 1 ? 'Create your farm workspace' : step === 2 ? 'Confirm your trial' : 'Finish setup'}
+      rightSubtitle={
+        step === 1
+          ? "Let’s name your workspace — this is how your farm appears across FarmVault."
+          : step === 2
+            ? 'Your workspace is created. Continue to activate your Pro trial and unlock full tracking.'
+            : "Your farm is ready. Create your first project now, or jump straight into the dashboard."
+      }
+      logo={
+        <div className="flex items-center gap-3">
+          <img
+            src="/Logo/FarmVault_Logo dark mode.png"
+            alt="FarmVault"
+            className="h-10 w-auto rounded-lg object-contain bg-white/85 p-1 shadow-sm"
+          />
+        </div>
+      }
+      belowPanel={
+        step === 3 ? (
+          <div className="rounded-[18px] border border-white/22 bg-white/90 p-4 sm:p-6 shadow-[0_22px_60px_rgba(0,0,0,0.26)]">
+            <NewProjectForm onCancel={goDashboard} onSuccess={handleOnboardingProjectSuccess} />
           </div>
+        ) : null
+      }
+    >
+      {error && (
+        <div className="mb-5 rounded-xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white/90">
+          {error}
+        </div>
+      )}
 
-          {error && (
-            <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">{error}</div>
-          )}
+      <AlertDialog open={skipConfirmOpen} onOpenChange={setSkipConfirmOpen}>
+        <AlertDialogContent className="max-w-md rounded-2xl border border-white/10 bg-black/70 text-white shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Skip project creation?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/75">
+              Are you sure? It&apos;s recommended that you create your first project so you can start tracking immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel className="rounded-full border-white/15 bg-white/10 text-white hover:bg-white/15">
+              Continue setup
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="rounded-full bg-[#1F3D2B] text-white hover:bg-[#1B3526]"
+              onClick={goDashboard}
+            >
+              Yes, skip
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-          {step === 1 && (
-            <>
-              <h2 className="text-xl font-semibold text-foreground mb-2">Create your company</h2>
-              <p className="text-sm text-muted-foreground mb-6">You’ll get a 7-day Pro trial once you continue. You can open your dashboard right away.</p>
-              {orgLogoUrl && (
-                <div className="flex justify-center mb-4">
-                  <img
-                    src={orgLogoUrl}
-                    alt="Organization logo"
-                    className="h-16 w-16 rounded-xl object-cover border border-border"
-                  />
-                </div>
-              )}
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="companyName">Farm / Company Name</Label>
-                  <Input
-                    id="companyName"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="e.g. Green Valley Farm Ltd"
-                    className="mt-1"
-                    autoComplete="organization"
-                    required
-                    minLength={2}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1.5">
-                    Enter the name of your farm, business, or company as you want it to appear in FarmVault. This is separate
-                    from your own name (your profile).
-                  </p>
-                </div>
-                <div>
-                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                    <Label htmlFor="companyEmail" className="mb-0">
-                      Company email <span className="text-muted-foreground font-normal">(optional)</span>
-                    </Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 shrink-0 text-xs w-full sm:w-auto"
-                      onClick={fillCompanyEmailFromAccount}
-                      disabled={!accountEmail}
-                    >
-                      Use my account email
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1 mb-1.5">
-                    Optional. You can use your own email if your farm does not have a separate company email.
-                  </p>
-                  <Input
-                    id="companyEmail"
-                    type="email"
-                    value={companyEmail}
-                    onChange={(e) => setCompanyEmail(e.target.value)}
-                    placeholder={accountEmail || 'you@example.com'}
-                    className="mt-0"
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
-              <Button className="w-full mt-6" onClick={handleStep1CreateCompany} disabled={!step1Valid || loading}>
-                {loading ? 'Creating…' : 'Create company'}
-                <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
-            </>
-          )}
-
-          {step === 2 && (
-            <>
-              <div className="flex justify-center mb-6">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary">
-                  <CheckCircle2 className="h-10 w-10" />
-                </div>
-              </div>
-              <h2 className="text-xl font-semibold text-foreground mb-2">You’re in</h2>
-              <p className="text-sm text-muted-foreground mb-6">
-                <strong>{companyName}</strong> is set to <strong>Pro</strong> with a <strong>7-day trial</strong> after our team
-                approves your workspace. Next, you can create your first project here, or skip and do it from the dashboard.
-              </p>
-              <Button className="w-full" onClick={() => void handleStep2Continue()} disabled={loading}>
-                {loading ? 'Preparing…' : 'Continue'}
-                <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
-            </>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-foreground">Create New or Existing Project</h2>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Same steps you will use from the Projects page — crop, blocks or planting date, then details.
-                  </p>
-                </div>
-                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={goDashboard}>
-                  Skip for now
-                </Button>
-              </div>
-              <NewProjectForm onCancel={goDashboard} onSuccess={handleOnboardingProjectSuccess} />
+      {step === 1 && (
+        <div className="animate-in fade-in-0 duration-300">
+          {orgLogoUrl && (
+            <div className="flex justify-center mb-5">
+              <img
+                src={orgLogoUrl}
+                alt="Organization logo"
+                className="h-16 w-16 rounded-2xl object-cover border border-white/20 shadow-sm"
+              />
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="companyName" className="text-sm font-medium text-white/90">
+                What should we call your farm?
+              </Label>
+              <Input
+                id="companyName"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="e.g. Green Valley Farm Ltd"
+                autoComplete="organization"
+                required
+                minLength={2}
+                className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111] shadow-sm transition-all duration-200 placeholder:text-[#6B7280]/80 focus-visible:ring-2 focus-visible:ring-[#1F3D2B]/25 focus-visible:ring-offset-0"
+              />
+              <p className="text-xs leading-relaxed text-white/65">
+                This becomes your workspace name. You can change it later in settings.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Label htmlFor="companyEmail" className="text-sm font-medium text-white/90">
+                  Where should we send workspace updates? <span className="text-white/60 font-normal">(optional)</span>
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-10 rounded-full border border-white/18 bg-white/20 text-xs text-white shadow-sm transition-all duration-200 hover:-translate-y-[1px] hover:bg-white/25"
+                  onClick={fillCompanyEmailFromAccount}
+                  disabled={!accountEmail}
+                >
+                  Use my account email
+                </Button>
+              </div>
+
+              <Input
+                id="companyEmail"
+                type="email"
+                value={companyEmail}
+                onChange={(e) => setCompanyEmail(e.target.value)}
+                placeholder={accountEmail || 'you@example.com'}
+                autoComplete="email"
+                className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111] shadow-sm transition-all duration-200 placeholder:text-[#6B7280]/80 focus-visible:ring-2 focus-visible:ring-[#1F3D2B]/25 focus-visible:ring-offset-0"
+              />
+              <p className="text-xs leading-relaxed text-white/65">
+                Optional. If your farm doesn’t have a separate email, your personal email works fine.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            className="mt-7 h-12 w-full rounded-full bg-[#1F3D2B] text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#1B3526] active:translate-y-0"
+            onClick={handleStep1CreateCompany}
+            disabled={!step1Valid || loading}
+          >
+            {loading ? 'Creating…' : 'Continue'}
+            <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="animate-in fade-in-0 duration-300">
+          <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 px-4 py-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 text-white shadow-sm">
+              <CheckCircle2 className="h-7 w-7" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white/95">Workspace created</p>
+              <p className="text-xs leading-relaxed text-white/70">
+                <strong className="font-semibold text-white/95">{companyName}</strong> will start on{' '}
+                <strong className="font-semibold text-white/95">Pro</strong> with a{' '}
+                <strong className="font-semibold text-white/95">7-day trial</strong> after approval.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            className="mt-6 h-12 w-full rounded-full bg-[#1F3D2B] text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#1B3526] active:translate-y-0"
+            onClick={() => void handleStep2Continue()}
+            disabled={loading}
+          >
+            {loading ? 'Preparing…' : 'Activate trial'}
+            <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
+
+          <p className="mt-4 text-xs leading-relaxed text-white/65">
+            You can create your first project next, or skip and do it later from the dashboard.
+          </p>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="animate-in fade-in-0 duration-300">
+          <div className="mt-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white/95">Create your first project</h3>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 rounded-full border border-white/10 bg-white/10 px-2 py-1 text-[10px] font-medium text-white/55 shadow-none transition-all hover:bg-white/12 sm:border-white/14 sm:bg-white/16 sm:px-3 sm:py-1.5 sm:text-[11px] sm:text-white/75 sm:shadow-none sm:hover:bg-white/20"
+                onClick={() => setSkipConfirmOpen(true)}
+              >
+                Skip for now
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </PremiumOnboardingShell>
   );
 }

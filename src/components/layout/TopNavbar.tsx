@@ -22,6 +22,7 @@ import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceAp
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { Button } from '@/components/ui/button';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -50,6 +51,24 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     isLoading: workspaceStatusLoading,
   } = useCompanyWorkspaceApprovalStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<'basic' | 'pro' | undefined>(undefined);
+
+  useEffect(() => {
+    return onUpgradeModalOpen((detail) => {
+      setCheckoutPlan(detail.checkoutPlan);
+      setUpgradeOpen(true);
+    });
+  }, []);
+
+  const openProUpgrade = () => {
+    setCheckoutPlan('pro');
+    setUpgradeOpen(true);
+  };
+
+  const handleUpgradeOpenChange = (next: boolean) => {
+    setUpgradeOpen(next);
+    if (!next) setCheckoutPlan(undefined);
+  };
 
   useEffect(() => {
     if (!import.meta.env.DEV || !user?.companyId) return;
@@ -262,7 +281,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             <div className="hidden md:flex flex-col items-end gap-0.5 max-w-[220px]">
               <button
                 type="button"
-                onClick={() => setUpgradeOpen(true)}
+                onClick={openProUpgrade}
                 className={cn(
                   'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border',
                   trialWorkspaceAccent === 'rose' &&
@@ -300,7 +319,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
             <button
               type="button"
-              onClick={() => setUpgradeOpen(true)}
+              onClick={openProUpgrade}
               className={cn(
                 'md:hidden inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border',
                 trialWorkspaceAccent === 'rose' &&
@@ -358,7 +377,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           {isExpired && !trialExpiredNeedsPlan && (
             <button
               type="button"
-              onClick={() => setUpgradeOpen(true)}
+              onClick={openProUpgrade}
               className="hidden sm:inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-medium text-destructive border border-destructive/40 hover:bg-destructive/15"
             >
               <AlertTriangle className="h-3 w-3" />
@@ -459,10 +478,11 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
       {!hidePaymentUpgradeModal && (
         <UpgradeModal
           open={upgradeOpen}
-          onOpenChange={setUpgradeOpen}
+          onOpenChange={handleUpgradeOpenChange}
           isTrial={isTrial}
           isExpired={isExpired && !trialExpiredNeedsPlan}
           daysRemaining={daysRemaining}
+          checkoutPlan={checkoutPlan}
         />
       )}
     </header>

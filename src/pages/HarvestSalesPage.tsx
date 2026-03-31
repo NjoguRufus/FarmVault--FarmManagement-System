@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, List } from 'lucide-react';
+import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, List, Lock } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -40,6 +40,9 @@ import { hasHarvestCollectionsModule } from '@/lib/cropModules';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
+import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { FeatureGate, ProBadge } from '@/components/subscription';
 
 const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
@@ -60,6 +63,8 @@ export default function HarvestSalesPage() {
 
   const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
   const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
+  const frenchBeansCollectionsAccess = useFeatureAccess('frenchBeansCollections');
+  const advancedHarvestAccess = useFeatureAccess('advancedHarvest');
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
@@ -146,29 +151,32 @@ export default function HarvestSalesPage() {
     queryKey: ['harvestSalesTotals', companyId, activeProject?.id],
     queryFn: () =>
       getCompanyCollectionFinancialsAggregate(companyId ?? '', activeProject?.id ?? null),
-    enabled: Boolean(showHarvestCollections && companyId),
+    enabled: Boolean(showHarvestCollections && companyId && advancedHarvestAccess.canAccess),
   });
 
-  const totalHarvestKg = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.totalHarvestKg
+  const useSupabaseHarvestTotals =
+    Boolean(showHarvestCollections && harvestSalesTotals && advancedHarvestAccess.canAccess);
+
+  const totalHarvestKg = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.totalHarvestKg
     : firestoreTotalHarvest;
-  const totalSalesAmount = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.totalSales
+  const totalSalesAmount = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.totalSales
     : firestoreTotalSales;
-  const completedSalesAmount = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.completedSales
+  const completedSalesAmount = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.completedSales
     : sales.filter((s) => s.status === 'completed').reduce((sum, s) => sum + s.totalAmount, 0);
-  const pendingSalesAmount = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.pendingSales
+  const pendingSalesAmount = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.pendingSales
     : sales.filter((s) => s.status === 'pending').reduce((sum, s) => sum + s.totalAmount, 0);
-  const completedSalesCount = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.collections.filter((c) => c.isClosed).length
+  const completedSalesCount = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.collections.filter((c) => c.isClosed).length
     : sales.filter((s) => s.status === 'completed').length;
-  const pendingSalesCount = showHarvestCollections && harvestSalesTotals
-    ? harvestSalesTotals.collections.filter((c) => !c.isClosed).length
+  const pendingSalesCount = useSupabaseHarvestTotals
+    ? harvestSalesTotals!.collections.filter((c) => !c.isClosed).length
     : sales.filter((s) => s.status === 'pending').length;
 
-  const collectionRecords = (showHarvestCollections && harvestSalesTotals?.collections) ?? [];
+  const collectionRecords = (useSupabaseHarvestTotals && harvestSalesTotals?.collections) ?? [];
 
   useEffect(() => {
     if (import.meta.env.DEV && showHarvestCollections) {
@@ -593,9 +601,21 @@ export default function HarvestSalesPage() {
             <Button
               variant="default"
               className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3 text-sm sm:h-10 sm:px-4 shrink-0"
-              onClick={() => navigate(`/harvest-collections/${activeProject.id}`)}
+              onClick={() => {
+                if (frenchBeansCollectionsAccess.isLocked) {
+                  openUpgradeModal({ checkoutPlan: 'pro' });
+                  return;
+                }
+                navigate(`/harvest-collections/${activeProject!.id}`);
+              }}
             >
+              {frenchBeansCollectionsAccess.isLocked && (
+                <Lock className="h-4 w-4 mr-1.5 shrink-0" aria-hidden />
+              )}
               Harvest Collections
+              {frenchBeansCollectionsAccess.isLocked && (
+                <ProBadge className="ml-1.5 align-middle shrink-0" />
+              )}
             </Button>
           )}
           {canCreateHarvest && (
@@ -1552,88 +1572,95 @@ export default function HarvestSalesPage() {
         {canSeeSalesRecords && (
           <SimpleStatCard
             title="Completed Sales"
-            value={showHarvestCollections && harvestSalesTotals ? formatCurrency(completedSalesAmount) : String(completedSalesCount)}
+            value={useSupabaseHarvestTotals ? formatCurrency(completedSalesAmount) : String(completedSalesCount)}
             layout="vertical"
           />
         )}
         {canSeeSalesRecords && (
           <SimpleStatCard
             title="Pending Sales"
-            value={showHarvestCollections && harvestSalesTotals ? formatCurrency(pendingSalesAmount) : String(pendingSalesCount)}
+            value={useSupabaseHarvestTotals ? formatCurrency(pendingSalesAmount) : String(pendingSalesCount)}
             valueVariant="warning"
             layout="vertical"
           />
         )}
       </div>
 
-      {/* French Beans: Harvest Collections (Supabase) */}
+      {/* French Beans: Harvest Collections (Supabase) — Pro: frenchBeansCollections + advanced aggregates */}
       {showHarvestCollections && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Harvest Collections</h3>
-          {collectionRecords.length === 0 && !loadingHarvests && (
-            <p className="text-sm text-muted-foreground">No collections yet. Create one from Harvest Collections.</p>
-          )}
-          {collectionRecords.length > 0 && (
-            <div className="fv-card overflow-x-auto">
-              <table className="fv-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Total kg</th>
-                    {canViewHarvestFinancials && <th>Buyer price/kg</th>}
-                    {canViewHarvestFinancials && <th>Revenue</th>}
-                    {canViewHarvestFinancials && <th>Paid out</th>}
-                    {canViewHarvestFinancials && <th>Profit</th>}
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {collectionRecords
-                    .sort((a, b) => String(b.collectionDate).localeCompare(String(a.collectionDate)))
-                    .map((row) => (
-                      <tr
-                        key={row.collectionId}
-                        className="cursor-pointer hover:bg-muted/50 transition-colors"
-                        onClick={() => navigate(`/harvest-collections?collection=${row.collectionId}`)}
-                      >
-                        <td>{formatDate(row.collectionDate)}</td>
-                        <td className="font-medium">{row.totalHarvestQty.toLocaleString()}</td>
-                        {canViewHarvestFinancials && (
+        <FeatureGate
+          feature="frenchBeansCollections"
+          title="Harvest collections (Pro)"
+          description="Upgrade to Pro to manage French beans collections, payouts, and collection-level financials."
+          className="space-y-4"
+        >
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Harvest Collections</h3>
+            {collectionRecords.length === 0 && !loadingHarvests && (
+              <p className="text-sm text-muted-foreground">No collections yet. Create one from Harvest Collections.</p>
+            )}
+            {collectionRecords.length > 0 && (
+              <div className="fv-card overflow-x-auto">
+                <table className="fv-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Total kg</th>
+                      {canViewHarvestFinancials && <th>Buyer price/kg</th>}
+                      {canViewHarvestFinancials && <th>Revenue</th>}
+                      {canViewHarvestFinancials && <th>Paid out</th>}
+                      {canViewHarvestFinancials && <th>Profit</th>}
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collectionRecords
+                      .sort((a, b) => String(b.collectionDate).localeCompare(String(a.collectionDate)))
+                      .map((row) => (
+                        <tr
+                          key={row.collectionId}
+                          className="cursor-pointer hover:bg-muted/50 transition-colors"
+                          onClick={() => navigate(`/harvest-collections?collection=${row.collectionId}`)}
+                        >
+                          <td>{formatDate(row.collectionDate)}</td>
+                          <td className="font-medium">{row.totalHarvestQty.toLocaleString()}</td>
+                          {canViewHarvestFinancials && (
+                            <td>
+                              {row.buyerPricePerUnit > 0 ? formatCurrency(row.buyerPricePerUnit) : '—'}
+                            </td>
+                          )}
+                          {canViewHarvestFinancials && <td>{formatCurrency(row.revenue)}</td>}
+                          {canViewHarvestFinancials && <td>{formatCurrency(row.totalPaidOut)}</td>}
+                          {canViewHarvestFinancials && (
+                            <td
+                              className={
+                                row.profit >= 0
+                                  ? 'text-green-600 dark:text-green-400'
+                                  : 'text-red-600 dark:text-red-400'
+                              }
+                            >
+                              {formatCurrency(row.profit)}
+                            </td>
+                          )}
                           <td>
-                            {row.buyerPricePerUnit > 0 ? formatCurrency(row.buyerPricePerUnit) : '—'}
+                            <span className={cn('fv-badge', row.isClosed ? 'fv-badge--active' : 'fv-badge--warning')}>
+                              {row.status === 'closed' ? 'Closed' : 'Open'}
+                            </span>
                           </td>
-                        )}
-                        {canViewHarvestFinancials && <td>{formatCurrency(row.revenue)}</td>}
-                        {canViewHarvestFinancials && <td>{formatCurrency(row.totalPaidOut)}</td>}
-                        {canViewHarvestFinancials && (
-                          <td
-                            className={
-                              row.profit >= 0
-                                ? 'text-green-600 dark:text-green-400'
-                                : 'text-red-600 dark:text-red-400'
-                            }
-                          >
-                            {formatCurrency(row.profit)}
+                          <td>
+                            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/harvest-collections?collection=${row.collectionId}`); }}>
+                              View
+                            </Button>
                           </td>
-                        )}
-                        <td>
-                          <span className={cn('fv-badge', row.isClosed ? 'fv-badge--active' : 'fv-badge--warning')}>
-                            {row.status === 'closed' ? 'Closed' : 'Open'}
-                          </span>
-                        </td>
-                        <td>
-                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/harvest-collections?collection=${row.collectionId}`); }}>
-                            View
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </FeatureGate>
       )}
 
       {/* Harvests Section (Firestore – non–French Beans or legacy) */}
