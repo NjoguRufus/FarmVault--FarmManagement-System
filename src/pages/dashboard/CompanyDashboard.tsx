@@ -78,6 +78,7 @@ import {
 } from '@/lib/farmProgressFromProject';
 import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { FeatureGate } from '@/components/subscription';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -1312,17 +1313,19 @@ export function CompanyDashboard() {
             )}
           >
             {showProfitLossCard && (
-              <div data-tour="profit-loss-card">
-                <StatCard
-                  title="Profit and Loss"
-                  value={`KES ${displayNetBalance.toLocaleString()}`}
-                  change={displayNetBalance >= 0 ? 22.1 : -5.2}
-                  changeLabel="vs last month"
-                  icon={<Wallet className="h-4 w-4" />}
-                  variant={displayNetBalance >= 0 ? 'primary' : 'default'}
-                  compact
-                />
-              </div>
+              <FeatureGate feature="profitCharts" className="min-w-0">
+                <div data-tour="profit-loss-card">
+                  <StatCard
+                    title="Profit and Loss"
+                    value={`KES ${displayNetBalance.toLocaleString()}`}
+                    change={displayNetBalance >= 0 ? 22.1 : -5.2}
+                    changeLabel="vs last month"
+                    icon={<Wallet className="h-4 w-4" />}
+                    variant={displayNetBalance >= 0 ? 'primary' : 'default'}
+                    compact
+                  />
+                </div>
+              </FeatureGate>
             )}
             {showBudgetCard && (
               <StatCard
@@ -1364,10 +1367,10 @@ export function CompanyDashboard() {
       )}
 
       {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <FeatureGate feature="advancedAnalytics" className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <ActivityChart data={activityChartData} />
         <ExpensesPieChart data={expensesByCategory} />
-      </div>
+      </FeatureGate>
 
       {/* Bottom Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

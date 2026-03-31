@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Package, Receipt, Wrench } from 'lucide-react';
+import { LayoutDashboard, Scale, Package, Receipt, Wrench, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { cn } from '@/lib/utils';
+import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
+import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 
 const ACTIVE_TAB_SHADOW =
   '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
@@ -14,7 +18,16 @@ export function StaffBottomNav() {
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const location = useLocation();
+  const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
   const [isDesktop, setIsDesktop] = useState(false);
+
+  const currentTier: SubscriptionTier =
+    isDeveloper || plan === 'enterprise' || isOverride ? 'pro' : plan === 'pro' ? 'pro' : 'basic';
+
+  const canAccessTier = (required: SubscriptionTier) => {
+    if (required === 'basic') return true;
+    return currentTier === 'pro';
+  };
 
   useEffect(() => {
     const update = () => {
@@ -68,7 +81,7 @@ export function StaffBottomNav() {
     });
   }
 
-  const normalizedPath = location.pathname.replace(/\/+/g, '/');
+  const normalizedPath = useMemo(() => location.pathname.replace(/\/+/g, '/'), [location.pathname]);
 
   return (
     <div
@@ -89,11 +102,24 @@ export function StaffBottomNav() {
           const isActive =
             normalizedPath === itemPath ||
             (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
+          const lockedFeature = getLockedProFeatureForPath(itemPath);
+          const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
+          const isLocked =
+            Boolean(lockedFeature) &&
+            !planLoading &&
+            !isDeveloper &&
+            !canAccessTier(requiredTier);
 
           return (
             <NavLink
               key={item.path}
               to={item.path}
+              onClick={(e) => {
+                if (!isLocked) return;
+                e.preventDefault();
+                e.stopPropagation();
+                openUpgradeModal({ checkoutPlan: 'pro' });
+              }}
               className={cn(
                 'relative z-10 flex flex-1 min-w-0 min-h-[44px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
                 isActive && 'bg-green-100/85 dark:bg-emerald-900/45',
@@ -116,6 +142,11 @@ export function StaffBottomNav() {
                         : 'text-primary/60 dark:text-emerald-100/60',
                     )}
                   />
+                  {isLocked ? (
+                    <span className="absolute -top-0.5 -right-0.5 rounded-full bg-muted px-1 py-0.5">
+                      <Lock className="h-3 w-3 text-muted-foreground" />
+                    </span>
+                  ) : null}
                 </span>
                 <span
                   className={cn(

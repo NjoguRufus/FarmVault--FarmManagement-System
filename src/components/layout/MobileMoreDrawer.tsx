@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, type PanInfo } from 'framer-motion';
+import { Lock } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -10,6 +11,11 @@ import {
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import type { NavItem } from '@/config/navConfig';
+import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
+import { ProBadge } from '@/components/subscription';
+import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 
 interface MobileMoreDrawerProps {
   open: boolean;
@@ -29,6 +35,19 @@ export function MobileMoreDrawer({
   items,
 }: MobileMoreDrawerProps) {
   const location = useLocation();
+  const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
+  const normalizedCurrentPath = useMemo(
+    () => location.pathname.replace(/\/+/g, '/'),
+    [location.pathname],
+  );
+
+  const currentTier: SubscriptionTier =
+    isDeveloper || plan === 'enterprise' || isOverride ? 'pro' : plan === 'pro' ? 'pro' : 'basic';
+
+  const canAccessTier = (required: SubscriptionTier) => {
+    if (required === 'basic') return true;
+    return currentTier === 'pro';
+  };
   const baseVisibleRows = Math.max(1, Math.min(items.length, MAX_BASE_VISIBLE_ROWS));
   const estimatedHeightPx =
     DRAWER_CHROME_PX + baseVisibleRows * DRAWER_ROW_PX + DRAWER_BOTTOM_PADDING_PX;
@@ -136,19 +155,35 @@ export function MobileMoreDrawer({
             <ul className="space-y-0.5 py-2">
               {items.map((item) => {
                 const itemPath = item.path.replace(/\/+/g, '/');
-                const path = location.pathname.replace(/\/+/g, '/');
+                const path = normalizedCurrentPath;
                 const isActive =
                   path === itemPath ||
                   (itemPath !== '/' &&
                     itemPath !== '/developer' &&
                     path.startsWith(itemPath + '/'));
                 const Icon = item.icon;
+                const lockedFeature = getLockedProFeatureForPath(itemPath);
+                const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
+                const isLocked =
+                  Boolean(lockedFeature) &&
+                  !planLoading &&
+                  !isDeveloper &&
+                  !canAccessTier(requiredTier);
 
                 return (
                   <li key={item.path}>
                     <Link
                       to={itemPath}
-                      onClick={() => onOpenChange(false)}
+                      onClick={(e) => {
+                        if (!isLocked) {
+                          onOpenChange(false);
+                          return;
+                        }
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openUpgradeModal({ checkoutPlan: 'pro' });
+                        onOpenChange(false);
+                      }}
                       className={cn(
                         'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
                         isActive
@@ -162,7 +197,15 @@ export function MobileMoreDrawer({
                           isActive ? 'text-primary' : 'text-muted-foreground'
                         )}
                       />
-                      {item.label}
+                      <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+                        <span className="truncate">{item.label}</span>
+                        {isLocked ? (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <Lock className="h-3.5 w-3.5" />
+                            <ProBadge />
+                          </span>
+                        ) : null}
+                      </span>
                     </Link>
                   </li>
                 );

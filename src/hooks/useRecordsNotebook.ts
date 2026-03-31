@@ -11,6 +11,8 @@ import {
   sendDeveloperCropRecordToCompany,
   getCropIntelligence,
   getCropRecordInsights,
+  resolveRecordCrop,
+  type ResolvedRecordCrop,
   upsertCropKnowledgeProfile,
   addCropKnowledgeChallenge,
   addCropKnowledgePractice,
@@ -34,6 +36,21 @@ export function useCompanyRecordCrops() {
     queryKey: ['records', 'company-crops', companyId],
     queryFn: () => getCompanyRecordCrops(companyId!),
     enabled: !!companyId && !error,
+  });
+}
+
+export function useResolveCompanyRecordCrop(cropIdOrName: string | undefined) {
+  const { companyId, error } = useCompanyScope();
+  const raw = (cropIdOrName ?? '').trim();
+  const likelySlug = raw !== '' && raw === raw.toLowerCase() && !/\s/.test(raw);
+
+  return useQuery<ResolvedRecordCrop | null>({
+    queryKey: ['records', 'resolve-crop', companyId, raw],
+    queryFn: () => resolveRecordCrop(companyId!, raw),
+    // Only resolve when it doesn't look like a crop_id already.
+    // This prevents an extra RPC call and avoids blocking the page if crop resolver data isn't available.
+    enabled: !!companyId && !!raw && !likelySlug && !error,
+    staleTime: 60_000,
   });
 }
 

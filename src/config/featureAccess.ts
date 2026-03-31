@@ -81,10 +81,7 @@ export const FEATURE_RULES: Record<FeatureKey, FeatureRule> = {
 /**
  * Basic plan limits. Pro/Enterprise have no limits.
  */
-export const BASIC_LIMITS = {
-  maxActiveProjects: 2,
-  maxEmployees: 3,
-} as const;
+export { BASIC_LIMITS } from '@/config/basicLimits';
 
 /**
  * Plan hierarchy for comparison.

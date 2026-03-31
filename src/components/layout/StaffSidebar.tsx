@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -7,6 +8,11 @@ import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useStaff } from '@/contexts/StaffContext';
+import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
+import { ProBadge } from '@/components/subscription';
+import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 
 interface StaffSidebarProps {
   collapsed: boolean;
@@ -20,6 +26,19 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const isMobile = useIsMobile();
   const { fullName, roleLabel, avatarUrl } = useStaff();
+  const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
+  const normalizedCurrentPath = useMemo(
+    () => location.pathname.replace(/\/+/g, '/'),
+    [location.pathname],
+  );
+
+  const currentTier: SubscriptionTier =
+    isDeveloper || plan === 'enterprise' || isOverride ? 'pro' : plan === 'pro' ? 'pro' : 'basic';
+
+  const canAccessTier = (required: SubscriptionTier) => {
+    if (required === 'basic') return true;
+    return currentTier === 'pro';
+  };
 
   const items: Array<{ label: string; path: string }> = [{ label: 'Dashboard', path: '/staff/staff-dashboard' }];
 
@@ -95,11 +114,18 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
         <nav className="min-h-0 flex-1 overflow-y-auto py-4 px-3 scrollbar-thin">
           <ul className="space-y-1">
             {items.map((item) => {
-              const normalizedPath = location.pathname.replace(/\/+/g, '/');
+              const normalizedPath = normalizedCurrentPath;
               const itemPath = item.path.replace(/\/+/g, '/');
               const isActive =
                 normalizedPath === itemPath ||
                 (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
+              const lockedFeature = getLockedProFeatureForPath(itemPath);
+              const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
+              const isLocked =
+                Boolean(lockedFeature) &&
+                !planLoading &&
+                !isDeveloper &&
+                !canAccessTier(requiredTier);
               return (
                 <li key={item.path}>
                   <Link
@@ -122,8 +148,34 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
                         ? 'bg-sidebar-accent text-sidebar-primary'
                         : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
                     )}
+                    aria-disabled={isLocked ? true : undefined}
+                    onMouseDown={(e) => {
+                      if (!isLocked) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      if (!isLocked) {
+                        if (isMobile) onToggle();
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openUpgradeModal({ checkoutPlan: 'pro' });
+                      if (isMobile) onToggle();
+                    }}
                   >
-                    {!collapsed && <span>{item.label}</span>}
+                    {!collapsed && (
+                      <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+                        <span className="truncate">{item.label}</span>
+                        {isLocked ? (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <Lock className="h-3.5 w-3.5" />
+                            <ProBadge />
+                          </span>
+                        ) : null}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );

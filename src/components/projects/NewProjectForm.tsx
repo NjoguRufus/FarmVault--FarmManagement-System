@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2, Lock } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -37,6 +37,12 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { getCropDaysToHarvest } from '@/utils/expectedHarvest';
 import { toast } from 'sonner';
+import { BASIC_LIMITS } from '@/config/basicLimits';
+import { isProjectClosed } from '@/lib/projectClosed';
+import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
+import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { ProBadge } from '@/components/subscription';
 
 interface NewProjectFormProps {
   onCancel: () => void;
@@ -108,9 +114,11 @@ function StepIndicator({ step }: { step: WizardStep }) {
 
 export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const { user } = useAuth();
-  const { setActiveProject } = useProject();
+  const { setActiveProject, projects } = useProject();
   const queryClient = useQueryClient();
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
+  const planAccess = useEffectivePlanAccess();
+  const multiBlockAccess = useFeatureAccess('multiBlockManagement');
 
   const [step, setStep] = useState<WizardStep>(1);
   const [form, setForm] = useState<ProjectFormState>({
@@ -137,6 +145,27 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  const isProTier =
+    planAccess.isDeveloper || planAccess.plan === 'enterprise' || planAccess.isOverride || planAccess.plan === 'pro';
+
+  const activeProjectCount = useMemo(() => {
+    const cid = user?.companyId ?? null;
+    if (!cid) return 0;
+    return (projects ?? []).filter((p) => p.companyId === cid && !isProjectClosed(p)).length;
+  }, [projects, user?.companyId]);
+
+  const openUpgrade = () => {
+    openUpgradeModal({ checkoutPlan: 'pro' });
+    setUpgradeOpen(true);
+  };
+
+  useEffect(() => {
+    if (multiBlockAccess.isLocked && enableBlockManagement) {
+      setEnableBlockManagement(false);
+      setBlocks([]);
+    }
+  }, [multiBlockAccess.isLocked, enableBlockManagement]);
 
   const selectedCrop = useMemo(
     () => findCropKnowledgeByTypeKey(cropCatalog, form.cropTypeKey),
@@ -295,7 +324,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
       return;
     }
     if (!canWrite) {
-      setUpgradeOpen(true);
+      openUpgrade();
       return;
     }
     if (!stepTwoReadyToSubmit) return;
@@ -304,7 +333,25 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
       toast.error('No active company selected. Please select a company before creating a project.');
       return;
     }
+
+    // Basic plan enforcement: cap active projects unless Pro.
+    if (!isProTier && activeProjectCount >= BASIC_LIMITS.maxActiveProjects) {
+      toast.error('Project limit reached', {
+        description: `Basic allows up to ${BASIC_LIMITS.maxActiveProjects} active projects. Upgrade to Pro for unlimited projects.`,
+      });
+      openUpgrade();
+      return;
+    }
+
     if (!enableBlockManagement && !form.plantingDate) return;
+
+    if (enableBlockManagement && multiBlockAccess.isLocked) {
+      toast.error('Block management is a Pro feature', {
+        description: 'Upgrade to Pro to manage multiple blocks per project.',
+      });
+      openUpgrade();
+      return;
+    }
 
     const finalStageKey = (form.currentStage || stageAutoDetected).trim();
     if (!enableBlockManagement && !finalStageKey) return;
@@ -537,18 +584,34 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
             </>
           ) : step === 2 ? (
             <>
-              <div className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2">
-                <Label htmlFor="block-mgmt" className="text-sm font-medium cursor-pointer">
-                  Enable Block Management
-                </Label>
+              <div className="flex items-center justify-between rounded-lg border border-border/70 px-3 py-2 gap-2">
+                <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                  <Label htmlFor="block-mgmt" className="text-sm font-medium cursor-pointer">
+                    Enable Block Management
+                  </Label>
+                  {multiBlockAccess.isLocked ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Lock className="h-3.5 w-3.5" />
+                      <ProBadge />
+                    </span>
+                  ) : null}
+                </div>
                 <Switch
                   id="block-mgmt"
                   checked={enableBlockManagement}
-                  onCheckedChange={setEnableBlockManagement}
+                  onCheckedChange={(next) => {
+                    if (next && multiBlockAccess.isLocked) {
+                      openUpgrade();
+                      return;
+                    }
+                    setEnableBlockManagement(next);
+                  }}
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                When on, add multiple blocks (each with its own planting date and acreage) below.
+                {multiBlockAccess.isLocked
+                  ? 'Pro: split a project into multiple blocks, each with its own planting date and acreage.'
+                  : 'When on, add multiple blocks (each with its own planting date and acreage) below.'}
               </p>
 
               {!enableBlockManagement && (

@@ -1,13 +1,20 @@
 import React, { useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { FileText, Plus, ChevronLeft, Loader2, Search } from 'lucide-react';
-import { useCropRecords, useCreateCompanyCropRecord, useCropIntelligence, useCropRecordInsights } from '@/hooks/useRecordsNotebook';
+import {
+  useCropRecords,
+  useCreateCompanyCropRecord,
+  useCropIntelligence,
+  useCropRecordInsights,
+  useResolveCompanyRecordCrop,
+} from '@/hooks/useRecordsNotebook';
 import type { CropRecordRow } from '@/services/recordsService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MarkdownContent } from '@/components/records/MarkdownContent';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { CropIntelligencePanel } from '@/components/records/CropIntelligencePanel';
+import { FeatureGate, ProBadge } from '@/components/subscription';
 import {
   Pagination,
   PaginationContent,
@@ -65,7 +72,7 @@ function NoteListItem({ record, onOpen }: { record: CropRecordRow; onOpen: () =>
 }
 
 export default function AdminCropRecordsPage() {
-  const { cropId } = useParams<{ cropId: string }>();
+  const { cropId: cropIdParam } = useParams<{ cropId: string }>();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -73,10 +80,26 @@ export default function AdminCropRecordsPage() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
 
-  const { data, isLoading, isError } = useCropRecords(cropId ?? '', page, PAGE_SIZE);
-  const createNote = useCreateCompanyCropRecord(cropId ?? '');
-  const intelQuery = useCropIntelligence(cropId);
-  const insightsQuery = useCropRecordInsights(cropId);
+  const resolvedCrop = useResolveCompanyRecordCrop(cropIdParam);
+  const effectiveCropId = resolvedCrop.data?.crop_id ?? cropIdParam ?? '';
+
+  const { data, isLoading, isError } = useCropRecords(effectiveCropId, page, PAGE_SIZE);
+  const createNote = useCreateCompanyCropRecord(effectiveCropId);
+  const intelQuery = useCropIntelligence(effectiveCropId);
+  const insightsQuery = useCropRecordInsights(effectiveCropId);
+
+  if (import.meta.env.DEV) {
+    // Temporary debugging for crop note inconsistency (e.g. "French Beans").
+    // eslint-disable-next-line no-console
+    console.log('[AdminCropRecordsPage] crop identifier resolution', {
+      cropIdParam,
+      effectiveCropId,
+      resolvedCrop: resolvedCrop.data ? { crop_id: resolvedCrop.data.crop_id, crop_name: resolvedCrop.data.crop_name } : null,
+      recordsTotal: data?.total ?? null,
+      insightsTotal: insightsQuery.data?.summary?.total_records ?? null,
+      insightsRecent: insightsQuery.data?.recent_notes?.length ?? null,
+    });
+  }
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -138,7 +161,10 @@ export default function AdminCropRecordsPage() {
       <Tabs defaultValue="notes" className="space-y-4">
         <TabsList>
           <TabsTrigger value="notes">Notes</TabsTrigger>
-          <TabsTrigger value="intelligence">Crop Intelligence</TabsTrigger>
+        <TabsTrigger value="intelligence" className="flex items-center gap-2">
+          <span>Crop Intelligence</span>
+          <ProBadge />
+        </TabsTrigger>
         </TabsList>
 
         <TabsContent value="notes" className="space-y-4">
@@ -217,13 +243,20 @@ export default function AdminCropRecordsPage() {
         </TabsContent>
 
         <TabsContent value="intelligence">
-          <CropIntelligencePanel
-            cropId={cropId ?? ''}
-            intelligence={intelQuery.data}
-            insights={insightsQuery.data}
-            isLoading={intelQuery.isLoading || insightsQuery.isLoading}
-            isError={Boolean(intelQuery.error || insightsQuery.error)}
-          />
+          <FeatureGate
+            feature="cropIntelligence"
+            title="This feature is available on Pro."
+            description="Upgrade to Pro to continue using advanced tools and insights."
+            className="w-full"
+          >
+            <CropIntelligencePanel
+              cropId={effectiveCropId}
+              intelligence={intelQuery.data}
+              insights={insightsQuery.data}
+              isLoading={intelQuery.isLoading || insightsQuery.isLoading}
+              isError={Boolean(intelQuery.error || insightsQuery.error)}
+            />
+          </FeatureGate>
         </TabsContent>
       </Tabs>
 

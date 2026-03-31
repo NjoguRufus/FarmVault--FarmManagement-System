@@ -94,6 +94,17 @@ export default function DeveloperCropRecordsPage() {
   const intelQuery = useCropIntelligence(cropId);
   const insightsQuery = useCropRecordInsights(cropId);
 
+  if (import.meta.env.DEV) {
+    // Temporary debugging for crop note inconsistency parity with company view.
+    // eslint-disable-next-line no-console
+    console.log('[DeveloperCropRecordsPage] crop identifiers + counts', {
+      cropIdParam: cropId ?? null,
+      recordsTotal: data?.total ?? null,
+      insightsTotal: insightsQuery.data?.summary?.total_records ?? null,
+      insightsRecent: insightsQuery.data?.recent_notes?.length ?? null,
+    });
+  }
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = data?.rows ?? [];

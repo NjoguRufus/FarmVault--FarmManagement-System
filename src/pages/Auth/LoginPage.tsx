@@ -6,6 +6,7 @@ import { useLocation, useNavigate, Link, Navigate } from 'react-router-dom';
 import { useAuth as useClerkAuth } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
 
 export default function LoginPage() {
   const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
@@ -57,125 +58,94 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      {/* Farm Background Image with Overlay - Responsive */}
-      <div className="absolute inset-0">
-        {/* Mobile background (default) */}
-        <div 
-          className="md:hidden absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.25)), url('/farm-backgroundmobile.jpg')`,
-          }}
-        />
-        {/* Desktop background */}
-        <div 
-          className="hidden md:block absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.25)), url('/farm-background-desktop.jpg')`,
-          }}
-        />
-        {/* Optional overlay for better text readability */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/10"></div>
-      </div>
-
-      {/* Login Form Card */}
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-8">
-        <div className="w-full max-w-md">
-          {/* Logo and Branding */}
-          <div className="text-center space-y-3 mb-8">
-            <div className="flex justify-center">
-              <img
-                src="/Logo/FarmVault_Logo dark mode.png"
-                alt="FarmVault logo"
-                className="h-32 w-auto md:h-40 lg:h-48 object-contain drop-shadow-lg"
-              />
-            </div>
-            <div>
-              <p className="text-sm md:text-base text-white/90 mt-1 drop-shadow-md">
-                <span className="hidden md:inline">A smart farm operations & decision system for modern agriculture</span>
-                <span className="md:hidden">A smart farm operations for modern agriculture</span>
-              </p>
-            </div>
-          </div>
-
-          {/* Form Card */}
-          <div className="bg-[#F5F1EB] rounded-3xl shadow-2xl p-6 md:p-8 space-y-6 border border-white/20">
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email Field */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-[#2D4A3E]" />
-                  <label className="text-sm font-medium text-[#2D4A3E]">Email</label>
-                </div>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-[#2D4A3E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2D4A3E]/20 focus:border-[#2D4A3E]"
-                  placeholder="Email"
-                />
-              </div>
-
-              {/* Password Field */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Lock className="h-4 w-4 text-[#2D4A3E]" />
-                  <label className="text-sm font-medium text-[#2D4A3E]">Password</label>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 pr-12 text-sm text-[#2D4A3E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2D4A3E]/20 focus:border-[#2D4A3E]"
-                    placeholder="Password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2D4A3E] hover:text-[#2D4A3E]/70 transition-colors"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-
-              {/* Sign In Button */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-xl bg-[#8B6F47] hover:bg-[#7A5F3A] text-white font-medium px-4 py-3.5 text-base transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? 'Signing in…' : 'Sign In'}
-              </button>
-            </form>
-
-            <div className="pt-4 text-center text-sm text-[#2D4A3E]">
-              <span>Don&apos;t have an account? </span>
-              <Link
-                to="/sign-up"
-                className="font-semibold underline-offset-2 hover:underline"
-              >
-                Create account
-              </Link>
-            </div>
+    <PremiumAuthShell
+      title="Welcome back"
+      subtitle="Sign in to continue managing your farm with clarity."
+      footer={<p className="text-xs text-white/60">Track crops, workers, harvest and profit in one place.</p>}
+    >
+      <div className="w-full min-w-0 max-w-full box-border flex flex-col gap-4">
+        {/* Brand block inside the panel */}
+        <div className="w-full min-w-0 max-w-full box-border flex items-center gap-4">
+          <img
+            src="/Logo/FarmVault_Logo dark mode.png"
+            alt="FarmVault logo"
+            className="h-12 w-auto object-contain drop-shadow-[0_14px_40px_rgba(0,0,0,0.35)]"
+          />
+          <div className="w-full min-w-0 max-w-full break-words">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-white/65">FARMVAULT</p>
+            <p className="mt-1 text-sm text-white/80">Welcome back to FarmVault</p>
           </div>
         </div>
+
+        <form onSubmit={handleSubmit} className="w-full min-w-0 max-w-full box-border flex flex-col gap-4">
+          {/* Email Field */}
+          <div className="w-full min-w-0 max-w-full box-border flex flex-col gap-2">
+            <div className="w-full min-w-0 max-w-full flex items-center gap-2">
+              <Mail className="h-4 w-4 text-white/80" />
+              <label className="text-sm font-medium text-white/90">Email</label>
+            </div>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full max-w-full min-w-0 box-border rounded-xl border border-white/20 bg-white/90 px-4 py-3.5 text-sm text-[#0B0F0D] placeholder:text-black/45 shadow-[0_10px_30px_rgba(0,0,0,0.18)] focus:outline-none focus:ring-2 focus:ring-[#1F3B2E]/35 focus:border-[#1F3B2E]/40"
+              placeholder="Email"
+              autoComplete="email"
+            />
+          </div>
+
+          {/* Password Field */}
+          <div className="w-full min-w-0 max-w-full box-border flex flex-col gap-2">
+            <div className="w-full min-w-0 max-w-full flex items-center gap-2">
+              <Lock className="h-4 w-4 text-white/80" />
+              <label className="text-sm font-medium text-white/90">Password</label>
+            </div>
+            <div className="relative w-full max-w-full min-w-0 box-border">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full max-w-full min-w-0 box-border rounded-xl border border-white/20 bg-white/90 px-4 py-3.5 pr-10 text-sm text-[#0B0F0D] placeholder:text-black/45 shadow-[0_10px_30px_rgba(0,0,0,0.18)] focus:outline-none focus:ring-2 focus:ring-[#1F3B2E]/35 focus:border-[#1F3B2E]/40"
+                placeholder="Password"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2 text-black/55 hover:text-black/75 transition-colors"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="w-full max-w-full min-w-0 box-border rounded-xl border border-red-200/70 bg-white/85 px-4 py-3 text-sm text-red-700 shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
+              {error}
+            </div>
+          )}
+
+          {/* Sign In Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full max-w-full min-w-0 box-border rounded-xl bg-[#1F3B2E] px-4 py-3.5 text-base font-medium text-white shadow-[0_18px_40px_rgba(0,0,0,0.28)] transition-all hover:-translate-y-[1px] hover:bg-[#193226] hover:shadow-[0_24px_60px_rgba(0,0,0,0.32)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+          >
+            {loading ? 'Signing in…' : 'Sign In'}
+          </button>
+        </form>
+
+        <div className="w-full min-w-0 max-w-full box-border pt-1 text-center text-sm text-white/80 break-words">
+          <span>Don&apos;t have an account? </span>
+          <Link to="/sign-up" className="font-semibold text-white/90 underline underline-offset-4 hover:text-white">
+            Create account
+          </Link>
+        </div>
       </div>
-    </div>
+    </PremiumAuthShell>
   );
 }
 
