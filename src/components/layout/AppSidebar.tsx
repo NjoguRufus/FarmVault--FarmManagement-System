@@ -132,7 +132,6 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
               <li key={item.path}>
                 <Link
                   to={itemPath}
-                  onClick={() => isMobile && onToggle()}
                   data-tour={getSidebarTourId(itemPath)}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',

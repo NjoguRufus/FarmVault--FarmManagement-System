@@ -10,9 +10,9 @@ import { getBillingAmountKes } from '@/lib/billingPricing';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 import { PaymentSummaryCard } from '@/components/subscription/billing/PaymentSummaryCard';
-import { MpesaInstructionsCard } from '@/components/subscription/billing/MpesaInstructionsCard';
+import { MpesaPaymentForm, type MpesaFieldErrors } from '@/components/subscription/billing/MpesaPaymentForm';
 import {
-  createPaymentRequest,
+  createPaymentSubmission,
   getPendingPaymentStatus,
 } from '@/services/billingSubmissionService';
 import { getCompany } from '@/services/companyService';
@@ -57,6 +57,10 @@ export function BillingModal({
   const [cycle, setCycle] = useState<BillingSubmissionCycle>(() => checkoutCycle ?? 'monthly');
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [mpesaName, setMpesaName] = useState('');
+  const [mpesaPhone, setMpesaPhone] = useState('');
+  const [transactionCode, setTransactionCode] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<MpesaFieldErrors>({});
   const upgradeOpenTrackedRef = useRef(false);
   const planRef = useRef(plan);
   planRef.current = plan;
@@ -69,7 +73,7 @@ export function BillingModal({
   });
 
   const mutation = useMutation({
-    mutationFn: createPaymentRequest,
+    mutationFn: createPaymentSubmission,
     onSuccess: async () => {
       setSuccess(true);
       if (companyId) {
@@ -99,6 +103,10 @@ export function BillingModal({
     if (!open) {
       setSuccess(false);
       setFormError(null);
+      setMpesaName('');
+      setMpesaPhone('');
+      setTransactionCode('');
+      setFieldErrors({});
     }
   }, [open]);
 
@@ -137,18 +145,30 @@ export function BillingModal({
 
   const amount = useMemo(() => getBillingAmountKes(plan, cycle), [plan, cycle]);
 
-  const handleSubmit = async (payload: { phoneNumber: string; mpesaCode: string | null }) => {
+  const handleSubmit = async () => {
     setFormError(null);
+    setFieldErrors({});
     if (!companyId) {
       onOpenChange(false);
       return;
     }
+    const nextErrors: MpesaFieldErrors = {};
+    if (!mpesaName.trim()) nextErrors.mpesaName = 'Enter the name as shown on the M-Pesa SMS.';
+    if (mpesaPhone.trim().length < 9) nextErrors.mpesaPhone = 'Enter a valid phone number.';
+    if (transactionCode.trim().length < 6) nextErrors.transactionCode = 'Enter the transaction code from the M-Pesa SMS.';
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      return;
+    }
+
     await mutation.mutateAsync({
-      companyId,
-      plan,
+      planCode: plan,
+      billingCycle: cycle,
       amount,
-      phoneNumber: payload.phoneNumber,
-      mpesaCode: payload.mpesaCode,
+      mpesaName: mpesaName.trim(),
+      mpesaPhone: mpesaPhone.trim(),
+      transactionCode: transactionCode.trim(),
+      currency: 'KES',
     });
   };
 
@@ -247,11 +267,27 @@ export function BillingModal({
                     )}
                   />
 
-                  <MpesaInstructionsCard
-                    tillNumber={TILL}
-                    onPaidSubmit={handleSubmit}
+                  <MpesaPaymentForm
+                    mpesaName={mpesaName}
+                    mpesaPhone={mpesaPhone}
+                    transactionCode={transactionCode}
+                    onMpesaNameChange={(v) => {
+                      setMpesaName(v);
+                      if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
+                    }}
+                    onMpesaPhoneChange={(v) => {
+                      setMpesaPhone(v);
+                      if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
+                    }}
+                    onTransactionCodeChange={(v) => {
+                      setTransactionCode(v);
+                      if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
+                    }}
+                    fieldErrors={fieldErrors}
+                    disabled={busy}
+                    onSubmit={() => void handleSubmit()}
+                    onDismiss={() => onOpenChange(false)}
                     submitLoading={busy}
-                    submitError={formError}
                     className="order-4 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start"
                   />
                 </div>

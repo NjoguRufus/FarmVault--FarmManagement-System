@@ -95,23 +95,22 @@ export async function createPaymentSubmission(input: CreatePaymentSubmissionInpu
 }
 
 export async function createPaymentRequest(input: CreatePaymentRequestInput): Promise<string> {
-  const id = crypto.randomUUID();
-  const payload = {
-    id,
-    company_id: input.companyId,
-    plan: input.plan,
-    amount: input.amount,
-    phone_number: input.phoneNumber.trim(),
-    mpesa_code: input.mpesaCode?.trim() || null,
-    status: 'pending',
-    created_at: new Date().toISOString(),
-  };
-
-  const { error } = await db.public().from('payment_requests').insert(payload);
-  if (error) {
-    throw new Error(error.message ?? 'Failed to submit payment request');
+  // Legacy API: `payment_requests` table was removed in favor of `subscription_payments` + RPC.
+  // Keep this function for older callers, but route to the new workflow.
+  const tx = input.mpesaCode?.trim();
+  if (!tx) {
+    throw new Error('Transaction code is required.');
   }
-  return id;
+  return createPaymentSubmission({
+    planCode: input.plan,
+    billingCycle: 'monthly',
+    amount: input.amount,
+    mpesaName: 'M-Pesa',
+    mpesaPhone: input.phoneNumber.trim(),
+    transactionCode: tx,
+    currency: 'KES',
+    notes: 'Legacy payment request submission',
+  });
 }
 
 export async function getCurrentCompanySubscription(

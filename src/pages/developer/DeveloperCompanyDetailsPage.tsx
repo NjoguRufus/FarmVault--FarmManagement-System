@@ -219,6 +219,7 @@ export default function DeveloperCompanyDetailsPage() {
           </TabsContent>
           <TabsContent value="subscription" className="mt-4 focus-visible:outline-none">
             <CompanySubscriptionTab
+              companyId={id}
               header={data?.header as Record<string, unknown> | undefined}
               payments={(data?.subscription_payments ?? []) as Record<string, unknown>[]}
             />

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { isSafeAppRedirect } from '@/lib/routing/postAuth';
+import { isAppRoutePath, pathnameFromFullPath } from '@/lib/routing/domainRoutes';
 
 const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
 const NON_PERSISTED_PATHS = new Set([
@@ -35,6 +37,9 @@ export function RoutePersistence() {
     if (isPublicPath) return;
 
     const fullPath = `${location.pathname}${location.search}${location.hash}`;
+    // Persist only true in-app routes (never marketing pages like /features or /pricing).
+    if (!isSafeAppRedirect(fullPath)) return;
+    if (!isAppRoutePath(location.pathname)) return;
     try {
       window.localStorage.setItem(LAST_ROUTE_KEY, fullPath);
     } catch {
@@ -59,7 +64,8 @@ export function RoutePersistence() {
       saved = '';
     }
 
-    if (saved && saved !== '/' && !saved.startsWith('/login')) {
+    const savedPathname = pathnameFromFullPath(saved);
+    if (saved && isSafeAppRedirect(saved) && isAppRoutePath(savedPathname) && !saved.startsWith('/login')) {
       didRestoreRef.current = true;
       navigate(saved, { replace: true });
       return;

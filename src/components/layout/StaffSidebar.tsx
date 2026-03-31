@@ -130,7 +130,6 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
                 <li key={item.path}>
                   <Link
                     to={itemPath}
-                    onClick={() => isMobile && onToggle()}
                     data-tour={
                       item.path === '/staff/harvest-collections'
                         ? 'staff-nav-harvest'

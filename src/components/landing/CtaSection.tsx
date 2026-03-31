@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
+import { getAppAuthUrl } from "@/lib/urls/domains";
 
 export function CtaSection() {
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -60,7 +61,7 @@ export function CtaSection() {
 
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-10 h-14 text-base font-semibold">
-                <a href="/sign-up" className="inline-flex items-center">
+                <a href={getAppAuthUrl("sign-up")} className="inline-flex items-center">
                   Get Started Now
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </a>

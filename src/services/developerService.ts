@@ -57,11 +57,16 @@ export interface PaymentRow {
   company_name: string | null;
   plan_id: string | null;
   amount: number | null;
+  currency?: string | null;
   status: string;
   billing_mode: string | null;
   created_at: string | null;
   approved_at: string | null;
+  approved_by?: string | null;
+  reviewed_at?: string | null;
   reviewed_by: string | null;
+  payment_method?: string | null;
+  reference?: string | null;
 }
 
 export type ListPaymentsRpcResponse = {
@@ -230,7 +235,7 @@ export async function fetchPayments(filter: PaymentsFilter = {}): Promise<ListPa
     offset = 0,
   } = filter;
 
-  const { data, error } = await supabase.rpc('list_payments', {
+  const { data, error } = await supabase.rpc('list_payments_v2', {
     _status: status,
     _billing_mode: billingMode,
     _plan: plan,

@@ -10,6 +10,7 @@ import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary
 import { initPwaInstall } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
+import { getAppEntryUrl } from "@/lib/urls/domains";
 import "./index.css";
 
 // Initialize PWA install prompt capture EARLY (before React mounts)
@@ -126,6 +127,7 @@ if (shouldRenderApp) {
 
   try {
     if (pk) {
+      const afterAuthUrl = getAppEntryUrl("/auth/continue");
       createRoot(root).render(
         wrapPostHog(
           <ClerkLoadErrorBoundary>
@@ -133,8 +135,8 @@ if (shouldRenderApp) {
               publishableKey={pk}
               signInUrl="/sign-in"
               signUpUrl="/sign-up"
-              afterSignInUrl="/auth/continue"
-              afterSignUpUrl="/auth/continue"
+              afterSignInUrl={afterAuthUrl}
+              afterSignUpUrl={afterAuthUrl}
               afterSignOutUrl="/"
             >
               <ClerkAuthBridge />
