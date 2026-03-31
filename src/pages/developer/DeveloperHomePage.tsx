@@ -1,13 +1,19 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Building2, Users, DollarSign, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { fetchDeveloperCompanies, fetchDeveloperKpis, fetchDeveloperUsers } from '@/services/developerService';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { useSeasonChallengesIntelligence } from '@/hooks/developer/useSeasonChallengesIntelligence';
+import { computeSubscriptionStatus } from '@/lib/subscription/subscriptionStatus';
+import { computeSubscriptionVisibility } from '@/lib/subscription/subscriptionVisibility';
+import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
+import { useNow } from '@/hooks/useNow';
 
 export default function DeveloperHomePage() {
+  const now = useNow(60_000);
   const {
     data: kpis,
     isLoading,
@@ -49,22 +55,93 @@ export default function DeveloperHomePage() {
     0,
   );
 
-  const pendingFromField = companyRows.reduce(
-    (sum, row) => sum + Number((row.pending_payments_count as number | null) ?? 0),
-    0,
-  );
+  const paymentRequiredCount = useMemo(() => {
+    return companyRows.reduce((sum, row) => {
+      const status = computeSubscriptionStatus(
+        {
+          trialEnd: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
+          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
+          isSuspended: String(row.subscription_status ?? '').toLowerCase() === 'suspended',
+          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
+        },
+        now,
+      );
+      return sum + (status.paymentRequired ? 1 : 0);
+    }, 0);
+  }, [companyRows, now]);
 
-  const pendingFromStatus = companyRows.reduce((sum, row) => {
-    const status = row.subscription?.status ?? row.subscription_status ?? '';
-    const lowered = status.toLowerCase();
-    if (['pending', 'past_due', 'unpaid'].includes(lowered)) {
-      return sum + 1;
+  const paymentLifecycleCounters = useMemo(() => {
+    const out = {
+      activeTrials: 0,
+      trialsExpired: 0,
+      pendingConfirmations: 0,
+      paidActiveCompanies: 0,
+      subscriptionExpired: 0,
+      paymentRequired: 0,
+    };
+
+    for (const row of companyRows as any[]) {
+      const derived = computeCompanySubscriptionState(
+        {
+          companyStatus: (row.company_status as string | null | undefined) ?? null,
+          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined) ?? null,
+          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
+          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
+          trialStartsAt: null,
+          trialEndsAt: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
+          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
+          latestPaymentStatus: (row.latest_subscription_payment?.status as string | null | undefined) ?? null,
+        },
+        now,
+      );
+
+      if (derived.accessStatus === 'suspended') continue;
+
+      if (derived.paymentStatus === 'pending_confirmation') out.pendingConfirmations += 1;
+      if (derived.accessSource === 'trial' && derived.accessStatus === 'active') out.activeTrials += 1;
+      if (derived.accessSource === 'trial' && derived.accessStatus === 'expired') out.trialsExpired += 1;
+      if (derived.accessSource === 'subscription' && derived.accessStatus === 'active' && derived.paymentStatus === 'paid') out.paidActiveCompanies += 1;
+      if (derived.accessSource === 'subscription' && derived.accessStatus === 'expired') out.subscriptionExpired += 1;
+      if (derived.paymentRequired) out.paymentRequired += 1;
     }
-    return sum;
-  }, 0);
+    return out;
+  }, [companyRows, now]);
 
-  const pendingPayments =
-    pendingFromField > 0 ? pendingFromField : pendingFromStatus;
+  const accessCounters = useMemo(() => {
+    const out = {
+      activeProTrials: 0,
+      activeProSubscriptions: 0,
+      expiredTrials: 0,
+      expiredSubscriptions: 0,
+      suspended: 0,
+    };
+    for (const row of companyRows as any[]) {
+      const visibility = computeSubscriptionVisibility(
+        {
+          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
+          trialStartsAt: null,
+          trialEndsAt: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
+          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
+          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
+          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
+          isSuspended: String(row.subscription_status ?? '').toLowerCase() === 'suspended',
+        },
+        now,
+      );
+      if (visibility.accessStatus === 'suspended') {
+        out.suspended += 1;
+        continue;
+      }
+      if (visibility.accessStatus === 'active') {
+        if (visibility.plan === 'pro' && visibility.accessType === 'trial') out.activeProTrials += 1;
+        if (visibility.plan === 'pro' && visibility.accessType === 'subscription') out.activeProSubscriptions += 1;
+      } else {
+        if (visibility.accessType === 'trial') out.expiredTrials += 1;
+        else out.expiredSubscriptions += 1;
+      }
+    }
+    return out;
+  }, [companyRows, now]);
 
   const totalChallenges = Number(challengesIntel?.totalChallenges ?? 0);
 
@@ -99,11 +176,51 @@ export default function DeveloperHomePage() {
             variant="default"
             compact
           />
+          <Link to="/developer/companies?subscription=payment_required" className="block">
+            <StatCard
+              title="Pending payments"
+              value={paymentRequiredCount.toLocaleString()}
+              icon={<DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />}
+              variant={paymentRequiredCount > 0 ? 'warning' : 'default'}
+              compact
+            />
+          </Link>
+        </DeveloperStatGrid>
+
+        <DeveloperStatGrid cols="5">
           <StatCard
-            title="Pending payments"
-            value={pendingPayments.toLocaleString()}
+            title="Active Trials"
+            value={Number(paymentLifecycleCounters.activeTrials ?? 0).toLocaleString()}
+            icon={<Users className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant={Number(paymentLifecycleCounters.activeTrials ?? 0) > 0 ? 'warning' : 'default'}
+            compact
+          />
+          <StatCard
+            title="Paid Active Companies"
+            value={Number(paymentLifecycleCounters.paidActiveCompanies ?? 0).toLocaleString()}
             icon={<DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant={pendingPayments > 0 ? 'warning' : 'default'}
+            variant={Number(paymentLifecycleCounters.paidActiveCompanies ?? 0) > 0 ? 'primary' : 'default'}
+            compact
+          />
+          <StatCard
+            title="Trials Expired"
+            value={Number(paymentLifecycleCounters.trialsExpired ?? 0).toLocaleString()}
+            icon={<AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant={Number(paymentLifecycleCounters.trialsExpired ?? 0) > 0 ? 'warning' : 'default'}
+            compact
+          />
+          <StatCard
+            title="Pending Confirmations"
+            value={Number(paymentLifecycleCounters.pendingConfirmations ?? 0).toLocaleString()}
+            icon={<AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant={Number(paymentLifecycleCounters.pendingConfirmations ?? 0) > 0 ? 'warning' : 'default'}
+            compact
+          />
+          <StatCard
+            title="Subscription Expired"
+            value={Number(paymentLifecycleCounters.subscriptionExpired ?? 0).toLocaleString()}
+            icon={<Building2 className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant={Number(paymentLifecycleCounters.subscriptionExpired ?? 0) > 0 ? 'warning' : 'default'}
             compact
           />
         </DeveloperStatGrid>

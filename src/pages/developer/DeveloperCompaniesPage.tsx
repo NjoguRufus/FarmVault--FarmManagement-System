@@ -11,6 +11,7 @@ import {
   listDuplicateEmails,
   fetchCompanyWorkspaceNotifyPayload,
   type OverrideMode,
+  extendCompanyTrial,
 } from '@/services/developerAdminService';
 import { getSupabaseAccessToken } from '@/lib/supabase';
 import { invokeNotifyCompanyWorkspaceReady } from '@/lib/email';
@@ -54,6 +55,14 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { computeSubscriptionStatus } from '@/lib/subscription/subscriptionStatus';
+import { computeSubscriptionVisibility, subscriptionVisibilityBadgeClass } from '@/lib/subscription/subscriptionVisibility';
+import {
+  computeCompanySubscriptionState,
+  companySubscriptionBadgeClass,
+} from '@/features/billing/lib/computeCompanySubscriptionState';
+import { useSearchParams } from 'react-router-dom';
+import { useNow } from '@/hooks/useNow';
 
 type LatestSubscriptionPayment = {
   id?: string;
@@ -82,6 +91,7 @@ type CompanyRow = {
   trial_ends_at?: string | null;
   active_until?: string | null;
   latest_subscription_payment?: LatestSubscriptionPayment | null;
+  company_status?: string | null;
   override?: {
     enabled?: boolean;
     mode?: string;
@@ -166,11 +176,14 @@ function isNewCompany(createdAt?: string | null, daysWindow: number = 7): boolea
 }
 
 export default function DeveloperCompaniesPage() {
+  const now = useNow(60_000);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended' | 'rejected' | 'approved' | 'pending_approval'>('all');
   const [overrideFilter, setOverrideFilter] = useState<'all' | 'overridden' | 'pilot' | 'collaborator' | 'free_access' | 'trial_override'>('all');
   const [newOnly, setNewOnly] = useState(false);
   const [newWindowDays, setNewWindowDays] = useState<3 | 7 | 14>(7);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const subscriptionFilter = (searchParams.get('subscription') || '').toLowerCase();
   const { activeCompanyId } = useActiveCompany();
   const [deleteModal, setDeleteModal] = useState<{
     open: boolean;
@@ -192,6 +205,18 @@ export default function DeveloperCompaniesPage() {
     planCode: 'pro',
     reason: '',
   });
+
+  const [confirmAction, setConfirmAction] = useState<{
+    open: boolean;
+    company: CompanyRow | null;
+    kind: 'suspend' | 'set_plan_pro' | 'set_plan_basic';
+  }>({ open: false, company: null, kind: 'suspend' });
+
+  const [extendTrialModal, setExtendTrialModal] = useState<{
+    open: boolean;
+    company: CompanyRow | null;
+    days: 7 | 14 | 30;
+  }>({ open: false, company: null, days: 7 });
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -220,6 +245,28 @@ export default function DeveloperCompaniesPage() {
       const id = (c.company_id ?? c.id ?? '').toLowerCase();
       const mode = (c.override?.mode ?? '').toLowerCase();
       const hasOverride = Boolean(c.override?.enabled);
+      const computed = computeSubscriptionStatus(
+        {
+          trialEnd: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+          activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+          isSuspended: status === 'suspended',
+          planCode: c.plan_code ?? c.subscription?.plan ?? null,
+        },
+        now,
+      );
+      const derived = computeCompanySubscriptionState(
+        {
+          companyStatus: c.company_status ?? null,
+          planCode: c.plan_code ?? c.subscription?.plan ?? null,
+          subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
+          isTrial: c.is_trial ?? (c.subscription?.status === 'trialing'),
+          trialStartsAt: null,
+          trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+          activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+          latestPaymentStatus: c.latest_subscription_payment?.status ?? null,
+        },
+        now,
+      );
 
       if (statusFilter !== 'all') {
         if (statusFilter === 'approved') {
@@ -227,6 +274,10 @@ export default function DeveloperCompaniesPage() {
         } else if (status !== statusFilter) {
           return false;
         }
+      }
+
+      if (subscriptionFilter === 'payment_required') {
+        if (!computed.paymentRequired) return false;
       }
 
       if (overrideFilter !== 'all') {
@@ -245,10 +296,12 @@ export default function DeveloperCompaniesPage() {
         name.includes(term) ||
         plan.includes(term) ||
         status.includes(term) ||
-        id.includes(term)
+        id.includes(term) ||
+        computed.label.toLowerCase().includes(term) ||
+        derived.displayLabel.toLowerCase().includes(term)
       );
     });
-  }, [companies, search, statusFilter, overrideFilter, newOnly, newWindowDays]);
+  }, [companies, search, statusFilter, overrideFilter, newOnly, newWindowDays, subscriptionFilter, now]);
 
   const formatCreatedTime = (dateStr: string | null | undefined): string => {
     if (!dateStr) return 'Unknown';
@@ -375,6 +428,8 @@ export default function DeveloperCompaniesPage() {
       toast({ title, description });
 
       await queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+      // If details page is open, refresh farm-intelligence payload too (includes subscription tab).
+      await queryClient.invalidateQueries({ queryKey: ['developer', 'company-farm-intelligence', params.companyId] });
 
       if (import.meta.env.DEV) {
         const pathAfter = typeof window !== 'undefined' ? window.location.pathname : location.pathname;
@@ -462,6 +517,24 @@ export default function DeveloperCompaniesPage() {
     },
   });
 
+  const extendTrialMutation = useMutation({
+    mutationFn: async (params: { companyId: string; days: 7 | 14 | 30 }) => {
+      return extendCompanyTrial({ companyId: params.companyId, days: params.days, reason: 'Developer trial extension' });
+    },
+    onSuccess: async (result) => {
+      toast({
+        title: 'Trial extended',
+        description: result.trial_ends_at ? `New trial end: ${formatDate(result.trial_ends_at)}` : 'Trial end updated.',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+      await queryClient.invalidateQueries({ queryKey: ['developer', 'company-farm-intelligence', result.company_id] });
+      setExtendTrialModal({ open: false, company: null, days: 7 });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Extend trial failed', description: err.message, variant: 'destructive' });
+    },
+  });
+
   const duplicatesQuery = useQuery({
     queryKey: ['developer', 'duplicate-emails'],
     queryFn: () => listDuplicateEmails(),
@@ -525,6 +598,36 @@ export default function DeveloperCompaniesPage() {
       onSearchChange={setSearch}
     >
       <div className="fv-card space-y-3 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Subscription:</span>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'payment_required', label: 'Payment required' },
+          ].map((f) => {
+            const active = (subscriptionFilter || 'all') === f.key;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  if (f.key === 'all') next.delete('subscription');
+                  else next.set('subscription', f.key);
+                  setSearchParams(next, { replace: true });
+                }}
+                className={cn(
+                  'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                  active
+                    ? 'bg-primary/15 text-primary border-primary/40'
+                    : 'bg-background text-muted-foreground border-border hover:border-primary/30'
+                )}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">New Companies:</span>
           <button
@@ -647,7 +750,7 @@ export default function DeveloperCompaniesPage() {
             <thead className="border-b border-border/60 text-xs text-muted-foreground">
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
-                <th className="py-2 text-left font-medium">Plan / Status</th>
+                <th className="py-2 text-left font-medium">Access</th>
                 <th className="py-2 text-left font-medium">Latest M-Pesa</th>
                 <th className="py-2 text-left font-medium">Users</th>
                 <th className="py-2 text-left font-medium">Trial ends</th>
@@ -662,6 +765,37 @@ export default function DeveloperCompaniesPage() {
                 const hasOverride = c.override?.enabled;
                 const displayName = c.company_name ?? c.name ?? '—';
                 const lowerName = displayName.trim().toLowerCase();
+                const computed = computeSubscriptionStatus({
+                  trialEnd: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+                  activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+                  isSuspended: String(c.subscription_status ?? '').toLowerCase() === 'suspended',
+                  planCode: c.plan_code ?? c.subscription?.plan ?? null,
+                });
+                const derived = computeCompanySubscriptionState(
+                  {
+                    companyStatus: c.company_status ?? null,
+                    planCode: c.plan_code ?? c.subscription?.plan ?? null,
+                    subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
+                    isTrial: c.is_trial ?? (c.subscription?.status === 'trialing'),
+                    trialStartsAt: null,
+                    trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+                    activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+                    latestPaymentStatus: c.latest_subscription_payment?.status ?? null,
+                  },
+                  now,
+                );
+                const visibility = computeSubscriptionVisibility(
+                  {
+                    planCode: c.plan_code ?? c.subscription?.plan ?? null,
+                    trialStartsAt: null,
+                    trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+                    activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+                    isTrial: c.is_trial ?? c.subscription?.status === 'trialing',
+                    subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
+                    isSuspended: String(c.subscription_status ?? '').toLowerCase() === 'suspended',
+                  },
+                  now,
+                );
                 const isProtectedCompany =
                   lowerName === 'keyfarm' ||
                   // Any company that is currently active in this session
@@ -683,20 +817,41 @@ export default function DeveloperCompaniesPage() {
                         Created: {formatCreatedTime(c.created_at)}
                       </div>
                     </td>
-                    <td className="max-md:items-start py-3 pr-4" data-label="Plan / Status">
-                      <span
-                        className={cn(
-                          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border',
-                          variant === 'success' && 'bg-green-500/10 text-green-600 border-green-500/20',
-                          variant === 'warning' && 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-                          variant === 'destructive' && 'bg-red-500/10 text-red-600 border-red-500/20',
-                          variant === 'secondary' && 'bg-blue-500/10 text-blue-600 border-blue-500/20',
-                          variant === 'default' && 'bg-muted text-muted-foreground border-border'
+                    <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Access">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className={cn('font-normal', companySubscriptionBadgeClass(derived))}>
+                          {derived.displayLabel}
+                        </Badge>
+                        {derived.paymentRequired && derived.accessStatus !== 'suspended' && (
+                          <Badge
+                            variant="outline"
+                            className="font-normal border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200"
+                            title="Trial or subscription ended with no active paid access"
+                          >
+                            Payment required
+                          </Badge>
                         )}
-                      >
-                        {hasOverride && <ShieldCheck className="h-3 w-3" />}
-                        {label}
-                      </span>
+                        {hasOverride && (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'font-normal',
+                              variant === 'success' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+                              variant === 'warning' && 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+                              variant === 'destructive' && 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200',
+                              variant === 'secondary' && 'border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-200',
+                              variant === 'default' && 'border-border bg-muted text-muted-foreground'
+                            )}
+                            title="Developer override (separate from billing-derived access)"
+                          >
+                            <ShieldCheck className="mr-1 h-3 w-3" />
+                            {label}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        {visibility.displayLabel}
+                      </div>
                     </td>
                     <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Latest M-Pesa">
                       {c.latest_subscription_payment ? (
@@ -760,58 +915,16 @@ export default function DeveloperCompaniesPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
-                              const reason = window.prompt('Reason for rejection (optional):', '');
-                              stateMutation.mutate({ companyId: id, action: 'reject', reason: reason ?? undefined });
-                            }}
-                            className="gap-2"
-                          >
-                            <XOctagon className="h-4 w-4" />
-                            Reject Company
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              const reason = window.prompt('Reason for suspension (optional):', '');
-                              stateMutation.mutate({ companyId: id, action: 'suspend', reason: reason ?? undefined });
+                              setConfirmAction({ open: true, company: c, kind: 'suspend' });
                             }}
                             className="gap-2"
                           >
                             <PauseCircle className="h-4 w-4" />
                             Suspend Company
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => stateMutation.mutate({ companyId: id, action: 'activate' })}
-                            className="gap-2"
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            Activate (7-day Pro trial)
-                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => {
-                              const daysRaw = window.prompt('Trial days to grant', '7');
-                              const days = Number(daysRaw ?? '7');
-                              stateMutation.mutate({ companyId: id, action: 'start_trial', days: Number.isFinite(days) ? days : 7 });
-                            }}
-                            className="gap-2"
-                          >
-                            <Clock className="h-4 w-4" />
-                            Start Trial
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              const daysRaw = window.prompt('Extra days to extend access', '30');
-                              const reason = window.prompt('Override note (optional)', '');
-                              const days = Number(daysRaw ?? '30');
-                              stateMutation.mutate({ companyId: id, action: 'extend', days: Number.isFinite(days) ? days : 30, reason: reason ?? undefined });
-                            }}
-                            className="gap-2"
-                          >
-                            <Clock className="h-4 w-4" />
-                            Extend Access
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleQuickOverride(c, 'paid_active')}
+                            onClick={() => setConfirmAction({ open: true, company: c, kind: 'set_plan_pro' })}
                             className="gap-2"
                           >
                             <Crown className="h-4 w-4" />
@@ -819,80 +932,20 @@ export default function DeveloperCompaniesPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
-                              stateMutation.mutate({ companyId: id, action: 'set_plan', planCode: 'basic' });
+                              setConfirmAction({ open: true, company: c, kind: 'set_plan_basic' });
                             }}
                             className="gap-2"
                           >
                             <Users className="h-4 w-4" />
                             Set Plan to Basic
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => handleQuickOverride(c, 'start_trial')}
+                            onClick={() => setExtendTrialModal({ open: true, company: c, days: 7 })}
                             className="gap-2"
                           >
                             <Clock className="h-4 w-4" />
-                            Grant Trial
+                            Extend Trial…
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleQuickOverride(c, 'start_trial')}
-                            className="gap-2"
-                          >
-                            <Clock className="h-4 w-4" />
-                            Extend Trial
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleQuickOverride(c, 'free_forever')}
-                            className="gap-2"
-                          >
-                            <Gift className="h-4 w-4" />
-                            Grant Free Access
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              const companyId = c.company_id ?? c.id ?? '';
-                              if (companyId) {
-                                overrideMutation.mutate({
-                                  companyId,
-                                  mode: 'pilot' as OverrideMode,
-                                  reason: 'Marked as pilot',
-                                });
-                              }
-                            }}
-                            className="gap-2"
-                          >
-                            <Beaker className="h-4 w-4" />
-                            Mark as Pilot
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              const companyId = c.company_id ?? c.id ?? '';
-                              if (companyId) {
-                                overrideMutation.mutate({
-                                  companyId,
-                                  mode: 'collaborator' as OverrideMode,
-                                  reason: 'Marked as collaborator',
-                                });
-                              }
-                            }}
-                            className="gap-2"
-                          >
-                            <Sparkles className="h-4 w-4" />
-                            Mark as Collaborator
-                          </DropdownMenuItem>
-                          {hasOverride && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => handleQuickOverride(c, 'remove_override')}
-                                className="gap-2 text-destructive"
-                              >
-                                <XCircle className="h-4 w-4" />
-                                Remove Override
-                              </DropdownMenuItem>
-                            </>
-                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             onClick={() => setDeleteModal({ open: true, company: c, confirmValue: '' })}
@@ -916,6 +969,121 @@ export default function DeveloperCompaniesPage() {
           </table>
         </div>
       )}
+
+      {/* Minimal confirm modal: suspend / set plan */}
+      <Dialog
+        open={confirmAction.open}
+        onOpenChange={(open) => {
+          if (stateMutation.isPending) return;
+          setConfirmAction((p) => ({ ...p, open }));
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmAction.kind === 'suspend'
+                ? 'Suspend Company'
+                : confirmAction.kind === 'set_plan_pro'
+                  ? 'Set Plan to Pro'
+                  : 'Set Plan to Basic'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmAction.kind === 'suspend'
+                ? `Suspend "${confirmAction.company?.company_name ?? confirmAction.company?.name ?? 'this company'}"? They will lose access until reactivated.`
+                : confirmAction.kind === 'set_plan_pro'
+                  ? `Set "${confirmAction.company?.company_name ?? confirmAction.company?.name ?? 'this company'}" to Pro?`
+                  : `Set "${confirmAction.company?.company_name ?? confirmAction.company?.name ?? 'this company'}" to Basic?`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              disabled={stateMutation.isPending}
+              onClick={() => setConfirmAction({ open: false, company: null, kind: 'suspend' })}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={confirmAction.kind === 'suspend' ? 'destructive' : 'default'}
+              disabled={stateMutation.isPending || !confirmAction.company}
+              className="gap-2"
+              onClick={() => {
+                const companyId = confirmAction.company?.company_id ?? confirmAction.company?.id ?? '';
+                if (!companyId) return;
+                if (confirmAction.kind === 'suspend') {
+                  stateMutation.mutate({ companyId, action: 'suspend', reason: 'Suspended by developer' });
+                } else if (confirmAction.kind === 'set_plan_pro') {
+                  stateMutation.mutate({ companyId, action: 'set_plan', planCode: 'pro', reason: 'Set plan to Pro' });
+                } else {
+                  stateMutation.mutate({ companyId, action: 'set_plan', planCode: 'basic', reason: 'Set plan to Basic' });
+                }
+                setConfirmAction((p) => ({ ...p, open: false }));
+              }}
+            >
+              {stateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Extend trial modal */}
+      <Dialog
+        open={extendTrialModal.open}
+        onOpenChange={(open) => {
+          if (extendTrialMutation.isPending) return;
+          setExtendTrialModal((p) => ({ ...p, open }));
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Extend Trial</DialogTitle>
+            <DialogDescription>
+              Extend the trial for{' '}
+              <span className="font-medium text-foreground">
+                {extendTrialModal.company?.company_name ?? extendTrialModal.company?.name ?? 'this company'}
+              </span>
+              . Choose the extension duration.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap gap-2 py-3">
+            {[7, 14, 30].map((d) => (
+              <Button
+                key={d}
+                type="button"
+                variant={extendTrialModal.days === d ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setExtendTrialModal((p) => ({ ...p, days: d as 7 | 14 | 30 }))}
+              >
+                {d} days
+              </Button>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              disabled={extendTrialMutation.isPending}
+              onClick={() => setExtendTrialModal({ open: false, company: null, days: 7 })}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={extendTrialMutation.isPending || !extendTrialModal.company}
+              className="gap-2"
+              onClick={() => {
+                const companyId = extendTrialModal.company?.company_id ?? extendTrialModal.company?.id ?? '';
+                if (!companyId) return;
+                extendTrialMutation.mutate({ companyId, days: extendTrialModal.days });
+              }}
+            >
+              {extendTrialMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Extend
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {duplicatesQuery.data && (
         <div className="fv-card space-y-2">

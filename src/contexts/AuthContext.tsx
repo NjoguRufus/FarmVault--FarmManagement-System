@@ -44,6 +44,10 @@ interface AuthContextType {
   /** Resolved access (landing page, allowed modules, etc.). Use this for nav, routes, and landing—not raw role. */
   effectiveAccess: EffectiveAccess;
   isAuthenticated: boolean;
+  /** True when Clerk has finished hydrating its session state (no longer unknown). */
+  clerkLoaded: boolean;
+  /** True when Clerk reports an authenticated session (only meaningful when clerkLoaded is true). */
+  clerkSignedIn: boolean;
   authReady: boolean;
   /**
    * Clerk finished loading and reports a signed-in session. FarmVault profile/onboarding may still be resolving (authReady false).
@@ -79,6 +83,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_USER_CACHE_KEY = 'farmvault:auth:user:v1';
 const EMERGENCY_SESSION_KEY = 'farmvault:emergency-session:v1';
 const CLERK_LOAD_TIMEOUT_MS = 4000;
+const ACCESS_REVOKED_REDIRECT_KEY = 'farmvault:access-revoked:v1';
+
+function isExplicitOnboardingRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const p = window.location.pathname || '/';
+    // Only allow creating platform rows during explicit onboarding / post-auth continuation.
+    // This prevents deleted accounts from being auto-recreated just because a stale auth session exists.
+    return (
+      p.startsWith('/auth/continue') ||
+      p.startsWith('/onboarding') ||
+      p.startsWith('/accept-invitation') ||
+      p.startsWith('/dev/bootstrap')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function redirectToSignUpAccessRevoked() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(ACCESS_REVOKED_REDIRECT_KEY, '1');
+  } catch {
+    // ignore
+  }
+  window.location.assign('/sign-up?reason=access-revoked');
+}
 
 function isEmergencyAccessEnabled(): boolean {
   return import.meta.env.VITE_EMERGENCY_ACCESS === 'true' || import.meta.env.VITE_EMERGENCY_ACCESS === '1';
@@ -764,8 +796,8 @@ export function AuthProvider({
         }
 
         // 3) Developer delete (user or company) inserts admin.reset_users so we do not resurrect stale sessions.
-        // When re-signup is allowed, consume that tombstone immediately — same as the old "Start Fresh" button —
-        // so the user continues like a first-time signup straight into onboarding (no extra gate page).
+        // IMPORTANT: When a reset tombstone exists, we must NOT auto-recreate user/company rows on reload.
+        // Instead, force a clean sign-out and send the user to sign-up (or public landing) to start fresh.
         const { data: resetState, error: resetError } = await supabase.rpc('get_reset_user_state');
         const resetPayload = (resetState ?? {}) as {
           has_reset_row?: boolean;
@@ -780,18 +812,39 @@ export function AuthProvider({
           console.warn('[Auth] get_reset_user_state RPC warning:', resetError);
         }
 
-        if (hasActiveResetRow && resetAllowResignup) {
-          const { error: consumeErr } = await supabase.rpc('consume_reset_user_for_signup');
-          if (consumeErr && import.meta.env.DEV) {
+        if (hasActiveResetRow) {
+          clearPendingApprovalSession();
+          writeCachedUser(null);
+          setEmployeeProfile(null);
+          setPermissions(getDefaultPermissions());
+          setSetupIncomplete(false);
+          setResetRequired(true);
+          setActivationResolved(true);
+          setAuthReady(true);
+
+          // If re-signup is blocked, we still sign the user out and route them away from app bootstrap.
+          if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.warn('[Auth] consume_reset_user_for_signup (auto after dev delete) failed:', consumeErr);
-          } else {
-            clearPendingApprovalSession();
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.log('[Auth] Cleared reset tombstone; continuing bootstrap as new signup', { uid: userId });
-            }
+            console.warn('[Auth] Reset tombstone detected; forcing sign-out to prevent auto-resurrection', {
+              uid: userId,
+              allow_resignup: resetAllowResignup,
+            });
           }
+
+          // Prefer Clerk signOut so session is truly cleared.
+          try {
+            await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+          } catch {
+            // ignore; fall back to local redirect below
+          }
+
+          // Redirect to sign-up (resignup allowed) or landing (blocked) without recreating server rows.
+          if (typeof window !== 'undefined') {
+            const target = resetAllowResignup ? '/sign-up' : '/';
+            // Use assign so the router + Clerk fully reset.
+            window.location.assign(target);
+          }
+          return;
         } else if (hasActiveResetRow && !resetAllowResignup) {
           const resetUser: User = {
             id: userId,
@@ -824,34 +877,83 @@ export function AuthProvider({
 
         setResetRequired(false);
 
-        // 3a) Idempotent platform user: match by Clerk id, else merge by normalized email (single core.profiles row per person).
-        const resolvedProfile = await resolveOrCreatePlatformUser({
-          clerkUserId: userId,
-          email: fallbackEmail,
-        });
-        if (!resolvedProfile) {
-          const { error: upsertError } = await db
+        // 3a) Platform profile MUST exist for access.
+        // IMPORTANT: Do NOT auto-create profiles on normal app loads — that resurrects deleted accounts.
+        const allowAutoCreatePlatformUser = isExplicitOnboardingRoute();
+        let hasCoreProfile = false;
+        try {
+          const { data: coreProfileRow, error: coreProfileErr } = await db
             .core()
             .from('profiles')
-            .upsert(
-              {
-                clerk_user_id: userId,
-                email: fallbackEmail || null,
-              },
-              { onConflict: 'clerk_user_id' },
-            );
-          if (upsertError && import.meta.env.DEV) {
+            .select('clerk_user_id')
+            .eq('clerk_user_id', userId)
+            .maybeSingle();
+          if (coreProfileErr && import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.warn('[Auth] Profile upsert fallback (resolve_or_ensure_platform_profile unavailable):', upsertError);
+            console.warn('[Auth] core.profiles lookup warning:', coreProfileErr);
           }
-        } else if (import.meta.env.DEV && resolvedProfile.action === 'merged_from_email') {
-          // eslint-disable-next-line no-console
-          console.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
-            clerk_user_id: resolvedProfile.clerk_user_id,
-          });
+          hasCoreProfile = !!coreProfileRow?.clerk_user_id;
+        } catch {
+          hasCoreProfile = false;
         }
 
-        // 3b) full_name / avatar loaded below; row ensured by resolve (or upsert fallback).
+        if (!hasCoreProfile) {
+          if (!allowAutoCreatePlatformUser) {
+            // Missing platform profile on a non-onboarding route means this session is no longer authorized.
+            // Force a clean sign-out + redirect to sign-up (manual re-registration is allowed).
+            clearPendingApprovalSession();
+            writeCachedUser(null);
+            setEmployeeProfile(null);
+            setPermissions(getDefaultPermissions());
+            setSetupIncomplete(false);
+            setResetRequired(true);
+            setActivationResolved(true);
+            setAuthReady(true);
+            try {
+              await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+            } catch {
+              // ignore
+            }
+            if (typeof window !== 'undefined') {
+            redirectToSignUpAccessRevoked();
+            }
+            return;
+          }
+
+          // Explicit onboarding route: allow platform profile creation (fresh sign-up flow).
+          try {
+            // If there is a reset tombstone for this identity, consume it only in onboarding context.
+            await supabase.rpc('consume_reset_user_for_signup');
+          } catch {
+            // non-blocking; access validation already handled earlier by get_reset_user_state
+          }
+
+          const resolvedProfile = await resolveOrCreatePlatformUser({
+            clerkUserId: userId,
+            email: fallbackEmail,
+          });
+          if (!resolvedProfile) {
+            const { error: upsertError } = await db
+              .core()
+              .from('profiles')
+              .upsert(
+                {
+                  clerk_user_id: userId,
+                  email: fallbackEmail || null,
+                },
+                { onConflict: 'clerk_user_id' },
+              );
+            if (upsertError && import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] Profile upsert fallback (resolve_or_ensure_platform_profile unavailable):', upsertError);
+            }
+          } else if (import.meta.env.DEV && resolvedProfile.action === 'merged_from_email') {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
+              clerk_user_id: resolvedProfile.clerk_user_id,
+            });
+          }
+        }
 
         // 3b) Load profile full_name + avatar_url (user display + avatar priority)
         let profileAvatarUrl: string | null = null;
@@ -915,25 +1017,33 @@ export function AuthProvider({
               console.warn('[Auth] company_exists RPC warning:', existsError);
             }
             if (!companyExists) {
+              // Missing company means access is no longer valid. Do NOT "repair" into onboarding; force exit to sign-up.
+              // This is the key fix for "deleted company restores access on reload".
               // eslint-disable-next-line no-console
-              console.warn('[Auth] Orphaned staff membership found during bootstrap; company is missing', {
+              console.warn('[Auth] Company missing for membership context; forcing sign-out', {
                 uid: userId,
                 companyId: contextCompanyId,
               });
+
+              clearPendingApprovalSession();
+              writeCachedUser(null);
+              setEmployeeProfile(null);
+              setPermissions(getDefaultPermissions());
+              setSetupIncomplete(false);
+              setResetRequired(true);
+              setActivationResolved(true);
+              setAuthReady(true);
+
               try {
-                await supabase.rpc('cleanup_orphaned_access', { p_company_id: contextCompanyId });
-              } catch (cleanupError) {
-                if (import.meta.env.DEV) {
-                  // eslint-disable-next-line no-console
-                  console.warn('[Auth] cleanup_orphaned_access failed (non-blocking):', cleanupError);
-                }
+                await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+              } catch {
+                // ignore
               }
-              contextCompanyId = null;
-              contextRole = null;
-              // eslint-disable-next-line no-console
-              console.warn('[Auth] Skipped staff login due to missing company for membership context', {
-                uid: userId,
-              });
+
+              if (typeof window !== 'undefined') {
+                redirectToSignUpAccessRevoked();
+              }
+              return;
             }
           } catch (existsUnexpectedError) {
             if (import.meta.env.DEV) {
@@ -1679,6 +1789,8 @@ export function AuthProvider({
         permissions,
         effectiveAccess,
         isAuthenticated: !!user,
+        clerkLoaded,
+        clerkSignedIn: isSignedIn,
         authReady: authReady && activationResolved,
         hasClerkSession: clerkState !== null && clerkLoaded && isSignedIn,
         isDeveloper,

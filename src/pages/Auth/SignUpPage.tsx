@@ -1,8 +1,32 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { SignUp } from '@clerk/react';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
+import { useLocation } from 'react-router-dom';
 
 export default function SignUpPage() {
+  const location = useLocation();
+
+  const showAccessRevoked = useMemo(() => {
+    const params = new URLSearchParams(location.search || '');
+    const byQuery = params.get('reason') === 'access-revoked';
+    let byStorage = false;
+    try {
+      byStorage = window.sessionStorage.getItem('farmvault:access-revoked:v1') === '1';
+    } catch {
+      byStorage = false;
+    }
+    return byQuery || byStorage;
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!showAccessRevoked) return;
+    try {
+      window.sessionStorage.removeItem('farmvault:access-revoked:v1');
+    } catch {
+      // ignore
+    }
+  }, [showAccessRevoked]);
+
   return (
     <PremiumAuthShell
       title="Create your FarmVault account"
@@ -21,6 +45,15 @@ export default function SignUpPage() {
             <p className="mt-1 text-sm text-white/80">Create your FarmVault account to get started</p>
           </div>
         </div>
+
+        {showAccessRevoked && (
+          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white/90 backdrop-blur">
+            <p className="font-medium">Your previous access is no longer available.</p>
+            <p className="mt-1 text-white/75">
+              Please sign up again to create a fresh FarmVault account.
+            </p>
+          </div>
+        )}
 
         <SignUp
           routing="path"

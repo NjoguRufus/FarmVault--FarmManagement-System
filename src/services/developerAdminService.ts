@@ -202,6 +202,26 @@ export async function updateCompanySubscriptionState(input: {
   return setCompanySubscriptionState(input);
 }
 
+export async function extendCompanyTrial(input: {
+  companyId: string;
+  days: 7 | 14 | 30 | number;
+  reason?: string | null;
+}): Promise<{ company_id: string; trial_ends_at: string | null }> {
+  const { data, error } = await supabase.rpc('extend_company_trial', {
+    _company_id: input.companyId,
+    _days: input.days,
+    _reason: input.reason ?? null,
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to extend trial');
+  }
+  const payload = (data ?? null) as { company_id?: string; trial_ends_at?: string | null } | null;
+  return {
+    company_id: String(payload?.company_id ?? input.companyId),
+    trial_ends_at: payload?.trial_ends_at ?? null,
+  };
+}
+
 export { listDuplicateEmails };
 
 // ---------------------------------------------------------------------------

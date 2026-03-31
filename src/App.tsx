@@ -123,6 +123,7 @@ import { TourProvider } from "@/tour/TourProvider";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
+import { DomainGuard } from "@/components/routing/DomainGuard";
 import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
 import { AppLockGate } from "@/components/auth/AppLockGate";
 import { AppLockPrompt } from "@/components/auth/AppLockPrompt";
@@ -503,6 +504,7 @@ const App = () => (
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <HelmetProvider>
                     {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
+                    <DomainGuard />
                     <RoutePersistence />
                     <PosthogAnalytics />
                     <TourProvider>

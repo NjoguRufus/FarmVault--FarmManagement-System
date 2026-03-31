@@ -4,6 +4,8 @@ import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { InstallFarmVault } from "@/components/pwa/InstallFarmVault";
+import { getAppAuthUrl, buildUrl, getAppBaseUrl, isPublicProductionHost } from "@/lib/urls/domains";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navLinks = [
   { name: "Home", href: "/", type: "route" },
@@ -18,6 +20,12 @@ export function LandingNavbar() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
+  const { isAuthenticated, authReady } = useAuth();
+
+  const showOpenDashboard = isPublicProductionHost() && authReady && isAuthenticated;
+  const dashboardHref = buildUrl(getAppBaseUrl(), "/dashboard");
+  const loginHref = getAppAuthUrl("sign-in");
+  const signUpHref = getAppAuthUrl("sign-up");
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -83,12 +91,20 @@ export function LandingNavbar() {
             compact
             className={scrolled ? "rounded-xl font-medium" : "rounded-xl font-medium border-primary-foreground/40 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"}
           />
-          <Button variant="ghost" size="sm" asChild className={scrolled ? "text-foreground hover:text-primary hover:bg-primary/5 font-medium" : "text-primary-foreground/90 hover:text-primary-foreground hover:bg-primary-foreground/10 font-medium"}>
-            <a href="/sign-in">Login</a>
-          </Button>
-          <Button size="sm" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-xl px-6 font-semibold">
-            <a href="/sign-up">Get Started</a>
-          </Button>
+          {showOpenDashboard ? (
+            <Button size="sm" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-xl px-6 font-semibold">
+              <a href={dashboardHref}>Open Dashboard</a>
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" asChild className={scrolled ? "text-foreground hover:text-primary hover:bg-primary/5 font-medium" : "text-primary-foreground/90 hover:text-primary-foreground hover:bg-primary-foreground/10 font-medium"}>
+                <a href={loginHref}>Login</a>
+              </Button>
+              <Button size="sm" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-xl px-6 font-semibold">
+                <a href={signUpHref}>Get Started</a>
+              </Button>
+            </>
+          )}
         </div>
 
         <button type="button" className={`lg:hidden transition-colors ${scrolled ? "text-foreground" : "text-primary-foreground"}`} onClick={() => setOpen(!open)} aria-label="Toggle menu">
@@ -124,12 +140,20 @@ export function LandingNavbar() {
                 ))}
               </ul>
               <div className="flex gap-3">
-                <Button variant="outline" size="sm" asChild className="flex-1 rounded-xl">
-                  <a href="/sign-in" onClick={() => setOpen(false)}>Login</a>
-                </Button>
-                <Button size="sm" asChild className="gradient-primary text-primary-foreground flex-1 rounded-xl btn-luxury">
-                  <a href="/sign-up" onClick={() => setOpen(false)}>Get Started</a>
-                </Button>
+                {showOpenDashboard ? (
+                  <Button size="sm" asChild className="gradient-primary text-primary-foreground flex-1 rounded-xl btn-luxury">
+                    <a href={dashboardHref} onClick={() => setOpen(false)}>Open Dashboard</a>
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" asChild className="flex-1 rounded-xl">
+                      <a href={loginHref} onClick={() => setOpen(false)}>Login</a>
+                    </Button>
+                    <Button size="sm" asChild className="gradient-primary text-primary-foreground flex-1 rounded-xl btn-luxury">
+                      <a href={signUpHref} onClick={() => setOpen(false)}>Get Started</a>
+                    </Button>
+                  </>
+                )}
               </div>
               <InstallFarmVault compact className="w-full rounded-xl mt-3" />
             </div>
