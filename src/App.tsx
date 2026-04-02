@@ -91,6 +91,7 @@ import SignUpPage from "@/pages/Auth/SignUpPage";
 import ScanPage from "@/pages/ScanPage";
 import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
 import PostAuthContinuePage from "@/pages/Auth/PostAuthContinuePage";
+import AmbassadorAuthContinuePage from "@/pages/Auth/AmbassadorAuthContinuePage";
 import { SignInRedirect } from "@/components/auth/SignInRedirect";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
@@ -246,6 +247,7 @@ const AppRoutesWithLock = () => {
       />
       <Route path="/auth/callback" element={<PostAuthContinuePage />} />
       <Route path="/auth/continue" element={<PostAuthContinuePage />} />
+      <Route path="/auth/ambassador-continue" element={<AmbassadorAuthContinuePage />} />
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
       <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
       <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />

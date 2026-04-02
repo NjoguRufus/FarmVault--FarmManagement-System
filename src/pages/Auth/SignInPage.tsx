@@ -4,7 +4,11 @@ import { SignIn } from '@clerk/react';
 import { ClerkLoadErrorBoundary } from '@/components/auth/ClerkLoadErrorBoundary';
 import { isEmergencyAccessEnabled } from '@/config/emergencyAccess';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
-import { getAmbassadorSignUpPath, isAmbassadorClerkFlow } from '@/lib/ambassador/clerkAuth';
+import {
+  AMBASSADOR_POST_AUTH_PATH,
+  getAmbassadorSignUpPath,
+  isAmbassadorClerkFlow,
+} from '@/lib/ambassador/clerkAuth';
 
 /**
  * Sign-in UI depends only on Clerk. No AuthContext or employee/company lookup runs here;
@@ -13,7 +17,7 @@ import { getAmbassadorSignUpPath, isAmbassadorClerkFlow } from '@/lib/ambassador
 export default function SignInPage() {
   const location = useLocation();
   const ambassadorFlow = isAmbassadorClerkFlow(location.search);
-  const afterAmbassadorAuthUrl = '/ambassador/onboarding';
+  const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
 
   return (
     <PremiumAuthShell

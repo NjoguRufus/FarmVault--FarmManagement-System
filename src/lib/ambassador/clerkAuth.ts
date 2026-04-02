@@ -1,6 +1,9 @@
 /** Query string for standard Clerk SignUp / SignIn pages to land on ambassador onboarding after auth. */
 export const AMBASSADOR_CLERK_FLOW = "ambassador";
 
+/** Clerk `afterSignInUrl` / `afterSignUpUrl` for ambassador flow — resolves dashboard vs onboarding without access-revoked. */
+export const AMBASSADOR_POST_AUTH_PATH = "/auth/ambassador-continue";
+
 export function getAmbassadorSignUpSearch(): string {
   return `flow=${encodeURIComponent(AMBASSADOR_CLERK_FLOW)}`;
 }

@@ -103,9 +103,14 @@ function isExplicitOnboardingRoute(): boolean {
     // This prevents deleted accounts from being auto-recreated just because a stale auth session exists.
     return (
       p.startsWith('/auth/continue') ||
+      p.startsWith('/auth/callback') ||
+      p.startsWith('/auth/ambassador-continue') ||
       p.startsWith('/onboarding') ||
       p.startsWith('/accept-invitation') ||
-      p.startsWith('/dev/bootstrap')
+      p.startsWith('/dev/bootstrap') ||
+      p.startsWith('/ambassador/onboarding') ||
+      p.startsWith('/ambassador/signup') ||
+      p.startsWith('/ambassador/console')
     );
   } catch {
     return false;
