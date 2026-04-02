@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
-import { UserPlus, Repeat2, Network, ArrowRight } from "lucide-react";
+import { UserPlus, Repeat2, Network, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeoHead } from "@/seo/SeoHead";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
@@ -9,6 +10,22 @@ import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SEO_ROUTES } from "@/seo/routes";
 import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
 import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { setAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
+import { fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
+
+function AmbassadorLandingGateLoader({ message }: { message: string }) {
+  return (
+    <div
+      className="landing-page min-h-screen flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-emerald-950 via-green-900 to-stone-900 text-emerald-50"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 className="h-10 w-10 animate-spin text-lime-300" aria-hidden />
+      <p className="text-sm text-emerald-200/70">{message}</p>
+    </div>
+  );
+}
 
 /** Soft outer lift + inner bevel, paired with glass blur */
 const neuGlass =
@@ -21,8 +38,11 @@ const neuGlassCard =
 
 export default function AmbassadorLandingPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const refParam = useMemo(() => searchParams.get("ref"), [searchParams]);
   const { setIsAccessingAmbassador } = useAmbassadorAccess();
+  const { user, isLoaded: clerkLoaded } = useUser();
+  const { authReady } = useAuth();
 
   useEffect(() => {
     const trimmed = refParam?.trim();
@@ -30,6 +50,43 @@ export default function AmbassadorLandingPage() {
       localStorage.setItem(AMBASSADOR_REF_STORAGE_KEY, trimmed);
     }
   }, [refParam]);
+
+  // Signed-in users: never send to sign-up — route to dashboard or onboarding (access-revoked safe).
+  useEffect(() => {
+    if (!clerkLoaded || !user || !authReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetchMyAmbassadorDashboardStats();
+        if (cancelled) return;
+        if (r.ok && r.onboarding_complete) {
+          navigate("/ambassador/dashboard", { replace: true });
+          return;
+        }
+        setAmbassadorAccessIntent(true);
+        navigate("/ambassador/onboarding", { replace: true });
+      } catch {
+        if (!cancelled) {
+          setAmbassadorAccessIntent(true);
+          navigate("/ambassador/onboarding", { replace: true });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clerkLoaded, user, authReady, navigate]);
+
+  if (!clerkLoaded) {
+    return <AmbassadorLandingGateLoader message="Loading…" />;
+  }
+
+  if (user) {
+    if (!authReady) {
+      return <AmbassadorLandingGateLoader message="Preparing your session…" />;
+    }
+    return <AmbassadorLandingGateLoader message="Opening ambassador…" />;
+  }
 
   const features = [
     { icon: UserPlus, title: "Refer Farmers", amount: "KES 600", detail: "per signup" },
