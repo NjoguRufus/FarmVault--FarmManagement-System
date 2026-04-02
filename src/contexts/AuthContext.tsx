@@ -114,7 +114,18 @@ function isExplicitOnboardingRoute(): boolean {
   }
 }
 
-/** Auto-create platform profile on ambassador paths only when user explicitly started the ambassador funnel. */
+/** Any `/ambassador` URL while Clerk is signed in may create a platform profile (avoids access-revoked on marketing page). */
+function isAmbassadorZonePath(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const p = window.location.pathname || '/';
+    return p === '/ambassador' || p.startsWith('/ambassador/');
+  } catch {
+    return false;
+  }
+}
+
+/** Auto-create on ambassador sub-routes when user explicitly started the funnel (intent). */
 function allowsAmbassadorProfileBootstrapPath(): boolean {
   if (!readAmbassadorAccessIntent()) return false;
   if (typeof window === 'undefined') return false;
@@ -939,7 +950,9 @@ export function AuthProvider({
         // 3a) Platform profile MUST exist for access.
         // IMPORTANT: Do NOT auto-create profiles on normal app loads — that resurrects deleted accounts.
         const allowAutoCreatePlatformUser =
-          isExplicitOnboardingRoute() || allowsAmbassadorProfileBootstrapPath();
+          isExplicitOnboardingRoute() ||
+          isAmbassadorZonePath() ||
+          allowsAmbassadorProfileBootstrapPath();
         let hasCoreProfile = false;
         try {
           const { data: coreProfileRow, error: coreProfileErr } = await db
