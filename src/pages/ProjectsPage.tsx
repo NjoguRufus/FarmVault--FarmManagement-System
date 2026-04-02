@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 
 type ProjectCardProps = {
   project: Project;
@@ -288,18 +289,6 @@ export default function ProjectsPage() {
     setSearchParams(next, { replace: true });
   };
 
-  const getCropEmoji = (cropType: string) => {
-    const emojis: Record<string, string> = {
-      tomatoes: '🍅',
-      'french-beans': '🫛',
-      capsicum: '🌶️',
-      maize: '🌽',
-      watermelons: '🍉',
-      rice: '🌾',
-    };
-    return emojis[cropType] || '🌱';
-  };
-
   const getStatusBadge = (status: Project['status']) => {
     const styles: Record<Project['status'], string> = {
       active: 'fv-badge--active',
@@ -420,7 +409,7 @@ export default function ProjectsPage() {
                 navigate(`/projects/${project.id}`);
               }}
               onSetActive={() => setActiveProject(project)}
-              getCropEmoji={getCropEmoji}
+              getCropEmoji={cropTypeKeyEmoji}
               getStatusBadge={getStatusBadge}
               formatCurrency={formatCurrency}
             />

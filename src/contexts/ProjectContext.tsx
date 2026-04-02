@@ -45,12 +45,13 @@ function readCachedProjects(): Project[] {
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const { user, isAuthenticated, authReady } = useAuth();
+  const { user, isAuthenticated, authReady, companyDataQueriesEnabled } = useAuth();
   const queryClient = useQueryClient();
   const prevCompanyIdRef = useRef<string | null>(undefined as unknown as string | null);
   const isDeveloper = user?.role === 'developer';
   const companyId = user?.companyId ?? null;
-  const canSubscribeProjects = authReady && isAuthenticated && (isDeveloper || !!companyId);
+  const canSubscribeProjects =
+    companyDataQueriesEnabled && authReady && isAuthenticated && (isDeveloper || !!companyId);
 
   const {
     data: projectsData = [],
@@ -92,9 +93,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setActiveProjectState(null);
       restoredActiveForCompanyRef.current = null;
       try {
-        if (prev) window.localStorage.removeItem(activeProjectStorageKey(prev));
+        if (prev) {
+          window.localStorage.removeItem(activeProjectStorageKey(prev));
+          void queryClient.removeQueries({ queryKey: ['projects', prev] });
+          void queryClient.removeQueries({ queryKey: ['dashboard-expenses-supa', prev] });
+          void queryClient.removeQueries({ queryKey: ['dashboard-inventory-supa', prev] });
+        }
         window.localStorage.removeItem(PROJECTS_CACHE_KEY);
-        queryClient.clear();
       } catch {
         // ignore
       }

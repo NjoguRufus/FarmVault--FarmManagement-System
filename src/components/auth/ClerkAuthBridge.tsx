@@ -9,6 +9,7 @@ import { useAuth as useClerkAuth, useUser, useSignIn } from '@clerk/react';
 import { AuthProvider } from '@/contexts/AuthContext';
 import type { ClerkStateSnapshot } from '@/contexts/AuthContext';
 import App from '@/App';
+import { ClerkSupabaseTokenBridge } from '@/components/auth/ClerkSupabaseTokenBridge';
 
 export function ClerkAuthBridge() {
   const clerk = useClerkAuth();
@@ -44,6 +45,7 @@ export function ClerkAuthBridge() {
 
   return (
     <AuthProvider clerkState={clerkState}>
+      <ClerkSupabaseTokenBridge />
       <App />
     </AuthProvider>
   );

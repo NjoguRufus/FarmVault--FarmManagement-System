@@ -20,6 +20,13 @@ export type CompanySubscriptionStateInput = {
   latestPaymentStatus?: string | null | undefined;
 };
 
+export type SubscriptionLifecycleState =
+  | 'trial_active'
+  | 'trial_expired'
+  | 'active_paid'
+  | 'payment_pending'
+  | 'suspended';
+
 export type CompanySubscriptionState = {
   approvalStatus: ApprovalStatus;
   plan: PlanCode;
@@ -45,6 +52,14 @@ export type CompanySubscriptionState = {
     | 'Basic Subscription'
     | 'Subscription Expired'
     | 'Suspended';
+
+  /** Trial-based access is active (never treated as paid). */
+  isTrialAccess: boolean;
+  /** At least one approved manual payment recorded (billing confirmation). */
+  isPaidAccess: boolean;
+  /** Table-friendly plan column, e.g. Pro (Trial), Pro (Paid), Basic. */
+  planTypeLabel: string;
+  lifecycleState: SubscriptionLifecycleState;
 };
 
 function norm(s: string | null | undefined): string {
@@ -154,6 +169,37 @@ export function computeCompanySubscriptionState(
     }
   }
 
+  const isPaidAccess = paymentStatus === 'paid';
+  const isTrialAccess = accessSource === 'trial' && accessStatus === 'active';
+
+  let planTypeLabel: string;
+  if (plan === 'basic') {
+    planTypeLabel = 'Basic';
+  } else if (isTrialAccess) {
+    planTypeLabel = 'Pro (Trial)';
+  } else if (isPaidAccess && accessSource === 'subscription' && accessStatus === 'active') {
+    planTypeLabel = 'Pro (Paid)';
+  } else if (plan === 'pro') {
+    planTypeLabel = accessStatus === 'expired' ? 'Pro (Expired)' : 'Pro';
+  } else {
+    planTypeLabel = 'Basic';
+  }
+
+  let lifecycleState: SubscriptionLifecycleState;
+  if (accessStatus === 'suspended') {
+    lifecycleState = 'suspended';
+  } else if (paymentStatus === 'pending_confirmation') {
+    lifecycleState = 'payment_pending';
+  } else if (accessSource === 'trial' && accessStatus === 'active') {
+    lifecycleState = 'trial_active';
+  } else if (accessSource === 'trial') {
+    lifecycleState = 'trial_expired';
+  } else if (accessStatus === 'active' && accessSource === 'subscription') {
+    lifecycleState = isPaidAccess ? 'active_paid' : 'payment_pending';
+  } else {
+    lifecycleState = 'trial_expired';
+  }
+
   return {
     approvalStatus,
     plan,
@@ -167,6 +213,10 @@ export function computeCompanySubscriptionState(
     daysRemaining,
     paymentRequired: accessStatus !== 'suspended' && (paymentRequired || (accessStatus === 'expired' && paymentStatus !== 'paid')),
     displayLabel,
+    isTrialAccess,
+    isPaidAccess,
+    planTypeLabel,
+    lifecycleState,
   };
 }
 

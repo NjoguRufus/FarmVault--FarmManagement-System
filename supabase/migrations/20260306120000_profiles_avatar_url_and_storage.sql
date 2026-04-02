@@ -2,8 +2,21 @@
 -- Priority in app: profile.avatar_url > Clerk/Google imageUrl > initials.
 
 -- 1) public.profiles: add avatar_url (custom upload URL from storage)
-ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS avatar_url text;
+DO $$
+DECLARE
+  v_kind text;
+BEGIN
+  SELECT c.relkind::text INTO v_kind
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'profiles';
+
+  -- Only mutate if public.profiles is a real table.
+  IF v_kind = 'r' THEN
+    ALTER TABLE public.profiles
+      ADD COLUMN IF NOT EXISTS avatar_url text;
+  END IF;
+END $$;
 
 -- 2) core.profiles: add avatar_url
 -- If it's a table (from 20260305000020), add column. If it's a view (from 20260305000016), recreate with avatar_url.

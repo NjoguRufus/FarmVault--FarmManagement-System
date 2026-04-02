@@ -1,0 +1,257 @@
+.notebook-shell {
+  min-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 32px;
+  width: 100%;
+}
+
+.notes-editor-wrapper {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+}
+
+/* Only while NotebookPage is mounted (body class toggled in React) */
+.fv-notebook-fullwidth .container {
+  max-width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.notebook-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+}
+
+.notebook-error {
+  border-radius: 16px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.notebook-page {
+  border-radius: 22px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 55px rgba(17, 24, 39, 0.10);
+  overflow: hidden;
+  width: 100%;
+  max-width: none;
+}
+
+.notebook-page.notes-editor {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.developer-ribbon {
+  font-size: 10px;
+  background: #e6f4ea;
+  color: #1f6f43;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin: 14px 18px 0 18px;
+  width: fit-content;
+}
+
+.developer-company-chip {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(17, 24, 39, 0.75);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.6);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.dark .developer-company-chip {
+  color: rgba(229, 231, 235, 0.85);
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(17, 24, 39, 0.25);
+}
+
+.dark .notebook-page {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(17, 24, 39, 0.35);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.35);
+}
+
+.dark .notebook-page.notes-editor {
+  border: none;
+  box-shadow: none;
+  background: rgba(17, 24, 39, 0.35);
+}
+
+.title-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  padding: 18px 18px 0 18px;
+  font-size: 22px;
+  font-weight: 650;
+  background: transparent;
+}
+
+.notebook-textarea {
+  width: 100%;
+  min-height: 80vh;
+  font-size: 18px;
+  line-height: 32px;
+  padding: 6px 24px 16px 24px;
+
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 31px,
+    rgba(0, 0, 0, 0.05) 32px
+  );
+  background-size: 100% 32px;
+  background-position-y: 6px;
+  background-attachment: local;
+
+  border: none;
+  outline: none;
+  resize: vertical;
+  background-color: transparent;
+}
+
+.dark .notebook-textarea {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 31px,
+    rgba(255, 255, 255, 0.06) 32px
+  );
+}
+
+.notes-editor {
+  width: 100%;
+  background-color: transparent;
+  line-height: 32px;
+  padding: 0;
+}
+
+.dark .notes-editor {
+  background-color: transparent;
+}
+
+.notes-editor textarea,
+.notes-editor [contenteditable="true"] {
+  line-height: 32px;
+  padding-top: 6px;
+  border: none;
+  outline: none;
+  width: 100%;
+}
+
+.notebook-attachments {
+  padding: 0 18px 16px 18px;
+}
+
+.notebook-attachments-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.75);
+  margin: 6px 0 8px 0;
+}
+
+.dark .notebook-attachments-title {
+  color: rgba(229, 231, 235, 0.8);
+}
+
+.notebook-attachments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notebook-attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.dark .notebook-attachment-item {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(17, 24, 39, 0.25);
+}
+
+.notebook-attachment-path {
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dark .notebook-attachment-path {
+  color: rgba(229, 231, 235, 0.75);
+}
+
+.notebook-smart-preview {
+  padding: 0 18px 18px 18px;
+}
+
+.notebook-smart-preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.75);
+  margin: 6px 0 8px 0;
+}
+
+.dark .notebook-smart-preview-title {
+  color: rgba(229, 231, 235, 0.8);
+}
+
+.notebook-smart-preview-body {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 16px;
+  padding: 12px 12px;
+  font-size: 14px;
+  line-height: 26px;
+}
+
+.dark .notebook-smart-preview-body {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(17, 24, 39, 0.20);
+}
+
+.nb-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.line-warning {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.text-positive {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.text-underline {
+  text-decoration: underline;
+  font-weight: 500;
+}
+

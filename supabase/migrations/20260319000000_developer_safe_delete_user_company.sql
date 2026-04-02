@@ -32,7 +32,7 @@ comment on table admin.developer_delete_audit is 'Audit log for developer delete
 alter table admin.developer_delete_audit enable row level security;
 drop policy if exists developer_delete_audit_select on admin.developer_delete_audit;
 create policy developer_delete_audit_select on admin.developer_delete_audit
-  for select to authenticated using (admin.is_developer());
+  for select to authenticated using (admin.is_developer(auth.uid()));
 
 -- =============================================================================
 -- 2) developer.delete_user_safely

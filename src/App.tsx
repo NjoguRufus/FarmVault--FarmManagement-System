@@ -111,11 +111,10 @@ import AdminPendingPaymentsPage from "@/pages/admin/AdminPendingPaymentsPage";
 import AdminSubscriptionAnalyticsPage from "@/pages/admin/AdminSubscriptionAnalyticsPage";
 import AdminBillingPage from "@/pages/admin/AdminBillingPage";
 import DeveloperRecordsPage from "@/pages/admin/DeveloperRecordsPage";
-import DeveloperCropRecordsPage from "@/pages/admin/DeveloperCropRecordsPage";
-import DeveloperRecordDetailPage from "@/pages/admin/DeveloperRecordDetailPage";
 import AdminRecordsPage from "@/pages/records/AdminRecordsPage";
-import AdminCropRecordsPage from "@/pages/records/AdminCropRecordsPage";
-import AdminRecordDetailPage from "@/pages/records/AdminRecordDetailPage";
+import CropDetailsPage from "@/pages/records/CropDetailsPage";
+import NotebookPage from "@/pages/records/NotebookPage";
+import FullKnowledgePage from "@/pages/records/FullKnowledgePage";
 import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -124,7 +123,6 @@ import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { DomainGuard } from "@/components/routing/DomainGuard";
-import { ClerkSupabaseTokenBridge } from "@/components/auth/ClerkSupabaseTokenBridge";
 import { AppLockGate } from "@/components/auth/AppLockGate";
 import { AppLockPrompt } from "@/components/auth/AppLockPrompt";
 import { useAppLock } from "@/hooks/useAppLock";
@@ -326,23 +324,9 @@ const AppRoutesWithLock = () => {
         <Route path="/support" element={<SupportPage />} />
         <Route path="/feedback" element={<FeedbackPage />} />
         <Route path="/records" element={<PermissionRoute module="notes"><AdminRecordsPage /></PermissionRoute>} />
-        <Route path="/records/:cropId" element={<PermissionRoute module="notes"><AdminCropRecordsPage /></PermissionRoute>} />
-        <Route
-          path="/records/:cropId/record/:recordId"
-          element={
-            <PermissionRoute module="notes">
-              <AdminRecordDetailPage />
-            </PermissionRoute>
-          }
-        />
-        <Route
-          path="/records/view/:recordId"
-          element={
-            <PermissionRoute module="notes">
-              <AdminRecordDetailPage />
-            </PermissionRoute>
-          }
-        />
+        <Route path="/records/:cropSlug" element={<PermissionRoute module="notes"><CropDetailsPage /></PermissionRoute>} />
+        <Route path="/records/:cropSlug/new" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
+        <Route path="/records/:cropSlug/:noteId" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
       </Route>
 
       {/* Staff workspace routes */}
@@ -471,9 +455,10 @@ const AppRoutesWithLock = () => {
         <Route path="email-center" element={<DeveloperEmailCenterPage />} />
         <Route path="email-logs" element={<Navigate to="/developer/email-center" replace />} />
         <Route path="records" element={<DeveloperRecordsPage />} />
-        <Route path="records/:cropId" element={<DeveloperCropRecordsPage />} />
-        <Route path="records/:cropId/record/:recordId" element={<DeveloperRecordDetailPage />} />
-        <Route path="records/view/:recordId" element={<DeveloperRecordViewPage />} />
+        <Route path="records/:cropSlug" element={<CropDetailsPage />} />
+        <Route path="records/:cropSlug/full-knowledge" element={<FullKnowledgePage />} />
+        <Route path="records/:cropSlug/new" element={<NotebookPage />} />
+        <Route path="records/:cropSlug/:noteId" element={<NotebookPage />} />
         <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
         <Route path="qr" element={<DevQRGeneratorPage />} />
       </Route>
@@ -503,7 +488,6 @@ const App = () => (
                 <Sonner />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <HelmetProvider>
-                    {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <ClerkSupabaseTokenBridge /> : null}
                     <DomainGuard />
                     <RoutePersistence />
                     <PosthogAnalytics />

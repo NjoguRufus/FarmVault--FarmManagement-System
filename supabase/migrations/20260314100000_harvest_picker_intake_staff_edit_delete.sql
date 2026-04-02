@@ -4,6 +4,8 @@
 
 drop policy if exists picker_intake_update_admin on harvest.picker_intake_entries;
 drop policy if exists picker_intake_delete_admin on harvest.picker_intake_entries;
+drop policy if exists picker_intake_update_member on harvest.picker_intake_entries;
+drop policy if exists picker_intake_delete_member on harvest.picker_intake_entries;
 
 create policy picker_intake_update_member
   on harvest.picker_intake_entries

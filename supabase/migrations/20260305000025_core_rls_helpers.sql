@@ -4,13 +4,13 @@
 
 begin;
 
--- Drop existing functions so we can recreate with desired parameter names/body.
-drop function if exists core.is_company_member(uuid);
-drop function if exists core.is_company_admin(uuid);
+-- IMPORTANT: Do not drop these helpers.
+-- They are referenced by many RLS policies, and dropping would fail in environments
+-- where those policies already exist. `create or replace` is safe and preserves deps.
 
--- core.is_company_member(check_company_id): true if current user is a member of the company.
+-- core.is_company_member(_company_id): true if current user is a member of the company.
 -- Uses core.current_user_id() (Clerk JWT sub). Checks core then public company_members.
-create or replace function core.is_company_member(check_company_id uuid)
+create or replace function core.is_company_member(_company_id uuid)
 returns boolean
 language plpgsql
 stable
@@ -32,7 +32,7 @@ begin
   ) then
     if exists (
       select 1 from core.company_members m
-      where m.company_id = check_company_id and m.clerk_user_id = v_user_id
+      where m.company_id = _company_id and m.clerk_user_id = v_user_id
     ) then
       return true;
     end if;
@@ -42,7 +42,7 @@ begin
   ) then
     if exists (
       select 1 from core.company_members m
-      where m.company_id = check_company_id and m.user_id = v_user_id
+      where m.company_id = _company_id and m.user_id = v_user_id
     ) then
       return true;
     end if;
@@ -51,7 +51,7 @@ begin
   -- 2) public.company_members (legacy: user_id)
   if exists (
     select 1 from public.company_members m
-    where m.company_id = check_company_id and m.user_id = v_user_id
+    where m.company_id = _company_id and m.user_id = v_user_id
   ) then
     return true;
   end if;
@@ -60,8 +60,8 @@ begin
 end;
 $$;
 
--- core.is_company_admin(check_company_id): true if current user is company_admin for the company.
-create or replace function core.is_company_admin(check_company_id uuid)
+-- core.is_company_admin(_company_id): true if current user is company_admin for the company.
+create or replace function core.is_company_admin(_company_id uuid)
 returns boolean
 language plpgsql
 stable
@@ -83,7 +83,7 @@ begin
   ) then
     if exists (
       select 1 from core.company_members m
-      where m.company_id = check_company_id and m.clerk_user_id = v_user_id
+      where m.company_id = _company_id and m.clerk_user_id = v_user_id
         and m.role in ('company_admin', 'admin', 'owner')
     ) then
       return true;
@@ -94,7 +94,7 @@ begin
   ) then
     if exists (
       select 1 from core.company_members m
-      where m.company_id = check_company_id and m.user_id = v_user_id
+      where m.company_id = _company_id and m.user_id = v_user_id
         and m.role in ('company_admin', 'admin', 'owner')
     ) then
       return true;
@@ -104,7 +104,7 @@ begin
   -- 2) public.company_members (legacy)
   if exists (
     select 1 from public.company_members m
-    where m.company_id = check_company_id and m.user_id = v_user_id
+    where m.company_id = _company_id and m.user_id = v_user_id
       and m.role in ('company_admin', 'admin', 'owner')
   ) then
     return true;

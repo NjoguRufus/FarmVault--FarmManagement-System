@@ -28,6 +28,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { toDate } from '@/lib/dateUtils';
 import { getSortTime, safeToDate } from '@/lib/safeTime';
 import {
@@ -96,23 +97,32 @@ export function CompanyDashboard() {
     isLoadingProjects,
     projectsFetchError,
   } = useProject();
-  const { user } = useAuth();
+  const {
+    user,
+    authReady,
+    hasClerkSession,
+    tenantSessionTrust,
+    companyDataQueriesEnabled,
+    syncTenantCompanyFromServer,
+    refreshAuthState,
+  } = useAuth();
   const { canSee, can } = usePermissions();
+  const companyId = user?.companyId ?? null;
+  const isDeveloper = user?.role === 'developer';
+  const queryCompanyId = companyDataQueriesEnabled ? companyId : null;
+  const canLoadProjects = companyDataQueriesEnabled && Boolean(isDeveloper || companyId);
   const [welcomeWizardOpen, setWelcomeWizardOpen] = useState(false);
+  const [tenantRecoveryBusy, setTenantRecoveryBusy] = useState(false);
   /** When navbar is “All Projects”, clicking a row in Your Farm Progress scopes the four financial stat cards to this project (toggle off by clicking again or Show All). */
   const [dashboardFocusProjectId, setDashboardFocusProjectId] = useState<string | null>(null);
   const [farmProgressDashboardFilter, setFarmProgressDashboardFilter] =
     useState<FarmProgressDashboardFilter>('all');
   const { startTour } = useTour();
   const isMobile = useIsMobile();
-  const { crops: cropCatalog } = useCropCatalog(user?.companyId);
+  const { crops: cropCatalog } = useCropCatalog(queryCompanyId ?? undefined);
 
   // Employee access: restrict projects and data to what this employee is allowed to see.
   const { hasProjectAccess, projectAccessIds } = useEmployeeAccess();
-
-  const companyId = user?.companyId ?? null;
-  const isDeveloper = user?.role === 'developer';
-  const canLoadProjects = Boolean(isDeveloper || companyId);
 
   useEffect(() => {
     if (!companyId) return;
@@ -137,32 +147,36 @@ export function CompanyDashboard() {
     {
       enabled: canLoadProjects,
       companyScoped: true,
-      companyId,
+      companyId: queryCompanyId,
       isDeveloper,
     },
   );
 
   const mergedProjects = useMemo(() => {
     const m = new Map<string, Project>();
+    const scopeId = queryCompanyId ?? companyId;
     for (const p of firestoreProjects) {
-      if (!companyId || p.companyId === companyId) m.set(p.id, p);
+      if (!scopeId || p.companyId === scopeId) m.set(p.id, p);
     }
     for (const p of supabaseProjects) {
-      if (p.companyId === companyId) m.set(p.id, p);
+      if (p.companyId === scopeId) m.set(p.id, p);
     }
     return Array.from(m.values());
-  }, [firestoreProjects, supabaseProjects, companyId]);
+  }, [firestoreProjects, supabaseProjects, companyId, queryCompanyId]);
 
-  const projectsLoading = isLoadingProjects || firestoreProjectsLoading;
+  const projectsLoading =
+    isLoadingProjects ||
+    firestoreProjectsLoading ||
+    (Boolean(companyId && hasClerkSession && !authReady));
   // Expenses from Supabase (canonical source)
   const {
     data: allExpensesSupa = [],
     isLoading: expensesSupaLoading,
     isError: expensesSupaError,
   } = useQuery({
-    queryKey: ['dashboard-expenses-supa', companyId ?? ''],
-    queryFn: () => getFinanceExpenses(companyId ?? ''),
-    enabled: Boolean(companyId),
+    queryKey: ['dashboard-expenses-supa', queryCompanyId ?? ''],
+    queryFn: () => getFinanceExpenses(queryCompanyId ?? ''),
+    enabled: Boolean(queryCompanyId),
   });
   // Map to shape compatible with existing dashboard computations
   const allExpenses = useMemo(() =>
@@ -179,19 +193,19 @@ export function CompanyDashboard() {
   [allExpensesSupa]);
   const { data: allHarvests = [] } = useCollection<Harvest>('dashboard-harvests', 'harvests', {
     companyScoped: true,
-    companyId,
+    companyId: queryCompanyId,
     isDeveloper,
   });
   const { data: allSales = [] } = useCollection<Sale>('dashboard-sales', 'sales', {
     companyScoped: true,
-    companyId,
+    companyId: queryCompanyId,
     isDeveloper,
   });
   // Inventory from Supabase
   const { data: inventoryStockRows = [] } = useQuery({
-    queryKey: ['dashboard-inventory-supa', companyId ?? ''],
-    queryFn: () => listInventoryStock({ companyId: companyId! }),
-    enabled: Boolean(companyId),
+    queryKey: ['dashboard-inventory-supa', queryCompanyId ?? ''],
+    queryFn: () => listInventoryStock({ companyId: queryCompanyId! }),
+    enabled: Boolean(queryCompanyId),
   });
   // Map InventoryStockRow to InventoryItem shape for dashboard widgets
   const allInventory = useMemo(() =>
@@ -205,13 +219,13 @@ export function CompanyDashboard() {
       pricePerUnit: row.average_cost ?? 0,
     })) as InventoryItem[],
   [inventoryStockRows]);
-  const { data: allStages = [] } = useCompanyProjectStages(companyId);
+  const { data: allStages = [] } = useCompanyProjectStages(queryCompanyId);
   const { data: projectWorkCards = [] } = useWorkCardsForProject(
     activeProject?.id ?? null,
-    companyId || null
+    queryCompanyId || null
   );
   const { data: projectBlocks = [] } = useProjectBlocks(
-    companyId,
+    queryCompanyId,
     activeProject?.useBlocks ? activeProject?.id ?? null : null
   );
   const blocksSummary = useMemo(() => {
@@ -237,21 +251,21 @@ export function CompanyDashboard() {
 
   const [activityLogs, setActivityLogs] = useState<ActivityLogDoc[]>([]);
   useEffect(() => {
-    if (!companyId) return;
+    if (!queryCompanyId) return;
     const unsubscribe = subscribeActivity(
-      companyId,
+      queryCompanyId,
       { limit: 15, projectId: activeProject?.id ?? undefined },
       setActivityLogs
     );
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [companyId, activeProject?.id]);
+  }, [queryCompanyId, activeProject?.id]);
 
   const { data: sqlActivityRows = [] } = useQuery({
-    queryKey: ['company-activity-logs', companyId ?? ''],
-    queryFn: () => listActivityLogs({ companyId: companyId!, limit: 20 }),
-    enabled: Boolean(companyId),
+    queryKey: ['company-activity-logs', queryCompanyId ?? ''],
+    queryFn: () => listActivityLogs({ companyId: queryCompanyId!, limit: 20 }),
+    enabled: Boolean(queryCompanyId),
     staleTime: 15_000,
   });
 
@@ -280,13 +294,13 @@ export function CompanyDashboard() {
   // Fetch admin alerts for the unified Recent Activities feed
   const [adminAlerts, setAdminAlerts] = useState<StoredAdminAlert[]>([]);
   useEffect(() => {
-    if (!companyId) return;
+    if (!queryCompanyId) return;
     let cancelled = false;
-    listAdminAlerts(companyId, 15).then((list) => {
+    listAdminAlerts(queryCompanyId, 15).then((list) => {
       if (!cancelled) setAdminAlerts(list);
     });
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [queryCompanyId]);
 
   const companyProjects = useMemo(
     () => {
@@ -752,15 +766,15 @@ export function CompanyDashboard() {
     activeProject && companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
 
   const { data: fbTotalsGlobal } = useQuery({
-    queryKey: ['dashboardFinancialTotals', companyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all'],
-    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', harvestFinancialsProjectIdGlobal),
-    enabled: Boolean(companyId),
+    queryKey: ['dashboardFinancialTotals', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all'],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(queryCompanyId ?? '', harvestFinancialsProjectIdGlobal),
+    enabled: Boolean(queryCompanyId),
   });
 
   const { data: fbTotalsStatCards } = useQuery({
-    queryKey: ['dashboardFinancialTotals', companyId ?? '', statCardsScopeValid ?? 'all'],
-    queryFn: () => getCompanyCollectionFinancialsAggregate(companyId ?? '', statCardsScopeValid),
-    enabled: Boolean(companyId),
+    queryKey: ['dashboardFinancialTotals', queryCompanyId ?? '', statCardsScopeValid ?? 'all'],
+    queryFn: () => getCompanyCollectionFinancialsAggregate(queryCompanyId ?? '', statCardsScopeValid),
+    enabled: Boolean(queryCompanyId),
   });
 
   const effectiveFbTotalsForStatCards = useMemo(() => {
@@ -993,6 +1007,60 @@ export function CompanyDashboard() {
     return <DashboardSkeleton />;
   }
 
+  if (tenantSessionTrust === 'provisional' && companyId && !isDeveloper) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col justify-center gap-4 px-4 animate-fade-in">
+        <Alert variant="destructive" className="border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <AlertTitle>Confirm your workspace</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 text-sm leading-relaxed">
+            <span>
+              We couldn&apos;t finish loading your account from the server, so farm data is paused to protect your
+              workspace. Sync your session to reload projects, expenses, and team access.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={tenantRecoveryBusy}
+                onClick={() => {
+                  setTenantRecoveryBusy(true);
+                  void (async () => {
+                    try {
+                      const ok = await syncTenantCompanyFromServer();
+                      await refreshAuthState();
+                      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+                      void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses-supa'] });
+                      void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa'] });
+                      if (import.meta.env.DEV) {
+                        // eslint-disable-next-line no-console
+                        console.log('[Dashboard] tenant recovery', { syncOk: ok });
+                      }
+                    } finally {
+                      setTenantRecoveryBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {tenantRecoveryBusy ? 'Syncing…' : 'Sync account'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-amber-700/40"
+                disabled={tenantRecoveryBusy}
+                onClick={() => window.location.reload()}
+              >
+                Refresh page
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   const companyProjectCount =
     companyId != null ? mergedProjects.filter((p) => p.companyId === companyId).length : 0;
   const canCreateFarmProject = can('projects', 'create');
@@ -1004,7 +1072,8 @@ export function CompanyDashboard() {
     companyProjectCount === 0 &&
     canCreateFarmProject &&
     !tenantDataLikelyExists &&
-    !expensesSupaLoading;
+    !expensesSupaLoading &&
+    companyDataQueriesEnabled;
 
   if (showFirstProjectOnboarding) {
     return (
@@ -1037,15 +1106,8 @@ export function CompanyDashboard() {
   const projectSelectorValue = activeProject ? activeProject.id : 'all';
 
   const getCropIcon = (cropType?: CropType | null) => {
-    const icons: Record<string, string> = {
-      tomatoes: '🍅',
-      'french-beans': '🌱',
-      capsicum: '🫑',
-      maize: '🌽',
-      watermelons: '🍉',
-      rice: '🍚',
-    };
-    return cropType ? icons[cropType] ?? '🌾' : '🌾';
+    if (!cropType) return cropTypeKeyEmoji(null);
+    return cropTypeKeyEmoji(String(cropType));
   };
 
   const showCropStageCard = canSee('dashboard', 'cards.cropStage');
@@ -1065,26 +1127,15 @@ export function CompanyDashboard() {
       profitLoss: showProfitLossCard,
       budget: showBudgetCard,
       projectAccessIds,
-    });
-  }
-
-  if (import.meta.env.DEV && user) {
-    // eslint-disable-next-line no-console
-    console.log('[Dashboard] visible cards', {
-      uid: user.id,
-      cropStage: showCropStageCard,
-      revenue: showRevenueCard,
-      expenses: showExpensesCard,
-      profitLoss: showProfitLossCard,
-      budget: showBudgetCard,
-      projectAccessIds,
+      companyDataQueriesEnabled,
     });
   }
 
   const showTenantLoadIssueBanner =
     Boolean(companyId) &&
     !isDeveloper &&
-    (Boolean(projectsFetchError) || expensesSupaError || (allExpensesSupa.length > 0 && companyProjectCount === 0));
+    companyDataQueriesEnabled &&
+    (Boolean(projectsFetchError) || expensesSupaError);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1094,10 +1145,16 @@ export function CompanyDashboard() {
           <AlertTitle>Company data may not have loaded fully</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Developer tools show records for this company, but the dashboard did not load projects or expenses from
-              your session. This is usually a membership or sign-in mismatch (Clerk user id must match{' '}
-              <code className="rounded bg-background/60 px-1">core.company_members</code>). Try refresh; if it persists,
-              confirm your account is listed under this company in Supabase or contact support.
+              Some dashboard data failed to load (projects or expenses). This is often a brief session or network issue.
+              {import.meta.env.DEV ? (
+                <>
+                  {' '}
+                  Dev: check Clerk <code className="rounded bg-background/60 px-1">sub</code> matches company membership
+                  in Supabase.
+                </>
+              ) : (
+                ' Try syncing below or refresh the page. Contact support if this continues.'
+              )}
             </span>
             <Button
               type="button"
@@ -1105,11 +1162,16 @@ export function CompanyDashboard() {
               size="sm"
               className="shrink-0 border-amber-700/40"
               onClick={() => {
-                void queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
-                void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses-supa', companyId ?? ''] });
+                void (async () => {
+                  await syncTenantCompanyFromServer();
+                  await refreshAuthState();
+                  void queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
+                  void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses-supa', companyId ?? ''] });
+                  void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa', companyId ?? ''] });
+                })();
               }}
             >
-              Retry load
+              Sync and retry
             </Button>
           </AlertDescription>
         </Alert>

@@ -12,7 +12,8 @@ stable
 security definer
 set search_path = core, public
 as $$
-  select core.create_company_with_admin(_name);
+  -- Use the alias that avoids overload ambiguity in some environments.
+  select core.create_company_and_admin(_name);
 $$;
 
 grant execute on function public.create_company_with_admin(text) to authenticated;

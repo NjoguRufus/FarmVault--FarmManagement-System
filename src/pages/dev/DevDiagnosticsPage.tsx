@@ -41,6 +41,7 @@ export default function DevDiagnosticsPage() {
             .select('role')
             .eq('clerk_user_id', clerkUserId)
             .eq('company_id', resolvedCompanyId)
+            .limit(1)
             .maybeSingle();
           roleFromMembers = (row as { role?: string } | null)?.role ?? null;
         }

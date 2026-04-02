@@ -3,6 +3,7 @@
 
 begin;
 
+drop function if exists public.list_payments_v2(text, text, text, timestamptz, timestamptz, text, int, int);
 create or replace function public.list_payments_v2(
   _status text default 'pending',
   _billing_mode text default null,

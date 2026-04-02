@@ -1,19 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { cn } from '@/lib/utils';
-
-function getCropEmojiFromId(cropId: string): string {
-  const emojis: Record<string, string> = {
-    tomatoes: '🍅',
-    'french-beans': '🫛',
-    capsicum: '🌶️',
-    maize: '🌽',
-    watermelons: '🍉',
-    rice: '🌾',
-  };
-  return emojis[cropId] || '🌱';
-}
 
 export interface CropCardProps {
   cropId: string;
@@ -35,7 +24,7 @@ export function CropCard({ cropId, name, libraryCount, companyCount, to, classNa
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary text-xl">
-          <span aria-hidden>{getCropEmojiFromId(cropId)}</span>
+          <span aria-hidden>{cropTypeKeyEmoji(cropId)}</span>
         </div>
         <div className="min-w-0">
           <h3 className="font-semibold text-foreground truncate">{name}</h3>
@@ -70,7 +59,7 @@ export function CropCardAdmin({ cropId, name, sharedCount, myCount, to, classNam
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary text-xl">
-          <span aria-hidden>{getCropEmojiFromId(cropId)}</span>
+          <span aria-hidden>{cropTypeKeyEmoji(cropId)}</span>
         </div>
         <div className="min-w-0">
           <h3 className="font-semibold text-foreground truncate">{name}</h3>

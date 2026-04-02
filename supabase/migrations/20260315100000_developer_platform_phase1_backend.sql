@@ -13,7 +13,29 @@ begin;
 -- Create view over public.company_subscriptions with columns list_companies expects.
 create schema if not exists billing;
 
-drop view if exists billing.company_subscriptions;
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'billing'
+      and c.relname = 'company_subscriptions'
+      and c.relkind = 'v'
+  ) then
+    execute 'drop view billing.company_subscriptions';
+  end if;
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'billing'
+      and c.relname = 'company_subscriptions'
+      and c.relkind in ('r','p')
+  ) then
+    execute 'drop table billing.company_subscriptions cascade';
+  end if;
+end $$;
 create or replace view billing.company_subscriptions as
 select
   s.company_id,
@@ -33,7 +55,29 @@ from public.company_subscriptions s;
 
 -- admin.dev_dashboard_kpis() counts from billing.payments if present.
 -- Expose public.subscription_payments so the count works.
-drop view if exists billing.payments;
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'billing'
+      and c.relname = 'payments'
+      and c.relkind = 'v'
+  ) then
+    execute 'drop view billing.payments';
+  end if;
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'billing'
+      and c.relname = 'payments'
+      and c.relkind in ('r','p')
+  ) then
+    execute 'drop table billing.payments cascade';
+  end if;
+end $$;
 create or replace view billing.payments as
 select id, company_id, plan_id, amount, status, billing_mode, created_at, approved_at, rejected_at, reviewed_at, reviewed_by
 from public.subscription_payments;
@@ -138,7 +182,8 @@ as $$
   select * from admin.dev_dashboard_kpis();
 $$;
 
-create or replace function public.list_companies()
+drop function if exists public.dev_list_companies_table();
+create or replace function public.dev_list_companies_table()
 returns table (
   company_id          uuid,
   company_name        text,
@@ -155,11 +200,23 @@ stable
 security definer
 set search_path = admin, public
 as $$
-  select * from admin.list_companies();
+  select
+    (r->>'company_id')::uuid as company_id,
+    (r->>'company_name')::text as company_name,
+    (r->>'subscription_status')::text as subscription_status,
+    (r->>'plan_code')::text as plan_code,
+    (r->>'billing_mode')::text as billing_mode,
+    (r->>'billing_cycle')::text as billing_cycle,
+    coalesce((r->>'is_trial')::boolean, false) as is_trial,
+    nullif(r->>'trial_ends_at','')::timestamptz as trial_ends_at,
+    nullif(r->>'active_until','')::timestamptz as active_until
+  from jsonb_array_elements(
+    coalesce(public.list_companies(null::text, 200::int, 0::int)->'rows', '[]'::jsonb)
+  ) r;
 $$;
 
 grant execute on function public.dev_dashboard_kpis() to authenticated;
-grant execute on function public.list_companies() to authenticated;
+grant execute on function public.dev_list_companies_table() to authenticated;
 
 -- =============================================================================
 -- 4) override_subscription RPC (frontend: developerAdminService.overrideSubscription)
@@ -317,6 +374,7 @@ begin
 end;
 $$;
 
+drop function if exists public.list_platform_users();
 create or replace function public.list_platform_users()
 returns table (
   user_id       text,
@@ -416,6 +474,7 @@ grant execute on function public.reject_subscription_payment(uuid) to authentica
 -- 8) list_pending_payments (Billing Confirmation page)
 -- =============================================================================
 
+drop function if exists admin.list_pending_payments();
 create or replace function admin.list_pending_payments()
 returns table (
   id            uuid,
@@ -454,6 +513,7 @@ begin
 end;
 $$;
 
+drop function if exists public.list_pending_payments();
 create or replace function public.list_pending_payments()
 returns table (
   id            uuid,

@@ -10,18 +10,61 @@ function throwStub(): never {
   throw new Error(msg);
 }
 
-const EMPTY_SNAPSHOT = {
-  docs: [],
-  metadata: { fromCache: false, hasPendingWrites: false },
-};
+export type DocumentData = Record<string, unknown>;
+
+export interface DocumentReference {
+  id: string;
+  path: string;
+}
+
+export interface CollectionReference {
+  id: string;
+  path: string;
+}
+
+export interface DocumentSnapshot {
+  exists(): boolean;
+  id: string;
+  data(): DocumentData;
+  ref: DocumentReference;
+}
+
+export interface QueryDocumentSnapshot extends DocumentSnapshot {}
+
+export interface QuerySnapshot {
+  docs: QueryDocumentSnapshot[];
+  metadata: { fromCache: boolean; hasPendingWrites: boolean };
+  empty: boolean;
+}
+
+export interface WriteBatch {
+  delete(ref: DocumentReference): WriteBatch;
+  commit(): Promise<void>;
+}
 
 export type QueryConstraint = unknown;
-export type DocumentSnapshot = unknown;
-export type DocumentReference = unknown;
-export type CollectionReference = unknown;
 export type Query = unknown;
-export type WriteBatch = unknown;
 export type Unsubscribe = () => void;
+
+function docRefFromSegments(segments: string[]): DocumentReference {
+  const id = segments.length > 0 ? segments[segments.length - 1]! : '';
+  return { id, path: segments.join('/') };
+}
+
+function emptyDocumentSnapshot(ref: DocumentReference): DocumentSnapshot {
+  return {
+    exists: () => false,
+    id: ref.id,
+    data: () => ({}),
+    ref,
+  };
+}
+
+const EMPTY_SNAPSHOT: QuerySnapshot = {
+  docs: [],
+  metadata: { fromCache: false, hasPendingWrites: false },
+  empty: true,
+};
 
 export const Timestamp = {
   now: () => throwStub(),
@@ -29,47 +72,61 @@ export const Timestamp = {
   fromMillis: (_: number) => throwStub(),
 };
 
-export function collection(_db: unknown, _path: string, ..._rest: string[]): unknown {
-  return { _path };
+export function collection(_db: unknown, path: string, ...pathSegments: string[]): CollectionReference {
+  const segments = [path, ...pathSegments];
+  return { id: path, path: segments.join('/') };
 }
-export function doc(_db: unknown, _path: string, ..._rest: string[]): unknown {
-  throwStub();
+
+export function doc(_db: unknown, path: string, ...pathSegments: string[]): DocumentReference {
+  return docRefFromSegments([path, ...pathSegments]);
 }
-export function getDoc(_ref: unknown): Promise<unknown> {
-  return Promise.resolve(null);
+
+export function getDoc(ref: unknown): Promise<DocumentSnapshot> {
+  return Promise.resolve(emptyDocumentSnapshot(ref as DocumentReference));
 }
-export function getDocs(_query: unknown): Promise<unknown> {
+
+export function getDocs(_query: unknown): Promise<QuerySnapshot> {
   return Promise.resolve(EMPTY_SNAPSHOT);
 }
-export function addDoc(_ref: unknown, _data: unknown): Promise<unknown> {
+
+export function addDoc(_ref: unknown, _data: unknown): Promise<DocumentReference> {
   throwStub();
 }
+
 export function setDoc(_ref: unknown, _data: unknown, _opts?: unknown): Promise<void> {
   throwStub();
 }
+
 export function updateDoc(_ref: unknown, _data: unknown): Promise<void> {
   throwStub();
 }
+
 export function deleteDoc(_ref: unknown): Promise<void> {
   throwStub();
 }
+
 export function query(_ref: unknown, ..._constraints: unknown[]): unknown {
   return _ref;
 }
+
 export function where(_field: string, _op: string, _value: unknown): QueryConstraint {
   return {};
 }
-export function orderBy(_field: string, _dir?: string): QueryConstraint {
+
+/** Accepts field name or `documentId()` (FieldPath sentinel in real Firebase). */
+export function orderBy(_field: unknown, _dir?: string): QueryConstraint {
   return {};
 }
+
 export function limit(_n: number): QueryConstraint {
   return {};
 }
+
 export function onSnapshot(
   _query: unknown,
   _optionsOrCb: unknown,
-  _cb?: (snapshot: unknown) => void,
-  _err?: (err: Error) => void
+  _cb?: (snapshot: QuerySnapshot) => void,
+  _err?: (err: Error) => void,
 ): Unsubscribe {
   const cb = typeof _optionsOrCb === 'function' ? _optionsOrCb : _cb;
   if (cb) {
@@ -77,35 +134,53 @@ export function onSnapshot(
   }
   return () => {};
 }
+
 export function writeBatch(_db: unknown): WriteBatch {
-  throwStub();
+  return {
+    delete(_ref: DocumentReference) {
+      return this;
+    },
+    commit() {
+      return Promise.reject(new Error(msg));
+    },
+  };
 }
+
 export function increment(_n: number): unknown {
   throwStub();
 }
+
 export function arrayUnion(..._items: unknown[]): unknown {
   throwStub();
 }
+
 export function serverTimestamp(): unknown {
   throwStub();
 }
-export function getDocFromCache(_ref: unknown): Promise<unknown> {
+
+export function getDocFromCache(_ref: unknown): Promise<DocumentSnapshot | null> {
   return Promise.resolve(null);
 }
-export function getDocsFromCache(_query: unknown): Promise<unknown> {
+
+export function getDocsFromCache(_query: unknown): Promise<QuerySnapshot> {
   return Promise.resolve(EMPTY_SNAPSHOT);
 }
+
 export function documentId(): QueryConstraint {
   return {};
 }
+
 export function runTransaction<T>(_db: unknown, _fn: (tx: unknown) => Promise<T>): Promise<T> {
   throwStub();
 }
+
 export function startAfter(_snap: unknown): QueryConstraint {
   return {};
 }
-export function getCountFromServer(_query: unknown): Promise<{ data: { count: number } }> {
-  return Promise.resolve({ data: { count: 0 } });
+
+/** Matches Firebase modular `getCountFromServer` aggregate snapshot: `.data().count`. */
+export function getCountFromServer(_query: unknown): Promise<{ data: () => { count: number } }> {
+  return Promise.resolve({
+    data: () => ({ count: 0 }),
+  });
 }
-export type DocumentData = Record<string, unknown>;
-export type QuerySnapshot = unknown;

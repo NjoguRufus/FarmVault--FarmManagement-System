@@ -3,6 +3,7 @@ import { MoreHorizontal, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Project } from '@/types';
 import { Link } from 'react-router-dom';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
 
 interface ProjectsTableProps {
@@ -11,18 +12,6 @@ interface ProjectsTableProps {
 }
 
 export function ProjectsTable({ projects, compact = false }: ProjectsTableProps) {
-  const getCropEmoji = (cropType: string) => {
-    const emojis: Record<string, string> = {
-      tomatoes: '🍅',
-      'french-beans': '🫛',
-      capsicum: '🌶️',
-      maize: '🌽',
-      watermelons: '🍉',
-      rice: '🌾',
-    };
-    return emojis[cropType] || '🌱';
-  };
-
   const getStatusBadge = (status: Project['status']) => {
     const styles: Record<Project['status'], string> = {
       active: 'fv-badge--active',
@@ -79,7 +68,7 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
               <tr key={project.id}>
                 <td className={compact ? 'py-2' : ''}>
                   <div className="flex items-center gap-2">
-                    <span className={compact ? 'text-lg' : 'text-xl'}>{getCropEmoji(project.cropType)}</span>
+                    <span className={compact ? 'text-lg' : 'text-xl'}>{cropTypeKeyEmoji(project.cropType)}</span>
                     <div>
                       <div className={cn('font-medium text-foreground', compact && 'text-sm')}>
                         {project.name}
@@ -122,7 +111,7 @@ export function ProjectsTable({ projects, compact = false }: ProjectsTableProps)
           <div key={project.id} className={cn('bg-muted/30 rounded-lg', compact ? 'p-2.5' : 'p-4')}>
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className={compact ? 'text-xl' : 'text-2xl'}>{getCropEmoji(project.cropType)}</span>
+                <span className={compact ? 'text-xl' : 'text-2xl'}>{cropTypeKeyEmoji(project.cropType)}</span>
                 <div>
                   <div className={cn('font-medium text-foreground', compact && 'text-sm')}>
                     {project.name}

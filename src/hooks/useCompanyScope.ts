@@ -3,6 +3,8 @@ import type { User } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 
 export const NO_COMPANY = 'NO_COMPANY' as const;
+/** Profile load fell back to cache; company-scoped queries are paused until sync. */
+export const TENANT_SYNC_REQUIRED = 'TENANT_SYNC_REQUIRED' as const;
 
 /**
  * Single source for effective company ID: user.companyId.
@@ -15,7 +17,14 @@ export function getEffectiveCompanyId(user: User | null): string {
 
 export type CompanyScopeResult =
   | { companyId: string; userId: string; role: string; isDeveloper: boolean; error: null }
-  | { companyId: null; userId: string; role: string; isDeveloper: boolean; error: typeof NO_COMPANY };
+  | { companyId: null; userId: string; role: string; isDeveloper: boolean; error: typeof NO_COMPANY }
+  | {
+      companyId: null;
+      userId: string;
+      role: string;
+      isDeveloper: boolean;
+      error: typeof TENANT_SYNC_REQUIRED;
+    };
 
 /**
  * Single source of truth for company-scoped data access.
@@ -23,13 +32,23 @@ export type CompanyScopeResult =
  * When companyId is missing (non-developer), returns error state so callers can show "Finish setup".
  */
 export function useCompanyScope(): CompanyScopeResult {
-  const { user } = useAuth();
+  const { user, tenantSessionTrust: sessionTrust } = useAuth();
 
   return useMemo((): CompanyScopeResult => {
     const userId = user?.id ?? '';
     const role = user?.role ?? 'employee';
     const isDeveloper = role === 'developer';
     const companyId = user?.companyId ?? null;
+
+    if (!isDeveloper && sessionTrust === 'provisional' && companyId) {
+      return {
+        companyId: null,
+        userId,
+        role,
+        isDeveloper: false,
+        error: TENANT_SYNC_REQUIRED,
+      };
+    }
 
     if (isDeveloper) {
       return {
@@ -58,5 +77,5 @@ export function useCompanyScope(): CompanyScopeResult {
       isDeveloper: false,
       error: null,
     };
-  }, [user?.id, user?.role, user?.companyId]);
+  }, [user?.id, user?.role, user?.companyId, sessionTrust]);
 }

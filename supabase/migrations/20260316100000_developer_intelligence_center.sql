@@ -106,6 +106,8 @@ $$;
 -- =========================================================
 
 create table if not exists admin.developers (
+  -- NOTE: some environments use `clerk_user_id text` instead of `user_id uuid`.
+  -- We keep this migration tolerant by using dynamic RLS/function bodies below.
   user_id uuid primary key,
   email text,
   full_name text,
@@ -118,19 +120,42 @@ create table if not exists admin.developers (
 alter table admin.developers enable row level security;
 
 drop policy if exists developers_select_self_or_developer on admin.developers;
-create policy developers_select_self_or_developer
-on admin.developers
-for select
-to authenticated
-using (
-  user_id = auth.uid()
-  or exists (
-    select 1
-    from admin.developers d
-    where d.user_id = auth.uid()
-      and d.is_active = true
-  )
-);
+do $$
+begin
+  if developer.column_exists('admin','developers','clerk_user_id') then
+    execute $p$
+      create policy developers_select_self_or_developer
+      on admin.developers
+      for select
+      to authenticated
+      using (
+        clerk_user_id = core.current_user_id()
+        or exists (
+          select 1
+          from admin.developers d
+          where d.clerk_user_id = core.current_user_id()
+            and d.is_active = true
+        )
+      )
+    $p$;
+  else
+    execute $p$
+      create policy developers_select_self_or_developer
+      on admin.developers
+      for select
+      to authenticated
+      using (
+        user_id = auth.uid()
+        or exists (
+          select 1
+          from admin.developers d
+          where d.user_id = auth.uid()
+            and d.is_active = true
+        )
+      )
+    $p$;
+  end if;
+end $$;
 
 drop policy if exists developers_insert_none on admin.developers;
 create policy developers_insert_none
@@ -156,17 +181,48 @@ using (false);
 
 create or replace function admin.is_developer(p_user_id uuid default auth.uid())
 returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public, admin, developer
+as $$
+declare
+  v_exists boolean := false;
+begin
+  if developer.column_exists('admin','developers','clerk_user_id') then
+    execute $q$
+      select exists (
+        select 1
+        from admin.developers d
+        where d.clerk_user_id = core.current_user_id()
+          and d.is_active = true
+      )
+    $q$ into v_exists;
+    return coalesce(v_exists, false);
+  end if;
+
+  execute $q$
+    select exists (
+      select 1
+      from admin.developers d
+      where d.user_id = $1
+        and d.is_active = true
+    )
+  $q$ into v_exists using p_user_id;
+
+  return coalesce(v_exists, false);
+end;
+$$;
+
+-- Zero-arg helper to avoid overload ambiguity in policies.
+create or replace function admin.is_developer()
+returns boolean
 language sql
 stable
 security definer
 set search_path = public, admin, developer
 as $$
-  select exists (
-    select 1
-    from admin.developers d
-    where d.user_id = p_user_id
-      and d.is_active = true
-  );
+  select admin.is_developer(auth.uid());
 $$;
 
 create or replace function developer.assert_developer()

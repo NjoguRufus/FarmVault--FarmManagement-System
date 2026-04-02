@@ -68,6 +68,7 @@ end;
 $$;
 
 -- 3) Public wrapper so browser RPC calls (supabase.rpc) can access it.
+drop function if exists public.ensure_current_membership();
 create or replace function public.ensure_current_membership()
 returns void
 language sql

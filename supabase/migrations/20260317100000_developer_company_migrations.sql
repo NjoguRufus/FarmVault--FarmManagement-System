@@ -160,7 +160,7 @@ DECLARE
 BEGIN
   -- Allow service role (postgres) or developers
   is_service_role := (SELECT current_user = 'postgres' OR current_setting('role', true) = 'service_role');
-  IF NOT is_service_role AND NOT admin.is_developer() THEN
+  IF NOT is_service_role AND NOT admin.is_developer(auth.uid()) THEN
     RAISE EXCEPTION 'Access denied: developer only';
   END IF;
 
@@ -229,7 +229,7 @@ DECLARE
 BEGIN
   -- Allow service role (postgres) or developers
   is_service_role := (SELECT current_user = 'postgres' OR current_setting('role', true) = 'service_role');
-  IF NOT is_service_role AND NOT admin.is_developer() THEN
+  IF NOT is_service_role AND NOT admin.is_developer(auth.uid()) THEN
     RAISE EXCEPTION 'Access denied: developer only';
   END IF;
 
@@ -497,7 +497,7 @@ DECLARE
 BEGIN
   -- Allow service role (postgres) or developers
   is_service_role := (SELECT current_user = 'postgres' OR current_setting('role', true) = 'service_role');
-  IF NOT is_service_role AND NOT admin.is_developer() THEN
+  IF NOT is_service_role AND NOT admin.is_developer(auth.uid()) THEN
     RAISE EXCEPTION 'Access denied: developer only';
   END IF;
 
@@ -1663,7 +1663,7 @@ DECLARE
 BEGIN
   -- Allow service role (postgres) or developers
   is_service_role := (SELECT current_user = 'postgres' OR current_setting('role', true) = 'service_role');
-  IF NOT is_service_role AND NOT admin.is_developer() THEN
+  IF NOT is_service_role AND NOT admin.is_developer(auth.uid()) THEN
     RAISE EXCEPTION 'Access denied: developer only';
   END IF;
 
@@ -1701,7 +1701,7 @@ DECLARE
 BEGIN
   -- Allow service role (postgres) or developers
   is_service_role := (SELECT current_user = 'postgres' OR current_setting('role', true) = 'service_role');
-  IF NOT is_service_role AND NOT admin.is_developer() THEN
+  IF NOT is_service_role AND NOT admin.is_developer(auth.uid()) THEN
     RAISE EXCEPTION 'Access denied: developer only';
   END IF;
 
@@ -1774,23 +1774,23 @@ ALTER TABLE admin.company_migration_items ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS dev_read_company_migrations ON admin.company_migrations;
 CREATE POLICY dev_read_company_migrations ON admin.company_migrations
-  FOR SELECT USING (admin.is_developer());
+  FOR SELECT USING (admin.is_developer(auth.uid()));
 
 DROP POLICY IF EXISTS dev_insert_company_migrations ON admin.company_migrations;
 CREATE POLICY dev_insert_company_migrations ON admin.company_migrations
-  FOR INSERT WITH CHECK (admin.is_developer());
+  FOR INSERT WITH CHECK (admin.is_developer(auth.uid()));
 
 DROP POLICY IF EXISTS dev_update_company_migrations ON admin.company_migrations;
 CREATE POLICY dev_update_company_migrations ON admin.company_migrations
-  FOR UPDATE USING (admin.is_developer());
+  FOR UPDATE USING (admin.is_developer(auth.uid()));
 
 DROP POLICY IF EXISTS dev_read_company_migration_items ON admin.company_migration_items;
 CREATE POLICY dev_read_company_migration_items ON admin.company_migration_items
-  FOR SELECT USING (admin.is_developer());
+  FOR SELECT USING (admin.is_developer(auth.uid()));
 
 DROP POLICY IF EXISTS dev_insert_company_migration_items ON admin.company_migration_items;
 CREATE POLICY dev_insert_company_migration_items ON admin.company_migration_items
-  FOR INSERT WITH CHECK (admin.is_developer());
+  FOR INSERT WITH CHECK (admin.is_developer(auth.uid()));
 
 GRANT SELECT, INSERT, UPDATE ON admin.company_migrations TO authenticated;
 GRANT SELECT, INSERT ON admin.company_migration_items TO authenticated;

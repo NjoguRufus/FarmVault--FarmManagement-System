@@ -216,6 +216,7 @@ begin
   end if;
 end $$;
 
+drop function if exists public.get_subscription_gate_state();
 create or replace function public.get_subscription_gate_state()
 returns table (
   company_id uuid,
@@ -261,6 +262,7 @@ begin
 end;
 $$;
 
+drop function if exists public.set_company_subscription_state(uuid, text, text, text, int);
 create or replace function public.set_company_subscription_state(
   _company_id uuid,
   _action text,

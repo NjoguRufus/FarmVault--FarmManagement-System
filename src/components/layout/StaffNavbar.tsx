@@ -20,6 +20,7 @@ import { useStaffTour } from '@/tour/StaffTourProvider';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { Button } from '@/components/ui/button';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 
 interface StaffNavbarProps {
@@ -79,18 +80,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
   const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
   const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
-
-  const getCropEmoji = (cropType: string) => {
-    const emojis: Record<string, string> = {
-      tomatoes: '🍅',
-      'french-beans': '🫛',
-      capsicum: '🌶️',
-      maize: '🌽',
-      watermelons: '🍉',
-      rice: '🌾',
-    };
-    return emojis[cropType] || '🌱';
-  };
 
   const path = location.pathname || '';
   let pageTitle = 'Staff Workspace';
@@ -154,7 +143,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
             >
               {activeProject ? (
                 <>
-                  <span className="text-base sm:text-lg">{getCropEmoji(activeProject.cropType)}</span>
+                  <span className="text-base sm:text-lg">{cropTypeKeyEmoji(activeProject.cropType)}</span>
                   <span className="font-medium hidden md:inline max-w-[140px] truncate">
                     {activeProject.name}
                   </span>
@@ -195,7 +184,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                       activeProject?.id === project.id && 'bg-muted'
                     )}
                   >
-                    <span className="text-lg">{getCropEmoji(project.cropType)}</span>
+                    <span className="text-lg">{cropTypeKeyEmoji(project.cropType)}</span>
                     <div className="flex flex-col">
                       <span className="font-medium">{project.name}</span>
                       <span className="text-xs text-muted-foreground capitalize">

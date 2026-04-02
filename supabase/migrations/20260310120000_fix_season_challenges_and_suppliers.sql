@@ -39,7 +39,7 @@ BEGIN
     WHERE schemaname = 'public' AND tablename = 'season_challenges' AND policyname = 'season_challenges_select'
   ) THEN
     CREATE POLICY season_challenges_select ON public.season_challenges FOR SELECT
-      USING (is_developer() OR row_company_matches_user(company_id));
+      USING (is_developer() OR row_company_matches_user(company_id::text));
   END IF;
 
   IF NOT EXISTS (
@@ -55,7 +55,7 @@ BEGIN
     WHERE schemaname = 'public' AND tablename = 'season_challenges' AND policyname = 'season_challenges_update'
   ) THEN
     CREATE POLICY season_challenges_update ON public.season_challenges FOR UPDATE
-      USING (is_developer() OR row_company_matches_user(company_id));
+      USING (is_developer() OR row_company_matches_user(company_id::text));
   END IF;
 
   IF NOT EXISTS (
@@ -63,7 +63,7 @@ BEGIN
     WHERE schemaname = 'public' AND tablename = 'season_challenges' AND policyname = 'season_challenges_delete'
   ) THEN
     CREATE POLICY season_challenges_delete ON public.season_challenges FOR DELETE
-      USING (is_developer() OR row_company_matches_user(company_id));
+      USING (is_developer() OR row_company_matches_user(company_id::text));
   END IF;
 END $$;
 
@@ -95,7 +95,7 @@ BEGIN
     WHERE schemaname = 'public' AND tablename = 'suppliers' AND policyname = 'suppliers_policy'
   ) THEN
     CREATE POLICY suppliers_policy ON public.suppliers FOR ALL
-      USING (is_developer() OR row_company_matches_user(company_id))
+      USING (is_developer() OR row_company_matches_user(company_id::text))
       WITH CHECK (auth.uid() IS NOT NULL AND (company_id = current_company_id() OR is_developer()));
   END IF;
 END $$;

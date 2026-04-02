@@ -17,6 +17,10 @@ import {
   seedFullNameFromClerk,
 } from '@/lib/userDisplayName';
 import { AnalyticsEvents, captureEvent, resetAnalyticsUser } from '@/lib/analytics';
+import {
+  computeCompanyDataQueriesEnabled,
+  type TenantSessionTrust,
+} from '@/lib/companyTenantGate';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -77,6 +81,12 @@ interface AuthContextType {
   syncTenantCompanyFromServer: () => Promise<boolean>;
   /** Force-refresh session as a platform developer when backend confirms admin.developers membership. */
   forceDeveloperMode: () => Promise<{ landingPage: string } | null>;
+  /**
+   * `provisional` after a profile-load error used a cached user — revalidate with syncTenantCompanyFromServer before querying.
+   */
+  tenantSessionTrust: TenantSessionTrust;
+  /** False until Clerk session + auth bootstrap agree; blocks company-scoped Supabase queries. */
+  companyDataQueriesEnabled: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -520,6 +530,7 @@ export function AuthProvider({
     if (clerkState === null) return true;
     return false;
   });
+  const [tenantSessionTrust, setTenantSessionTrust] = useState<TenantSessionTrust>('verified');
   const [setupIncomplete, setSetupIncomplete] = useState(false);
   const [resetRequired, setResetRequired] = useState(false);
   const [activationResolved, setActivationResolved] = useState(false);
@@ -528,6 +539,33 @@ export function AuthProvider({
     return window.localStorage.getItem('fv:isDeveloper') === '1';
   });
   const [isEmergencySession, setIsEmergencySession] = useState<boolean>(() => clerkState === null && !!readEmergencySession());
+  const companyDataQueriesEnabled = React.useMemo(
+    () =>
+      computeCompanyDataQueriesEnabled({
+        clerkStateNull: clerkState === null,
+        isEmergencySession,
+        clerkLoaded,
+        isSignedIn,
+        clerkUserId: userId,
+        authReady,
+        activationResolved,
+        tenantSessionTrust,
+        isDeveloper,
+        userCompanyId: user?.companyId ?? null,
+      }),
+    [
+      clerkState,
+      isEmergencySession,
+      clerkLoaded,
+      isSignedIn,
+      userId,
+      authReady,
+      activationResolved,
+      tenantSessionTrust,
+      isDeveloper,
+      user?.companyId,
+    ],
+  );
   const clerkLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Track whether we've ever confirmed the user was signed in during this session.
@@ -648,6 +686,7 @@ export function AuthProvider({
       setPermissions(getDefaultPermissions());
       writeCachedUser(null);
       writeEmergencySession(null);
+      setTenantSessionTrust('verified');
       setSetupIncomplete(false);
       setResetRequired(false);
       setIsDeveloper(false);
@@ -678,6 +717,7 @@ export function AuthProvider({
 
     (async () => {
       try {
+        setTenantSessionTrust('verified');
         const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
         const oauthHints = clerkOAuthDisplayHints(clerkUser);
 
@@ -1072,6 +1112,7 @@ export function AuthProvider({
                   .select('role')
                   .eq('clerk_user_id', userId)
                   .eq('company_id', aid)
+                  .limit(1)
                   .maybeSingle();
                 const r = memRow?.role != null ? String(memRow.role).trim() : '';
                 if (r) contextRole = r;
@@ -1386,6 +1427,7 @@ export function AuthProvider({
       } catch (error) {
         const cached = readCachedUser();
         if (cached && cached.id === userId && cached.companyId) {
+          setTenantSessionTrust('provisional');
           setUser(cached);
           setEmployeeProfile(null);
           setPermissions(buildEffectivePermissions(cached, null));
@@ -1395,35 +1437,30 @@ export function AuthProvider({
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
         } else {
-          const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
-          if (userId) {
-            await resolveOrCreatePlatformUser({ clerkUserId: userId, email: fallbackEmail });
-          }
-          const errOauth = clerkOAuthDisplayHints(clerkUser);
-          const clerkImageUrl = (clerkUser as { imageUrl?: string })?.imageUrl;
-          const fallbackUser: User = {
-            id: userId,
-            email: fallbackEmail,
-            name: resolveUserDisplayName({
-              profileDisplayName: null,
-              oauthFullName: errOauth.oauthFullName,
-              oauthName: errOauth.oauthName,
-              email: fallbackEmail,
-            }),
-            role: 'employee',
-            employeeRole: undefined,
-            companyId: null,
-            avatar: clerkImageUrl ? String(clerkImageUrl) : undefined,
-            createdAt: new Date(),
-          };
-          setUser(fallbackUser);
+          // Never auto-create platform profiles from this error path — it resurrected deleted identities.
+          clearPendingApprovalSession();
+          writeCachedUser(null);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
-          setSetupIncomplete(true);
-          setResetRequired(false);
-          writeCachedUser(null);
+          setUser(null);
+          setSetupIncomplete(false);
+          setResetRequired(true);
           setActivationResolved(true);
-          confirmedSignedInRef.current = true;
+          confirmedSignedInRef.current = false;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] Profile bootstrap failed; forcing sign-out (no auto profile create)', error);
+          }
+          try {
+            await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+          } catch {
+            // ignore
+          }
+          if (typeof window !== 'undefined') {
+            window.location.assign('/sign-in?reason=session-reconcile');
+          }
+          setAuthReady(true);
+          return;
         }
         const errMsg = (error as Error)?.message ?? String(error);
         if (errMsg.includes('failed_to_load_clerk_js') || errMsg.includes('clerk') || errMsg.includes('CORS')) {
@@ -1491,6 +1528,7 @@ export function AuthProvider({
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
+      setTenantSessionTrust('verified');
       setSetupIncomplete(false);
       setResetRequired(false);
       setIsEmergencySession(false);
@@ -1506,6 +1544,7 @@ export function AuthProvider({
           setUser(null);
           setEmployeeProfile(null);
           setPermissions(getDefaultPermissions());
+          setTenantSessionTrust('verified');
           setSetupIncomplete(false);
           setResetRequired(false);
           setIsDeveloper(false);
@@ -1516,6 +1555,7 @@ export function AuthProvider({
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
+      setTenantSessionTrust('verified');
       setSetupIncomplete(false);
       setResetRequired(false);
       setIsDeveloper(false);
@@ -1625,6 +1665,7 @@ export function AuthProvider({
       setPermissions(effectivePermissions);
       setSetupIncomplete(false);
       writeCachedUser(nextUser);
+      setTenantSessionTrust('verified');
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -1704,6 +1745,7 @@ export function AuthProvider({
       setEmployeeProfile(employee);
       setPermissions(effectivePermissions);
       writeCachedUser(nextUser);
+      setTenantSessionTrust('verified');
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -1805,6 +1847,8 @@ export function AuthProvider({
         refreshAuthState,
         syncTenantCompanyFromServer,
         forceDeveloperMode,
+        tenantSessionTrust,
+        companyDataQueriesEnabled,
       }}
     >
       {children}
