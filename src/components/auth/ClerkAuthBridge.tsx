@@ -8,6 +8,7 @@ import React, { useMemo, useCallback } from 'react';
 import { useAuth as useClerkAuth, useUser, useSignIn } from '@clerk/react';
 import { AuthProvider } from '@/contexts/AuthContext';
 import type { ClerkStateSnapshot } from '@/contexts/AuthContext';
+import { AmbassadorAccessProvider } from '@/contexts/AmbassadorAccessContext';
 import App from '@/App';
 import { ClerkSupabaseTokenBridge } from '@/components/auth/ClerkSupabaseTokenBridge';
 
@@ -44,9 +45,11 @@ export function ClerkAuthBridge() {
   );
 
   return (
-    <AuthProvider clerkState={clerkState}>
-      <ClerkSupabaseTokenBridge />
-      <App />
-    </AuthProvider>
+    <AmbassadorAccessProvider>
+      <AuthProvider clerkState={clerkState}>
+        <ClerkSupabaseTokenBridge />
+        <App />
+      </AuthProvider>
+    </AmbassadorAccessProvider>
   );
 }

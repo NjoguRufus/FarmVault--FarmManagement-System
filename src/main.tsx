@@ -5,6 +5,7 @@ import { ClerkProvider } from "@clerk/react";
 import { PostHogProvider } from "@posthog/react";
 import App from "./App.tsx";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AmbassadorAccessProvider } from "@/contexts/AmbassadorAccessContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
 import { initPwaInstall } from "@/lib/pwa-install";
@@ -147,9 +148,11 @@ if (shouldRenderApp) {
     } else {
       createRoot(root).render(
         wrapPostHog(
-          <AuthProvider clerkState={null}>
-            <App />
-          </AuthProvider>,
+          <AmbassadorAccessProvider>
+            <AuthProvider clerkState={null}>
+              <App />
+            </AuthProvider>
+          </AmbassadorAccessProvider>,
         ),
       );
     }

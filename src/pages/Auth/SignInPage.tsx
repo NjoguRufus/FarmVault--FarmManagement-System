@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { SignIn } from '@clerk/react';
 import { ClerkLoadErrorBoundary } from '@/components/auth/ClerkLoadErrorBoundary';
@@ -18,6 +18,12 @@ export default function SignInPage() {
   const location = useLocation();
   const ambassadorFlow = isAmbassadorClerkFlow(location.search);
   const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
+
+  useEffect(() => {
+    if (ambassadorFlow) {
+      setAmbassadorAccessIntent(true);
+    }
+  }, [ambassadorFlow]);
 
   return (
     <PremiumAuthShell

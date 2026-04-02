@@ -13,6 +13,7 @@ import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { Footer } from "@/components/landing/Footer";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getAmbassadorSignUpPath } from "@/lib/ambassador/clerkAuth";
+import { clearAmbassadorAccessIntent, readAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
 import type { AmbassadorType } from "@/lib/ambassador/constants";
 import {
   clearStoredAmbassadorRef,
@@ -79,6 +80,15 @@ export default function AmbassadorOnboardingPage() {
   useEffect(() => {
     if (!clerkLoaded) return;
 
+    if (!readAmbassadorAccessIntent()) {
+      if (user) {
+        navigate("/dashboard", { replace: true });
+      } else {
+        navigate("/ambassador", { replace: true });
+      }
+      return;
+    }
+
     if (!user) {
       try {
         persistIntendedRoute("/ambassador/onboarding");
@@ -97,6 +107,7 @@ export default function AmbassadorOnboardingPage() {
         if (cancelled) return;
         if (r.ok) {
           if (r.onboarding_complete) {
+            clearAmbassadorAccessIntent();
             navigate("/ambassador/console/dashboard", { replace: true });
             return;
           }
@@ -165,6 +176,7 @@ export default function AmbassadorOnboardingPage() {
     setFinishing(true);
     try {
       await completeMyAmbassadorOnboarding();
+      clearAmbassadorAccessIntent();
       navigate("/ambassador/console/refer", { replace: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not finish onboarding.";

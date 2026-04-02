@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
@@ -10,10 +11,15 @@ import { SEO_ROUTES } from "@/seo/routes";
 import { getAmbassadorSignInPath, getAmbassadorSignUpPath } from "@/lib/ambassador/clerkAuth";
 import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
 import { getStoredAmbassadorRef } from "@/services/ambassadorService";
+import { setAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
 
 export default function AmbassadorSignupPage() {
   const { isSignedIn, isLoaded } = useUser();
   const storedRef = getStoredAmbassadorRef();
+
+  useEffect(() => {
+    setAmbassadorAccessIntent(true);
+  }, []);
 
   return (
     <div className="min-h-screen font-body relative overflow-hidden bg-gradient-to-b from-emerald-950 via-green-900 to-stone-900 text-emerald-50">
@@ -73,7 +79,12 @@ export default function AmbassadorSignupPage() {
                 <div className="space-y-3">
                   <p className="text-sm text-emerald-100/80">You are signed in. Continue to complete your ambassador profile.</p>
                   <Button asChild className="w-full rounded-full bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold">
-                    <Link to="/ambassador/onboarding">Continue to onboarding</Link>
+                    <Link
+                      to="/ambassador/onboarding"
+                      onClick={() => setAmbassadorAccessIntent(true)}
+                    >
+                      Continue to onboarding
+                    </Link>
                   </Button>
                 </div>
               ) : (

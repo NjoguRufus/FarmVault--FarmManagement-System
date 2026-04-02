@@ -21,6 +21,7 @@ import {
   computeCompanyDataQueriesEnabled,
   type TenantSessionTrust,
 } from '@/lib/companyTenantGate';
+import { readAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -104,10 +105,23 @@ function isExplicitOnboardingRoute(): boolean {
     return (
       p.startsWith('/auth/continue') ||
       p.startsWith('/auth/callback') ||
-      p.startsWith('/auth/ambassador-continue') ||
       p.startsWith('/onboarding') ||
       p.startsWith('/accept-invitation') ||
-      p.startsWith('/dev/bootstrap') ||
+      p.startsWith('/dev/bootstrap')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Auto-create platform profile on ambassador paths only when user explicitly started the ambassador funnel. */
+function allowsAmbassadorProfileBootstrapPath(): boolean {
+  if (!readAmbassadorAccessIntent()) return false;
+  if (typeof window === 'undefined') return false;
+  try {
+    const p = window.location.pathname || '/';
+    return (
+      p.startsWith('/auth/ambassador-continue') ||
       p.startsWith('/ambassador/onboarding') ||
       p.startsWith('/ambassador/signup') ||
       p.startsWith('/ambassador/console')
@@ -924,7 +938,8 @@ export function AuthProvider({
 
         // 3a) Platform profile MUST exist for access.
         // IMPORTANT: Do NOT auto-create profiles on normal app loads — that resurrects deleted accounts.
-        const allowAutoCreatePlatformUser = isExplicitOnboardingRoute();
+        const allowAutoCreatePlatformUser =
+          isExplicitOnboardingRoute() || allowsAmbassadorProfileBootstrapPath();
         let hasCoreProfile = false;
         try {
           const { data: coreProfileRow, error: coreProfileErr } = await db

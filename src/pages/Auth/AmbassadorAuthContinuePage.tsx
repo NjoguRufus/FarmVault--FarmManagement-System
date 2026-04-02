@@ -8,6 +8,7 @@ import { useAuth as useClerkAuth } from "@clerk/react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { getAmbassadorSignInPath } from "@/lib/ambassador/clerkAuth";
+import { clearAmbassadorAccessIntent, readAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
 import { fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
 
 export default function AmbassadorAuthContinuePage() {
@@ -19,6 +20,7 @@ export default function AmbassadorAuthContinuePage() {
   useEffect(() => {
     if (!clerkLoaded || !clerkSignedIn) return;
     if (!authReady) return;
+    if (!readAmbassadorAccessIntent()) return;
     if (ranRef.current) return;
     ranRef.current = true;
 
@@ -30,6 +32,7 @@ export default function AmbassadorAuthContinuePage() {
         if (cancelled) return;
         if (r.ok) {
           if (r.onboarding_complete) {
+            clearAmbassadorAccessIntent();
             navigate("/ambassador/dashboard", { replace: true });
           } else {
             navigate("/ambassador/onboarding", { replace: true });
@@ -53,6 +56,10 @@ export default function AmbassadorAuthContinuePage() {
 
   if (!clerkSignedIn) {
     return <Navigate to={getAmbassadorSignInPath()} replace />;
+  }
+
+  if (!readAmbassadorAccessIntent()) {
+    return <Navigate to="/auth/continue" replace />;
   }
 
   if (!authReady) {
