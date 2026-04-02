@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Paperclip, Save } from "lucide-react";
 import { db, requireCompanyId } from "@/lib/db";
@@ -10,6 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
+import type { NoteAttachmentLayout } from "@/components/records/DraggableAttachment";
+import { DraggableAttachment } from "@/components/records/DraggableAttachment";
+import { StructuredNotePreview } from "@/components/records/StructuredNotePreview";
+import { SmartRichNotesEditor } from "@/components/records/SmartRichNotesEditor";
+import { parseNotebookContentToBlocks } from "@/lib/notebook/parseNotebookContentToBlocks";
+import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./notebookPage.css";
 
 type FarmNotebookEntryRow = {
@@ -19,6 +25,8 @@ type FarmNotebookEntryRow = {
   title: string | null;
   content: string | null;
   attachments: unknown | null;
+  structured_blocks?: unknown | null;
+  raw_text?: string | null;
   created_by: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -28,40 +36,6 @@ type FarmNotebookEntryRow = {
   sent_by_developer?: boolean | null;
   developer_updated?: boolean | null;
 };
-
-const warningKeywords = ["NB", "NOTE", "DON'T", "DO NOT", "WARNING"];
-const positiveKeywords = ["CREATE", "PLANT", "APPLY", "START", "ADD"];
-const underlineKeywords = ["IMPORTANT", "MAKE SURE", "ALWAYS"];
-
-function escapeHtml(input: string) {
-  return input
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function replaceAllKeywordsEscaped(htmlEscaped: string, keywords: string[], className: string) {
-  let out = htmlEscaped;
-  for (const word of keywords) {
-    const escapedWord = escapeHtml(word);
-    out = out.replace(new RegExp(escapedWord, "gi"), (m) => `<span class="${className}">${m}</span>`);
-  }
-  return out;
-}
-
-function formatLineToHtml(line: string) {
-  const upper = line.toUpperCase().trimStart();
-  const isWarningLine = warningKeywords.some((w) => upper.startsWith(w));
-
-  let formatted = escapeHtml(line);
-  formatted = replaceAllKeywordsEscaped(formatted, positiveKeywords, "text-positive");
-  formatted = replaceAllKeywordsEscaped(formatted, underlineKeywords, "text-underline");
-
-  const safe = formatted.length ? formatted : "&nbsp;";
-  return isWarningLine ? `<div class="nb-line line-warning">${safe}</div>` : `<div class="nb-line">${safe}</div>`;
-}
 
 export default function NotebookPage() {
   const navigate = useNavigate();
@@ -74,21 +48,65 @@ export default function NotebookPage() {
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
 
-  const [noteId, setNoteId] = useState<string | null>(noteIdParam);
-  const [loading, setLoading] = useState<boolean>(!!noteIdParam);
+  const [noteId, setNoteId] = useState<string | null>(noteIdParam && noteIdParam !== "new" ? noteIdParam : null);
+  const [loading, setLoading] = useState<boolean>(() => !!noteIdParam && noteIdParam !== "new");
   const [saving, setSaving] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [title, setTitle] = useState<string>("");
   const [content, setContent] = useState<string>("");
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<NoteAttachmentLayout[]>([]);
   const [uploading, setUploading] = useState(false);
   const [developerCompanyId, setDeveloperCompanyId] = useState<string>("");
   const [currentNoteCompanyId, setCurrentNoteCompanyId] = useState<string | null>(null);
   const [noteSource, setNoteSource] = useState<string | null>(null);
+  const [editorHydrate, setEditorHydrate] = useState(0);
 
   const lastSavedRef = useRef<{ title: string; content: string; attachmentsKey: string } | null>(null);
   const inflightRef = useRef<Promise<void> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  function newAttachmentId() {
+    // crypto.randomUUID is widely supported in modern browsers; fallback for older environments
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? (crypto as any).randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function normalizeAttachments(raw: unknown): NoteAttachmentLayout[] {
+    if (!Array.isArray(raw)) return [];
+    const out: NoteAttachmentLayout[] = [];
+    for (const item of raw) {
+      if (typeof item === "string") {
+        out.push({
+          id: newAttachmentId(),
+          url: item,
+          x: 40,
+          y: 40,
+          width: 180,
+          height: 140,
+          rotation: 0,
+          zIndex: 1,
+        });
+        continue;
+      }
+      if (!item || typeof item !== "object") continue;
+      const anyItem = item as any;
+      const url = String(anyItem.url ?? anyItem.publicUrl ?? anyItem.path ?? "");
+      if (!url) continue;
+      out.push({
+        id: String(anyItem.id ?? newAttachmentId()),
+        url,
+        x: Number.isFinite(anyItem.x) ? Number(anyItem.x) : 40,
+        y: Number.isFinite(anyItem.y) ? Number(anyItem.y) : 40,
+        width: Number.isFinite(anyItem.width) ? Number(anyItem.width) : 180,
+        height: Number.isFinite(anyItem.height) ? Number(anyItem.height) : 140,
+        rotation: Number.isFinite(anyItem.rotation) ? Number(anyItem.rotation) : 0,
+        zIndex: Number.isFinite(anyItem.zIndex) ? Number(anyItem.zIndex) : 1,
+      });
+    }
+    return out;
+  }
 
   useEffect(() => {
     document.body.classList.add("fv-notebook-fullwidth");
@@ -158,7 +176,7 @@ export default function NotebookPage() {
   }, [scope.companyId, scope.error, isDeveloperRoute, developerCompanyId]);
 
   useEffect(() => {
-    setNoteId(noteIdParam);
+    setNoteId(noteIdParam && noteIdParam !== "new" ? noteIdParam : null);
   }, [noteIdParam]);
 
   useEffect(() => {
@@ -167,6 +185,19 @@ export default function NotebookPage() {
       if (!noteIdParam) {
         setLoading(false);
         lastSavedRef.current = { title: "", content: "", attachmentsKey: "[]" };
+        setEditorHydrate((n) => n + 1);
+        return;
+      }
+      if (noteIdParam === "new") {
+        setLoading(false);
+        setSaveError(null);
+        setTitle("");
+        setContent("");
+        setAttachments([]);
+        setNoteSource(null);
+        setNoteId(null);
+        lastSavedRef.current = { title: "", content: "", attachmentsKey: "[]" };
+        setEditorHydrate((n) => n + 1);
         return;
       }
       try {
@@ -192,8 +223,7 @@ export default function NotebookPage() {
         if (cancelled) return;
         setTitle(row.title ?? "");
         setContent(row.content ?? "");
-        const nextAttachments =
-          Array.isArray(row.attachments) ? (row.attachments as any[]).map((v) => String(v)) : [];
+        const nextAttachments = normalizeAttachments(row.attachments);
         setAttachments(nextAttachments);
         setNoteSource(row.source ? String(row.source) : null);
         if (isDeveloperRoute && row.company_id) {
@@ -207,6 +237,7 @@ export default function NotebookPage() {
           content: row.content ?? "",
           attachmentsKey: JSON.stringify(nextAttachments),
         };
+        setEditorHydrate((n) => n + 1);
 
         // Reset "updated" flag after developer opens the note
         if (isDeveloperRoute && row.developer_updated === true) {
@@ -232,32 +263,56 @@ export default function NotebookPage() {
     };
   }, [noteIdParam, companyId, cropSlug, isDeveloperRoute]);
 
-  const handleAttachments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  async function uploadNoteAttachment(file: File) {
+    const fileExt = file.name.split(".").pop();
+    const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
+    const filePath = `notes/${fileName}`;
+
+    const { error } = await supabase.storage.from("farm-notes").upload(filePath, file);
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from("farm-notes").getPublicUrl(filePath);
+
+    return data.publicUrl;
+  }
+
+  async function handleAttachments(files: File[]) {
+    const uploads: NoteAttachmentLayout[] = [];
+
+    for (const file of files) {
+      const url = await uploadNoteAttachment(file);
+      uploads.push({
+        id: newAttachmentId(),
+        url,
+        x: 40,
+        y: 40,
+        width: 180,
+        height: 140,
+        rotation: 0,
+        zIndex: 1,
+      });
+    }
+
+    return uploads;
+  }
+
+  const onAttachmentsSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
 
     setUploading(true);
     try {
-      const uploads = await Promise.all(
-        files.map(async (file) => {
-          const safeName = file.name.replace(/[^\w.\- ]+/g, "_");
-          const key = `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
-          const path = `attachments/${key}`;
-          const { data, error } = await supabase.storage.from("notes").upload(path, file, {
-            upsert: false,
-          });
-          if (error) throw error;
-          return data?.path ? String(data.path) : null;
-        }),
-      );
-
-      const paths = uploads.filter(Boolean) as string[];
-      if (paths.length) {
-        setAttachments((prev) => Array.from(new Set([...prev, ...paths])));
+      const newOnes = await handleAttachments(files);
+      if (newOnes.length) {
+        setAttachments((prev) => {
+          const maxZ = prev.reduce((m, a) => Math.max(m, a.zIndex || 1), 1);
+          return [...prev, ...newOnes.map((a, idx) => ({ ...a, zIndex: maxZ + idx + 1 }))];
+        });
         toast.success("Uploaded attachments");
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload attachments.");
+    } catch {
+      toast.error("Attachment upload failed. Check storage bucket.");
     } finally {
       setUploading(false);
       // allow selecting same file again
@@ -266,6 +321,21 @@ export default function NotebookPage() {
   };
 
   const attachmentsKey = useMemo(() => JSON.stringify(attachments ?? []), [attachments]);
+
+  const bringFront = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const maxZ = prev.reduce((m, a) => Math.max(m, a.zIndex || 1), 1);
+      return prev.map((a) => (a.id === id ? { ...a, zIndex: maxZ + 1 } : a));
+    });
+  }, []);
+
+  const updateAttachment = useCallback((next: NoteAttachmentLayout) => {
+    setAttachments((prev) => prev.map((a) => (a.id === next.id ? next : a)));
+  }, []);
+
+  const deleteAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   const saveNote = async (opts?: { showToast?: boolean }) => {
     if (!isDeveloperRoute && scope.error) return;
@@ -284,6 +354,9 @@ export default function NotebookPage() {
     setSaving(true);
     setSaveError(null);
 
+    const plainBody = htmlToPlainText(nextContent);
+    const structuredBlocks = parseNotebookContentToBlocks(plainBody);
+
     const run = (async () => {
       try {
         if (!noteId) {
@@ -295,6 +368,8 @@ export default function NotebookPage() {
               crop_slug: cropSlug,
               title: nextTitle,
               content: nextContent,
+              raw_text: plainBody,
+              structured_blocks: structuredBlocks,
               attachments,
               created_by: isDeveloperRoute ? "developer" : user.id,
             })
@@ -318,6 +393,8 @@ export default function NotebookPage() {
             .update({
               title: nextTitle,
               content: nextContent,
+              raw_text: plainBody,
+              structured_blocks: structuredBlocks,
               attachments,
               ...(isDeveloperRoute ? { developer_updated: true } : null),
             })
@@ -376,6 +453,9 @@ export default function NotebookPage() {
       crop_slug: cropSlug,
       title,
       content,
+      raw_text: htmlToPlainText(content),
+      structured_blocks: parseNotebookContentToBlocks(htmlToPlainText(content)),
+      attachments,
       created_by: "developer",
       source: "developer",
       source_note_id: noteId,
@@ -399,12 +479,10 @@ export default function NotebookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content, attachmentsKey]);
 
-  const formattedContent = useMemo(() => {
-    return content
-      .split("\n")
-      .map((line) => formatLineToHtml(line))
-      .join("");
-  }, [content]);
+  const structuredPreviewBlocks = useMemo(
+    () => parseNotebookContentToBlocks(htmlToPlainText(content)),
+    [content],
+  );
 
   const headerSubtitle = useMemo(() => {
     if (saving) return "Saving…";
@@ -496,7 +574,7 @@ export default function NotebookPage() {
             ref={fileInputRef}
             type="file"
             multiple
-            onChange={handleAttachments}
+            onChange={onAttachmentsSelected}
             className="hidden"
             accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
           />
@@ -529,43 +607,32 @@ export default function NotebookPage() {
           inputMode="text"
         />
 
-        <textarea
-          className="notebook-textarea"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Start writing…"
-        />
+        <div ref={canvasRef} className="note-canvas">
+          <SmartRichNotesEditor
+            className="notebook-textarea-wrap"
+            value={content}
+            onChange={setContent}
+            hydrateNonce={editorHydrate}
+            placeholder="Start writing…"
+          />
 
-        {attachments.length ? (
-          <div className="notebook-attachments">
-            <div className="notebook-attachments-title">Attachments</div>
-            <div className="notebook-attachments-list">
-              {attachments.map((p) => (
-                <div key={p} className="notebook-attachment-item">
-                  <span className="notebook-attachment-path">{p}</span>
-                  <Button
-                    variant="ghost"
-                    className="h-7 px-2 rounded-lg"
-                    onClick={(ev) => {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      setAttachments((prev) => prev.filter((x) => x !== p));
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+          {attachments.map((a) => (
+            <DraggableAttachment
+              key={a.id}
+              attachment={a}
+              containerRef={canvasRef}
+              onChange={updateAttachment}
+              onDelete={deleteAttachment}
+              onBringFront={bringFront}
+            />
+          ))}
+        </div>
 
         <div className="notebook-smart-preview">
-          <div className="notebook-smart-preview-title">Smart preview</div>
-          <div
-            className="notebook-smart-preview-body"
-            dangerouslySetInnerHTML={{ __html: formattedContent }}
-          />
+          <div className="notebook-smart-preview-title">Structured preview</div>
+          <div className="notebook-smart-preview-body notebook-structured-preview-body">
+            <StructuredNotePreview blocks={structuredPreviewBlocks} />
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import React from "react";
+import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 
 type NoteLike = {
   id: string;
@@ -28,8 +29,10 @@ export function NotesCard({
     String(note.source ?? "").toLowerCase() === "developer" || Boolean(note.is_admin_note);
 
   const title = note.title?.trim() ? note.title.trim() : "Untitled";
-  const body = (note.content ?? "").trim().replace(/\s+/g, " ");
-  const preview = body ? (body.length <= 80 ? body : `${body.slice(0, 79)}…`) : "No content yet…";
+  const plain = htmlToPlainText(note.content ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  const preview = plain ? (plain.length <= 80 ? plain : `${plain.slice(0, 79)}…`) : "No content yet…";
   const dateText = formatDate(note.created_at ?? note.updated_at) || "FarmVault";
 
   return (

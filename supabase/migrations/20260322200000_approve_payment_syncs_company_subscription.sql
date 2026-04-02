@@ -141,6 +141,15 @@ begin
 
   raise notice '[approve_subscription_payment] company=% subscription after: status=active is_trial=false current_period_end=% active_until=%',
     v_company_id, v_period_end, v_period_end;
+
+  -- Canonical company-level subscription fields (used by computeSubscriptionStatus in UI).
+  update core.companies
+  set
+    payment_confirmed = true,
+    active_until = v_period_end,
+    trial_ends_at = null,
+    pending_confirmation = false
+  where id = v_company_id;
 end;
 $$;
 

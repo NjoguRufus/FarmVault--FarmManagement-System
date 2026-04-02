@@ -1,15 +1,20 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { SignIn } from '@clerk/react';
 import { ClerkLoadErrorBoundary } from '@/components/auth/ClerkLoadErrorBoundary';
 import { isEmergencyAccessEnabled } from '@/config/emergencyAccess';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
+import { getAmbassadorSignUpPath, isAmbassadorClerkFlow } from '@/lib/ambassador/clerkAuth';
 
 /**
  * Sign-in UI depends only on Clerk. No AuthContext or employee/company lookup runs here;
  * data fetching runs only after a Clerk user exists (in AuthContext).
  */
 export default function SignInPage() {
+  const location = useLocation();
+  const ambassadorFlow = isAmbassadorClerkFlow(location.search);
+  const afterAmbassadorAuthUrl = '/ambassador/onboarding';
+
   return (
     <PremiumAuthShell
       title="Welcome back"
@@ -33,8 +38,9 @@ export default function SignInPage() {
           <SignIn
             routing="path"
             path="/sign-in"
-            signUpUrl="/sign-up"
-            afterSignInUrl="/auth/continue"
+            signUpUrl={ambassadorFlow ? getAmbassadorSignUpPath() : '/sign-up'}
+            afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
+            afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
             appearance={{
               variables: {
                 colorPrimary: '#1F3B2E',

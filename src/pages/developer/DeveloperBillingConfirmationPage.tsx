@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchSubscriptionAnalytics } from '@/services/developerService';
 import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
+import { setCompanyPaidAccess } from '@/services/developerService';
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -102,14 +103,29 @@ export default function DeveloperBillingConfirmationPage() {
   };
 
   const approveMutation = useMutation({
-    mutationFn: (paymentId: string) => {
+    mutationFn: async (paymentId: string) => {
       const list = queryClient.getQueryData<PendingPayment[]>(['developer', 'pending-payments']);
       const row = list?.find((x) => x.id === paymentId);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
       }
-      return approveSubscriptionPayment(paymentId);
+      await approveSubscriptionPayment(paymentId);
+
+      // Enforce canonical company access window per submitted billing cycle.
+      const companyId = String(row?.company_id ?? '');
+      const rawPlan = String(row?.plan_id ?? 'basic').toLowerCase();
+      const plan = rawPlan.includes('pro') ? 'pro' : 'basic';
+      const cycle = String(row?.billing_cycle ?? 'monthly').toLowerCase();
+      const months =
+        cycle === 'seasonal'
+          ? 3
+          : cycle === 'annual'
+            ? 12
+            : 1;
+      if (companyId) {
+        await setCompanyPaidAccess({ companyId, plan, months });
+      }
     },
     onMutate: async (paymentId: string) => {
       await queryClient.cancelQueries({ queryKey: ['developer', 'pending-payments'] });
@@ -608,6 +624,8 @@ export default function DeveloperBillingConfirmationPage() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Approval duration is derived from the submitted billing_cycle (monthly/seasonal/annual). */}
       </div>
     </DeveloperPageShell>
   );

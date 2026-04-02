@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import {
   fetchAnalyticsCropProfit,
@@ -6,6 +6,7 @@ import {
   fetchAnalyticsExpenseBreakdown,
   fetchAnalyticsMonthlyRevenue,
 } from '@/services/analyticsReportsService';
+import { supabase } from '@/lib/supabase';
 
 const staleTime = 60_000;
 
@@ -58,18 +59,52 @@ export function useFarmAnalyticsReports(companyId: string | null | undefined) {
     const totalRevenue = cropProfit.reduce((s, r) => s + r.total_revenue, 0);
     const totalExpenses = expenseBreakdown.reduce((s, r) => s + r.total, 0);
     const totalProfit = totalRevenue - totalExpenses;
-    return { totalRevenue, totalExpenses, totalProfit };
-  }, [cropProfit, expenseBreakdown]);
+    const totalYield = cropYield.reduce((s, r) => s + r.total_yield, 0);
+    return { totalRevenue, totalExpenses, totalProfit, totalYield };
+  }, [cropProfit, expenseBreakdown, cropYield]);
 
   const bestCrop = useMemo(() => {
     if (!cropProfit.length) return null;
     const ranked = [...cropProfit].filter((r) => (r.crop ?? '').length > 0 || r.profit !== 0 || r.total_revenue !== 0);
     if (!ranked.length) return null;
-    ranked.sort((a, b) => b.profit - a.profit || b.total_revenue - a.total_revenue);
+    // Best crop = crop with highest revenue (per requirements)
+    ranked.sort((a, b) => b.total_revenue - a.total_revenue);
     return ranked[0];
   }, [cropProfit]);
 
-  const refetchAll = () => Promise.all(results.map((q) => q.refetch()));
+  const refetchAll = useCallback(() => Promise.all(results.map((q) => q.refetch())), [results]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const channel = supabase
+      .channel(`farm-analytics-${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'harvests', filter: `company_id=eq.${id}` },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'expenses', filter: `company_id=eq.${id}` },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inventory_usage_logs', filter: `company_id=eq.${id}` },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'operations_work_cards', filter: `company_id=eq.${id}` },
+        () => void refetchAll(),
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [enabled, id, refetchAll]);
 
   return {
     enabled,

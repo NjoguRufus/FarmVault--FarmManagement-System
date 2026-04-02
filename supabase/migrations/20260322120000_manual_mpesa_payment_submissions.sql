@@ -295,6 +295,11 @@ begin
     updated_at = now()
   where company_id::text = v_company_id::text;
 
+  -- Canonical flag for unified status resolver
+  update core.companies
+  set pending_confirmation = true
+  where id = v_company_id;
+
   return v_id;
 end;
 $$;

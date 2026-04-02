@@ -45,12 +45,16 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { toDate, formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
-import { exportToExcel } from '@/lib/exportUtils';
+import { downloadCsv } from '@/lib/csv/downloadCsv';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getHarvestPickersByIds, getRecentPayoutsSummary, getCollectionPayoutDetail, getHarvestCollection, listHarvestCollections, type RecentPayoutSummary, type CollectionPayoutDetail } from '@/services/harvestCollectionsService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { formatKes } from '@/components/reports/analyticsFormat';
+import { renderReport } from '@/lib/pdf/renderReport';
+import { printHtmlReport } from '@/lib/pdf/printHtmlReport';
+import { getCompany } from '@/services/companyService';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -532,29 +536,124 @@ export default function ExpensesPage() {
       toast.error('Permission denied', { description: 'You cannot export reports.' });
       return;
     }
-    const rows = filteredExpenses.map((expense) => ({
-      Description: expense.description,
-      Category: expense.category,
-      AmountKES: expense.amount,
-      Date: formatDate(expense.date),
-      Project: activeProject?.name ?? 'All Projects',
-      Status: expense.paid ? 'paid' : 'pending',
-    }));
+    toast.message('Choose CSV or PDF export above.');
+  };
 
+  const handleExportExpensesCsv = () => {
+    if (!canExportExpenseReport) {
+      toast.error('Permission denied', { description: 'You cannot export reports.' });
+      return;
+    }
+    const rows = filteredExpenses.map((expense) => ({
+      Date: formatDate(expense.date),
+      Category: expense.category,
+      Amount: expense.amount,
+      Supplier: (expense as any)?.supplierName ?? '',
+      Crop: expense.cropType ?? '',
+      Notes: expense.description ?? '',
+    }));
     if (!rows.length) {
       toast.error('No expenses to export.');
       return;
     }
-
-    const dateTag = new Date().toISOString().slice(0, 10);
-    exportToExcel(rows, `expenses-${dateTag}`);
+    downloadCsv(rows, 'farmvault-expenses');
     captureEvent(AnalyticsEvents.REPORT_EXPORTED_EXCEL, {
       company_id: companyId ?? undefined,
       project_id: activeProject?.id,
-      report_type: 'expenses',
+      report_type: 'expenses-csv',
       module_name: 'expenses',
     });
-    toast.success('Expenses exported.');
+    toast.success('Expenses CSV exported.');
+  };
+
+  const handleExportExpensesPdf = async () => {
+    if (!canExportExpenseReport) {
+      toast.error('Permission denied', { description: 'You cannot export reports.' });
+      return;
+    }
+    if (!filteredExpenses.length) {
+      toast.error('No expenses to export.');
+      return;
+    }
+
+    const dateRangeLabel = dateRange?.from || dateRange?.to
+      ? `${dateRange?.from ? formatDate(dateRange.from) : '—'} → ${dateRange?.to ? formatDate(dateRange.to) : '—'}`
+      : 'All time';
+
+    const total = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+    const tx = filteredExpenses.length;
+    const avg = tx ? total / tx : 0;
+    const byCategory = Object.entries(
+      filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+        const key = String(e.category ?? 'Other');
+        acc[key] = (acc[key] || 0) + Number(e.amount ?? 0);
+        return acc;
+      }, {}),
+    ).sort((a, b) => b[1] - a[1]);
+
+    const top = byCategory[0] ?? ['—', 0];
+
+    const badgeForExpenseCategory = (cat: string) => {
+      const c = String(cat || '').toLowerCase();
+      if (c.includes('labour') || c.includes('labor')) return 'badge-green';
+      if (c.includes('input') || c.includes('fert') || c.includes('chem')) return 'badge-gold';
+      return 'badge-gray';
+    };
+
+    const company = companyId ? await getCompany(companyId) : null;
+    const html = renderReport({
+      company: {
+        name: company?.name ?? (user as any)?.companyName ?? 'FarmVault Company',
+        location: String((company as any)?.location ?? ''),
+        website: String((company as any)?.website ?? 'farmvault.africa'),
+        email: company?.email ?? '',
+        phone: String((company as any)?.phone ?? ''),
+        logo: String((company as any)?.logo_url ?? (company as any)?.logo ?? ''),
+      },
+      report: {
+        key: 'expenses',
+        title: 'Expenses Report',
+        dateRange: dateRangeLabel,
+        generatedAt: new Date().toLocaleString(),
+      },
+      stats: {
+        total_expenses: formatKes(total),
+        transactions: `${tx}`,
+        avg_expense: formatKes(avg),
+        top_category: String(top[0]),
+        top_category_amount: formatKes(Number(top[1] ?? 0)),
+      },
+      rows: filteredExpenses.map((e) => ({
+        date: formatDate(e.date),
+        category: `<span class="badge ${badgeForExpenseCategory(String(e.category ?? ''))}">${String(e.category ?? '')}</span>`,
+        item: String(e.description ?? ''),
+        supplier: String((e as any)?.supplierName ?? '—'),
+        crop: String(e.cropType ?? '—'),
+        notes: String(e.description ?? ''),
+        amount: `${Number(e.amount ?? 0).toLocaleString()}`,
+      })),
+      totals: {
+        transactions: tx,
+        total_amount: `${Math.round(total).toLocaleString()}`,
+        category_summary: byCategory.slice(0, 6).map(([label, amount]) => ({
+          label,
+          value: formatKes(amount),
+        })),
+        chart: {
+          type: 'pie',
+          labels: byCategory.slice(0, 6).map((x) => x[0]),
+          values: byCategory.slice(0, 6).map((x) => x[1]),
+        },
+        notes: 'All amounts in Kenyan Shillings (KES).',
+      },
+    });
+
+    try {
+      printHtmlReport(html);
+      toast.success('Expenses PDF export opened.');
+    } catch {
+      toast.error('Could not open print window.', { description: 'Please allow popups and try again.' });
+    }
   };
 
   return (
@@ -662,14 +761,23 @@ export default function ExpensesPage() {
           </>
           )}
           {canExportExpenseReport && (
-            <button
-              className="fv-btn fv-btn--secondary"
-              onClick={handleExport}
-              data-tour="staff-expenses-export"
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </button>
+            <>
+              <button
+                className="fv-btn fv-btn--secondary"
+                onClick={() => void handleExportExpensesPdf()}
+                data-tour="staff-expenses-export"
+              >
+                <Download className="h-4 w-4" />
+                Export PDF
+              </button>
+              <button
+                className="fv-btn fv-btn--secondary"
+                onClick={handleExportExpensesCsv}
+              >
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+            </>
           )}
           {canCreateExpense && (
           <Dialog

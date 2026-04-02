@@ -76,15 +76,10 @@ begin
     v_plan := case when v_plan like '%pro%' then 'pro' else 'basic' end;
   end if;
 
+  -- Canonical rule for FarmVault: manual approval grants 30 days access window
+  -- (independent of any legacy billing_cycle stored on the payment row).
   v_cycle := lower(trim(coalesce(v_cycle, 'monthly')));
-  if v_cycle = 'seasonal' then
-    v_period_end := v_now + interval '3 months';
-  elsif v_cycle = 'annual' then
-    v_period_end := v_now + interval '1 year';
-  else
-    v_cycle := 'monthly';
-    v_period_end := v_now + interval '1 month';
-  end if;
+  v_period_end := v_now + interval '30 days';
 
   raise notice '[approve_subscription_payment] company=% subscription before: status=% is_trial=% → activating paid plan=% cycle=% until=%',
     v_company_id, coalesce(v_old_sub_status, '(no row)'), coalesce(v_old_is_trial::text, '?'),
@@ -151,6 +146,16 @@ begin
 
   raise notice '[approve_subscription_payment] company=% subscription after: status=active is_trial=false current_period_end=% active_until=%',
     v_company_id, v_period_end, v_period_end;
+
+  -- Canonical company record used by unified status resolver
+  update core.companies
+  set
+    plan = v_plan,
+    payment_confirmed = true,
+    pending_confirmation = false,
+    active_until = v_period_end,
+    trial_ends_at = null
+  where id = v_company_id;
 end;
 $$;
 

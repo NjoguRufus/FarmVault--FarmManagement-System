@@ -26,7 +26,7 @@ export type FarmVaultQRGeneratorProps = {
   className?: string;
 };
 
-function preloadLogo(url: string | undefined): Promise<string | undefined> {
+export function preloadLogo(url: string | undefined): Promise<string | undefined> {
   if (!url) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     const img = new Image();
@@ -45,7 +45,7 @@ function preloadLogo(url: string | undefined): Promise<string | undefined> {
   });
 }
 
-function buildQrOptions(
+export function buildQrOptions(
   data: string,
   imageUrl: string | undefined,
 ): ConstructorParameters<typeof QRCodeStyling>[0] {

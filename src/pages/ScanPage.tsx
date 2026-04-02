@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2, Leaf, Users, ReceiptText, ShieldCheck } from 
 import { Button } from "@/components/ui/button";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SeoHead } from "@/seo/SeoHead";
+import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
 
 type CropId = "frenchbeans" | "tomatoes" | "capsicum" | "maize" | "rice";
 
@@ -303,6 +304,17 @@ export default function ScanPage() {
   const [selectedCrop, setSelectedCrop] = useState<CropId | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const dynamicSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const refParam = searchParams.get("ref")?.trim();
+    if (refParam) {
+      try {
+        window.localStorage.setItem(AMBASSADOR_REF_STORAGE_KEY, refParam);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (hydrated) return;

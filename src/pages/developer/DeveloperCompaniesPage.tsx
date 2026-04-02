@@ -55,12 +55,13 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { computeSubscriptionStatus } from '@/lib/subscription/subscriptionStatus';
-import { computeSubscriptionVisibility, subscriptionVisibilityBadgeClass } from '@/lib/subscription/subscriptionVisibility';
 import {
-  computeCompanySubscriptionState,
-  companySubscriptionBadgeClass,
-} from '@/features/billing/lib/computeCompanySubscriptionState';
+  computeCompanyStatus,
+  companyStatusAccessLabel,
+  companyStatusBadgeClass,
+  type CompanyStatus,
+} from '@/lib/subscription/companyStatus';
+import { setCompanyPaidAccess } from '@/services/developerService';
 import { useSearchParams } from 'react-router-dom';
 import { useNow } from '@/hooks/useNow';
 
@@ -85,11 +86,13 @@ type CompanyRow = {
   users_count?: number | null;
   employees_count?: number | null;
   subscription_status?: string | null;
-  plan_code?: string | null;
+  plan?: string | null;
+  plan_code?: string | null; // legacy field still present in RPC payloads
   billing_mode?: string | null;
   is_trial?: boolean | null;
   trial_ends_at?: string | null;
   active_until?: string | null;
+  payment_confirmed?: boolean | null;
   latest_subscription_payment?: LatestSubscriptionPayment | null;
   company_status?: string | null;
   override?: {
@@ -107,36 +110,22 @@ type CompanyRow = {
   } | null;
 };
 
-function getEffectiveLabel(c: CompanyRow): { label: string; variant: 'default' | 'success' | 'warning' | 'destructive' | 'secondary' } {
-  const override = c.override;
-  const mode = override?.mode?.toLowerCase();
-  const status = (c.subscription_status ?? '').toLowerCase();
-  const plan = (c.plan_code ?? 'basic').toLowerCase();
-
-  if (override?.enabled) {
-    if (mode === 'pilot') return { label: 'Pilot', variant: 'secondary' };
-    if (mode === 'collaborator') return { label: 'Collaborator', variant: 'secondary' };
-    if (mode === 'free_forever' || mode === 'free_until') return { label: 'Free Access', variant: 'success' };
-    if (mode === 'extended_trial' || mode === 'start_trial') return { label: 'Extended Trial', variant: 'warning' };
-  }
-
-  if (status === 'trialing') return { label: 'Trial', variant: 'warning' };
-  if (status === 'pending_approval') return { label: 'Pending Approval', variant: 'warning' };
-  if (status === 'active') {
-    if (plan === 'pro' || plan === 'professional') return { label: 'Pro', variant: 'success' };
-    if (plan === 'enterprise') return { label: 'Enterprise', variant: 'success' };
-    return { label: 'Basic', variant: 'default' };
-  }
-  if (status === 'expired') return { label: 'Expired', variant: 'destructive' };
-  if (status === 'rejected') return { label: 'Rejected', variant: 'destructive' };
-  if (status === 'suspended') return { label: 'Suspended', variant: 'destructive' };
-  if (status === 'cancelled') return { label: 'Cancelled', variant: 'destructive' };
-
-  if (!status) {
-    if (!plan) return { label: 'Unset / None', variant: 'default' };
-    return { label: `${plan} / Unset`, variant: 'default' };
-  }
-  return { label: plan || 'None', variant: 'default' };
+function computeResolvedStatus(c: CompanyRow, now: Date): CompanyStatus {
+  const suspended =
+    String(c.subscription_status ?? '').trim().toLowerCase() === 'suspended' ||
+    String(c.company_status ?? '').trim().toLowerCase() === 'suspended';
+  const plan =
+    (c.plan ?? null) ??
+    (c.plan_code ?? null) ??
+    (c.subscription?.plan ?? null);
+  return computeCompanyStatus({
+    suspended,
+    pending_confirmation: (c as any).pending_confirmation ?? null,
+    plan,
+    payment_confirmed: c.payment_confirmed ?? null,
+    active_until: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
+    trial_ends_at: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+  }, now);
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -212,6 +201,13 @@ export default function DeveloperCompaniesPage() {
     kind: 'suspend' | 'set_plan_pro' | 'set_plan_basic';
   }>({ open: false, company: null, kind: 'suspend' });
 
+  const [paidAccessModal, setPaidAccessModal] = useState<{
+    open: boolean;
+    company: CompanyRow | null;
+    plan: 'basic' | 'pro';
+    months: 1 | 2 | 3;
+  }>({ open: false, company: null, plan: 'pro', months: 1 });
+
   const [extendTrialModal, setExtendTrialModal] = useState<{
     open: boolean;
     company: CompanyRow | null;
@@ -245,28 +241,7 @@ export default function DeveloperCompaniesPage() {
       const id = (c.company_id ?? c.id ?? '').toLowerCase();
       const mode = (c.override?.mode ?? '').toLowerCase();
       const hasOverride = Boolean(c.override?.enabled);
-      const computed = computeSubscriptionStatus(
-        {
-          trialEnd: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
-          activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
-          isSuspended: status === 'suspended',
-          planCode: c.plan_code ?? c.subscription?.plan ?? null,
-        },
-        now,
-      );
-      const derived = computeCompanySubscriptionState(
-        {
-          companyStatus: c.company_status ?? null,
-          planCode: c.plan_code ?? c.subscription?.plan ?? null,
-          subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
-          isTrial: c.is_trial ?? (c.subscription?.status === 'trialing'),
-          trialStartsAt: null,
-          trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
-          activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
-          latestPaymentStatus: c.latest_subscription_payment?.status ?? null,
-        },
-        now,
-      );
+      const computedStatus = computeResolvedStatus(c, now);
 
       if (statusFilter !== 'all') {
         if (statusFilter === 'approved') {
@@ -277,7 +252,7 @@ export default function DeveloperCompaniesPage() {
       }
 
       if (subscriptionFilter === 'payment_required') {
-        if (!computed.paymentRequired) return false;
+        if (computedStatus !== 'trial_expired') return false;
       }
 
       if (overrideFilter !== 'all') {
@@ -297,8 +272,7 @@ export default function DeveloperCompaniesPage() {
         plan.includes(term) ||
         status.includes(term) ||
         id.includes(term) ||
-        computed.label.toLowerCase().includes(term) ||
-        derived.displayLabel.toLowerCase().includes(term)
+        companyStatusAccessLabel(computedStatus).toLowerCase().includes(term)
       );
     });
   }, [companies, search, statusFilter, overrideFilter, newOnly, newWindowDays, subscriptionFilter, now]);
@@ -535,6 +509,19 @@ export default function DeveloperCompaniesPage() {
     },
   });
 
+  const setPaidAccessMutation = useMutation({
+    mutationFn: (input: { companyId: string; plan: 'basic' | 'pro'; months: 1 | 2 | 3 }) =>
+      setCompanyPaidAccess({ companyId: input.companyId, plan: input.plan, months: input.months }),
+    onSuccess: () => {
+      toast({ title: 'Access updated', description: 'Paid access window has been updated.' });
+      void queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
+      void queryClient.invalidateQueries({ queryKey: ['developer', 'subscription-analytics'] });
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Failed to update access', description: err.message ?? 'Unknown error', variant: 'destructive' });
+    },
+  });
+
   const duplicatesQuery = useQuery({
     queryKey: ['developer', 'duplicate-emails'],
     queryFn: () => listDuplicateEmails(),
@@ -761,41 +748,10 @@ export default function DeveloperCompaniesPage() {
             <tbody>
               {filtered.map((c) => {
                 const id = c.company_id ?? c.id ?? '';
-                const { label, variant } = getEffectiveLabel(c);
                 const hasOverride = c.override?.enabled;
                 const displayName = c.company_name ?? c.name ?? '—';
                 const lowerName = displayName.trim().toLowerCase();
-                const computed = computeSubscriptionStatus({
-                  trialEnd: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
-                  activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
-                  isSuspended: String(c.subscription_status ?? '').toLowerCase() === 'suspended',
-                  planCode: c.plan_code ?? c.subscription?.plan ?? null,
-                });
-                const derived = computeCompanySubscriptionState(
-                  {
-                    companyStatus: c.company_status ?? null,
-                    planCode: c.plan_code ?? c.subscription?.plan ?? null,
-                    subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
-                    isTrial: c.is_trial ?? (c.subscription?.status === 'trialing'),
-                    trialStartsAt: null,
-                    trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
-                    activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
-                    latestPaymentStatus: c.latest_subscription_payment?.status ?? null,
-                  },
-                  now,
-                );
-                const visibility = computeSubscriptionVisibility(
-                  {
-                    planCode: c.plan_code ?? c.subscription?.plan ?? null,
-                    trialStartsAt: null,
-                    trialEndsAt: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
-                    activeUntil: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
-                    isTrial: c.is_trial ?? c.subscription?.status === 'trialing',
-                    subscriptionStatus: c.subscription_status ?? c.subscription?.status ?? null,
-                    isSuspended: String(c.subscription_status ?? '').toLowerCase() === 'suspended',
-                  },
-                  now,
-                );
+                const computedStatus = computeResolvedStatus(c, now);
                 const isProtectedCompany =
                   lowerName === 'keyfarm' ||
                   // Any company that is currently active in this session
@@ -819,38 +775,12 @@ export default function DeveloperCompaniesPage() {
                     </td>
                     <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Access">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className={cn('font-normal', companySubscriptionBadgeClass(derived))}>
-                          {derived.displayLabel}
+                        <Badge
+                          variant="outline"
+                          className={cn('font-normal', companyStatusBadgeClass(computedStatus))}
+                        >
+                          {companyStatusAccessLabel(computedStatus)}
                         </Badge>
-                        {derived.paymentRequired && derived.accessStatus !== 'suspended' && (
-                          <Badge
-                            variant="outline"
-                            className="font-normal border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200"
-                            title="Trial or subscription ended with no active paid access"
-                          >
-                            Payment required
-                          </Badge>
-                        )}
-                        {hasOverride && (
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'font-normal',
-                              variant === 'success' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
-                              variant === 'warning' && 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
-                              variant === 'destructive' && 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200',
-                              variant === 'secondary' && 'border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-200',
-                              variant === 'default' && 'border-border bg-muted text-muted-foreground'
-                            )}
-                            title="Developer override (separate from billing-derived access)"
-                          >
-                            <ShieldCheck className="mr-1 h-3 w-3" />
-                            {label}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="mt-1 text-[11px] text-muted-foreground">
-                        {visibility.displayLabel}
                       </div>
                     </td>
                     <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Latest M-Pesa">
@@ -1013,15 +943,72 @@ export default function DeveloperCompaniesPage() {
                 if (confirmAction.kind === 'suspend') {
                   stateMutation.mutate({ companyId, action: 'suspend', reason: 'Suspended by developer' });
                 } else if (confirmAction.kind === 'set_plan_pro') {
-                  stateMutation.mutate({ companyId, action: 'set_plan', planCode: 'pro', reason: 'Set plan to Pro' });
+                  setPaidAccessModal({ open: true, company: confirmAction.company, plan: 'pro', months: 1 });
                 } else {
-                  stateMutation.mutate({ companyId, action: 'set_plan', planCode: 'basic', reason: 'Set plan to Basic' });
+                  setPaidAccessModal({ open: true, company: confirmAction.company, plan: 'basic', months: 1 });
                 }
                 setConfirmAction((p) => ({ ...p, open: false }));
               }}
             >
               {stateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Paid access modal: set plan + duration */}
+      <Dialog
+        open={paidAccessModal.open}
+        onOpenChange={(open) => {
+          if (setPaidAccessMutation.isPending) return;
+          setPaidAccessModal((p) => ({ ...p, open }));
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {paidAccessModal.plan === 'pro' ? 'Set Plan to Pro (Paid)' : 'Set Plan to Basic (Paid)'}
+            </DialogTitle>
+            <DialogDescription>
+              Choose a duration. This sets <code>plan</code>, <code>active_until</code>, and marks payment as confirmed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap gap-2 py-3">
+            {([1, 2, 3] as const).map((m) => (
+              <Button
+                key={m}
+                type="button"
+                variant={paidAccessModal.months === m ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPaidAccessModal((p) => ({ ...p, months: m }))}
+              >
+                {m} month{m === 1 ? '' : 's'}
+              </Button>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              disabled={setPaidAccessMutation.isPending}
+              onClick={() => setPaidAccessModal({ open: false, company: null, plan: 'pro', months: 1 })}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={setPaidAccessMutation.isPending || !paidAccessModal.company}
+              className="gap-2"
+              onClick={() => {
+                const companyId = paidAccessModal.company?.company_id ?? paidAccessModal.company?.id ?? '';
+                if (!companyId) return;
+                setPaidAccessMutation.mutate({ companyId, plan: paidAccessModal.plan, months: paidAccessModal.months });
+                setPaidAccessModal((p) => ({ ...p, open: false }));
+              }}
+            >
+              {setPaidAccessMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Apply
             </Button>
           </DialogFooter>
         </DialogContent>

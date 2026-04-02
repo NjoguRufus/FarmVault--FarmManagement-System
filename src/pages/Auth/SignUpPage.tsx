@@ -2,9 +2,12 @@ import React, { useEffect, useMemo } from 'react';
 import { SignUp } from '@clerk/react';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
 import { useLocation } from 'react-router-dom';
+import { getAmbassadorSignInPath, isAmbassadorClerkFlow } from '@/lib/ambassador/clerkAuth';
 
 export default function SignUpPage() {
   const location = useLocation();
+  const ambassadorFlow = isAmbassadorClerkFlow(location.search);
+  const afterAmbassadorAuthUrl = '/ambassador/onboarding';
 
   const showAccessRevoked = useMemo(() => {
     const params = new URLSearchParams(location.search || '');
@@ -58,8 +61,9 @@ export default function SignUpPage() {
         <SignUp
           routing="path"
           path="/sign-up"
-          signInUrl="/sign-in"
-          afterSignUpUrl="/auth/continue"
+          signInUrl={ambassadorFlow ? getAmbassadorSignInPath() : '/sign-in'}
+          afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
+          afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
           appearance={{
             variables: {
               colorPrimary: '#1F3B2E',

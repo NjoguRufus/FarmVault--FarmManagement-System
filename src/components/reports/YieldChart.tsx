@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { AnalyticsCropYieldRow } from '@/services/analyticsReportsService';
-import { formatCrates, formatKg } from './analyticsFormat';
+import { formatKg } from './analyticsFormat';
 
 const glass =
   'rounded-2xl border border-white/20 bg-card/55 shadow-[var(--shadow-card)] backdrop-blur-xl dark:border-white/10 dark:bg-card/40 p-4 sm:p-5';
@@ -30,8 +30,7 @@ export function YieldChart({
     () =>
       data.map((r) => ({
         name: r.crop?.trim() || 'Unknown',
-        crates: r.total_crates,
-        weightKg: r.total_weight,
+        yield: r.total_yield,
       })),
     [data],
   );
@@ -41,7 +40,7 @@ export function YieldChart({
   return (
     <div className={cn(glass, className)}>
       <h3 className="text-base font-semibold text-foreground mb-1">Yield per crop</h3>
-      <p className="text-xs text-muted-foreground mb-4">Total crates and weight from harvest totals</p>
+      <p className="text-xs text-muted-foreground mb-4">Total harvested yield by crop</p>
       {loading ? (
         <Skeleton className="h-64 w-full rounded-xl" />
       ) : empty ? (
@@ -61,16 +60,7 @@ export function YieldChart({
                 textAnchor="end"
                 height={56}
               />
-              <YAxis
-                yAxisId="left"
-                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={(v) => (Number(v) >= 1000 ? `${Math.round(Number(v) / 1000)}k` : String(v))}
-              />
+              <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: 'hsl(var(--card))',
@@ -78,13 +68,9 @@ export function YieldChart({
                   borderRadius: '10px',
                   boxShadow: 'var(--shadow-card)',
                 }}
-                formatter={(value: number, name: string) =>
-                  name === 'Crates' ? [formatCrates(value), name] : [formatKg(value), name]
-                }
+                formatter={(value: number) => [formatKg(value), 'Yield']}
               />
-              <Legend />
-              <Bar yAxisId="left" dataKey="crates" fill="hsl(150 30% 38%)" radius={[4, 4, 0, 0]} name="Crates" />
-              <Bar yAxisId="right" dataKey="weightKg" fill="hsl(45 70% 52%)" radius={[4, 4, 0, 0]} name="Weight (kg)" />
+              <Bar dataKey="yield" fill="hsl(150 30% 38%)" radius={[8, 8, 0, 0]} name="Yield" />
             </BarChart>
           </ResponsiveContainer>
         </div>

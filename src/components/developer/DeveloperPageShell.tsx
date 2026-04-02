@@ -9,6 +9,8 @@ interface DeveloperPageShellProps {
   isLoading?: boolean;
   isRefetching?: boolean;
   onRefresh?: () => void;
+  /** Renders in the header toolbar row next to Refresh (e.g. secondary links). */
+  toolbarEnd?: React.ReactNode;
   searchPlaceholder?: string;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
@@ -21,6 +23,7 @@ export function DeveloperPageShell({
   isLoading,
   isRefetching,
   onRefresh,
+  toolbarEnd,
   searchPlaceholder,
   searchValue,
   onSearchChange,
@@ -46,20 +49,25 @@ export function DeveloperPageShell({
               />
             </div>
           )}
-          {onRefresh && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onRefresh}
-              disabled={isLoading}
-              className="gap-1.5 w-full sm:w-auto"
-            >
-              <RotateCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
-              <span className="text-xs font-medium">
-                {isRefetching ? 'Refreshing…' : 'Refresh'}
-              </span>
-            </Button>
+          {(toolbarEnd || onRefresh) && (
+            <div className="flex flex-row flex-wrap items-center gap-2 justify-end w-full sm:w-auto min-w-0">
+              {toolbarEnd}
+              {onRefresh && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onRefresh}
+                  disabled={isLoading}
+                  className="gap-1.5 shrink-0"
+                >
+                  <RotateCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
+                  <span className="text-xs font-medium">
+                    {isRefetching ? 'Refreshing…' : 'Refresh'}
+                  </span>
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </div>

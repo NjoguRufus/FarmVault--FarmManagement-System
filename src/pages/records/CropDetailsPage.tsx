@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import { NotesCard } from "@/components/records/NotesCard";
+import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./cropDetailsNotes.css";
 
 type FarmNotebookEntryRow = {
@@ -35,19 +36,6 @@ const CROP_LABELS: Record<string, string> = {
 
 function labelForCrop(slug: string) {
   return CROP_LABELS[slug] ?? slug.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-function preview(text: string, max = 140) {
-  const t = (text || "").trim().replace(/\s+/g, " ");
-  if (!t) return "";
-  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-}
-
-function formatNoteDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 export default function CropDetailsPage() {
@@ -80,7 +68,7 @@ export default function CropDetailsPage() {
 
     return filteredByCompany.filter((note) => {
       const t = String(note.title ?? "").toLowerCase();
-      const c = String(note.content ?? "").toLowerCase();
+      const c = htmlToPlainText(String(note.content ?? "")).toLowerCase();
       const companyId = String(note.company_id ?? "");
       const companyName = (companyNameById[companyId] ?? companyId).toLowerCase();
       return t.includes(q) || c.includes(q) || (isDeveloperRoute && companyName.includes(q));
