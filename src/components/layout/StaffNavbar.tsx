@@ -22,6 +22,7 @@ import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceAp
 import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { DashboardRoleMenuItems } from '@/components/dashboard/DashboardRoleSwitcher';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -288,6 +289,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>My Staff Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DashboardRoleMenuItems />
               <DropdownMenuItem
                 className="cursor-pointer"
                 onClick={() => navigate('/settings')}

@@ -7,11 +7,18 @@ import {
   getAmbassadorSignInPath,
   isAmbassadorClerkFlow,
 } from '@/lib/ambassador/clerkAuth';
+import { setAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
 
 export default function SignUpPage() {
   const location = useLocation();
   const ambassadorFlow = isAmbassadorClerkFlow(location.search);
   const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
+
+  useEffect(() => {
+    if (ambassadorFlow) {
+      setAmbassadorAccessIntent(true);
+    }
+  }, [ambassadorFlow]);
 
   const showAccessRevoked = useMemo(() => {
     const params = new URLSearchParams(location.search || '');

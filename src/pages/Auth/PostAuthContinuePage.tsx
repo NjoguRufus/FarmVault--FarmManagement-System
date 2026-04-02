@@ -12,6 +12,8 @@ import {
   readIntendedRouteFromStorage,
   clearIntendedRouteStorage,
 } from '@/lib/routing/postAuth';
+import { readAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+import { useDashboardRoles } from '@/hooks/useDashboardRoles';
 
 function normalizeLandingPath(landing: string): string {
   const l = (landing || '/dashboard').trim() || '/dashboard';
@@ -32,6 +34,7 @@ export default function PostAuthContinuePage() {
     effectiveAccess,
     isEmergencySession,
   } = useAuth();
+  const { hasCompany, hasAmbassador, loading: rolesLoading } = useDashboardRoles();
 
   const intended = useMemo(() => {
     const stored = readIntendedRouteFromStorage();
@@ -62,10 +65,6 @@ export default function PostAuthContinuePage() {
     return <AuthLoadingScreen message="Finishing sign-in…" />;
   }
 
-  if (intended && intended.split('?')[0] === '/ambassador/onboarding') {
-    return <Navigate to={intended} replace />;
-  }
-
   if (isEmergencySession) {
     const to = normalizeLandingPath(effectiveAccess.landingPage);
     return <Navigate to={to} replace />;
@@ -73,6 +72,19 @@ export default function PostAuthContinuePage() {
 
   if (isDeveloper || user.role === 'developer') {
     return <Navigate to="/developer" replace />;
+  }
+
+  // Explicit ambassador funnel — isolated from default farm dashboard routing.
+  if (readAmbassadorAccessIntent()) {
+    return <Navigate to="/ambassador/onboarding" replace />;
+  }
+
+  // Ambassador-only accounts: company onboarding is not the right destination.
+  if (!isEmergencySession && rolesLoading) {
+    return <AuthLoadingScreen message="Preparing your workspace…" />;
+  }
+  if (!hasCompany && hasAmbassador) {
+    return <Navigate to="/ambassador/dashboard" replace />;
   }
 
   if (setupIncomplete && !employeeProfile) {

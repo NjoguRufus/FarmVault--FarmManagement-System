@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
+import { DashboardRoleMenuItems } from '@/components/dashboard/DashboardRoleSwitcher';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -443,6 +444,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DashboardRoleMenuItems />
               <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/billing')}>
                 <Crown className="mr-2 h-4 w-4" />
                 Billing

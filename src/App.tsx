@@ -250,6 +250,7 @@ const AppRoutesWithLock = () => {
       <Route path="/auth/ambassador-continue" element={<AmbassadorAuthContinuePage />} />
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
       <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
+      <Route path="/company" element={<Navigate to="/dashboard" replace />} />
       <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
       <Route path="/pending-approval" element={<RequireAuth><PendingApprovalPage /></RequireAuth>} />
       <Route path="/awaiting-approval" element={<Navigate to="/pending-approval" replace />} />

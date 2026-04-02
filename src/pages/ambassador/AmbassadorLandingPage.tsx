@@ -8,6 +8,7 @@ import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SEO_ROUTES } from "@/seo/routes";
 import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
+import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
 
 /** Soft outer lift + inner bevel, paired with glass blur */
 const neuGlass =
@@ -21,6 +22,7 @@ const neuGlassCard =
 export default function AmbassadorLandingPage() {
   const [searchParams] = useSearchParams();
   const refParam = useMemo(() => searchParams.get("ref"), [searchParams]);
+  const { setIsAccessingAmbassador } = useAmbassadorAccess();
 
   useEffect(() => {
     const trimmed = refParam?.trim();
@@ -127,7 +129,11 @@ export default function AmbassadorLandingPage() {
                     size="lg"
                     className="rounded-lg h-12 px-8 text-base font-semibold border-0 text-[hsl(150_35%_12%)] bg-gradient-to-br from-[hsl(var(--gold))] to-[hsl(var(--gold-light))] hover:opacity-[0.96] transition-opacity shadow-[0_6px_24px_-4px_hsl(var(--gold)/0.45),inset_0_1px_0_rgba(255,255,255,0.35)]"
                   >
-                    <Link to="/ambassador/signup" className="inline-flex items-center justify-center gap-2">
+                    <Link
+                      to="/ambassador/onboarding"
+                      onClick={() => setIsAccessingAmbassador(true)}
+                      className="inline-flex items-center justify-center gap-2"
+                    >
                       Become Ambassador
                       <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
                     </Link>
@@ -300,7 +306,11 @@ export default function AmbassadorLandingPage() {
               size="lg"
               className="mt-8 rounded-lg h-12 px-8 text-base font-semibold border-0 text-[hsl(150_35%_12%)] bg-gradient-to-br from-[hsl(var(--gold))] to-[hsl(var(--gold-light))] hover:opacity-[0.96] transition-opacity shadow-[0_6px_24px_-4px_hsl(var(--gold)/0.45),inset_0_1px_0_rgba(255,255,255,0.35)]"
             >
-              <Link to="/ambassador/signup" className="inline-flex items-center justify-center gap-2">
+              <Link
+                to="/ambassador/onboarding"
+                onClick={() => setIsAccessingAmbassador(true)}
+                className="inline-flex items-center justify-center gap-2"
+              >
                 Apply Now — It&apos;s Free
                 <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
               </Link>
