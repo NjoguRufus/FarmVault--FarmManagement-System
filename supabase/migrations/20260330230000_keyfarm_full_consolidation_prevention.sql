@@ -9,6 +9,7 @@ DECLARE
   v_kept_company_id  uuid := 'fa61d13d-3466-48db-a39c-4a474ccfed58'; -- CANONICAL (keep)
 
   v_sc_company_id_type text := NULL;
+  r record;
 BEGIN
   -- 0) Basic sanity: ensure both core company ids exist (or continue best-effort).
   -- If one is missing, subsequent operations will simply affect 0 rows.
@@ -198,7 +199,7 @@ BEGIN
       returns trigger
       language plpgsql
       stable
-    as $$
+    as $sync$
     declare
       v_company_id uuid;
     begin
@@ -213,7 +214,7 @@ BEGIN
       end if;
       return NEW;
     end;
-    $$;
+    $sync$;
     $fn$;
   ELSE
     EXECUTE $fn$
@@ -221,7 +222,7 @@ BEGIN
       returns trigger
       language plpgsql
       stable
-    as $$
+    as $sync$
     declare
       v_company_id uuid;
     begin
@@ -236,7 +237,7 @@ BEGIN
       end if;
       return NEW;
     end;
-    $$;
+    $sync$;
     $fn$;
   END IF;
 
@@ -244,21 +245,21 @@ BEGIN
   EXECUTE 'DROP TRIGGER IF EXISTS sync_season_challenges_company_id ON public.season_challenges';
 
   IF v_sc_company_id_type = 'uuid' OR v_sc_company_id_type IS NULL THEN
-    EXECUTE $$
+    EXECUTE $trg$
       create trigger sync_season_challenges_company_id
       before insert or update
       on public.season_challenges
       for each row
       execute function public.sync_season_challenges_company_id_from_project_uuid();
-    $$;
+    $trg$;
   ELSE
-    EXECUTE $$
+    EXECUTE $trg$
       create trigger sync_season_challenges_company_id
       before insert or update
       on public.season_challenges
       for each row
       execute function public.sync_season_challenges_company_id_from_project_text();
-    $$;
+    $trg$;
   END IF;
 END $$;
 

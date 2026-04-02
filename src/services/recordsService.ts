@@ -28,6 +28,11 @@ import type {
   RecordCategory,
 } from '@/types';
 
+/** PostgREST: call record RPCs on `public` so resolution targets one schema (avoids uuid/text overload mix-ups). */
+function recordsPublicRpc() {
+  return supabase.schema('public');
+}
+
 const LIBRARY = 'records_library';
 const SHARES = 'company_record_shares';
 const COMPANY_RECORDS = 'company_records';
@@ -588,6 +593,26 @@ export async function purgeRecordsData(options: {
 // Supabase-backed Farm Notebook / Records (company + developer)
 // ---------------------------------------------------------------------------
 
+function validateCompanyId(companyId: string | null | undefined): string | null {
+  if (!companyId || companyId === null || companyId === undefined) {
+    return null;
+  }
+
+  const trimmed = String(companyId).trim();
+  if (trimmed === '' || trimmed.length === 0) {
+    return null;
+  }
+
+  // Optional: Validate UUID format if your system uses UUIDs
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(trimmed)) {
+    console.warn('[records] Company ID does not look like a valid UUID:', trimmed);
+    // Still return the trimmed value - it might be valid in your system
+  }
+
+  return trimmed;
+}
+
 export type RecordCropCard = {
   crop_id: string;
   crop_name: string;
@@ -596,6 +621,190 @@ export type RecordCropCard = {
   records_count: number;
   last_updated_at: string | null;
 };
+
+/**
+ * Notebook crop cards (company admin + developer): always show these crops at 0 records until notes exist.
+ * Merged with `getCompanyRecordCrops` RPC results by crop_id.
+ */
+export const DEVELOPER_NOTEBOOK_DEFAULT_CROPS: readonly Pick<
+  RecordCropCard,
+  'crop_id' | 'crop_name' | 'slug'
+>[] = [
+  { crop_id: 'tomatoes', crop_name: 'Tomatoes', slug: 'tomatoes' },
+  { crop_id: 'french-beans', crop_name: 'French Beans', slug: 'french-beans' },
+  { crop_id: 'capsicum', crop_name: 'Capsicum', slug: 'capsicum' },
+  { crop_id: 'maize', crop_name: 'Maize', slug: 'maize' },
+  { crop_id: 'rice', crop_name: 'Rice', slug: 'rice' },
+];
+
+const DEVELOPER_NOTEBOOK_DEFAULT_CROP_IDS = new Set(
+  DEVELOPER_NOTEBOOK_DEFAULT_CROPS.map((d) => d.crop_id),
+);
+
+/**
+ * Merge RPC crop cards with default notebook crops (Map by crop_id).
+ * Used for company admin records and developer notebook. Defaults first, then other crops A–Z.
+ */
+export function mergeDeveloperNotebookCropCardsWithDefaults(rpc: RecordCropCard[]): RecordCropCard[] {
+  const byId = new Map<string, RecordCropCard>();
+
+  for (const d of DEVELOPER_NOTEBOOK_DEFAULT_CROPS) {
+    byId.set(d.crop_id, {
+      crop_id: d.crop_id,
+      crop_name: d.crop_name,
+      slug: d.slug,
+      is_global: true,
+      records_count: 0,
+      last_updated_at: null,
+    });
+  }
+
+  for (const r of rpc) {
+    const cid = (r.crop_id ?? '').trim();
+    if (!cid) continue;
+    const existing = byId.get(cid);
+    const name = (r.crop_name ?? '').trim();
+    const slug = (r.slug ?? '').trim();
+    if (existing) {
+      byId.set(cid, {
+        ...existing,
+        crop_name: name || existing.crop_name,
+        slug: slug || existing.slug,
+        records_count: r.records_count,
+        last_updated_at: r.last_updated_at,
+      });
+    } else {
+      byId.set(cid, { ...r, crop_id: cid });
+    }
+  }
+
+  const defaultsOrdered = DEVELOPER_NOTEBOOK_DEFAULT_CROPS.map((d) => byId.get(d.crop_id)).filter(
+    (c): c is RecordCropCard => c != null,
+  );
+  const dynamicSorted = [...byId.entries()]
+    .filter(([id]) => !DEVELOPER_NOTEBOOK_DEFAULT_CROP_IDS.has(id))
+    .map(([, card]) => card)
+    .sort((a, b) => a.crop_name.localeCompare(b.crop_name));
+
+  return [...defaultsOrdered, ...dynamicSorted];
+}
+
+/** Page title for /developer/records/:cropId when there are no rows (e.g. all companies, zero notes). */
+export function developerNotebookCropDisplayName(cropId: string | null | undefined): string {
+  const id = (cropId ?? '').trim();
+  if (!id) return 'Crop records';
+  const d = DEVELOPER_NOTEBOOK_DEFAULT_CROPS.find((c) => c.crop_id === id);
+  if (d) return d.crop_name;
+  return id
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+export type RecordsFetchErrorKind = 'network' | 'rls' | 'schema' | 'unknown';
+
+export type RecordsFetchErrorMeta = {
+  kind: RecordsFetchErrorKind;
+  code?: string;
+};
+
+/** Thrown by record crop loaders; inspect `recordsMeta` for a coarse category (dev UI). */
+export type RecordsServiceError = Error & { recordsMeta?: RecordsFetchErrorMeta };
+
+function classifyRecordsRpcError(err: {
+  code?: string;
+  message?: string;
+  details?: string;
+}): RecordsFetchErrorMeta {
+  const code = err.code ?? '';
+  const msg = `${err.message ?? ''} ${err.details ?? ''}`.toLowerCase();
+  // Postgres 42725 = ambiguous_function; PostgREST surfaces overload conflicts in message text.
+  if (
+    code === '42725' ||
+    code === 'PGRST203' ||
+    msg.includes('could not choose the best candidate function') ||
+    msg.includes('ambiguous function')
+  ) {
+    return { kind: 'schema', code };
+  }
+  if (msg.includes('invalid input syntax for type uuid')) {
+    return { kind: 'schema', code };
+  }
+  if (
+    code === '42501' ||
+    code === 'PGRST301' ||
+    msg.includes('not authorized') ||
+    msg.includes('permission denied') ||
+    msg.includes('row-level security') ||
+    msg.includes('rls')
+  ) {
+    return { kind: 'rls', code };
+  }
+  if (
+    msg.includes('does not exist') ||
+    msg.includes('schema cache') ||
+    msg.includes('undefined table') ||
+    msg.includes('undefined column')
+  ) {
+    return { kind: 'schema', code };
+  }
+  if (
+    code === '' &&
+    (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('load failed'))
+  ) {
+    return { kind: 'network', code };
+  }
+  return { kind: 'unknown', code };
+}
+
+export function getRecordsServiceErrorMeta(err: unknown): RecordsFetchErrorMeta | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  return (err as RecordsServiceError).recordsMeta;
+}
+
+function normalizeRecordCropCards(data: unknown): RecordCropCard[] {
+  if (data == null) return [];
+  if (!Array.isArray(data)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[records] fv_notebook_list_crops_ctx returned non-array', typeof data);
+    }
+    return [];
+  }
+  const out: RecordCropCard[] = [];
+  for (const raw of data) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+    const cropId = String(row.crop_id ?? '').trim();
+    if (!cropId) continue;
+    const cropNameRaw = row.crop_name;
+    const cropName =
+      cropNameRaw != null && String(cropNameRaw).trim() !== ''
+        ? String(cropNameRaw).trim()
+        : cropId;
+    const slugRaw = row.slug;
+    const slug =
+      slugRaw != null && String(slugRaw).trim() !== '' ? String(slugRaw).trim() : cropId;
+    const n = Number(row.records_count);
+    const recordsCount = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    const lu = row.last_updated_at;
+    let lastUpdated: string | null = null;
+    if (lu != null && lu !== '') {
+      if (typeof lu === 'string') lastUpdated = lu;
+      else lastUpdated = String(lu);
+    }
+    out.push({
+      crop_id: cropId,
+      crop_name: cropName,
+      slug,
+      is_global: Boolean(row.is_global),
+      records_count: recordsCount,
+      last_updated_at: lastUpdated,
+    });
+  }
+  return out;
+}
 
 export type CropRecordRow = {
   record_id: string;
@@ -745,14 +954,120 @@ function normaliseRecordDetail(data: unknown): CropRecordDetail | null {
 
 // ------------------------------ Company-side -------------------------------
 
-export async function getCompanyRecordCrops(companyId: string): Promise<RecordCropCard[]> {
-  const { data, error } = await supabase.rpc('list_company_record_crops', {
-    p_company_id: companyId,
-  });
-  if (error) {
-    throw new Error(error.message ?? 'Failed to load record crops');
+function rpcNullableTextParam(value: string | null | undefined): string | null {
+  return validateCompanyId(value);
+}
+
+/**
+ * Load notebook crop cards for one company, or `null` for all companies (developers only; RPC enforces is_developer()).
+ * Never pass `""` — use `null` for “all companies”.
+ * Always merges canonical default crops (Tomatoes, French Beans, Capsicum, Maize, Rice) with RPC data.
+ */
+export async function getCompanyRecordCrops(companyId: string | null | undefined): Promise<RecordCropCard[]> {
+  const rpc = recordsPublicRpc();
+
+  if (companyId === undefined || companyId === null) {
+    const { data, error } = await rpc.rpc('fv_notebook_list_crops_ctx', { p_ctx: {} });
+    if (error) {
+      const meta = classifyRecordsRpcError(error);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('[records] notebook list crops RPC failed (all companies)', {
+          kind: meta.kind,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+      }
+      const wrapped = new Error(error.message ?? 'Failed to load record crops') as RecordsServiceError;
+      wrapped.recordsMeta = meta;
+      throw wrapped;
+    }
+    return mergeDeveloperNotebookCropCardsWithDefaults(normalizeRecordCropCards(data));
   }
-  return (data as RecordCropCard[] | null) ?? [];
+
+  const trimmed = String(companyId).trim();
+  if (!trimmed) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[records] getCompanyRecordCrops: empty string is invalid; use null for all companies');
+    }
+    return [];
+  }
+
+  const { data, error } = await rpc.rpc('fv_notebook_list_crops_ctx', {
+    p_ctx: { p_company_id: trimmed },
+  });
+
+  if (error) {
+    const meta = classifyRecordsRpcError(error);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[records] notebook list crops RPC failed', {
+        kind: meta.kind,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        companyId: trimmed,
+      });
+    }
+    const wrapped = new Error(error.message ?? 'Failed to load record crops') as RecordsServiceError;
+    wrapped.recordsMeta = meta;
+    throw wrapped;
+  }
+  return mergeDeveloperNotebookCropCardsWithDefaults(normalizeRecordCropCards(data));
+}
+
+export type CompanyNotebookRecentRow = {
+  id: string;
+  title: string;
+  crop_id: string;
+  source_type: string;
+  created_at: string | null;
+  content_preview: string;
+};
+
+export async function listRecentCompanyNotebookRecords(
+  companyId: string,
+  limit = 50,
+): Promise<CompanyNotebookRecentRow[]> {
+
+  const cid = rpcNullableTextParam(companyId);
+  if (!cid) return [];
+
+  const { data, error } = await supabase
+    .from('company_records')
+    .select('id, title, content, crop_id, source_type, created_at, visibility')
+    .eq('company_id', cid)
+    .eq('visibility', 'visible')
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 100));
+
+  if (error) {
+    throw new Error(error.message ?? 'Failed to load recent notes');
+  }
+
+  if (!Array.isArray(data)) return [];
+
+  return data.map((row) => {
+    const content = String((row as { content?: string }).content ?? '');
+    const preview =
+      content.length > 160 ? `${content.slice(0, 157)}…` : content;
+
+    return {
+      id: String((row as { id: string }).id),
+      title: String((row as { title?: string }).title ?? ''),
+      crop_id: String((row as { crop_id?: string }).crop_id ?? ''),
+      source_type: String((row as { source_type?: string }).source_type ?? 'company'),
+      created_at:
+        (row as { created_at?: string | null }).created_at != null
+          ? String((row as { created_at?: string | null }).created_at)
+          : null,
+      content_preview: preview,
+    };
+  });
 }
 
 export type ResolvedRecordCrop = {
@@ -810,9 +1125,17 @@ export async function resolveRecordCrop(
 }
 
 export async function createCompanyRecordCrop(companyId: string, name: string): Promise<void> {
-  const { error } = await supabase.rpc('create_company_record_crop', {
-    p_company_id: companyId,
-    p_name: name,
+  const id = rpcNullableTextParam(companyId);
+  if (!id) {
+    throw new Error('Company workspace is required.');
+  }
+  const nm = String(name ?? '').trim();
+  if (!nm) {
+    throw new Error('Crop name is required.');
+  }
+  const { error } = await recordsPublicRpc().rpc('create_company_record_crop', {
+    p_company_id: id,
+    p_name: nm,
   });
   if (error) {
     throw new Error(error.message ?? 'Failed to create crop');
@@ -825,20 +1148,33 @@ export async function getCropRecords(
   limit = 20,
   offset = 0,
 ): Promise<PagedCropRecordsResponse> {
-  const { data, error } = await supabase.rpc('list_crop_records', {
-    p_company_id: companyId,
-    p_crop_id: cropId,
+
+  const cid = rpcNullableTextParam(companyId);
+  const cCrop = rpcNullableTextParam(cropId);
+
+  if (!cid || !cCrop) {
+    console.warn('[records] blocked empty params', { cid, cCrop });
+    return { rows: [], total: 0 };
+  }
+
+  console.log('[records] getCropRecords ->', { cid, cCrop });
+
+  const { data, error } = await recordsPublicRpc().rpc('list_crop_records', {
+    p_company_id: cid,
+    p_crop_id: cCrop,
     p_limit: limit,
     p_offset: offset,
   });
+
   if (error) {
     throw new Error(error.message ?? 'Failed to load crop records');
   }
+
   return normalisePagedResponse(data);
 }
 
 export async function getCropRecordDetail(recordId: string): Promise<CropRecordDetail | null> {
-  const { data, error } = await supabase.rpc('get_crop_record_detail', {
+  const { data, error } = await recordsPublicRpc().rpc('get_crop_record_detail', {
     p_record_id: recordId,
   });
   if (error) {
@@ -847,15 +1183,162 @@ export async function getCropRecordDetail(recordId: string): Promise<CropRecordD
   return normaliseRecordDetail(data);
 }
 
+const COMPANY_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Reject Clerk ids (`user_…`) and other junk before RPCs / inserts that cast company_id to uuid. */
+function isNotebookTenantUuid(value: string | null | undefined): boolean {
+  const t = String(value ?? '').trim();
+  // Clerk ids look like `user_...` and will never be a valid UUID for company_id FK checks.
+  // Be extra defensive: reject any value containing `_` (UUIDs never contain underscores).
+  if (!t || t.includes('_') || t.toLowerCase().startsWith('user_')) return false;
+  if (COMPANY_ID_UUID_RE.test(t)) return true;
+  return /^[0-9a-f]{32}$/i.test(t);
+}
+
+async function verifyNotebookMembershipForCompany(
+  clerkUserId: string,
+  companyUuid: string,
+): Promise<boolean> {
+  const uid = String(clerkUserId ?? '').trim();
+  const cid = String(companyUuid ?? '').trim();
+  if (!uid || !isNotebookTenantUuid(cid)) return false;
+
+  const { data: coreRow, error: coreErr } = await supabase
+    .schema('core')
+    .from('company_members')
+    .select('company_id')
+    .eq('clerk_user_id', uid)
+    .eq('company_id', cid)
+    .limit(1)
+    .maybeSingle();
+
+  if (!coreErr && coreRow?.company_id != null) {
+    return true;
+  }
+
+  const { data: pubRow, error: pubErr } = await supabase
+    .from('company_members')
+    .select('company_id')
+    .eq('user_id', uid)
+    .eq('company_id', cid)
+    .limit(1)
+    .maybeSingle();
+
+  return !pubErr && pubRow?.company_id != null;
+}
+
+/** Same source as AuthContext / RLS session company (uuid text). */
+async function resolveCompanyIdFromCurrentContextRpc(): Promise<string | null> {
+  const { data, error } = await supabase.rpc('current_context');
+  if (error || data == null) {
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  const raw =
+    row && typeof row === 'object' && 'company_id' in row
+      ? (row as { company_id?: unknown }).company_id
+      : null;
+  const cid = raw != null ? String(raw).trim() : '';
+  return isNotebookTenantUuid(cid) ? cid : null;
+}
+
+/**
+ * RPCs such as create_company_crop_record need the tenant UUID (company_id), not Clerk user.id.
+ * Resolve from membership: core.company_members (clerk_user_id), then public.company_members (user_id).
+ * When preferredCompanyId is a UUID (active workspace), require a row for that company.
+ */
+async function resolveNotebookCompanyIdFromMembership(
+  userId: string,
+  preferredCompanyId?: string | null,
+): Promise<string | null> {
+  const uid = String(userId ?? '').trim();
+  if (!uid) {
+    return null;
+  }
+
+  const prefRaw =
+    preferredCompanyId != null ? String(preferredCompanyId).trim() : '';
+  const pref = COMPANY_ID_UUID_RE.test(prefRaw) ? prefRaw : '';
+
+  let qCore = supabase
+    .schema('core')
+    .from('company_members')
+    .select('company_id')
+    .eq('clerk_user_id', uid);
+  if (pref) {
+    qCore = qCore.eq('company_id', pref);
+  }
+  const { data: coreRow, error: coreErr } = await qCore
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (coreErr && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn('[records] core.company_members lookup failed', coreErr);
+  }
+  if (coreRow?.company_id != null) {
+    return String(coreRow.company_id);
+  }
+
+  let qPub = supabase.from('company_members').select('company_id').eq('user_id', uid);
+  if (pref) {
+    qPub = qPub.eq('company_id', pref);
+  }
+  const { data: membership, error } = await qPub
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[records] company_members lookup failed', error);
+    }
+    return null;
+  }
+
+  if (membership?.company_id == null) {
+    return null;
+  }
+
+  return String(membership.company_id);
+}
+
 export async function createCompanyCropRecord(
-  companyId: string,
+  clerkUserId: string,
   cropId: string,
   title: string,
   content: string,
+  preferredCompanyId?: string | null,
 ): Promise<string> {
-  const { data, error } = await supabase.rpc('create_company_crop_record', {
-    p_company_id: companyId,
-    p_crop_id: cropId,
+  const prefRaw = preferredCompanyId != null ? String(preferredCompanyId).trim() : '';
+
+  // IMPORTANT:
+  // Some environments have `company_records.company_id` as uuid, so Postgres will cast the RPC's text
+  // value into uuid during insert. Never send Clerk ids like `user_...` here.
+  //
+  // For normal company-admin flows, pass null and let the RPC use public.current_company_id() (uuid)
+  // from the session. For developer flows targeting a specific company, pass a verified UUID.
+  let companyIdForRpc: string | null = null;
+  if (isNotebookTenantUuid(prefRaw) && (await verifyNotebookMembershipForCompany(clerkUserId, prefRaw))) {
+    companyIdForRpc = prefRaw;
+  } else {
+    companyIdForRpc = null;
+  }
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log('[records] create_company_crop_record RPC params', {
+      preferredCompanyId: prefRaw || null,
+      p_company_id: companyIdForRpc,
+    });
+  }
+
+  const { data, error } = await recordsPublicRpc().rpc('create_company_crop_record', {
+    p_company_id: companyIdForRpc,
+    p_crop_id: rpcNullableTextParam(cropId),
     p_title: title,
     p_content: content,
   });
@@ -892,7 +1375,7 @@ export async function updateCropRecord(
   title?: string,
   content?: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('update_crop_record', {
+  const { error } = await recordsPublicRpc().rpc('update_crop_record', {
     p_record_id: recordId,
     p_title: title ?? null,
     p_content: content ?? null,
@@ -921,7 +1404,7 @@ export async function addCropRecordAttachment(
   fileName?: string,
   fileType?: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('add_crop_record_attachment', {
+  const { error } = await recordsPublicRpc().rpc('add_crop_record_attachment', {
     p_record_id: recordId,
     p_file_url: fileUrl,
     p_file_name: fileName ?? null,
@@ -953,18 +1436,72 @@ export async function getDeveloperCropRecords(
     offset = 0,
   } = filters;
 
-  const { data, error } = await supabase.rpc('dev_list_crop_records', {
-    p_company_id: companyId,
-    p_crop_id: cropId,
-    p_source_type: sourceType,
+  const devCid = rpcNullableTextParam(companyId);
+  const devCrop = rpcNullableTextParam(cropId);
+
+  // Always pass all parameters so PostgREST applies SQL defaults correctly for "all companies" (null).
+  const { data, error } = await recordsPublicRpc().rpc('dev_list_crop_records', {
     p_limit: limit,
     p_offset: offset,
+    p_company_id: devCid,
+    p_crop_id: devCrop,
+    p_source_type: sourceType,
   });
 
   if (error) {
-    throw new Error(error.message ?? 'Failed to load developer records');
+    const meta = classifyRecordsRpcError(error);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[records] dev_list_crop_records failed', {
+        kind: meta.kind,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        filters,
+      });
+    }
+    const wrapped = new Error(error.message ?? 'Failed to load developer records') as RecordsServiceError;
+    wrapped.recordsMeta = meta;
+    throw wrapped;
   }
   return normalisePagedResponse(data);
+}
+
+/** All distinct notebook crops (companies + developer + canonical), developer-only RPC. */
+export async function listDeveloperNotebookCropsAll(): Promise<{ crop_id: string; crop_name: string }[]> {
+  const { data, error } = await recordsPublicRpc().rpc('dev_list_all_notebook_crops');
+  if (error) {
+    throw new Error(error.message ?? 'Failed to load notebook crops');
+  }
+  const rows = (Array.isArray(data) ? data : []) as { crop_id?: string; crop_name?: string | null }[];
+  return rows
+    .map((r) => ({
+      crop_id: String(r.crop_id ?? '').trim(),
+      crop_name: String(r.crop_name ?? r.crop_id ?? '').trim() || String(r.crop_id ?? ''),
+    }))
+    .filter((r) => r.crop_id.length > 0);
+}
+
+/** Developer / FarmVault template row (visible across dev dashboard; not a company record until pushed). */
+export async function createDeveloperCropRecordTemplate(
+  cropId: string,
+  title: string,
+  content: string,
+): Promise<string> {
+  const cid = String(cropId ?? '').trim();
+  if (!cid) throw new Error('Crop is required');
+  const { data, error } = await recordsPublicRpc().rpc('dev_create_crop_record_template', {
+    p_crop_id: cid,
+    p_title: title.trim(),
+    p_content: content.trim(),
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to save developer note');
+  }
+  if (!data) return '';
+  const obj = data as { record_id?: string };
+  return obj.record_id ?? '';
 }
 
 export async function sendDeveloperCropRecordToCompany(
@@ -973,9 +1510,9 @@ export async function sendDeveloperCropRecordToCompany(
   title: string,
   content: string,
 ): Promise<string> {
-  const { data, error } = await supabase.rpc('dev_send_crop_record_to_company', {
-    p_company_id: companyId,
-    p_crop_id: cropId,
+  const { data, error } = await recordsPublicRpc().rpc('dev_send_crop_record_to_company', {
+    p_company_id: rpcNullableTextParam(companyId),
+    p_crop_id: rpcNullableTextParam(cropId),
     p_title: title,
     p_content: content,
   });
@@ -992,28 +1529,60 @@ export async function sendDeveloperCropRecordToCompany(
   return obj.record_id ?? '';
 }
 
+/** Create a developer-originated company record, then upload and link attachments. */
+export async function sendDeveloperCropRecordToCompanyWithAttachments(
+  companyId: string,
+  cropId: string,
+  title: string,
+  content: string,
+  files: File[],
+): Promise<string> {
+  const recordId = await sendDeveloperCropRecordToCompany(companyId, cropId, title, content);
+  if (!recordId || files.length === 0) return recordId;
+
+  for (const file of files) {
+    const uploaded = await uploadRecordAttachment(file, 'developer', companyId, cropId, recordId);
+    await addCropRecordAttachment(recordId, uploaded.fileUrl, uploaded.fileName, uploaded.fileType);
+  }
+  return recordId;
+}
+
 export async function getCropIntelligence(cropId: string): Promise<CropIntelligenceResponse | null> {
-  const { data, error } = await supabase.rpc('get_crop_intelligence', {
-    p_crop_id: cropId,
+
+  const safeCrop = rpcNullableTextParam(cropId);
+  if (!safeCrop) return null;
+
+  const { data, error } = await recordsPublicRpc().rpc('get_crop_intelligence', {
+    p_crop_id: safeCrop,
   });
+
   if (error) {
     throw new Error(error.message ?? 'Failed to load crop intelligence');
   }
+
   if (!data) return null;
   if (Array.isArray(data)) {
     return (data[0] as CropIntelligenceResponse | undefined) ?? null;
   }
+
   return data as CropIntelligenceResponse;
 }
 
 export async function getCropRecordInsights(cropId: string): Promise<CropRecordInsightsResponse | null> {
-  const { data, error } = await supabase.rpc('get_crop_record_insights', {
-    p_crop_id: cropId,
+
+  const safeCrop = rpcNullableTextParam(cropId);
+  if (!safeCrop) return null;
+
+  const { data, error } = await recordsPublicRpc().rpc('get_crop_record_insights', {
+    p_crop_id: safeCrop,
   });
+
   if (error) {
     throw new Error(error.message ?? 'Failed to load crop record insights');
   }
+
   if (!data) return null;
+
   return data as CropRecordInsightsResponse;
 }
 
@@ -1075,7 +1644,7 @@ export async function upsertCropKnowledgeProfile(
   cropId: string,
   form: CropKnowledgeProfileForm,
 ): Promise<void> {
-  const { error } = await supabase.rpc('upsert_crop_knowledge_profile', {
+  const { error } = await recordsPublicRpc().rpc('upsert_crop_knowledge_profile', {
     p_crop_id: cropId,
     p_maturity_min_days: form.maturityMinDays,
     p_maturity_max_days: form.maturityMaxDays,
@@ -1096,7 +1665,7 @@ export async function addCropKnowledgeChallenge(
   cropId: string,
   form: CropKnowledgeChallengeForm,
 ): Promise<void> {
-  const { error } = await supabase.rpc('add_crop_knowledge_challenge', {
+  const { error } = await recordsPublicRpc().rpc('add_crop_knowledge_challenge', {
     p_crop_id: cropId,
     p_challenge_name: form.challengeName,
     p_challenge_type: form.challengeType,
@@ -1112,7 +1681,7 @@ export async function addCropKnowledgePractice(
   cropId: string,
   form: CropKnowledgePracticeForm,
 ): Promise<void> {
-  const { error } = await supabase.rpc('add_crop_knowledge_practice', {
+  const { error } = await recordsPublicRpc().rpc('add_crop_knowledge_practice', {
     p_crop_id: cropId,
     p_title: form.title,
     p_practice_type: form.practiceType,
@@ -1127,7 +1696,7 @@ export async function addCropKnowledgeChemical(
   cropId: string,
   form: CropKnowledgeChemicalForm,
 ): Promise<void> {
-  const { error } = await supabase.rpc('add_crop_knowledge_chemical', {
+  const { error } = await recordsPublicRpc().rpc('add_crop_knowledge_chemical', {
     p_crop_id: cropId,
     p_chemical_name: form.chemicalName,
     p_purpose: form.purpose || null,
@@ -1145,7 +1714,7 @@ export async function addCropKnowledgeTimingWindow(
   cropId: string,
   form: CropKnowledgeTimingWindowForm,
 ): Promise<void> {
-  const { error } = await supabase.rpc('add_crop_knowledge_timing_window', {
+  const { error } = await recordsPublicRpc().rpc('add_crop_knowledge_timing_window', {
     p_crop_id: cropId,
     p_title: form.title,
     p_planting_start: form.plantingStart || null,

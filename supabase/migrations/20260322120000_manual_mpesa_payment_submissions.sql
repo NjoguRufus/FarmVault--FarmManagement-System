@@ -459,6 +459,7 @@ $$;
 
 grant execute on function public.dev_dashboard_kpis() to authenticated;
 
+drop function if exists admin.list_pending_payments();
 create or replace function admin.list_pending_payments()
 returns table (
   id uuid,
@@ -508,6 +509,7 @@ begin
 end;
 $$;
 
+drop function if exists public.list_pending_payments();
 create or replace function public.list_pending_payments()
 returns table (
   id uuid,

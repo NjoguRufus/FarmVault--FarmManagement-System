@@ -704,6 +704,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
               <thead className="border-b border-border/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="py-2 text-left font-medium">Company</th>
+                  <th className="py-2 text-left font-medium">Plan type</th>
                   <th className="py-2 text-left font-medium">Badges</th>
                   <th className="py-2 text-left font-medium">Billing</th>
                   <th className="py-2 text-left font-medium">Access end</th>
@@ -740,6 +741,12 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                       <td className="max-md:items-start max-md:gap-2 py-3 pr-4" data-label="Company">
                         <div className="font-medium text-foreground">{row.company_name ?? 'Unknown company'}</div>
                         <div className="text-[11px] text-muted-foreground">{row.company_id}</div>
+                      </td>
+                      <td className="py-3 pr-4 text-xs font-medium text-foreground" data-label="Plan type">
+                        {derived.planTypeLabel}
+                        <div className="mt-0.5 text-[11px] font-normal text-muted-foreground">
+                          {derived.isTrialAccess ? 'Trial' : derived.isPaidAccess ? 'Paid' : '—'} · {derived.lifecycleState.replace(/_/g, ' ')}
+                        </div>
                       </td>
                       <td className="py-3 pr-4 text-xs" data-label="Badges">
                         <div className="flex flex-wrap gap-2">

@@ -11,6 +11,7 @@ begin
     from information_schema.tables
     where table_schema = 'public'
       and table_name   = 'subscriptions'
+      and table_type   = 'BASE TABLE'
   ) then
     -- Drop the FK if it exists; safe to run multiple times.
     alter table public.subscriptions

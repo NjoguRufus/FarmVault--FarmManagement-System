@@ -10,12 +10,13 @@ do $$
 declare
   pol record;
 begin
-  -- Only apply if the legacy public.subscriptions table exists in this environment.
+  -- Only apply if public.subscriptions is a BASE TABLE (not a view).
   if exists (
     select 1
     from information_schema.tables
     where table_schema = 'public'
       and table_name   = 'subscriptions'
+      and table_type   = 'BASE TABLE'
   ) then
     -- Ensure RLS is enabled on public.subscriptions
     alter table public.subscriptions enable row level security;

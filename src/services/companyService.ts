@@ -84,6 +84,19 @@ export async function listCompanies(): Promise<{ id: string; name: string }[]> {
   }));
 }
 
+/**
+ * All companies for developer tools (ordered by name).
+ * Uses `core.companies` via the project DB wrapper (not unqualified `public.companies`).
+ */
+export async function getAllCompanies(): Promise<{ id: string; name: string | null }[]> {
+  const { data, error } = await db.core().from('companies').select('id, name').order('name');
+
+  if (error) {
+    throw new Error(error.message ?? 'Failed to load companies');
+  }
+  return (data ?? []) as { id: string; name: string | null }[];
+}
+
 export async function setPaymentReminder(companyId: string, nextPaymentAt?: Date): Promise<void> {
   const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
   const subscription = (data?.subscription as Record<string, unknown>) ?? {};

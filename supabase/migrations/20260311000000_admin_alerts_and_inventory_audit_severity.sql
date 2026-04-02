@@ -28,6 +28,8 @@ create index if not exists idx_admin_alerts_company_read
 -- RLS: company-scoped. App filters by company_id when listing; allow select for any authenticated context.
 alter table public.admin_alerts enable row level security;
 
+drop policy if exists admin_alerts_select on public.admin_alerts;
+drop policy if exists admin_alerts_insert on public.admin_alerts;
 create policy admin_alerts_select on public.admin_alerts for select
   using (true);
 
@@ -51,6 +53,10 @@ create index if not exists idx_alert_recipients_company
 
 alter table public.alert_recipients enable row level security;
 
+drop policy if exists alert_recipients_select on public.alert_recipients;
+drop policy if exists alert_recipients_insert on public.alert_recipients;
+drop policy if exists alert_recipients_update on public.alert_recipients;
+drop policy if exists alert_recipients_delete on public.alert_recipients;
 create policy alert_recipients_select on public.alert_recipients for select using (true);
 create policy alert_recipients_insert on public.alert_recipients for insert with check (true);
 create policy alert_recipients_update on public.alert_recipients for update using (true);

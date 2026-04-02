@@ -223,6 +223,20 @@ export interface PaymentsFilter {
   offset?: number;
 }
 
+/** PostgREST returns a JSON array for `RETURNS TABLE` RPCs — normalize legacy `{ rows, total }` shapes. */
+function normalizeListPaymentsV2Payload(data: unknown): ListPaymentsRpcResponse {
+  if (data == null) return { rows: [], total: 0 };
+  if (Array.isArray(data)) {
+    return { rows: data as PaymentRow[], total: data.length };
+  }
+  const obj = data as { rows?: PaymentRow[]; total?: number };
+  const rows = Array.isArray(obj.rows) ? obj.rows : [];
+  return {
+    rows,
+    total: typeof obj.total === 'number' ? obj.total : rows.length,
+  };
+}
+
 export async function fetchPayments(filter: PaymentsFilter = {}): Promise<ListPaymentsRpcResponse> {
   const {
     status = 'pending',
@@ -250,11 +264,7 @@ export async function fetchPayments(filter: PaymentsFilter = {}): Promise<ListPa
     throw new Error(error.message ?? 'Failed to load payments');
   }
 
-  const payload = (data as ListPaymentsRpcResponse | null) ?? { rows: [], total: 0 };
-  return {
-    rows: payload.rows ?? [],
-    total: payload.total ?? 0,
-  };
+  return normalizeListPaymentsV2Payload(data);
 }
 
 export async function fetchSubscriptionAnalytics(params?: {

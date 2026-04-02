@@ -46,7 +46,7 @@ create policy email_logs_select_developer
   on public.email_logs
   for select
   to authenticated
-  using (admin.is_developer());
+  using (admin.is_developer(auth.uid()));
 
 grant select on public.email_logs to authenticated;
 grant all on public.email_logs to service_role;

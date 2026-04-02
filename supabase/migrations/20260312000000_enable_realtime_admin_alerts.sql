@@ -70,4 +70,15 @@ COMMIT;
 
 -- Enable real-time for admin_alerts (must be outside transaction)
 -- This allows Supabase real-time subscriptions to receive INSERT events
-ALTER PUBLICATION supabase_realtime ADD TABLE public.admin_alerts;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'admin_alerts'
+  ) THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.admin_alerts';
+  END IF;
+END $$;

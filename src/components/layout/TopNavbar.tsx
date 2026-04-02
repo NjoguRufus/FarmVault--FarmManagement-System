@@ -21,6 +21,7 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { Button } from '@/components/ui/button';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 
@@ -118,18 +119,6 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     (user.role === 'driver' || (user.role === 'employee' && (empRole === 'logistics-driver' || empRole === 'driver')))
   );
 
-  const getCropEmoji = (cropType: string) => {
-    const emojis: Record<string, string> = {
-      tomatoes: '🍅',
-      'french-beans': '🫛',
-      capsicum: '🌶️',
-      maize: '🌽',
-      watermelons: '🍉',
-      rice: '🌾',
-    };
-    return emojis[cropType] || '🌱';
-  };
-
   return (
     <header
       id="main-navbar"
@@ -162,7 +151,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             >
               {activeProject ? (
                 <>
-                  <span className="text-base sm:text-lg">{getCropEmoji(activeProject.cropType)}</span>
+                  <span className="text-base sm:text-lg">{cropTypeKeyEmoji(activeProject.cropType)}</span>
                   <span className="font-medium hidden sm:inline">{activeProject.name}</span>
                   <span className="font-medium sm:hidden max-w-[80px] truncate">{activeProject.name}</span>
                   <span className="hidden sm:inline text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
@@ -205,7 +194,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                       activeProject?.id === project.id && 'bg-muted'
                     )}
                   >
-                    <span className="text-lg">{getCropEmoji(project.cropType)}</span>
+                    <span className="text-lg">{cropTypeKeyEmoji(project.cropType)}</span>
                     <div className="flex flex-col">
                       <span className="font-medium">{project.name}</span>
                       <span className="text-xs text-muted-foreground capitalize">

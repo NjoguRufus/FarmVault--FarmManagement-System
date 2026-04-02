@@ -4,7 +4,19 @@
 begin;
 
 -- 1) If it was created as a view, drop it so we can have a table.
-drop view if exists public.company_subscriptions;
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'company_subscriptions'
+      and c.relkind = 'v'
+  ) then
+    execute 'drop view public.company_subscriptions';
+  end if;
+end $$;
 
 -- 2) Create the table if it doesn't exist.
 -- Support both UUID (onboarding schema) and TEXT (legacy) company_id via separate block.

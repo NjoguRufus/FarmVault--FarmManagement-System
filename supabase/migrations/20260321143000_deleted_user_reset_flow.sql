@@ -26,7 +26,7 @@ create policy reset_users_select_developer
 on admin.reset_users
 for select
 to authenticated
-using (admin.is_developer());
+using (admin.is_developer(auth.uid()));
 
 create or replace function public.get_reset_user_state()
 returns jsonb

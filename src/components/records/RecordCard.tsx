@@ -2,6 +2,7 @@ import React from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { Chips } from './Chips';
 import type { RecordCategory } from '@/types';
+import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { cn } from '@/lib/utils';
 
 export interface RecordCardProps {
@@ -19,19 +20,6 @@ export interface RecordCardProps {
   className?: string;
 }
 
-function getCropEmojiFromId(cropId?: string): string | null {
-  if (!cropId) return null;
-  const emojis: Record<string, string> = {
-    tomatoes: '🍅',
-    'french-beans': '🫛',
-    capsicum: '🌶️',
-    maize: '🌽',
-    watermelons: '🍉',
-    rice: '🌾',
-  };
-  return emojis[cropId] || '🌱';
-}
-
 export function RecordCard({
   title,
   category,
@@ -46,8 +34,6 @@ export function RecordCard({
   readOnly,
   className,
 }: RecordCardProps) {
-  const cropEmoji = getCropEmojiFromId(cropId);
-
   return (
     <div
       className={cn(
@@ -60,11 +46,11 @@ export function RecordCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-foreground flex items-center gap-2">
-            {cropEmoji && (
+            {cropId ? (
               <span className="text-base" aria-hidden>
-                {cropEmoji}
+                {cropTypeKeyEmoji(cropId)}
               </span>
-            )}
+            ) : null}
             <span className="truncate">{title}</span>
           </h3>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
