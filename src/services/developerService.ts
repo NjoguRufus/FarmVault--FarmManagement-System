@@ -212,6 +212,22 @@ export async function rejectSubscriptionPayment(id: string): Promise<void> {
   }
 }
 
+export async function setCompanyPaidAccess(input: {
+  companyId: string;
+  plan: 'basic' | 'pro';
+  months: 1 | 2 | 3 | number;
+}): Promise<void> {
+  const { companyId, plan, months } = input;
+  const { error } = await supabase.rpc('set_company_paid_access', {
+    _company_id: companyId,
+    _plan: plan,
+    _months: months,
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to set paid access');
+  }
+}
+
 export interface PaymentsFilter {
   status?: string;
   billingMode?: string | null;

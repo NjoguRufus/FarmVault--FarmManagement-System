@@ -27,6 +27,7 @@ export type DeveloperCompanyRow = {
   users_count?: number | null;
   employees_count?: number | null;
   pending_payments_count?: number | null;
+  payment_confirmed?: boolean | null;
   subscription_status?: string | null;
   plan_code?: string | null;
   billing_mode?: string | null;

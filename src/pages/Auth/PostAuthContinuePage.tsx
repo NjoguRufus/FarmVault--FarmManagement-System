@@ -62,6 +62,10 @@ export default function PostAuthContinuePage() {
     return <AuthLoadingScreen message="Finishing sign-in…" />;
   }
 
+  if (intended && intended.split('?')[0] === '/ambassador/onboarding') {
+    return <Navigate to={intended} replace />;
+  }
+
   if (isEmergencySession) {
     const to = normalizeLandingPath(effectiveAccess.landingPage);
     return <Navigate to={to} replace />;

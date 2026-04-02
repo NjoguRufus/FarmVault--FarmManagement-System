@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { formatDevDateShort } from './utils';
+import { computeCompanyStatus, companyStatusAccessLabel } from '@/lib/subscription/companyStatus';
 
 type SubRow = Record<string, unknown>;
 
@@ -28,13 +29,21 @@ export function CompanyDetailsHeader({ header, className }: Props) {
   const ownerName = str(header?.owner_name);
   const ownerEmail = str(header?.owner_email);
   const sub = (header?.subscription as SubRow | undefined) ?? {};
+  const company = (header?.company as Record<string, unknown> | undefined) ?? {};
 
   const plan =
     str(sub.plan_code) ?? str(sub.plan_id) ?? str(sub.plan) ?? '—';
-  const status = str(sub.status) ?? '—';
   const isTrial = sub.is_trial === true;
   const trialEnd = str(sub.trial_ends_at as string);
   const activeUntil = str(sub.active_until as string) ?? str(sub.current_period_end as string);
+  const computedStatus = computeCompanyStatus({
+    suspended: String(company.status ?? '').trim().toLowerCase() === 'suspended' || String(sub.status ?? '').trim().toLowerCase() === 'suspended',
+    pending_confirmation: company.pending_confirmation === true,
+    plan: str(company.plan) ?? str(sub.plan_code) ?? str(sub.plan) ?? null,
+    trial_ends_at: str(company.trial_ends_at) ?? trialEnd,
+    active_until: str(company.active_until) ?? activeUntil,
+    payment_confirmed: company.payment_confirmed === true,
+  });
 
   return (
     <div
@@ -57,14 +66,9 @@ export function CompanyDetailsHeader({ header, className }: Props) {
             </Badge>
             <Badge
               variant="outline"
-              className={cn(
-                'font-normal text-xs',
-                status.toLowerCase() === 'active' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
-                (status.toLowerCase() === 'trialing' || status.toLowerCase() === 'trial') &&
-                  'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200',
-              )}
+              className="font-normal text-xs"
             >
-              {status.replace(/_/g, ' ')}
+              {companyStatusAccessLabel(computedStatus)}
             </Badge>
             {isTrial ? (
               <Badge variant="outline" className="font-normal text-xs border-amber-500/30 bg-amber-500/5">

@@ -1,15 +1,13 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, Users, DollarSign, AlertTriangle } from 'lucide-react';
+import { Building2, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { fetchDeveloperCompanies, fetchDeveloperKpis, fetchDeveloperUsers } from '@/services/developerService';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { useSeasonChallengesIntelligence } from '@/hooks/developer/useSeasonChallengesIntelligence';
-import { computeSubscriptionStatus } from '@/lib/subscription/subscriptionStatus';
-import { computeSubscriptionVisibility } from '@/lib/subscription/subscriptionVisibility';
-import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
+import { computeCompanyStatus } from '@/lib/subscription/companyStatus';
 import { useNow } from '@/hooks/useNow';
 
 export default function DeveloperHomePage() {
@@ -57,88 +55,38 @@ export default function DeveloperHomePage() {
 
   const paymentRequiredCount = useMemo(() => {
     return companyRows.reduce((sum, row) => {
-      const status = computeSubscriptionStatus(
-        {
-          trialEnd: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
-          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
-          isSuspended: String(row.subscription_status ?? '').toLowerCase() === 'suspended',
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
-        },
-        now,
-      );
-      return sum + (status.paymentRequired ? 1 : 0);
+      const status = computeCompanyStatus({
+        suspended: String(row.company_status ?? '').toLowerCase() === 'suspended' || String(row.subscription_status ?? '').toLowerCase() === 'suspended',
+        pending_confirmation: (row.pending_confirmation as boolean | null | undefined) ?? null,
+        plan: (row.plan as string | null | undefined) ?? (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
+        payment_confirmed: (row.payment_confirmed as boolean | null | undefined) ?? null,
+        trial_ends_at: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
+        active_until: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
+      }, now);
+      return sum + (status === 'trial_expired' || status === 'subscription_expired' ? 1 : 0);
     }, 0);
   }, [companyRows, now]);
 
   const paymentLifecycleCounters = useMemo(() => {
     const out = {
-      activeTrials: 0,
-      trialsExpired: 0,
-      pendingConfirmations: 0,
-      paidActiveCompanies: 0,
-      subscriptionExpired: 0,
-      paymentRequired: 0,
-    };
-
-    for (const row of companyRows as any[]) {
-      const derived = computeCompanySubscriptionState(
-        {
-          companyStatus: (row.company_status as string | null | undefined) ?? null,
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined) ?? null,
-          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
-          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
-          trialStartsAt: null,
-          trialEndsAt: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
-          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
-          latestPaymentStatus: (row.latest_subscription_payment?.status as string | null | undefined) ?? null,
-        },
-        now,
-      );
-
-      if (derived.accessStatus === 'suspended') continue;
-
-      if (derived.paymentStatus === 'pending_confirmation') out.pendingConfirmations += 1;
-      if (derived.accessSource === 'trial' && derived.accessStatus === 'active') out.activeTrials += 1;
-      if (derived.accessSource === 'trial' && derived.accessStatus === 'expired') out.trialsExpired += 1;
-      if (derived.accessSource === 'subscription' && derived.accessStatus === 'active' && derived.paymentStatus === 'paid') out.paidActiveCompanies += 1;
-      if (derived.accessSource === 'subscription' && derived.accessStatus === 'expired') out.subscriptionExpired += 1;
-      if (derived.paymentRequired) out.paymentRequired += 1;
-    }
-    return out;
-  }, [companyRows, now]);
-
-  const accessCounters = useMemo(() => {
-    const out = {
-      activeProTrials: 0,
-      activeProSubscriptions: 0,
-      expiredTrials: 0,
-      expiredSubscriptions: 0,
-      suspended: 0,
+      activePaid: 0,
+      activeTrial: 0,
+      pendingConfirmation: 0,
+      paymentDue: 0,
     };
     for (const row of companyRows as any[]) {
-      const visibility = computeSubscriptionVisibility(
-        {
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
-          trialStartsAt: null,
-          trialEndsAt: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
-          activeUntil: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
-          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
-          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
-          isSuspended: String(row.subscription_status ?? '').toLowerCase() === 'suspended',
-        },
-        now,
-      );
-      if (visibility.accessStatus === 'suspended') {
-        out.suspended += 1;
-        continue;
-      }
-      if (visibility.accessStatus === 'active') {
-        if (visibility.plan === 'pro' && visibility.accessType === 'trial') out.activeProTrials += 1;
-        if (visibility.plan === 'pro' && visibility.accessType === 'subscription') out.activeProSubscriptions += 1;
-      } else {
-        if (visibility.accessType === 'trial') out.expiredTrials += 1;
-        else out.expiredSubscriptions += 1;
-      }
+      const st = computeCompanyStatus({
+        suspended: String(row.company_status ?? '').toLowerCase() === 'suspended' || String(row.subscription_status ?? '').toLowerCase() === 'suspended',
+        pending_confirmation: (row.pending_confirmation as boolean | null | undefined) ?? null,
+        plan: (row.plan as string | null | undefined) ?? (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
+        payment_confirmed: (row.payment_confirmed as boolean | null | undefined) ?? null,
+        trial_ends_at: (row.trial_ends_at as string | null | undefined) ?? (row.subscription?.trial_end as string | null | undefined),
+        active_until: (row.active_until as string | null | undefined) ?? (row.subscription?.period_end as string | null | undefined),
+      }, now);
+      if (st === 'pro_active' || st === 'basic_active') out.activePaid += 1;
+      if (st === 'trial_active') out.activeTrial += 1;
+      if (st === 'pending_confirmation') out.pendingConfirmation += 1;
+      if (st === 'trial_expired' || st === 'subscription_expired') out.paymentDue += 1;
     }
     return out;
   }, [companyRows, now]);
@@ -224,6 +172,28 @@ export default function DeveloperHomePage() {
             compact
           />
         </DeveloperStatGrid>
+
+        <section>
+          <Link
+            to="/dev/referrals"
+            className="fv-card group flex items-center justify-between gap-3 border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.06] to-transparent transition-colors hover:border-emerald-500/35"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <Share2 className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Ambassador referrals</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  Live referral funnel, commissions, and mark-as-paid (developer tools).
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:underline">
+              Open
+            </span>
+          </Link>
+        </section>
 
         {/* Season challenges intelligence preview */}
         <section className="space-y-3">

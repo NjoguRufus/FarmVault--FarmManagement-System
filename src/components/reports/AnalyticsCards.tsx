@@ -3,7 +3,8 @@ import { Award, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { AnalyticsCropProfitRow } from '@/services/analyticsReportsService';
-import { formatKes } from './analyticsFormat';
+import type { AnalyticsMonthlyRevenueRow } from '@/services/analyticsReportsService';
+import { formatKes, formatKg } from './analyticsFormat';
 
 const glass =
   'rounded-2xl border border-white/20 bg-card/55 shadow-[var(--shadow-card)] backdrop-blur-xl dark:border-white/10 dark:bg-card/40';
@@ -76,6 +77,8 @@ export function AnalyticsCards({
   totalRevenue,
   totalExpenses,
   totalProfit,
+  totalYield,
+  monthlyRevenue,
   cropProfitRows,
 }: {
   mode: 'pro' | 'basic';
@@ -84,6 +87,8 @@ export function AnalyticsCards({
   totalRevenue: number;
   totalExpenses: number;
   totalProfit: number;
+  totalYield: number;
+  monthlyRevenue: AnalyticsMonthlyRevenueRow[];
   cropProfitRows: AnalyticsCropProfitRow[];
 }) {
   const profitVariant = useMemo(() => {
@@ -92,40 +97,25 @@ export function AnalyticsCards({
     return 'neutral' as const;
   }, [totalProfit]);
 
-  const basicCards = (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-      <MetricCard
-        title="Total revenue"
-        value={formatKes(totalRevenue)}
-        subtitle="From harvest collections"
-        icon={Wallet}
-        accentClass="bg-primary/15 text-primary"
-        loading={loading}
-      />
-      <MetricCard
-        title="Total expenses"
-        value={formatKes(totalExpenses)}
-        subtitle="All recorded categories"
-        icon={TrendingDown}
-        accentClass="bg-fv-warning/15 text-fv-warning"
-        loading={loading}
-      />
-    </div>
-  );
-
-  if (mode === 'basic') {
-    return basicCards;
-  }
-
   const bestLabel = bestCrop?.crop?.trim() || '—';
   const bestSubtitle =
     !loading && cropProfitRows.length === 0
       ? 'Add harvests and expenses to see insights'
       : bestCrop
-        ? `Profit ${formatKes(bestCrop.profit)}`
+        ? `Revenue ${formatKes(bestCrop.total_revenue)}`
         : 'No crop breakdown yet';
 
-  return (
+  const monthlyTrend = useMemo(() => {
+    if (!monthlyRevenue.length) return null;
+    const sorted = [...monthlyRevenue].sort((a, b) => a.month.localeCompare(b.month));
+    const last = sorted[sorted.length - 1];
+    const prev = sorted.length > 1 ? sorted[sorted.length - 2] : null;
+    const delta = prev ? last.revenue - prev.revenue : null;
+    const pct = prev && prev.revenue !== 0 ? (delta! / prev.revenue) * 100 : null;
+    return { last, prev, delta, pct };
+  }, [monthlyRevenue]);
+
+  const cards = (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
       {loading ? (
         <CardShell>
@@ -142,7 +132,7 @@ export function AnalyticsCards({
         <CardShell className="sm:col-span-2 xl:col-span-1 ring-1 ring-primary/15 bg-gradient-to-br from-primary/5 to-transparent">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Best crop</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Best performing crop</p>
               <p className="mt-1 text-xl sm:text-2xl font-bold text-foreground truncate">{bestLabel}</p>
               <p className="mt-1 text-xs text-muted-foreground">{bestSubtitle}</p>
             </div>
@@ -155,7 +145,7 @@ export function AnalyticsCards({
       <MetricCard
         title="Total revenue"
         value={formatKes(totalRevenue)}
-        subtitle="Sum by crop (harvest)"
+        subtitle="From harvest collections"
         icon={Wallet}
         accentClass="bg-primary/15 text-primary"
         loading={loading}
@@ -163,7 +153,7 @@ export function AnalyticsCards({
       <MetricCard
         title="Total expenses"
         value={formatKes(totalExpenses)}
-        subtitle="Expense ledger"
+        subtitle="All recorded categories"
         icon={TrendingDown}
         accentClass="bg-fv-warning/15 text-fv-warning"
         loading={loading}
@@ -182,6 +172,29 @@ export function AnalyticsCards({
         }
         loading={loading}
       />
+      <MetricCard
+        title="Total yield"
+        value={formatKg(totalYield)}
+        subtitle="All harvests"
+        icon={TrendingUp}
+        accentClass="bg-fv-success/10 text-fv-success"
+        loading={loading}
+      />
+      <MetricCard
+        title="Monthly revenue trend"
+        value={monthlyTrend ? formatKes(monthlyTrend.last.revenue) : '—'}
+        subtitle={
+          monthlyTrend?.prev
+            ? `${monthlyTrend.delta != null && monthlyTrend.delta >= 0 ? 'Up' : 'Down'} ${formatKes(Math.abs(monthlyTrend.delta ?? 0))} vs last month`
+            : 'Latest month total'
+        }
+        icon={TrendingUp}
+        accentClass="bg-fv-gold-soft/70 text-fv-olive"
+        loading={loading}
+      />
     </div>
   );
+
+  void mode; // mode retained for UI toggle; cards remain consistent
+  return cards;
 }

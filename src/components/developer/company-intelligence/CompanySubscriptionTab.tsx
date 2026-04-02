@@ -4,9 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyStateBlock } from './EmptyStateBlock';
 import { formatDevDate, formatDevDateShort, formatMoney } from './utils';
-import { computeSubscriptionStatus, subscriptionStatusBadgeClass } from '@/lib/subscription/subscriptionStatus';
-import { computeSubscriptionVisibility, subscriptionVisibilityBadgeClass, formatPlanLabel } from '@/lib/subscription/subscriptionVisibility';
-import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
+import { computeCompanyStatus, companyStatusAccessLabel } from '@/lib/subscription/companyStatus';
 import { extendCompanyTrial, updateCompanySubscriptionState } from '@/services/developerAdminService';
 import { useNow } from '@/hooks/useNow';
 
@@ -46,53 +44,29 @@ export function CompanySubscriptionTab({ companyId, header, payments }: Props) {
     (sub.status != null || sub.plan_id != null || sub.plan_code != null);
 
   const computed = useMemo(() => {
-    return computeSubscriptionStatus({
-      trialEnd: (sub.trial_ends_at as string | null | undefined) ?? (sub.trial_end as string | null | undefined),
-      activeUntil: (sub.active_until as string | null | undefined) ?? (sub.current_period_end as string | null | undefined),
-      isSuspended: isSuspendedCompany(header),
-      planCode: (sub.plan_code as string | null | undefined) ?? (sub.plan_id as string | null | undefined) ?? (sub.plan as string | null | undefined),
-    }, now);
-  }, [header, sub, now]);
-
-  const visibility = useMemo(() => {
-    const planCode =
-      (sub.plan_code as string | null | undefined) ??
-      (sub.plan_id as string | null | undefined) ??
-      (sub.plan as string | null | undefined);
-    return computeSubscriptionVisibility(
+    return computeCompanyStatus(
       {
-        planCode,
-        trialStartsAt: (sub.trial_starts_at as string | null | undefined) ?? (sub.trial_started_at as string | null | undefined),
-        trialEndsAt: (sub.trial_ends_at as string | null | undefined) ?? (sub.trial_end as string | null | undefined),
-        activeUntil: (sub.active_until as string | null | undefined) ?? (sub.current_period_end as string | null | undefined),
-        isTrial: (sub.is_trial as boolean | null | undefined) ?? null,
-        subscriptionStatus: (sub.status as string | null | undefined) ?? null,
-        isSuspended: isSuspendedCompany(header),
-      },
-      now,
-    );
-  }, [header, sub, now]);
-
-  const derived = useMemo(() => {
-    const latestPayment = payments?.[0] as Record<string, unknown> | undefined;
-    return computeCompanySubscriptionState(
-      {
-        companyStatus: (company.status as string | null | undefined) ?? null,
-        planCode:
+        suspended: isSuspendedCompany(header),
+        pending_confirmation: (company.pending_confirmation as boolean | null | undefined) ?? null,
+        plan:
+          (company.plan as string | null | undefined) ??
           (sub.plan_code as string | null | undefined) ??
           (sub.plan_id as string | null | undefined) ??
           (sub.plan as string | null | undefined) ??
           null,
-        subscriptionStatus: (sub.status as string | null | undefined) ?? null,
-        isTrial: (sub.is_trial as boolean | null | undefined) ?? null,
-        trialStartsAt: (sub.trial_starts_at as string | null | undefined) ?? (sub.trial_started_at as string | null | undefined) ?? null,
-        trialEndsAt: (sub.trial_ends_at as string | null | undefined) ?? (sub.trial_end as string | null | undefined) ?? null,
-        activeUntil: (sub.active_until as string | null | undefined) ?? (sub.current_period_end as string | null | undefined) ?? null,
-        latestPaymentStatus: (latestPayment?.status as string | null | undefined) ?? null,
+        trial_ends_at:
+          (company.trial_ends_at as string | null | undefined) ??
+          (sub.trial_ends_at as string | null | undefined) ??
+          (sub.trial_end as string | null | undefined),
+        active_until:
+          (company.active_until as string | null | undefined) ??
+          (sub.active_until as string | null | undefined) ??
+          (sub.current_period_end as string | null | undefined),
+        payment_confirmed: (company.payment_confirmed as boolean | null | undefined) ?? null,
       },
       now,
     );
-  }, [company.status, now, payments, sub]);
+  }, [header, sub, now]);
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
@@ -128,32 +102,12 @@ export function CompanySubscriptionTab({ companyId, header, payments }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">Subscription</h3>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className={subscriptionVisibilityBadgeClass(visibility)}>
-                  {visibility.displayLabel}
-                </Badge>
-                <Badge variant="outline" className={subscriptionStatusBadgeClass(computed)}>
-                  {computed.label}
-                </Badge>
+                <Badge variant="outline">{companyStatusAccessLabel(computed)}</Badge>
               </div>
             </div>
-            <RowKV k="Plan" v={formatPlanLabel(visibility.plan)} />
-            <RowKV k="Access Source" v={derived.accessSource === 'trial' ? 'Trial' : 'Subscription'} />
-            <RowKV
-              k="Payment Status"
-              v={derived.paymentStatus === 'unpaid' ? 'Unpaid' : derived.paymentStatus === 'pending_confirmation' ? 'Pending confirmation' : derived.paymentStatus === 'paid' ? 'Paid' : 'Rejected'}
-            />
-            <RowKV
-              k="Access Status"
-              v={visibility.accessStatus === 'suspended' ? 'Suspended' : visibility.accessStatus === 'active' ? 'Active' : 'Expired'}
-            />
             <RowKV k="Trial start" v={formatDevDateShort((sub.trial_starts_at ?? sub.trial_started_at) as string)} />
             <RowKV k="Trial end" v={formatDevDateShort((sub.trial_ends_at ?? sub.trial_end) as string)} />
             <RowKV k="Active until / Paid until" v={formatDevDateShort((sub.active_until ?? sub.current_period_end) as string)} />
-            <RowKV k="Payment required" v={derived.paymentRequired ? 'Yes' : 'No'} />
-            <RowKV
-              k="Days remaining"
-              v={derived.daysRemaining == null ? '—' : `${derived.daysRemaining} day${derived.daysRemaining === 1 ? '' : 's'}`}
-            />
             <RowKV k="Billing mode" v={String(sub.billing_mode ?? '—')} />
             <RowKV k="Billing cycle" v={String(sub.billing_cycle ?? '—')} />
             <RowKV k="Updated" v={formatDevDate(sub.updated_at as string)} />

@@ -7,13 +7,39 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchDeveloperCompanies, fetchPayments, fetchSubscriptionAnalytics } from '@/services/developerService';
 import {
-  computeSubscriptionStatus,
-  subscriptionStatusBadgeClass,
-  type ComputedSubscriptionStatus,
-} from '@/lib/subscription/subscriptionStatus';
-import { computeSubscriptionVisibility } from '@/lib/subscription/subscriptionVisibility';
-import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
+  computeCompanyStatus,
+  companyStatusAccessLabel,
+  companyStatusBadgeClass,
+  type CompanyStatus,
+} from '@/lib/subscription/companyStatus';
 import { useNow } from '@/hooks/useNow';
+
+function computeResolvedStatus(row: any, now: Date): CompanyStatus {
+  const suspended =
+    String(row?.subscription_status ?? '').trim().toLowerCase() === 'suspended' ||
+    String(row?.company_status ?? '').trim().toLowerCase() === 'suspended';
+  const plan =
+    (row?.plan as string | null | undefined) ??
+    (row?.plan_code as string | null | undefined) ??
+    (row?.subscription?.plan as string | null | undefined) ??
+    null;
+  const trialEndsAt =
+    (row?.trial_ends_at as string | null | undefined) ??
+    (row?.subscription?.trial_end as string | null | undefined) ??
+    null;
+  const activeUntil =
+    (row?.active_until as string | null | undefined) ??
+    (row?.subscription?.period_end as string | null | undefined) ??
+    null;
+  return computeCompanyStatus({
+    suspended,
+    pending_confirmation: (row?.pending_confirmation as boolean | null | undefined) ?? null,
+    plan,
+    payment_confirmed: (row?.payment_confirmed as boolean | null | undefined) ?? null,
+    trial_ends_at: trialEndsAt,
+    active_until: activeUntil,
+  }, now);
+}
 
 type StatusFilter = 'all' | 'active' | 'trialing' | 'expired' | 'rejected';
 type RevenueWindowDays = 7 | 30 | 90;
@@ -141,10 +167,10 @@ function miniBar(widthPct: number, tone: 'success' | 'warning' | 'danger' | 'neu
   return cn('h-2 rounded-full', color, 'w-[var(--w)]', '[--w:' + w + ']');
 }
 
-function statusBadgeFromComputed(computed: ComputedSubscriptionStatus) {
+function statusBadgeFromResolved(status: CompanyStatus) {
   return (
-    <Badge variant="outline" className={cn('font-normal', subscriptionStatusBadgeClass(computed))}>
-      {computed.key === 'active_paid' ? 'Active' : computed.key === 'trial_active' ? 'Trial' : computed.label}
+    <Badge variant="outline" className={cn('font-normal', companyStatusBadgeClass(status))}>
+      {companyStatusAccessLabel(status)}
     </Badge>
   );
 }
@@ -209,93 +235,32 @@ export default function DeveloperSubscriptionAnalyticsPage() {
   const counters = useMemo(() => {
     const items = companiesQuery.data?.items ?? [];
     const computedRows = (items as any[]).map((row) => {
-      const suspended = String(row.subscription_status ?? '').toLowerCase() === 'suspended';
-      const computed = computeSubscriptionStatus(
-        {
-          trialEnd:
-            (row.trial_ends_at as string | null | undefined) ??
-            (row.subscription?.trial_end as string | null | undefined),
-          activeUntil:
-            (row.active_until as string | null | undefined) ??
-            (row.subscription?.period_end as string | null | undefined),
-          isSuspended: suspended,
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
-        },
-        now,
-      );
-      const visibility = computeSubscriptionVisibility(
-        {
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined),
-          trialStartsAt: null,
-          trialEndsAt:
-            (row.trial_ends_at as string | null | undefined) ??
-            (row.subscription?.trial_end as string | null | undefined),
-          activeUntil:
-            (row.active_until as string | null | undefined) ??
-            (row.subscription?.period_end as string | null | undefined),
-          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
-          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
-          isSuspended: suspended,
-        },
-        now,
-      );
-      const derived = computeCompanySubscriptionState(
-        {
-          companyStatus: (row.company_status as string | null | undefined) ?? null,
-          planCode: (row.plan_code as string | null | undefined) ?? (row.subscription?.plan as string | null | undefined) ?? null,
-          subscriptionStatus: (row.subscription_status as string | null | undefined) ?? (row.subscription?.status as string | null | undefined) ?? null,
-          isTrial: (row.is_trial as boolean | null | undefined) ?? (row.subscription?.is_trial as boolean | null | undefined) ?? null,
-          trialStartsAt: null,
-          trialEndsAt:
-            (row.trial_ends_at as string | null | undefined) ??
-            (row.subscription?.trial_end as string | null | undefined),
-          activeUntil:
-            (row.active_until as string | null | undefined) ??
-            (row.subscription?.period_end as string | null | undefined),
-          latestPaymentStatus: (row.latest_subscription_payment?.status as string | null | undefined) ?? null,
-        },
-        now,
-      );
+      const computed = computeResolvedStatus(row, now);
       return {
         companyId: String(row.company_id ?? row.id ?? ''),
         companyName: String(row.company_name ?? row.name ?? '—'),
-        planCode: String(row.plan_code ?? row.subscription?.plan ?? 'basic'),
         computed,
-        visibility,
-        derived,
       };
     });
 
     const out = {
       totalCompanies: computedRows.length,
-      trialActive: computedRows.filter((r) => r.derived.displayLabel === 'Pro Trial').length,
-      trialExpired: computedRows.filter((r) => r.derived.displayLabel === 'Trial Expired').length,
-      pendingConfirmation: computedRows.filter((r) => r.derived.displayLabel === 'Pending Confirmation').length,
-      paidActive: computedRows.filter((r) => r.derived.displayLabel === 'Pro Subscription' || r.derived.displayLabel === 'Basic Subscription').length,
-      paidExpired: computedRows.filter((r) => r.derived.displayLabel === 'Subscription Expired').length,
-      suspended: computedRows.filter((r) => r.derived.displayLabel === 'Suspended').length,
-      paymentDue: computedRows.filter((r) => r.derived.paymentRequired).length,
-      activeProTrials: computedRows.filter((r) => r.visibility.plan === 'pro' && r.visibility.accessType === 'trial' && r.visibility.accessStatus === 'active').length,
-      activeProSubscriptions: computedRows.filter((r) => r.visibility.plan === 'pro' && r.visibility.accessType === 'subscription' && r.visibility.accessStatus === 'active').length,
-      expiredTrials: computedRows.filter((r) => r.visibility.accessStatus === 'expired' && r.visibility.accessType === 'trial').length,
-      expiredSubscriptions: computedRows.filter((r) => r.visibility.accessStatus === 'expired' && r.visibility.accessType === 'subscription').length,
-      expiringSoon: computedRows
-        .filter((r) => (r.derived.accessStatus === 'active') && typeof r.derived.daysRemaining === 'number')
-        .filter((r) => (r.derived.daysRemaining as number) <= 14)
-        .sort((a, b) => Number(a.derived.daysRemaining) - Number(b.derived.daysRemaining)),
-      expirations3: [] as typeof computedRows,
-      expirations7: [] as typeof computedRows,
-      expirations14: [] as typeof computedRows,
+      trialActive: computedRows.filter((r) => r.computed === 'trial_active').length,
+      trialExpired: computedRows.filter((r) => r.computed === 'trial_expired').length,
+      paymentPending: computedRows.filter((r) => r.computed === 'payment_pending').length,
+      paidActive: computedRows.filter((r) => r.computed === 'pro_active').length,
+      paidExpired: computedRows.filter((r) => r.computed === 'subscription_expired').length,
+      suspended: computedRows.filter((r) => r.computed === 'suspended').length,
+      // Legacy page fields still rendered in cards/sections.
+      paymentDue: computedRows.filter((r) => r.computed === 'trial_expired').length,
+      activeProTrials: 0,
+      activeProSubscriptions: 0,
+      expiredTrials: 0,
+      expiredSubscriptions: 0,
+      pendingConfirmation: 0,
+      expiringSoon: [] as typeof computedRows,
       computedRows,
     };
-
-    const activeOrTrial = computedRows
-      .filter((r) => r.derived.accessStatus === 'active')
-      .filter((r) => typeof r.derived.daysRemaining === 'number' && (r.derived.daysRemaining as number) >= 0);
-
-    out.expirations3 = activeOrTrial.filter((r) => (r.derived.daysRemaining as number) <= 3);
-    out.expirations7 = activeOrTrial.filter((r) => (r.derived.daysRemaining as number) <= 7);
-    out.expirations14 = activeOrTrial.filter((r) => (r.derived.daysRemaining as number) <= 14);
 
     return out;
   }, [companiesQuery.data, now]);
@@ -596,33 +561,27 @@ export default function DeveloperSubscriptionAnalyticsPage() {
 
       {/* SECTION 4 — UPCOMING EXPIRATIONS */}
       <section className="mb-5 grid grid-cols-1 gap-3 lg:grid-cols-3">
-        {[
-          { label: 'Expiring in 3 days', rows: counters.expirations3, days: 3 },
-          { label: 'Expiring in 7 days', rows: counters.expirations7, days: 7 },
-          { label: 'Expiring in 14 days', rows: counters.expirations14, days: 14 },
-        ].map((bucket) => (
-          <div key={bucket.days} className="fv-card p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">{bucket.label}</p>
-              <p className="text-xs text-muted-foreground">{bucket.rows.length}</p>
-            </div>
-            <div className="mt-3 space-y-2">
-              {bucket.rows.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No companies expiring in this window.</p>
-              ) : (
-                bucket.rows.slice(0, 6).map((r) => (
-                  <div key={r.companyId} className="flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-medium text-foreground">{r.companyName}</p>
-                      <p className="text-[11px] text-muted-foreground">in {r.derived.daysRemaining} days</p>
-                    </div>
-                    {statusBadgeFromComputed(r.computed)}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        ))}
+        <div className="fv-card p-4">
+          <p className="text-sm font-semibold">Trial expired</p>
+          <p className="mt-1 text-xs text-muted-foreground">Needs attention (no payment confirmed)</p>
+          <p className="mt-4 text-3xl font-bold tabular-nums text-red-700 dark:text-red-400">
+            {counters.trialExpired.toLocaleString()}
+          </p>
+        </div>
+        <div className="fv-card p-4">
+          <p className="text-sm font-semibold">Active Pro</p>
+          <p className="mt-1 text-xs text-muted-foreground">Payment confirmed + active</p>
+          <p className="mt-4 text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+            {counters.paidActive.toLocaleString()}
+          </p>
+        </div>
+        <div className="fv-card p-4">
+          <p className="text-sm font-semibold">Payment pending</p>
+          <p className="mt-1 text-xs text-muted-foreground">Pro with no confirmed payment</p>
+          <p className="mt-4 text-3xl font-bold tabular-nums text-blue-700 dark:text-blue-400">
+            {counters.paymentPending.toLocaleString()}
+          </p>
+        </div>
       </section>
 
       {/* SECTION 5 — REVENUE ANALYTICS */}
@@ -684,7 +643,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
         </div>
       </section>
 
-      {/* Subscriptions table */}
+      {/* Companies table */}
       <section className="mb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -712,29 +671,9 @@ export default function DeveloperSubscriptionAnalyticsPage() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const computed = computeSubscriptionStatus(
-                    {
-                      trialEnd: row.trial_ends_at,
-                      activeUntil: row.active_until,
-                      isSuspended: String(row.status ?? '').toLowerCase() === 'suspended',
-                      planCode: row.plan_code ?? row.plan,
-                    },
-                    now,
-                  );
-                  const derived = computeCompanySubscriptionState(
-                    {
-                      companyStatus: 'active',
-                      planCode: row.plan_code ?? row.plan,
-                      subscriptionStatus: row.status,
-                      isTrial: row.is_trial,
-                      trialStartsAt: row.trial_starts_at,
-                      trialEndsAt: row.trial_ends_at,
-                      activeUntil: row.active_until,
-                      latestPaymentStatus: null,
-                    },
-                    now,
-                  );
-                  const planLabel = String(row.plan_code ?? row.plan ?? '—');
+                  const statusResolved = computeResolvedStatus(row, now);
+                  const planLabel = String(row.plan_code ?? row.plan ?? row.selected_plan ?? '—');
+                  const endIso = String(row.active_until ?? row.current_period_end ?? row.trial_ends_at ?? '');
 
                   return (
                     <tr key={row.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
@@ -743,32 +682,14 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                         <div className="text-[11px] text-muted-foreground">{row.company_id}</div>
                       </td>
                       <td className="py-3 pr-4 text-xs font-medium text-foreground" data-label="Plan type">
-                        {derived.planTypeLabel}
-                        <div className="mt-0.5 text-[11px] font-normal text-muted-foreground">
-                          {derived.isTrialAccess ? 'Trial' : derived.isPaidAccess ? 'Paid' : '—'} · {derived.lifecycleState.replace(/_/g, ' ')}
-                        </div>
+                        {planLabel}
                       </td>
                       <td className="py-3 pr-4 text-xs" data-label="Badges">
                         <div className="flex flex-wrap gap-2">
                           <Badge variant="outline" className="font-normal capitalize">
                             {planLabel}
                           </Badge>
-                          {statusBadgeFromComputed(computed)}
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'font-normal',
-                              derived.displayLabel === 'Pro Trial' && 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200',
-                              derived.displayLabel === 'Pending Confirmation' && 'border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-200',
-                              (derived.displayLabel === 'Trial Expired' || derived.displayLabel === 'Subscription Expired') &&
-                                'border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200',
-                              derived.displayLabel === 'Suspended' && 'border-border bg-muted text-muted-foreground',
-                              (derived.displayLabel === 'Pro Subscription' || derived.displayLabel === 'Basic Subscription') &&
-                                'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
-                            )}
-                          >
-                            {derived.displayLabel}
-                          </Badge>
+                          {statusBadgeFromResolved(statusResolved)}
                         </div>
                       </td>
                       <td className="py-3 pr-4 text-xs" data-label="Billing">
@@ -776,12 +697,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                         <div className="text-[11px] text-muted-foreground">{row.billing_cycle ?? '—'}</div>
                       </td>
                       <td className="py-3 pr-4 text-xs" data-label="Access end">
-                        <div className="text-foreground">{derived.activeUntil ?? derived.trialEnd ?? '—'}</div>
-                        {typeof derived.daysRemaining === 'number' ? (
-                          <div className="text-[11px] text-muted-foreground">
-                            {derived.daysRemaining >= 0 ? `${derived.daysRemaining} day(s) left` : `${Math.abs(derived.daysRemaining)} day(s) ago`}
-                          </div>
-                        ) : null}
+                        <div className="text-foreground">{endIso || '—'}</div>
                       </td>
                     </tr>
                   );

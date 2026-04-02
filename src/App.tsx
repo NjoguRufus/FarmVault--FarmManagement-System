@@ -77,6 +77,15 @@ import BlogPostPage from "@/pages/seo/BlogPostPage";
 import FeaturesPage from "@/pages/FeaturesPage";
 import PricingPage from "@/pages/PricingPage";
 import AboutPage from "@/pages/AboutPage";
+import AmbassadorLandingPage from "@/pages/ambassador/AmbassadorLandingPage";
+import AmbassadorSignupPage from "@/pages/ambassador/AmbassadorSignupPage";
+import AmbassadorDashboardPage from "@/pages/ambassador/AmbassadorDashboardPage";
+import AmbassadorOnboardingPage from "@/pages/ambassador/AmbassadorOnboardingPage";
+import AmbassadorReferPage from "@/pages/ambassador/AmbassadorReferPage";
+import AmbassadorReferralsPage from "@/pages/ambassador/AmbassadorReferralsPage";
+import AmbassadorEarningsPage from "@/pages/ambassador/AmbassadorEarningsPage";
+import AmbassadorSettingsPage from "@/pages/ambassador/AmbassadorSettingsPage";
+import { AmbassadorLayout } from "@/components/layout/AmbassadorLayout";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
 import ScanPage from "@/pages/ScanPage";
@@ -130,6 +139,8 @@ import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
 import DevBootstrapPage from "@/pages/dev/DevBootstrap";
 import DevDiagnosticsPage from "@/pages/dev/DevDiagnosticsPage";
+import DevReferralsPage from "@/pages/dev/DevReferralsPage";
+import DevReferralDetailPage from "@/pages/dev/DevReferralDetailPage";
 import DevQRGeneratorPage from "@/pages/dev/DevQRGeneratorPage";
 import { DeveloperLayout } from "@/components/layout/DeveloperLayout";
 import DeveloperCompaniesPage from "@/pages/developer/DeveloperCompaniesPage";
@@ -248,6 +259,20 @@ const AppRoutesWithLock = () => {
       <Route path="/features" element={<FeaturesPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/about" element={<AboutPage />} />
+      <Route path="/ambassador" element={<AmbassadorLandingPage />} />
+      <Route path="/ambassador/signup" element={<AmbassadorSignupPage />} />
+      <Route path="/ambassador/onboarding" element={<AmbassadorOnboardingPage />} />
+      <Route path="/ambassador/refer" element={<Navigate to="/ambassador/console/refer" replace />} />
+      <Route path="/ambassador/dashboard" element={<Navigate to="/ambassador/console/dashboard" replace />} />
+      <Route path="/ambassador/console" element={<AmbassadorLayout />}>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AmbassadorDashboardPage />} />
+        <Route path="referrals" element={<AmbassadorReferralsPage />} />
+        <Route path="earnings" element={<AmbassadorEarningsPage />} />
+        <Route path="refer" element={<AmbassadorReferPage />} />
+        <Route path="qr" element={<Navigate to="refer" replace />} />
+        <Route path="settings" element={<AmbassadorSettingsPage />} />
+      </Route>
       <Route path="/scan" element={<ScanPage />} />
 
       {/* Public SEO pillar pages */}
@@ -412,6 +437,8 @@ const AppRoutesWithLock = () => {
         <Route path="/dev" element={<Navigate to="/developer" replace />} />
         <Route path="/dev/dashboard" element={<Navigate to="/developer" replace />} />
         <Route path="/dev/diagnostics" element={<DevDiagnosticsPage />} />
+        <Route path="/dev/referrals/:id" element={<DevReferralDetailPage />} />
+        <Route path="/dev/referrals" element={<DevReferralsPage />} />
         <Route path="/dev/qr-generator" element={<Navigate to="/developer/qr" replace />} />
         {/* Legacy /admin/* still supported; index redirects to Developer Home */}
         <Route path="/admin" element={<Navigate to="/developer" replace />} />
