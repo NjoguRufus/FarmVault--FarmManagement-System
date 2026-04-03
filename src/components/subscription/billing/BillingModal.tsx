@@ -15,8 +15,15 @@ import {
   createPaymentSubmission,
   getPendingPaymentStatus,
 } from '@/services/billingSubmissionService';
+import {
+  extractMpesaCodeFromPastedMessage,
+  extractMpesaNameFromPastedMessage,
+} from '@/lib/mpesaExtract';
 import { getCompany } from '@/services/companyService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { useToast } from '@/hooks/use-toast';
+import { initiateMpesaStkPush } from '@/services/mpesaStkService';
+import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
 
 export interface BillingModalProps {
   open: boolean;
@@ -42,6 +49,7 @@ export function BillingModal({
   checkoutCycle,
 }: BillingModalProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
 
@@ -53,7 +61,7 @@ export function BillingModal({
   });
   const workspaceName = companyDoc?.name ?? null;
 
-  const [plan, setPlan] = useState<BillingSubmissionPlan>(() => checkoutPlan ?? 'basic');
+  const [plan, setPlan] = useState<BillingSubmissionPlan>(() => checkoutPlan ?? 'pro');
   const [cycle, setCycle] = useState<BillingSubmissionCycle>(() => checkoutCycle ?? 'monthly');
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -61,6 +69,8 @@ export function BillingModal({
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [transactionCode, setTransactionCode] = useState('');
   const [fieldErrors, setFieldErrors] = useState<MpesaFieldErrors>({});
+  const [stkLoading, setStkLoading] = useState(false);
+  const [stkCheckoutRequestId, setStkCheckoutRequestId] = useState<string | null>(null);
   const upgradeOpenTrackedRef = useRef(false);
   const planRef = useRef(plan);
   planRef.current = plan;
@@ -107,6 +117,8 @@ export function BillingModal({
       setMpesaPhone('');
       setTransactionCode('');
       setFieldErrors({});
+      setStkLoading(false);
+      setStkCheckoutRequestId(null);
     }
   }, [open]);
 
@@ -127,7 +139,7 @@ export function BillingModal({
 
   useEffect(() => {
     if (!open) return;
-    if (checkoutPlan) setPlan(checkoutPlan);
+    setPlan(checkoutPlan ?? 'pro');
     if (checkoutCycle) setCycle(checkoutCycle);
   }, [open, checkoutPlan, checkoutCycle]);
 
@@ -154,25 +166,88 @@ export function BillingModal({
     }
     const nextErrors: MpesaFieldErrors = {};
     if (!mpesaName.trim()) nextErrors.mpesaName = 'Enter the name as shown on the M-Pesa SMS.';
-    if (mpesaPhone.trim().length < 9) nextErrors.mpesaPhone = 'Enter a valid phone number.';
-    if (transactionCode.trim().length < 6) nextErrors.transactionCode = 'Enter the transaction code from the M-Pesa SMS.';
+    const phoneTrim = mpesaPhone.trim();
+    if (phoneTrim && phoneTrim.length < 8) nextErrors.mpesaPhone = 'Enter a valid phone number or leave blank.';
+    const txNorm = extractMpesaCodeFromPastedMessage(transactionCode.trim()) || transactionCode.trim().replace(/[^A-Za-z0-9]/g, '');
+    if (txNorm.length < 8) nextErrors.transactionCode = 'Enter the M-Pesa message or transaction code (at least 8 characters).';
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors(nextErrors);
       return;
     }
+
+    const finalTx =
+      extractMpesaCodeFromPastedMessage(transactionCode.trim()) ||
+      transactionCode.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 10);
 
     await mutation.mutateAsync({
       planCode: plan,
       billingCycle: cycle,
       amount,
       mpesaName: mpesaName.trim(),
-      mpesaPhone: mpesaPhone.trim(),
-      transactionCode: transactionCode.trim(),
+      mpesaPhone: phoneTrim,
+      transactionCode: finalTx,
       currency: 'KES',
     });
   };
 
-  const busy = mutation.isPending;
+  const handleStkPush = async () => {
+    setFormError(null);
+    if (!companyId) {
+      onOpenChange(false);
+      return;
+    }
+    const phoneTrim = mpesaPhone.trim();
+    if (phoneTrim.length < 9) {
+      toast({
+        variant: 'destructive',
+        title: 'Phone required for STK',
+        description: 'Enter the M-Pesa number that should receive the payment prompt (e.g. 07… or +254…).',
+      });
+      return;
+    }
+    setStkLoading(true);
+    try {
+      const res = await initiateMpesaStkPush({
+        companyId,
+        phoneNumber: phoneTrim,
+        planCode: plan,
+        billingCycle: cycle,
+      });
+      setStkCheckoutRequestId(res.checkoutRequestId);
+      toast({
+        title: 'Check your phone',
+        description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.',
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'STK request failed.';
+      setFormError(msg);
+      toast({ variant: 'destructive', title: 'STK failed', description: msg });
+    } finally {
+      setStkLoading(false);
+    }
+  };
+
+  const handleTransactionCodePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const raw = e.clipboardData.getData('text');
+    const looksLikeSms =
+      raw.length >= 25 ||
+      /\bconfirmed\b/i.test(raw) ||
+      /\bm-?pesa\b/i.test(raw) ||
+      /\bsafaricom\b/i.test(raw);
+    if (!looksLikeSms) return;
+    const code = extractMpesaCodeFromPastedMessage(raw);
+    if (code.length < 8) return;
+    e.preventDefault();
+    setTransactionCode(code);
+    setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
+    const name = extractMpesaNameFromPastedMessage(raw);
+    if (name && !mpesaName.trim()) {
+      setMpesaName(name);
+      setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
+    }
+  };
+
+  const busy = mutation.isPending || stkLoading;
   const showPendingBanner = !success && (pendingStatus?.hasPending ?? false);
 
   return (
@@ -232,6 +307,18 @@ export function BillingModal({
                   </div>
                 ) : null}
 
+                {formError ? (
+                  <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs text-destructive sm:mb-6 sm:px-4 sm:py-3 sm:text-sm">
+                    {formError}
+                  </div>
+                ) : null}
+
+                {stkCheckoutRequestId ? (
+                  <div className="mb-4 sm:mb-6">
+                    <StkPushConfirmation checkoutRequestId={stkCheckoutRequestId} />
+                  </div>
+                ) : null}
+
                 {/*
                   Mobile (<lg): plan → billing cycle → summary → M-Pesa (flex order).
                   Desktop (lg+): plan + cycle + form in col 1–3; sticky summary in col 4–5.
@@ -283,11 +370,14 @@ export function BillingModal({
                       setTransactionCode(v);
                       if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
                     }}
+                    onTransactionCodePaste={handleTransactionCodePaste}
                     fieldErrors={fieldErrors}
                     disabled={busy}
                     onSubmit={() => void handleSubmit()}
                     onDismiss={() => onOpenChange(false)}
-                    submitLoading={busy}
+                    submitLoading={mutation.isPending}
+                    onStkPush={() => void handleStkPush()}
+                    stkLoading={stkLoading}
                     className="order-4 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start"
                   />
                 </div>

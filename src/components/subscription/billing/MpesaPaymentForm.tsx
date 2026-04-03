@@ -13,11 +13,16 @@ export interface MpesaPaymentFormProps {
   onMpesaNameChange: (v: string) => void;
   onMpesaPhoneChange: (v: string) => void;
   onTransactionCodeChange: (v: string) => void;
+  /** Parse pasted SMS into confirmation code (and optionally name) in the parent. */
+  onTransactionCodePaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
   fieldErrors: MpesaFieldErrors;
   disabled?: boolean;
   onSubmit: () => void;
   onDismiss: () => void;
   submitLoading?: boolean;
+  /** Lipa Na M-Pesa STK (server-side Daraja; amount from selected plan/cycle). */
+  onStkPush?: () => void | Promise<void>;
+  stkLoading?: boolean;
   className?: string;
 }
 
@@ -28,11 +33,14 @@ export function MpesaPaymentForm({
   onMpesaNameChange,
   onMpesaPhoneChange,
   onTransactionCodeChange,
+  onTransactionCodePaste,
   fieldErrors,
   disabled,
   onSubmit,
   onDismiss,
   submitLoading,
+  onStkPush,
+  stkLoading,
   className,
 }: MpesaPaymentFormProps) {
   return (
@@ -40,12 +48,32 @@ export function MpesaPaymentForm({
       <div className="space-y-0.5 lg:space-y-1">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">M-Pesa details</p>
         <p className="text-[11px] leading-snug text-muted-foreground lg:text-xs lg:leading-normal">
-          Use the name and number from your M-Pesa confirmation.
+          Paste the confirmation SMS to fill the code automatically, or type the code. Name should match your M-Pesa
+          confirmation; phone helps if we need to trace the payment.
         </p>
       </div>
 
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:gap-3">
-        <div className="space-y-1.5 sm:col-span-2">
+      <div className="flex flex-col gap-2.5 lg:gap-3">
+        <div className="space-y-1.5">
+          <label htmlFor="billing-mpesa-tx" className="text-xs font-medium text-foreground">
+            M-Pesa message / Transaction code
+          </label>
+          <Input
+            id="billing-mpesa-tx"
+            className={cn(
+              'h-9 rounded-md bg-background font-mono text-xs lg:h-10 lg:rounded-lg lg:text-sm',
+              fieldErrors.transactionCode && 'border-destructive',
+            )}
+            value={transactionCode}
+            disabled={disabled}
+            onChange={(e) => onTransactionCodeChange(e.target.value)}
+            onPaste={onTransactionCodePaste}
+            placeholder="Paste Mpesa SMS or enter code"
+            autoComplete="off"
+          />
+          {fieldErrors.transactionCode ? <p className="text-xs text-destructive">{fieldErrors.transactionCode}</p> : null}
+        </div>
+        <div className="space-y-1.5">
           <label htmlFor="billing-mpesa-name" className="text-xs font-medium text-foreground">
             Name on M-Pesa
           </label>
@@ -65,7 +93,7 @@ export function MpesaPaymentForm({
         </div>
         <div className="space-y-1.5">
           <label htmlFor="billing-mpesa-phone" className="text-xs font-medium text-foreground">
-            Phone number
+            Phone number (optional)
           </label>
           <Input
             id="billing-mpesa-phone"
@@ -82,35 +110,20 @@ export function MpesaPaymentForm({
           />
           {fieldErrors.mpesaPhone ? <p className="text-xs text-destructive">{fieldErrors.mpesaPhone}</p> : null}
         </div>
-        <div className="space-y-1.5">
-          <label htmlFor="billing-mpesa-tx" className="text-xs font-medium text-foreground">
-            Transaction code
-          </label>
-          <Input
-            id="billing-mpesa-tx"
-            className={cn(
-              'h-9 rounded-md bg-background font-mono text-xs lg:h-10 lg:rounded-lg lg:text-sm',
-              fieldErrors.transactionCode && 'border-destructive',
-            )}
-            value={transactionCode}
-            disabled={disabled}
-            onChange={(e) => onTransactionCodeChange(e.target.value)}
-            placeholder="Paste SMS or enter code"
-            autoComplete="off"
-          />
-          {fieldErrors.transactionCode ? <p className="text-xs text-destructive">{fieldErrors.transactionCode}</p> : null}
-        </div>
       </div>
 
-      <Button
-        type="button"
-        variant="outline"
-        disabled
-        className="h-8 w-full cursor-not-allowed gap-2 rounded-md border-dashed text-[10px] text-muted-foreground lg:h-9 lg:rounded-lg lg:text-xs"
-      >
-        <Smartphone className="h-3.5 w-3.5" />
-        STK Push — coming soon
-      </Button>
+      {onStkPush ? (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled || stkLoading}
+          className="h-8 w-full gap-2 rounded-md text-[10px] lg:h-9 lg:rounded-lg lg:text-xs"
+          onClick={() => void onStkPush()}
+        >
+          <Smartphone className="h-3.5 w-3.5" />
+          {stkLoading ? 'Sending STK prompt…' : 'Pay with M-Pesa STK'}
+        </Button>
+      ) : null}
 
       <div className="flex flex-col-reverse gap-2 pt-0.5 sm:flex-row sm:justify-end lg:pt-1">
         <Button

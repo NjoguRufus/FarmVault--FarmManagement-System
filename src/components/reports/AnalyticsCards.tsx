@@ -71,7 +71,6 @@ function MetricCard({
 }
 
 export function AnalyticsCards({
-  mode,
   loading,
   bestCrop,
   totalRevenue,
@@ -81,7 +80,6 @@ export function AnalyticsCards({
   monthlyRevenue,
   cropProfitRows,
 }: {
-  mode: 'pro' | 'basic';
   loading: boolean;
   bestCrop: AnalyticsCropProfitRow | null;
   totalRevenue: number;
@@ -195,6 +193,5 @@ export function AnalyticsCards({
     </div>
   );
 
-  void mode; // mode retained for UI toggle; cards remain consistent
   return cards;
 }

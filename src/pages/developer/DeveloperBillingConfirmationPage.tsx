@@ -1,11 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import {
   approveSubscriptionPayment,
+  fetchMpesaStkPaymentsForDeveloper,
   fetchPendingPayments,
   fetchPayments,
   rejectSubscriptionPayment,
+  type MpesaStkPaymentRow,
   type PendingPayment,
 } from '@/services/developerService';
 import { Button } from '@/components/ui/button';
@@ -15,6 +17,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchSubscriptionAnalytics } from '@/services/developerService';
 import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
 import { setCompanyPaidAccess } from '@/services/developerService';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { initiateMpesaStkDeveloperTest } from '@/services/mpesaStkService';
+import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
+import { Input } from '@/components/ui/input';
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -33,10 +40,40 @@ function paymentStatusLabel(status: string): string {
   return status.replace(/_/g, ' ');
 }
 
+function stkPushStatusBadgeClass(status: string): string {
+  const s = status.toUpperCase();
+  if (s === 'PENDING') {
+    return 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200';
+  }
+  if (s === 'SUCCESS') {
+    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200';
+  }
+  if (s === 'FAILED') {
+    return 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200';
+  }
+  return 'border-border bg-muted text-muted-foreground';
+}
+
+function formatCheckoutIdDisplay(id: string | null | undefined): string {
+  if (!id) return '—';
+  return id.length > 20 ? `${id.slice(0, 14)}…${id.slice(-6)}` : id;
+}
+
 export default function DeveloperBillingConfirmationPage() {
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [tab, setTab] = useState<'pending' | 'approved' | 'rejected' | 'stk_confirmation'>('pending');
+  const [stkTestPhone, setStkTestPhone] = useState('');
+  const [stkTestLoading, setStkTestLoading] = useState(false);
+  const [stkTestCheckoutId, setStkTestCheckoutId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const { isDeveloper } = useAuth();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!isDeveloper && tab === 'stk_confirmation') {
+      setTab('pending');
+    }
+  }, [isDeveloper, tab]);
 
   const {
     data: payments,
@@ -71,6 +108,19 @@ export default function DeveloperBillingConfirmationPage() {
     queryFn: () => fetchPayments({ status: 'rejected', limit: 200, offset: 0 }),
   });
 
+  const {
+    data: stkPayments,
+    isLoading: loadingStkPayments,
+    isFetching: fetchingStkPayments,
+    error: stkPaymentsError,
+    refetch: refetchStkPayments,
+  } = useQuery({
+    queryKey: ['developer', 'mpesa-stk-payments'],
+    queryFn: fetchMpesaStkPaymentsForDeveloper,
+    enabled: isDeveloper === true,
+    staleTime: 15_000,
+  });
+
   const { data: analyticsResp } = useQuery({
     queryKey: ['developer', 'subscription-analytics'],
     queryFn: () => fetchSubscriptionAnalytics(),
@@ -100,6 +150,7 @@ export default function DeveloperBillingConfirmationPage() {
     void queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
     void queryClient.invalidateQueries({ queryKey: ['developer', 'subscription-analytics'] });
     void queryClient.invalidateQueries({ queryKey: ['developer', 'approved-payments-this-month'] });
+    void queryClient.invalidateQueries({ queryKey: ['developer', 'mpesa-stk-payments'] });
   };
 
   const approveMutation = useMutation({
@@ -305,6 +356,28 @@ export default function DeveloperBillingConfirmationPage() {
     });
   }, [rejectedRows, search]);
 
+  const stkRows = stkPayments ?? [];
+  const stkFiltered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return stkRows;
+    return stkRows.filter((r: MpesaStkPaymentRow) => {
+      const checkout = (r.checkout_request_id ?? '').toLowerCase();
+      const receipt = (r.mpesa_receipt ?? '').toLowerCase();
+      const phone = (r.phone ?? '').toLowerCase();
+      const st = (r.status ?? '').toLowerCase();
+      const cid = String(r.company_id ?? '').toLowerCase();
+      const desc = (r.result_desc ?? '').toLowerCase();
+      return (
+        checkout.includes(term) ||
+        receipt.includes(term) ||
+        phone.includes(term) ||
+        st.includes(term) ||
+        cid.includes(term) ||
+        desc.includes(term)
+      );
+    });
+  }, [stkRows, search]);
+
   const paymentStats = analyticsResp?.payment_stats;
   const pendingCount = Number(paymentStats?.pending_total_count ?? filtered.length ?? 0);
   const approvedCount = Number(paymentStats?.approved_count ?? approvedFiltered.length ?? 0);
@@ -325,13 +398,16 @@ export default function DeveloperBillingConfirmationPage() {
         isFetching ||
         fetchingApproved ||
         fetchingRejected ||
+        fetchingStkPayments ||
         approveMutation.isPending ||
-        rejectMutation.isPending
+        rejectMutation.isPending ||
+        stkTestLoading
       }
       onRefresh={() => {
         void refetch();
         void refetchApproved();
         void refetchRejected();
+        void refetchStkPayments();
       }}
       searchPlaceholder="Search company, plan, cycle, M-Pesa details, transaction code, status…"
       searchValue={search}
@@ -352,6 +428,12 @@ export default function DeveloperBillingConfirmationPage() {
       {rejectedError && (
         <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive text-sm">
           {(rejectedError as Error).message || 'Failed to load rejected payments.'}
+        </div>
+      )}
+
+      {stkPaymentsError && isDeveloper && (
+        <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive text-sm">
+          {(stkPaymentsError as Error).message || 'Failed to load STK push payments.'}
         </div>
       )}
 
@@ -383,11 +465,81 @@ export default function DeveloperBillingConfirmationPage() {
           </div>
         </section>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="space-y-3">
-          <TabsList className="w-full justify-start">
+        {isDeveloper ? (
+          <section className="fv-card space-y-3 border-dashed border-primary/25 bg-primary/[0.03]">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">M-Pesa STK test (KES 1)</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sends a real Daraja STK prompt for <span className="font-medium text-foreground">1 bob</span> using the
+                active <code className="rounded bg-muted px-1 py-0.5 text-[11px]">MPESA_ENV</code> credentials. Use a
+                sandbox test number in Daraja sandbox. Inserts a tracking row in{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">mpesa_payments</code> (not a subscription
+                submission).
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <label htmlFor="dev-stk-test-phone" className="text-xs font-medium text-foreground">
+                  Phone (receives prompt)
+                </label>
+                <Input
+                  id="dev-stk-test-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="07… or +254…"
+                  value={stkTestPhone}
+                  disabled={stkTestLoading}
+                  onChange={(e) => setStkTestPhone(e.target.value)}
+                  className="h-9 max-w-md"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-9 shrink-0"
+                disabled={stkTestLoading || stkTestPhone.trim().length < 9}
+                onClick={() => {
+                  void (async () => {
+                    setStkTestLoading(true);
+                    try {
+                      const res = await initiateMpesaStkDeveloperTest(stkTestPhone);
+                      setStkTestCheckoutId(res.checkoutRequestId);
+                      void queryClient.invalidateQueries({ queryKey: ['developer', 'mpesa-stk-payments'] });
+                      toast({
+                        title: 'STK test sent (KES 1)',
+                        description: res.customerMessage ?? 'Check the handset for the M-Pesa prompt.',
+                      });
+                    } catch (e) {
+                      const msg = e instanceof Error ? e.message : 'STK test failed.';
+                      toast({ variant: 'destructive', title: 'STK test failed', description: msg });
+                    } finally {
+                      setStkTestLoading(false);
+                    }
+                  })();
+                }}
+              >
+                {stkTestLoading ? 'Sending…' : 'Send KES 1 STK'}
+              </Button>
+            </div>
+            {stkTestCheckoutId ? (
+              <div className="pt-1">
+                <StkPushConfirmation checkoutRequestId={stkTestCheckoutId} />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="space-y-3">
+          <TabsList className="flex w-full flex-wrap justify-start gap-1">
             <TabsTrigger value="pending">Pending ({filtered.length})</TabsTrigger>
             <TabsTrigger value="approved">Confirmed ({approvedFiltered.length})</TabsTrigger>
             <TabsTrigger value="rejected">Rejected ({rejectedFiltered.length})</TabsTrigger>
+            {isDeveloper ? (
+              <TabsTrigger value="stk_confirmation">
+                STK confirmation ({stkFiltered.length})
+              </TabsTrigger>
+            ) : null}
           </TabsList>
 
           <TabsContent value="pending" className="space-y-2">
@@ -623,6 +775,98 @@ export default function DeveloperBillingConfirmationPage() {
               )
             )}
           </TabsContent>
+
+          {isDeveloper ? (
+            <TabsContent value="stk_confirmation" className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                M-Pesa STK (Daraja) push attempts and callbacks from{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-foreground/90">mpesa_payments</code>.
+                Separate from manual till submissions above.
+              </p>
+              {loadingStkPayments ? (
+                <div className="fv-card text-sm text-muted-foreground">Loading STK push payments…</div>
+              ) : !stkPaymentsError && stkFiltered.length === 0 ? (
+                <div className="fv-card text-sm text-muted-foreground">
+                  No STK push records yet. Billing checkout or the KES 1 test above will create rows here after Daraja
+                  accepts the push.
+                </div>
+              ) : stkFiltered.length > 0 ? (
+                  <div className="fv-card overflow-x-visible md:overflow-x-auto">
+                    <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[960px]">
+                      <thead className="border-b border-border/60 text-xs text-muted-foreground">
+                        <tr>
+                          <th className="py-2 text-left font-medium">Status</th>
+                          <th className="py-2 text-left font-medium">Checkout request</th>
+                          <th className="py-2 text-left font-medium">Company</th>
+                          <th className="py-2 text-left font-medium">Amount</th>
+                          <th className="py-2 text-left font-medium">Phone</th>
+                          <th className="py-2 text-left font-medium">Receipt</th>
+                          <th className="py-2 text-left font-medium">Result</th>
+                          <th className="py-2 text-left font-medium">Paid at</th>
+                          <th className="py-2 text-left font-medium">Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stkFiltered.map((r) => (
+                          <tr key={r.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                            <td className="py-3 pr-4 text-xs" data-label="Status">
+                              <Badge
+                                variant="outline"
+                                className={cn('font-normal uppercase', stkPushStatusBadgeClass(r.status))}
+                              >
+                                {r.status}
+                              </Badge>
+                            </td>
+                            <td
+                              className="max-md:items-start py-3 pr-4 font-mono text-[11px] text-muted-foreground"
+                              data-label="Checkout"
+                              title={r.checkout_request_id ?? undefined}
+                            >
+                              {formatCheckoutIdDisplay(r.checkout_request_id)}
+                            </td>
+                            <td className="max-md:items-start py-3 pr-4 text-xs" data-label="Company">
+                              {r.company_id ? (
+                                <>
+                                  <div className="font-mono text-[11px] text-foreground">{r.company_id}</div>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="py-3 pr-4 text-xs" data-label="Amount">
+                              {r.amount != null && r.amount !== ''
+                                ? `KES ${Number(r.amount).toLocaleString()}`
+                                : '—'}
+                            </td>
+                            <td className="py-3 pr-4 font-mono text-xs" data-label="Phone">
+                              {r.phone ?? '—'}
+                            </td>
+                            <td className="py-3 pr-4 font-mono text-xs" data-label="Receipt">
+                              {r.mpesa_receipt ?? '—'}
+                            </td>
+                            <td className="max-md:items-start py-3 pr-4 text-xs text-muted-foreground" data-label="Result">
+                              {r.result_desc ? (
+                                <span className="line-clamp-2" title={r.result_desc}>
+                                  {r.result_desc}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="py-3 pr-4 text-xs md:whitespace-nowrap" data-label="Paid at">
+                              {r.paid_at ?? '—'}
+                            </td>
+                            <td className="py-3 pr-4 text-xs md:whitespace-nowrap" data-label="Created">
+                              {r.created_at ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              ) : null}
+            </TabsContent>
+          ) : null}
         </Tabs>
 
         {/* Approval duration is derived from the submitted billing_cycle (monthly/seasonal/annual). */}

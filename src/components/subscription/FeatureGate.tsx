@@ -4,7 +4,8 @@
  * Pro pages remain visible in navigation but content is locked.
  */
 
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Lock, Sparkles, ArrowRight } from 'lucide-react';
 import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
@@ -13,9 +14,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 
-// Prevent multiple "Upgrade to Pro" cards stacking up on the same page.
-// Keyed by route (or an optional override).
+// Prevent multiple "Upgrade to Pro" cards stacking on one screen at once.
+// Keyed by route path (or upgradeCardGroupKey). Must reset when the route changes
+// and when the claiming instance unmounts, or the upgrade UI disappears on revisit / strict mode.
 const upgradeCardShownGroups = new Set<string>();
+let lastPathnameForUpgradeDedupe: string | null = null;
 
 export interface FeatureGateProps {
   /** The feature key to check access for */
@@ -34,9 +37,21 @@ export interface FeatureGateProps {
   onUpgradeClick?: () => void;
   /**
    * Optional group key for suppressing duplicate upgrade cards.
-   * Defaults to the current route path, so only one upgrade card is shown per page.
+   * Defaults to the current route `pathname`, so only one "Upgrade to Pro" card
+   * shows per screen (prevents 2+ cards).
    */
   upgradeCardGroupKey?: string;
+  /**
+   * When false, locked state renders a height placeholder only (no upgrade card).
+   * Use with a page-level banner (e.g. dashboard).
+   */
+  showUpgradeCard?: boolean;
+  /**
+   * `full` — large glass upgrade card (deduped once per route).
+   * `inline` — compact padlock + text only (replaces widget).
+   * `blur-data` — keep widget chrome; blur data; inject `proLocked` / `onProUpgrade` on children (StatCard, charts).
+   */
+  upgradePresentation?: 'full' | 'inline' | 'blur-data';
 }
 
 export function FeatureGate({
@@ -48,14 +63,39 @@ export function FeatureGate({
   className,
   onUpgradeClick,
   upgradeCardGroupKey,
+  showUpgradeCard = true,
+  upgradePresentation = 'full',
 }: FeatureGateProps) {
+  const { pathname } = useLocation();
+  const groupKey = upgradeCardGroupKey ?? pathname;
+
+  // New route → clear so the first locked gate on this page can show the upgrade card again.
+  if (upgradePresentation === 'full' && lastPathnameForUpgradeDedupe !== pathname) {
+    upgradeCardShownGroups.clear();
+    lastPathnameForUpgradeDedupe = pathname;
+  }
+
+  // Tracks whether *this* FeatureGate instance claimed the upgrade slot.
+  // Important: without this, on rerender the global Set already contains groupKey,
+  // and the upgrade card would incorrectly switch to the blurred-only state.
+  const hasClaimedUpgradeSlotRef = useRef(false);
+  useLayoutEffect(() => {
+    if (upgradePresentation !== 'full') return;
+    return () => {
+      if (hasClaimedUpgradeSlotRef.current) {
+        upgradeCardShownGroups.delete(groupKey);
+        hasClaimedUpgradeSlotRef.current = false;
+      }
+    };
+  }, [groupKey, upgradePresentation]);
+
   const { plan, isTrial, status, isLoading, isDeveloper } = useEffectivePlanAccess();
   const { canAccess } = useFeatureAccess(feature);
 
   // Loading state
   if (isLoading) {
     return (
-      <div className={cn('fv-card animate-pulse', className)}>
+      <div className={cn('fv-card animate-pulse min-h-[160px]', className)}>
         <div className="h-32 bg-muted/50 rounded-lg" />
       </div>
     );
@@ -71,46 +111,96 @@ export function FeatureGate({
     return <>{children}</>;
   }
 
-  const displayTitle = title ?? 'This feature is available on Pro';
-  const displayDescription =
-    description ??
-    'Upgrade to Pro to unlock advanced tools and insights.';
+  if (!showUpgradeCard) {
+    return (
+      <div className={cn('relative', className)}>
+        <div className="w-full min-h-[160px] rounded-xl border border-border/50 bg-card/60" aria-hidden="true" />
+      </div>
+    );
+  }
 
   const handleUpgrade = () => {
     if (onUpgradeClick) {
       onUpgradeClick();
     } else {
-      // Default: open upgrade prompt (billing modal) without hiding locked pages/features.
       openUpgradeModal({ checkoutPlan: 'pro' });
     }
   };
 
-  const groupKey =
-    upgradeCardGroupKey ?? (typeof window !== 'undefined' ? window.location.pathname : 'ssr');
-
-  // Show full upgrade card only once per group, to avoid multiple stacked cards.
-  // Subsequent locked gates show blurred/hidden content instead of another upgrade card.
-  let shouldShowUpgradeCard = true;
-  if (upgradeCardShownGroups.has(groupKey)) {
-    shouldShowUpgradeCard = false;
-  } else {
-    upgradeCardShownGroups.add(groupKey);
+  if (upgradePresentation === 'blur-data') {
+    return (
+      <div className={cn(className)}>
+        {React.Children.map(children, (child) => {
+          if (!React.isValidElement(child)) return child;
+          return React.cloneElement(
+            child as React.ReactElement<{ proLocked?: boolean; onProUpgrade?: () => void }>,
+            { proLocked: true, onProUpgrade: handleUpgrade },
+          );
+        })}
+      </div>
+    );
   }
 
-  // If we already rendered the upgrade card for this group, don't render another full card.
+  const displayTitle = title ?? 'This feature is available on Pro';
+  const displayDescription =
+    description ??
+    'Upgrade to Pro to unlock advanced tools and insights.';
+
+  if (upgradePresentation === 'inline') {
+    const inlineSubtitle = description ?? 'Upgrade to Pro to unlock.';
+    return (
+      <div className={cn('relative', className)}>
+        <div
+          className={cn(
+            'col-span-full flex min-h-[160px] w-full flex-col items-center justify-center gap-2 rounded-xl border border-border/50 bg-card/50 px-3 py-4 text-center shadow-sm backdrop-blur-sm',
+            'md:min-h-[180px] md:gap-2.5 md:py-5',
+          )}
+          role="region"
+          aria-label="Pro feature"
+        >
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15"
+            aria-hidden
+          >
+            <Lock className="h-5 w-5" strokeWidth={2} />
+          </div>
+          <p className="max-w-[16rem] text-xs font-semibold leading-snug text-foreground sm:text-sm">
+            {displayTitle}
+          </p>
+          <p className="max-w-[18rem] text-[11px] leading-relaxed text-muted-foreground sm:text-xs">
+            {inlineSubtitle}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-1 h-8 border-primary/25 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10"
+            onClick={handleUpgrade}
+          >
+            Upgrade to unlock
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show full upgrade card only once per group among simultaneously mounted instances.
+  // If this instance already claimed the slot, keep showing it on rerenders.
+  const globalHasClaim = upgradeCardShownGroups.has(groupKey);
+  const shouldShowUpgradeCard = hasClaimedUpgradeSlotRef.current || !globalHasClaim;
+
+  if (!globalHasClaim && shouldShowUpgradeCard) {
+    upgradeCardShownGroups.add(groupKey);
+    hasClaimedUpgradeSlotRef.current = true;
+  }
+
+  // If another instance already claimed the upgrade slot, render blurred-only placeholder.
   if (!shouldShowUpgradeCard) {
     return (
       <div className={cn('relative', className)}>
-        {!hideContent ? (
-          <div
-            className="pointer-events-none select-none opacity-30 blur-sm"
-            aria-hidden="true"
-          >
-            {children}
-          </div>
-        ) : (
-          <div className="min-h-[200px]" aria-hidden="true" />
-        )}
+        {/* Duplicate locked widgets should not render another upgrade card.
+            Keep layout stable and avoid blurring the surrounding dashboard background. */}
+        <div className="w-full min-h-[160px] rounded-xl border border-border/50 bg-card/60" aria-hidden="true" />
       </div>
     );
   }
@@ -118,44 +208,43 @@ export function FeatureGate({
   return (
     <div className={cn('relative', className)}>
       {/* Inline upgrade card (no absolute/fixed overlay) */}
-      <div className="col-span-full w-full min-h-[200px] flex items-center justify-center py-8">
-        <div className="fv-card max-w-md w-full text-center space-y-4 bg-background/95 backdrop-blur-md border-primary/20 shadow-lg">
-          {/* Lock icon */}
-          <div className="flex justify-center">
-            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-              <Lock className="h-6 w-6 text-primary" />
+      <div className="col-span-full w-full min-h-[160px] flex items-center justify-center py-8">
+        <div className="fv-app-lock-glass-card max-w-md w-full p-6 text-center space-y-4">
+          <div className="mx-auto flex w-fit items-center justify-center">
+            <div className="fv-app-lock-icon-bubble flex h-[72px] w-[72px] items-center justify-center">
+              <Lock className="relative z-[1] h-9 w-9 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)]" aria-hidden />
             </div>
           </div>
 
-          {/* Title and description */}
           <div className="space-y-2">
-            <h3 className="text-base font-semibold text-foreground flex items-center justify-center gap-2">
+            <h3 className="text-base font-semibold tracking-[-0.02em] text-white flex items-center justify-center gap-2">
               {displayTitle}
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/10 text-white/90 border border-white/15">
                 <Sparkles className="h-3 w-3" />
                 PRO
               </span>
             </h3>
-            <p className="text-sm text-muted-foreground">{displayDescription}</p>
+            <p className="text-sm leading-[1.5] text-white/75">{displayDescription}</p>
           </div>
 
-          {/* Current plan info */}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-white/70">
             You&apos;re currently on{' '}
-            <span className="font-medium text-foreground capitalize">
+            <span className="font-medium text-white capitalize">
               {status === 'trial' ? 'Free Trial' : plan}
             </span>
             {isTrial && ' (trial)'}
           </p>
 
-          {/* Upgrade button */}
-          <Button onClick={handleUpgrade} className="w-full gap-2" size="default">
+          <Button
+            onClick={handleUpgrade}
+            className="fv-app-lock-primary-btn w-full text-sm"
+            size="default"
+          >
             Upgrade to Pro
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="relative z-[1] h-4 w-4" />
           </Button>
 
-          {/* Subtle note */}
-          <p className="text-[11px] text-muted-foreground">Unlock all features with a Pro subscription</p>
+          <p className="text-[11px] text-white/60">Unlock all features with a Pro subscription</p>
         </div>
       </div>
     </div>

@@ -74,6 +74,33 @@ export type ListPaymentsRpcResponse = {
   total: number;
 };
 
+/** Rows from `public.mpesa_payments` (M-Pesa STK push lifecycle). Developer RLS can read all. */
+export type MpesaStkPaymentRow = {
+  id: string;
+  checkout_request_id: string | null;
+  company_id: string | null;
+  mpesa_receipt: string | null;
+  amount: number | string | null;
+  phone: string | null;
+  status: string;
+  result_desc: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
+export async function fetchMpesaStkPaymentsForDeveloper(): Promise<MpesaStkPaymentRow[]> {
+  const { data, error } = await supabase
+    .from('mpesa_payments')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(300);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to load STK payments');
+  }
+  return (data ?? []) as MpesaStkPaymentRow[];
+}
+
 // ---------------------------------------------------------------------------
 // Subscription analytics (developer-only)
 // ---------------------------------------------------------------------------

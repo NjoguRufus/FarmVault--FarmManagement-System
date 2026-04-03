@@ -5,6 +5,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
 import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
+import { FeatureGate } from '@/components/subscription';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { getFinanceExpenses, createFinanceExpense } from '@/services/financeExpenseService';
@@ -985,24 +986,28 @@ export default function ExpensesPage() {
           </Popover>
         </div>
 
-        {/* Pie + Bar charts side by side (no empty space) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ExpensesPieChart
-            data={Object.entries(
-              filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-                acc[e.category] = (acc[e.category] || 0) + e.amount;
-                return acc;
-              }, {}),
-            ).map(([category, amount]) => ({ category, amount }))}
-          />
-          <ExpensesBarChart
-            data={Object.entries(
-              filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-                acc[e.category] = (acc[e.category] || 0) + e.amount;
-                return acc;
-              }, {}),
-            ).map(([category, amount]) => ({ category, amount }))}
-          />
+        {/* Pie + Bar charts — Basic: titles visible, data blurred + Pro overlay */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
+            <ExpensesPieChart
+              data={Object.entries(
+                filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                  acc[e.category] = (acc[e.category] || 0) + e.amount;
+                  return acc;
+                }, {}),
+              ).map(([category, amount]) => ({ category, amount }))}
+            />
+          </FeatureGate>
+          <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
+            <ExpensesBarChart
+              data={Object.entries(
+                filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                  acc[e.category] = (acc[e.category] || 0) + e.amount;
+                  return acc;
+                }, {}),
+              ).map(([category, amount]) => ({ category, amount }))}
+            />
+          </FeatureGate>
         </div>
       </div>
 
