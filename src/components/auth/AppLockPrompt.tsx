@@ -134,36 +134,69 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
     setStep('enter');
   };
 
-  // Intro screen
+  // Intro screen — premium glass + neumorphic card over blurred farm-green backdrop
   if (step === 'intro') {
     return (
-      <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-card rounded-2xl shadow-xl border p-6 space-y-6">
-          <div className="text-center space-y-4">
-            <div className="h-16 w-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
-              <Shield className="h-8 w-8 text-primary" />
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="app-lock-intro-title"
+        aria-describedby="app-lock-intro-desc"
+      >
+        <div
+          className="fv-app-lock-backdrop absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(165deg, hsl(150 38% 12% / 0.4) 0%, hsl(155 42% 8% / 0.38) 45%, hsl(160 45% 6% / 0.44) 100%)',
+            boxShadow: 'inset 0 0 120px rgba(0, 0, 0, 0.42), inset 0 0 60px rgba(0, 0, 0, 0.2)',
+          }}
+          aria-hidden
+        />
+        <div className="fv-app-lock-modal-shell relative z-[1] w-full max-w-[420px]">
+          <div className="fv-app-lock-glass-card p-7 space-y-6">
+            <div className="text-center space-y-5">
+              <div className="fv-app-lock-icon-bubble mx-auto flex h-[72px] w-[72px] items-center justify-center rounded-full">
+                <Shield className="relative z-[1] h-9 w-9 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)]" aria-hidden />
+              </div>
+              <div className="space-y-2">
+                <h1
+                  id="app-lock-intro-title"
+                  className="text-xl font-semibold tracking-[-0.02em] text-white"
+                >
+                  New Feature: App Lock
+                </h1>
+                <p
+                  id="app-lock-intro-desc"
+                  className="text-sm leading-[1.5] text-[rgba(255,255,255,0.75)]"
+                >
+                  Protect FarmVault on this device with a PIN.
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-semibold text-foreground">New Feature: App Lock</h1>
-              <p className="text-sm text-muted-foreground mt-2">
-                Protect FarmVault on this device with a PIN.
-              </p>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleStartSetup}
+                className="fv-app-lock-primary-btn text-sm"
+              >
+                <Lock className="relative z-[1] h-4 w-4 shrink-0" aria-hidden />
+                <span className="relative z-[1]">Create PIN</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSkip}
+                className="flex w-full items-center justify-center rounded-xl border border-transparent bg-white/[0.06] px-4 py-3 text-sm text-[rgba(255,255,255,0.55)] backdrop-blur-md transition-colors hover:bg-white/[0.1] hover:text-[rgba(255,255,255,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+              >
+                Skip
+              </button>
             </div>
-          </div>
 
-          <div className="space-y-3">
-            <Button onClick={handleStartSetup} className="w-full gap-2">
-              <Lock className="h-4 w-4" />
-              Create PIN
-            </Button>
-            <Button onClick={handleSkip} variant="ghost" className="w-full text-muted-foreground">
-              Skip
-            </Button>
+            <p className="text-center text-xs leading-relaxed text-[rgba(255,255,255,0.5)]">
+              You can always enable this later in Settings
+            </p>
           </div>
-
-          <p className="text-center text-xs text-muted-foreground">
-            You can always enable this later in Settings
-          </p>
         </div>
       </div>
     );

@@ -22,6 +22,7 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { cn } from "@/lib/utils";
 import { useDashboardRoles } from "@/hooks/useDashboardRoles";
 import { useAuth } from "@/contexts/AuthContext";
+import { writeDashboardSurfacePreference } from "@/lib/dashboard/dashboardSurfacePreference";
 
 const COMPANY_HOME_PATH = "/company";
 const AMBASSADOR_PORTAL_PATH = "/ambassador/dashboard";
@@ -133,14 +134,20 @@ export function FarmVaultUserMenu({
             </DropdownMenuLabel>
             <DropdownMenuItem
               className={cn("cursor-pointer gap-2", !onAmbassadorSurface && "bg-muted/50")}
-              onClick={() => navigate(COMPANY_HOME_PATH)}
+              onClick={() => {
+                writeDashboardSurfacePreference("company");
+                navigate(COMPANY_HOME_PATH);
+              }}
             >
               <LayoutDashboard className="h-4 w-4 shrink-0 opacity-80" />
               Company Dashboard
             </DropdownMenuItem>
             <DropdownMenuItem
               className={cn("cursor-pointer gap-2", onAmbassadorSurface && "bg-muted/50")}
-              onClick={() => navigate(AMBASSADOR_PORTAL_PATH)}
+              onClick={() => {
+                writeDashboardSurfacePreference("ambassador");
+                navigate(AMBASSADOR_PORTAL_PATH);
+              }}
             >
               <Sparkles className="h-4 w-4 shrink-0 opacity-80" />
               Ambassador Portal

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, FileText, Loader2, Plus, RefreshCw, Search, Sprout } from 'lucide-react';
+import { FileText, Loader2, Plus, RefreshCw, Search, Sprout } from 'lucide-react';
 import { RecordsCropGrid } from '@/components/records/RecordsCropGrid';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -32,6 +32,73 @@ type FarmNotebookEntrySlim = {
   sent_by_developer?: boolean | null;
   developer_updated?: boolean | null;
 };
+
+function stripHtml(html: string): string {
+  const s = String(html ?? '');
+  if (!s) return '';
+  if (typeof document === 'undefined') {
+    return s.replace(/<[^>]+>/g, ' ');
+  }
+  const div = document.createElement('div');
+  div.innerHTML = s;
+  return div.textContent || '';
+}
+
+function developerNotePreview(content: string | null | undefined): string {
+  const preview = stripHtml(String(content ?? ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  return preview || '—';
+}
+
+function formatDeveloperNoteListDate(iso: string | null | undefined, fallback?: string | null): string {
+  const raw = iso ?? fallback ?? '';
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+function developerNoteCompanyLabel(note: FarmNotebookEntrySlim, nameById: Map<string, string>): string {
+  const cid = note.company_id != null ? String(note.company_id).trim() : '';
+  if (!cid) return 'FarmVault';
+  return nameById.get(cid) ?? cid;
+}
+
+function DeveloperNoteListRow({
+  note,
+  companyName,
+  showUpdatedBadge,
+}: {
+  note: FarmNotebookEntrySlim;
+  companyName: string;
+  showUpdatedBadge?: boolean;
+}) {
+  const preview = developerNotePreview(note.content);
+  const formattedDate = formatDeveloperNoteListDate(note.updated_at, note.created_at);
+  const to = `/developer/records/${encodeURIComponent(String(note.crop_slug ?? ''))}/${encodeURIComponent(note.id)}`;
+
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 py-3 px-2 hover:bg-muted/40 cursor-pointer"
+    >
+      <FileText className="w-4 h-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
+        {showUpdatedBadge ? (
+          <span className="shrink-0 rounded bg-[#e6f4ea] px-1.5 py-0.5 text-[10px] font-semibold text-[#166534]">
+            Updated
+          </span>
+        ) : null}
+        <span className="font-medium truncate shrink min-w-0">{note.title?.trim() || 'Untitled'}</span>
+        <span className="text-muted-foreground truncate min-w-0">{preview}</span>
+      </div>
+      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">{companyName}</span>
+      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">{formattedDate}</span>
+    </Link>
+  );
+}
 
 function glassCard(className?: string) {
   return cn(
@@ -65,6 +132,15 @@ export default function DeveloperRecordsPage() {
   });
 
   const companies = companiesQuery.data?.items ?? [];
+  const companyNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of companies) {
+      const id = String(c.company_id ?? c.id ?? '').trim();
+      if (!id) continue;
+      m.set(id, String(c.company_name ?? c.name ?? id));
+    }
+    return m;
+  }, [companies]);
   const scopedCompanyId = selectedCompany === ALL_COMPANIES ? null : selectedCompany;
 
   function slugify(input: string): string {
@@ -484,7 +560,7 @@ export default function DeveloperRecordsPage() {
             />
           )}
 
-          <div className={cn(glassCard(), 'p-6')}>
+          <div className="pt-2">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className="text-lg font-semibold text-foreground">Notes</h2>
               <div className="max-w-md w-full">
@@ -492,7 +568,7 @@ export default function DeveloperRecordsPage() {
                   placeholder="Search notes…"
                   value={noteSearch}
                   onChange={(e) => setNoteSearch(e.target.value)}
-                  className="rounded-xl border-black/10 bg-background/60 dark:border-white/10"
+                  className="h-9 border-border bg-background"
                 />
               </div>
             </div>
@@ -505,81 +581,35 @@ export default function DeveloperRecordsPage() {
               ) : (
                 <div className="space-y-6">
                   {filteredUpdatedNotes.length > 0 ? (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold text-foreground">Updated</h3>
-                      <ul className="space-y-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground mb-2">Updated</h3>
+                      <div className="divide-y divide-border border-t border-border">
                         {filteredUpdatedNotes.slice(0, 30).map((n) => (
-                          <li key={`updated-${n.id}`} className="p-4 rounded-xl border border-[#1F7A63]/20 bg-[#1F7A63]/5 hover:bg-[#1F7A63]/10 transition">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1 space-y-2">
-                                <div className="w-fit rounded-md bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
-                                  Updated
-                                </div>
-                                <h3 className="text-base font-semibold text-foreground truncate">{n.title || 'Untitled'}</h3>
-                                <div className="text-sm text-muted-foreground line-clamp-2">
-                                  {(n.content ?? '').trim().slice(0, 220) || '—'}
-                                </div>
-                              </div>
-                              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-                                <Button type="button" size="sm" variant="outline" className="rounded-lg" asChild>
-                                  <Link
-                                    to={`/developer/records/${encodeURIComponent(
-                                      String(n.crop_slug ?? ''),
-                                    )}/${encodeURIComponent(n.id)}`}
-                                  >
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    Open
-                                  </Link>
-                                </Button>
-                              </div>
-                            </div>
-                          </li>
+                          <DeveloperNoteListRow
+                            key={`updated-${n.id}`}
+                            note={n}
+                            companyName={developerNoteCompanyLabel(n, companyNameById)}
+                            showUpdatedBadge
+                          />
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   ) : null}
 
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-foreground">All</h3>
-                    <ul className="space-y-3">
-                      {filteredNotes.slice(0, 60).map((n) => (
-                        <li key={n.id} className="p-4 rounded-xl border border-border bg-card hover:bg-muted/40 transition">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <h3 className="text-base font-semibold text-foreground truncate">{n.title || 'Untitled'}</h3>
-                              <div className="text-sm text-muted-foreground line-clamp-2">
-                                {(n.content ?? '').trim().slice(0, 220) || '—'}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                <span>{String(n.crop_slug ?? '').trim() || 'unknown'}</span>
-                                {n.company_id ? <span>· {String(n.company_id).slice(0, 8)}…</span> : null}
-                                <span>
-                                  ·{' '}
-                                  {n.updated_at
-                                    ? new Date(n.updated_at).toLocaleString()
-                                    : n.created_at
-                                      ? new Date(n.created_at).toLocaleString()
-                                      : ''}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-                              <Button type="button" size="sm" variant="outline" className="rounded-lg" asChild>
-                                <Link
-                                  to={`/developer/records/${encodeURIComponent(
-                                    String(n.crop_slug ?? ''),
-                                  )}/${encodeURIComponent(n.id)}`}
-                                >
-                                  <Eye className="h-4 w-4 mr-1" />
-                                  Open
-                                </Link>
-                              </Button>
-                            </div>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  {filteredNotes.length > 0 ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground mb-2">All</h3>
+                      <div className="divide-y divide-border border-t border-border">
+                        {filteredNotes.slice(0, 60).map((n) => (
+                          <DeveloperNoteListRow
+                            key={n.id}
+                            note={n}
+                            companyName={developerNoteCompanyLabel(n, companyNameById)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
