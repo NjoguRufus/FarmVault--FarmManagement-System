@@ -25,3 +25,32 @@ export function extractMpesaCodeFromPastedMessage(raw: string): string {
   }
   return out.toUpperCase();
 }
+
+const SMS_NOISE = /^(confirmed|mpesa|ksh|bal|balance|new|safaricom|fuliza|lipa)$/i;
+
+/**
+ * Best-effort payer / counterparty name from a pasted M-Pesa SMS (Safaricom-style).
+ * Fills the "Name on M-Pesa" field when the user pastes a full message.
+ */
+export function extractMpesaNameFromPastedMessage(raw: string): string {
+  const normalized = raw.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+
+  const tryCapture = (re: RegExp): string => {
+    const m = normalized.match(re);
+    if (!m?.[1]) return '';
+    const name = m[1].replace(/\s+/g, ' ').trim();
+    if (name.length < 2) return '';
+    const firstWord = name.split(/\s/)[0] ?? '';
+    if (SMS_NOISE.test(firstWord)) return '';
+    return name;
+  };
+
+  return (
+    tryCapture(
+      /\b(?:from|received from)\s+([A-Za-z][A-Za-z0-9\s.'-]{1,48}?)(?=\s+on\s+\d|\s+on\s+[A-Z]{3}|\.\s|$|,|\s+Balance|\s+NEW\s+M-PESA|$)/i,
+    ) ||
+    tryCapture(/\bpaid\s+to\s+([A-Za-z][A-Za-z0-9\s.'-]{1,48}?)\s+from\b/i) ||
+    ''
+  );
+}

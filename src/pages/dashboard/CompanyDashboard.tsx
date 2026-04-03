@@ -1137,8 +1137,14 @@ export function CompanyDashboard() {
     companyDataQueriesEnabled &&
     (Boolean(projectsFetchError) || expensesSupaError);
 
+  const hasFinancialStatCards =
+    showRevenueCard || showExpensesCard || showProfitLossCard || showBudgetCard;
+  const revenueChangeLabel = isHarvestActive ? 'Harvest revenue (current cycle)' : 'vs last month';
+  const showCropDashboard = !isHarvestActive && showCropStageCard;
+  const hasRightStack = showRevenueCard || showExpensesCard;
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-2 animate-fade-in">
       {showTenantLoadIssueBanner && (
         <Alert variant="destructive" className="border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
           <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -1215,8 +1221,8 @@ export function CompanyDashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="space-y-3" data-tour="dashboard-stats">
+      {/* Stats: structured grid when crop + financials; else crop-only or simple 2-col financials */}
+      <div className="space-y-2" data-tour="dashboard-stats">
         {!activeProject && dashboardFocusProjectId ? (
           <div
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/[0.07] px-3 py-2 text-sm shadow-sm backdrop-blur-sm transition-colors"
@@ -1237,76 +1243,51 @@ export function CompanyDashboard() {
             </button>
           </div>
         ) : null}
-        {!isHarvestActive ? (
-          <div
-            className={cn(
-              'grid grid-cols-1 gap-3 items-stretch',
-              (showExpensesCard || showRevenueCard) && 'md:grid-cols-2',
-            )}
-          >
-            {showCropStageCard ? (
-              <div data-tour="crop-stage-progress" className="min-w-0 space-y-1">
-                {blocksSummary != null && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">{blocksSummary.count} Blocks Active</span>
-                    <span>·</span>
-                    <span>{blocksSummary.weightedProgressPercent}% season progress</span>
-                  </div>
-                )}
-                <CropStageProgressCard
-                  farmProgressRows={farmProgressRowsForAllProjects}
-                  farmProgressDashboardFocusProjectId={!activeProject ? dashboardFocusProjectId : null}
-                  onFarmProgressDashboardFocusToggle={handleFarmProgressDashboardFocusToggle}
-                  farmProgressStatusFilter={farmProgressDashboardFilter}
-                  onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
-                  projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
-                  stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
-                  activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
-                  knowledgeDetection={
-                    loneProjectCropCardProps?.knowledgeDetection ?? activeProjectKnowledgeDetection
-                  }
-                  recentActivityLogs={mergedActivityLogs}
-                  advisorySummary={advisorySummary}
-                  compact={user?.role === 'employee'}
-                />
-              </div>
-            ) : showRevenueCard ? (
-              <StatCard
-                title="Total Revenue"
-                value={`KES ${displayTotalRevenue.toLocaleString()}`}
-                change={15.3}
-                changeLabel="vs last month"
-                icon={<TrendingUp className="h-4 w-4" />}
-                variant="gold"
-                compact
-              />
-            ) : showExpensesCard ? (
-              <div data-tour="expenses-summary-card">
-                <StatCard
-                  title="Total Expenses"
-                  value={`KES ${displayTotalExpenses.toLocaleString()}`}
-                  change={12.5}
-                  changeLabel="vs last month"
-                  icon={<DollarSign className="h-4 w-4" />}
-                  variant="default"
-                  compact
-                />
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 text-sm text-muted-foreground">
-                No dashboard cards enabled for your account.
-              </div>
-            )}
 
-            {(showExpensesCard || showRevenueCard) && (
-              <div className="grid grid-cols-1 gap-3 md:h-full md:grid-rows-2">
+        {showCropDashboard && hasFinancialStatCards ? (
+          <div className="dashboard-grid" data-layout="dashboard-grid">
+            <div
+              data-tour="crop-stage-progress"
+              className={cn(
+                'min-w-0 space-y-1 mb-0',
+                'lg:col-start-1 lg:row-start-1',
+                !hasRightStack && 'lg:col-span-2',
+              )}
+            >
+              {blocksSummary != null && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{blocksSummary.count} Blocks Active</span>
+                  <span>·</span>
+                  <span>{blocksSummary.weightedProgressPercent}% season progress</span>
+                </div>
+              )}
+              <CropStageProgressCard
+                farmProgressRows={farmProgressRowsForAllProjects}
+                farmProgressDashboardFocusProjectId={!activeProject ? dashboardFocusProjectId : null}
+                onFarmProgressDashboardFocusToggle={handleFarmProgressDashboardFocusToggle}
+                farmProgressStatusFilter={farmProgressDashboardFilter}
+                onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
+                projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
+                stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
+                activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
+                knowledgeDetection={
+                  loneProjectCropCardProps?.knowledgeDetection ?? activeProjectKnowledgeDetection
+                }
+                recentActivityLogs={mergedActivityLogs}
+                advisorySummary={advisorySummary}
+                compact={user?.role === 'employee'}
+              />
+            </div>
+
+            {hasRightStack ? (
+              <div className="dashboard-grid-right-stack mb-0 lg:col-start-2 lg:row-start-1">
                 {showRevenueCard && (
-                  <div data-tour="revenue-summary-card" className={cn('h-full', showExpensesCard ? 'md:row-start-1' : '')}>
+                  <div data-tour="revenue-summary-card" className="min-w-0 mb-0">
                     <StatCard
                       title="Total Revenue"
                       value={`KES ${displayTotalRevenue.toLocaleString()}`}
                       change={15.3}
-                      changeLabel="vs last month"
+                      changeLabel={revenueChangeLabel}
                       icon={<TrendingUp className="h-4 w-4" />}
                       variant="gold"
                       compact
@@ -1314,7 +1295,7 @@ export function CompanyDashboard() {
                   </div>
                 )}
                 {showExpensesCard && (
-                  <div data-tour="expenses-summary-card" className="h-full">
+                  <div data-tour="expenses-summary-card" className="min-w-0 mb-0">
                     <StatCard
                       title="Total Expenses"
                       value={`KES ${displayTotalExpenses.toLocaleString()}`}
@@ -1327,28 +1308,97 @@ export function CompanyDashboard() {
                   </div>
                 )}
               </div>
+            ) : null}
+
+            {showProfitLossCard && (
+              <div
+                className={cn(
+                  'min-w-0 mb-0',
+                  'lg:col-start-1 lg:row-start-2',
+                  !showBudgetCard && 'lg:col-span-2',
+                )}
+              >
+                <FeatureGate feature="profitCharts" upgradePresentation="blur-data" className="min-w-0">
+                  <div data-tour="profit-loss-card" className="min-w-0">
+                    <StatCard
+                      title="Profit and Loss"
+                      value={`KES ${displayNetBalance.toLocaleString()}`}
+                      change={displayNetBalance >= 0 ? 22.1 : -5.2}
+                      changeLabel="vs last month"
+                      icon={<Wallet className="h-4 w-4" />}
+                      variant={displayNetBalance >= 0 ? 'primary' : 'default'}
+                      compact
+                    />
+                  </div>
+                </FeatureGate>
+              </div>
+            )}
+            {showBudgetCard && (
+              <div
+                className={cn(
+                  'min-w-0 mb-0',
+                  'lg:col-start-2 lg:row-start-2',
+                  !showProfitLossCard && 'lg:col-span-2 lg:col-start-1',
+                )}
+              >
+                <StatCard
+                  title="Remaining Budget"
+                  value={`KES ${displayRemainingBudget.toLocaleString()}`}
+                  change={undefined}
+                  changeLabel={`of KES ${statCardsBudgetTotal.toLocaleString()}`}
+                  icon={<CalendarIcon className="h-4 w-4" />}
+                  variant={displayRemainingBudget >= 0 ? 'primary' : 'default'}
+                  compact
+                />
+              </div>
             )}
           </div>
-        ) : (
-          <div
-            className={cn(
-              'grid grid-cols-1 gap-3',
-              showRevenueCard && showExpensesCard && 'md:grid-cols-2',
+        ) : showCropDashboard && !hasFinancialStatCards ? (
+          <div data-tour="crop-stage-progress" className="min-w-0 space-y-1 mb-0">
+            {blocksSummary != null && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{blocksSummary.count} Blocks Active</span>
+                <span>·</span>
+                <span>{blocksSummary.weightedProgressPercent}% season progress</span>
+              </div>
             )}
+            <CropStageProgressCard
+              farmProgressRows={farmProgressRowsForAllProjects}
+              farmProgressDashboardFocusProjectId={!activeProject ? dashboardFocusProjectId : null}
+              onFarmProgressDashboardFocusToggle={handleFarmProgressDashboardFocusToggle}
+              farmProgressStatusFilter={farmProgressDashboardFilter}
+              onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
+              projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
+              stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
+              activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
+              knowledgeDetection={
+                loneProjectCropCardProps?.knowledgeDetection ?? activeProjectKnowledgeDetection
+              }
+              recentActivityLogs={mergedActivityLogs}
+              advisorySummary={advisorySummary}
+              compact={user?.role === 'employee'}
+            />
+          </div>
+        ) : hasFinancialStatCards ? (
+          <div
+            className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+            data-layout="dashboard-stats-grid-fallback"
           >
             {showRevenueCard && (
-              <StatCard
-                title="Total Revenue"
-                value={`KES ${displayTotalRevenue.toLocaleString()}`}
-                change={15.3}
-                changeLabel="Harvest revenue (current cycle)"
-                icon={<TrendingUp className="h-4 w-4" />}
-                variant="gold"
-                compact
-              />
+              <div data-tour="revenue-summary-card" className="min-w-0 mb-0">
+                <StatCard
+                  title="Total Revenue"
+                  value={`KES ${displayTotalRevenue.toLocaleString()}`}
+                  change={15.3}
+                  changeLabel={revenueChangeLabel}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                  variant="gold"
+                  compact
+                />
+              </div>
             )}
             {showExpensesCard && (
-              <div data-tour="expenses-summary-card">
+              <div data-tour="expenses-summary-card" className="min-w-0 mb-0">
                 <StatCard
                   title="Total Expenses"
                   value={`KES ${displayTotalExpenses.toLocaleString()}`}
@@ -1360,48 +1410,44 @@ export function CompanyDashboard() {
                 />
               </div>
             )}
-            {!showRevenueCard && !showExpensesCard && (
-              <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 text-sm text-muted-foreground">
-                No dashboard cards enabled for your account.
+            {showProfitLossCard && (
+              <div className={cn('min-w-0 mb-0', !showBudgetCard && 'lg:col-span-2')}>
+                <FeatureGate feature="profitCharts" upgradePresentation="blur-data" className="min-w-0">
+                  <div data-tour="profit-loss-card" className="min-w-0">
+                    <StatCard
+                      title="Profit and Loss"
+                      value={`KES ${displayNetBalance.toLocaleString()}`}
+                      change={displayNetBalance >= 0 ? 22.1 : -5.2}
+                      changeLabel="vs last month"
+                      icon={<Wallet className="h-4 w-4" />}
+                      variant={displayNetBalance >= 0 ? 'primary' : 'default'}
+                      compact
+                    />
+                  </div>
+                </FeatureGate>
+              </div>
+            )}
+            {showBudgetCard && (
+              <div className={cn('min-w-0 mb-0', !showProfitLossCard && 'lg:col-span-2')}>
+                <StatCard
+                  title="Remaining Budget"
+                  value={`KES ${displayRemainingBudget.toLocaleString()}`}
+                  change={undefined}
+                  changeLabel={`of KES ${statCardsBudgetTotal.toLocaleString()}`}
+                  icon={<CalendarIcon className="h-4 w-4" />}
+                  variant={displayRemainingBudget >= 0 ? 'primary' : 'default'}
+                  compact
+                />
               </div>
             )}
           </div>
-        )}
-        {(showProfitLossCard || showBudgetCard) && (
-          <div
-            className={cn(
-              'grid gap-3',
-              showProfitLossCard && showBudgetCard ? 'grid-cols-2' : 'grid-cols-1',
-            )}
-          >
-            {showProfitLossCard && (
-              <FeatureGate feature="profitCharts" className="min-w-0">
-                <div data-tour="profit-loss-card">
-                  <StatCard
-                    title="Profit and Loss"
-                    value={`KES ${displayNetBalance.toLocaleString()}`}
-                    change={displayNetBalance >= 0 ? 22.1 : -5.2}
-                    changeLabel="vs last month"
-                    icon={<Wallet className="h-4 w-4" />}
-                    variant={displayNetBalance >= 0 ? 'primary' : 'default'}
-                    compact
-                  />
-                </div>
-              </FeatureGate>
-            )}
-            {showBudgetCard && (
-              <StatCard
-                title="Remaining Budget"
-                value={`KES ${displayRemainingBudget.toLocaleString()}`}
-                change={undefined}
-                changeLabel={`of KES ${statCardsBudgetTotal.toLocaleString()}`}
-                icon={<CalendarIcon className="h-4 w-4" />}
-                variant={displayRemainingBudget >= 0 ? 'primary' : 'default'}
-                compact
-              />
-            )}
+        ) : null}
+
+        {!hasFinancialStatCards && (isHarvestActive || !showCropStageCard) ? (
+          <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 text-sm text-muted-foreground">
+            No dashboard cards enabled for your account.
           </div>
-        )}
+        ) : null}
       </div>
 
       {showInsightCard && (
@@ -1429,13 +1475,17 @@ export function CompanyDashboard() {
       )}
 
       {/* Charts */}
-      <FeatureGate feature="advancedAnalytics" className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <FeatureGate
+        feature="advancedAnalytics"
+        upgradePresentation="blur-data"
+        className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-3 md:items-start"
+      >
         <ActivityChart data={activityChartData} />
         <ExpensesPieChart data={expensesByCategory} />
       </FeatureGate>
 
       {/* Bottom Widgets */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 lg:gap-4">
         <CropStageSection stages={activeProject ? effectiveActiveProjectStages : computedAllProjectsStages} />
         <div data-tour="inventory-overview">
           <InventoryOverview inventoryItems={filteredInventory} />
@@ -1448,11 +1498,11 @@ export function CompanyDashboard() {
       {/* Recent Activities — merged stream of activity logs + admin alerts */}
       {(mergedActivityLogs.length > 0 || adminAlerts.length > 0) && (
         <div className="fv-card">
-          <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
             <Activity className="h-5 w-5" />
             Recent Activities
           </h3>
-          <ul className="space-y-2 max-h-[320px] overflow-y-auto scrollbar-thin pr-1">
+          <ul className="space-y-1 max-h-[320px] overflow-y-auto scrollbar-thin pr-1">
             {(() => {
               // Merge activity logs and alerts into a single sorted stream
               type FeedItem = { id: string; time: number; kind: 'activity' | 'alert'; data: any };

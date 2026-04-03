@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Download, FileText, BarChart2, PieChart, TrendingUp, Info, AlertCircle } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
@@ -7,12 +7,12 @@ import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { FeatureGate } from '@/components/subscription';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { Lock } from 'lucide-react';
 import { NoCompanyGuard } from '@/components/NoCompanyGuard';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { useFarmAnalyticsReports } from '@/hooks/useFarmAnalyticsReports';
-import { ToggleBasicPro, type ReportsDashboardMode } from '@/components/reports/ToggleBasicPro';
 import { AnalyticsCards } from '@/components/reports/AnalyticsCards';
 import { ProfitChart } from '@/components/reports/ProfitChart';
 import { RevenueTrendChart } from '@/components/reports/RevenueTrendChart';
@@ -64,8 +64,6 @@ export default function ReportsPage() {
   const scope = useCompanyScope();
   const companyId = scope.companyId;
   const canQuery = scope.error === null && !!companyId?.trim();
-
-  const [mode, setMode] = useState<ReportsDashboardMode>('pro');
 
   const analytics = useFarmAnalyticsReports(canQuery ? companyId : null);
 
@@ -816,7 +814,6 @@ export default function ReportsPage() {
                 </Button>
               </>
             ) : null}
-            <ToggleBasicPro mode={mode} onChange={setMode} className="self-start sm:self-center" />
           </div>
         </div>
 
@@ -859,7 +856,6 @@ export default function ReportsPage() {
         {!showDevNoCompany && canQuery ? (
           <>
             <AnalyticsCards
-              mode={mode}
               loading={analytics.isLoading}
               bestCrop={analytics.bestCrop}
               totalRevenue={analytics.totals.totalRevenue}
@@ -875,18 +871,22 @@ export default function ReportsPage() {
                 <RevenueTrendChart data={analytics.monthlyRevenue} loading={analytics.isLoading} />
               </div>
               <div data-report-chart="expense-breakdown">
-                <ExpensePieChart data={analytics.expenseBreakdown} loading={analytics.isLoading} />
+                <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="block h-full">
+                  <ExpensePieChart data={analytics.expenseBreakdown} loading={analytics.isLoading} />
+                </FeatureGate>
               </div>
             </div>
 
-            {mode === 'pro' ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
+              <FeatureGate feature="profitCharts" upgradePresentation="blur-data" className="min-w-0">
                 <ProfitChart data={analytics.cropProfit} loading={analytics.isLoading} />
-                <div data-report-chart="yield-per-crop">
+              </FeatureGate>
+              <div data-report-chart="yield-per-crop" className="min-w-0">
+                <FeatureGate feature="profitCharts" upgradePresentation="blur-data" className="block h-full">
                   <YieldChart data={analytics.cropYield} loading={analytics.isLoading} />
-                </div>
+                </FeatureGate>
               </div>
-            ) : null}
+            </div>
           </>
         ) : null}
 

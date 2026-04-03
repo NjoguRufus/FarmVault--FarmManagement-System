@@ -41,3 +41,11 @@ verify_jwt = false
 # No user JWT: invoke with apikey (publishable/anon) only; do not verify Clerk RS256 at gateway.
 [functions.notify-company-submission-received]
 verify_jwt = false
+
+# Clerk Bearer verified inside function (RS256); gateway JWT verify would fail.
+[functions.mpesa-stk-push]
+verify_jwt = false
+
+# Safaricom Daraja STK callback — no Authorization header.
+[functions.mpesa-stk-callback]
+verify_jwt = false

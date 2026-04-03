@@ -1,23 +1,20 @@
-import React, { useMemo, useState } from 'react';
-import { 
-  ChevronDown, 
-  ChevronUp, 
-  Package, 
-  Wheat, 
-  Boxes, 
-  Wine, 
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Package,
+  Wheat,
+  Boxes,
+  Wine,
   PackageOpen,
   Box,
-  Coins,
-  Calculator
 } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-  DialogDescription,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,26 +32,56 @@ import { toast } from 'sonner';
 import { useAuth } from '@clerk/react';
 import { useAuth as useAppAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { cn } from '@/lib/utils';
 
 type PackagingType = 'single' | 'sack' | 'box' | 'bottle' | 'pack' | 'other';
 type UnitType = 'kg' | 'g' | 'litres' | 'ml' | 'pieces' | 'metres';
+type WizardStep = 1 | 2 | 3;
 
-const packagingConfig: Record<PackagingType, { 
-  icon: React.ElementType; 
-  label: string; 
-  singularLabel: string;
-  pluralLabel: string;
-  color: string;
-  bgColor: string;
-  stockLabel: string;
-  unitsPerLabel: string;
-  priceLabel: string;
-  showUnitsPerField: boolean;
-  exampleCalc: string;
-}> = {
-  single: { 
-    icon: Box, 
-    label: 'Single Item', 
+const DRAFT_STORAGE_PREFIX = 'fv-add-inv-draft:v1:';
+
+type AddInventoryDraft = {
+  step: WizardStep;
+  slideDir: 1 | -1;
+  name: string;
+  categoryId: string;
+  newCategoryName: string;
+  packagingType: PackagingType;
+  unit: UnitType;
+  amount: string;
+  numberOfPacks: string;
+  unitsPerPack: string;
+  pricePerPack: string;
+  totalPrice: string;
+  supplierId: 'none' | 'add_new' | string;
+  newSupplierName: string;
+  showAdvanced: boolean;
+  sku: string;
+  itemCode: string;
+  minStockLevel: string;
+  reorderQuantity: string;
+  notes: string;
+};
+
+const packagingConfig: Record<
+  PackagingType,
+  {
+    icon: React.ElementType;
+    label: string;
+    singularLabel: string;
+    pluralLabel: string;
+    color: string;
+    bgColor: string;
+    stockLabel: string;
+    unitsPerLabel: string;
+    priceLabel: string;
+    showUnitsPerField: boolean;
+    exampleCalc: string;
+  }
+> = {
+  single: {
+    icon: Box,
+    label: 'Single Item',
     singularLabel: 'item',
     pluralLabel: 'items',
     color: 'text-blue-600',
@@ -63,11 +90,11 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Amount per item',
     priceLabel: 'Price per item',
     showUnitsPerField: false,
-    exampleCalc: '10 items = 10 pieces'
+    exampleCalc: '10 items = 10 pieces',
   },
-  sack: { 
-    icon: Wheat, 
-    label: 'Sack / Bag', 
+  sack: {
+    icon: Wheat,
+    label: 'Sack / Bag',
     singularLabel: 'sack',
     pluralLabel: 'sacks',
     color: 'text-amber-600',
@@ -76,11 +103,11 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Content per sack',
     priceLabel: 'Price per sack',
     showUnitsPerField: false,
-    exampleCalc: '5 sacks × 50kg = 250kg'
+    exampleCalc: '5 sacks × 50kg = 250kg',
   },
-  box: { 
-    icon: Boxes, 
-    label: 'Box / Carton', 
+  box: {
+    icon: Boxes,
+    label: 'Box / Carton',
     singularLabel: 'box',
     pluralLabel: 'boxes',
     color: 'text-orange-600',
@@ -89,11 +116,11 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Units per box',
     priceLabel: 'Price per box',
     showUnitsPerField: true,
-    exampleCalc: '5 boxes × 24 pieces = 120 pieces'
+    exampleCalc: '5 boxes × 24 pieces = 120 pieces',
   },
-  bottle: { 
-    icon: Wine, 
-    label: 'Bottle / Container', 
+  bottle: {
+    icon: Wine,
+    label: 'Bottle / Container',
     singularLabel: 'bottle',
     pluralLabel: 'bottles',
     color: 'text-emerald-600',
@@ -102,11 +129,11 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Content per bottle',
     priceLabel: 'Price per bottle',
     showUnitsPerField: false,
-    exampleCalc: '6 bottles × 2L = 12L'
+    exampleCalc: '6 bottles × 2L = 12L',
   },
-  pack: { 
-    icon: PackageOpen, 
-    label: 'Pack / Bundle', 
+  pack: {
+    icon: PackageOpen,
+    label: 'Pack / Bundle',
     singularLabel: 'pack',
     pluralLabel: 'packs',
     color: 'text-purple-600',
@@ -115,11 +142,11 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Units per pack',
     priceLabel: 'Price per pack',
     showUnitsPerField: true,
-    exampleCalc: '4 packs × 10 pieces = 40 pieces'
+    exampleCalc: '4 packs × 10 pieces = 40 pieces',
   },
-  other: { 
-    icon: Package, 
-    label: 'Other', 
+  other: {
+    icon: Package,
+    label: 'Other',
     singularLabel: 'unit',
     pluralLabel: 'units',
     color: 'text-gray-600',
@@ -128,7 +155,7 @@ const packagingConfig: Record<PackagingType, {
     unitsPerLabel: 'Amount per unit',
     priceLabel: 'Price per unit',
     showUnitsPerField: true,
-    exampleCalc: '3 units × 1 = 3 total'
+    exampleCalc: '3 units × 1 = 3 total',
   },
 };
 
@@ -155,7 +182,15 @@ export function AddInventoryItemModal({
   const sessionCompanyId = (sessionClaims?.company_id as string | undefined)?.trim();
   const { user } = useAppAuth();
   const { addNotification } = useNotifications();
-  
+  const reducedMotion = useReducedMotion();
+
+  const [step, setStep] = useState<WizardStep>(1);
+  const [slideDir, setSlideDir] = useState<1 | -1>(1);
+
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const unitSelectTriggerRef = useRef<HTMLButtonElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
+
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -179,6 +214,16 @@ export function AddInventoryItemModal({
   const [notes, setNotes] = useState('');
 
   const [saving, setSaving] = useState(false);
+
+  const draftKey = useMemo(() => `${DRAFT_STORAGE_PREFIX}${String(companyId || '').trim() || 'none'}`, [companyId]);
+
+  const clearDraftStorage = useCallback(() => {
+    try {
+      sessionStorage.removeItem(draftKey);
+    } catch {
+      /* ignore */
+    }
+  }, [draftKey]);
 
   const predefinedCategories = useMemo(
     () => [
@@ -204,60 +249,72 @@ export function AddInventoryItemModal({
   );
 
   const getCategoryDefaultUnit = (catId: string, catName?: string): UnitType | null => {
-    const predefined = predefinedCategories.find(c => c.value === catId);
+    const predefined = predefinedCategories.find((c) => c.value === catId);
     if (predefined?.defaultUnit) return predefined.defaultUnit;
-    
-    const name = catName?.toLowerCase() || '';
-    if (name.includes('fertilizer') || name.includes('fertiliser')) return 'kg';
-    if (name.includes('chemical') || name.includes('pesticide') || name.includes('herbicide') || name.includes('fungicide')) return 'ml';
-    if (name.includes('fuel') || name.includes('diesel') || name.includes('petrol')) return 'litres';
-    if (name.includes('rope') || name.includes('sack') || name.includes('tying')) return 'pieces';
-    if (name.includes('seed')) return 'g';
-    
+
+    const n = catName?.toLowerCase() || '';
+    if (n.includes('fertilizer') || n.includes('fertiliser')) return 'kg';
+    if (n.includes('chemical') || n.includes('pesticide') || n.includes('herbicide') || n.includes('fungicide')) return 'ml';
+    if (n.includes('fuel') || n.includes('diesel') || n.includes('petrol')) return 'litres';
+    if (n.includes('rope') || n.includes('sack') || n.includes('tying')) return 'pieces';
+    if (n.includes('seed')) return 'g';
+
     return null;
   };
 
   const handleCategoryChange = (newCategoryId: string) => {
     setCategoryId(newCategoryId);
-    
-    const matchedCategory = categories.find(c => c.id === newCategoryId);
+
+    const matchedCategory = categories.find((c) => c.id === newCategoryId);
     const defaultUnit = getCategoryDefaultUnit(newCategoryId, matchedCategory?.name ?? undefined);
-    
+
     if (defaultUnit) {
       setUnit(defaultUnit);
     }
   };
 
   const currentPackaging = packagingConfig[packagingType];
-  const PackagingIcon = currentPackaging.icon;
 
   const getUnitDisplayName = (u: UnitType): string => {
     switch (u) {
-      case 'kg': return 'kgs';
-      case 'g': return 'grams';
-      case 'litres': return 'litres';
-      case 'ml': return 'ml';
-      case 'pieces': return 'pieces';
-      case 'metres': return 'meters';
-      default: return u;
+      case 'kg':
+        return 'kgs';
+      case 'g':
+        return 'grams';
+      case 'litres':
+        return 'litres';
+      case 'ml':
+        return 'ml';
+      case 'pieces':
+        return 'pieces';
+      case 'metres':
+        return 'meters';
+      default:
+        return u;
     }
   };
 
   const getAmountPlaceholder = (): string => {
     const unitName = getUnitDisplayName(unit);
     const packagingName = currentPackaging.singularLabel;
-    
+
     return `How many ${unitName} per ${packagingName}`;
   };
 
   const getAmountExample = (): string => {
     switch (packagingType) {
-      case 'sack': return unit === 'kg' ? '50' : '25';
-      case 'bottle': return unit === 'litres' ? '2' : unit === 'ml' ? '500' : '1';
-      case 'box': return '24';
-      case 'pack': return '10';
-      case 'single': return '1';
-      default: return '1';
+      case 'sack':
+        return unit === 'kg' ? '50' : '25';
+      case 'bottle':
+        return unit === 'litres' ? '2' : unit === 'ml' ? '500' : '1';
+      case 'box':
+        return '24';
+      case 'pack':
+        return '10';
+      case 'single':
+        return '1';
+      default:
+        return '1';
     }
   };
 
@@ -325,36 +382,92 @@ export function AddInventoryItemModal({
     }
   };
 
-  const getSummaryText = (): string => {
+  /** Centered live line for Step 2 */
+  const liveQuantityLine = (() => {
     const packs = Number(numberOfPacks);
-    if (!Number.isFinite(packs) || packs <= 0) {
-      return currentPackaging.exampleCalc;
-    }
+    if (!Number.isFinite(packs) || packs <= 0) return null;
+    if (!calculatedTotal) return null;
 
     const packLabel = getPackLabel(packs);
 
-    if (needsUnitsPerField) {
-      const upp = Number(unitsPerPack);
-      if (!Number.isFinite(upp) || upp <= 0) {
-        return `${packs} ${packLabel} (enter units per ${currentPackaging.singularLabel} for total)`;
+    if (calculatedTotal.isPackCount) {
+      if (needsUnitsPerField) {
+        return `${packs} ${packLabel} — enter ${currentPackaging.unitsPerLabel.toLowerCase()}`;
       }
-      const total = packs * upp;
-      return `${packs} ${packLabel} × ${upp} pieces = ${total.toLocaleString()} pieces`;
-    } else {
-      const amt = Number(amount);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        if (packagingType === 'single') {
-          return `${packs} ${packLabel} = ${packs} pieces`;
-        }
-        return `${packs} ${packLabel} (set amount in Item Setup for total)`;
+      if (packagingType === 'single') {
+        return `${packs} ${packLabel} = ${packs} pieces`;
       }
-      const total = packs * amt;
-      const unitLabel = getUnitLabel(unit, total);
-      return `${packs} ${packLabel} × ${amt}${unit === 'litres' ? 'L' : unit} = ${total.toLocaleString()} ${unitLabel}`;
+      return `${packs} ${packLabel} — set amount per ${currentPackaging.singularLabel}`;
+    }
+
+    const total = calculatedTotal.value;
+    const unitStr =
+      calculatedTotal.unit === 'pieces'
+        ? total === 1
+          ? 'piece'
+          : 'pieces'
+        : getUnitLabel(calculatedTotal.unit as UnitType, total);
+
+    return `${packs} ${packLabel} = ${total.toLocaleString()} ${unitStr}`;
+  })();
+
+  const canGoToStep2 = Boolean(
+    name.trim() && categoryId && (categoryId !== 'add_new' || newCategoryName.trim()),
+  );
+
+  const packsNumForGate = Number(numberOfPacks);
+  const canGoToStep3 = Boolean(
+    Number.isFinite(packsNumForGate) &&
+      packsNumForGate > 0 &&
+      (!needsUnitsPerField || (Number(unitsPerPack) > 0 && Number.isFinite(Number(unitsPerPack)))),
+  );
+
+  const goNext = () => {
+    if (step === 1 && canGoToStep2) {
+      setSlideDir(1);
+      setStep(2);
+    } else if (step === 2 && canGoToStep3) {
+      setSlideDir(1);
+      setStep(3);
     }
   };
 
+  const goBack = () => {
+    if (step === 2) {
+      setSlideDir(-1);
+      setStep(1);
+    } else if (step === 3) {
+      setSlideDir(-1);
+      setStep(2);
+    }
+  };
+
+  const applyDraft = useCallback((d: AddInventoryDraft) => {
+    setStep(d.step ?? 1);
+    setSlideDir(d.slideDir === -1 ? -1 : 1);
+    setName(d.name ?? '');
+    setCategoryId(d.categoryId ?? '');
+    setNewCategoryName(d.newCategoryName ?? '');
+    setPackagingType((d.packagingType as PackagingType) ?? 'single');
+    setUnit((d.unit as UnitType) ?? 'kg');
+    setAmount(d.amount ?? '');
+    setNumberOfPacks(d.numberOfPacks ?? '');
+    setUnitsPerPack(d.unitsPerPack ?? '');
+    setPricePerPack(d.pricePerPack ?? '');
+    setTotalPrice(d.totalPrice ?? '');
+    setSupplierId((d.supplierId as 'none' | 'add_new' | string) ?? 'none');
+    setNewSupplierName(d.newSupplierName ?? '');
+    setShowAdvanced(Boolean(d.showAdvanced));
+    setSku(d.sku ?? '');
+    setItemCode(d.itemCode ?? '');
+    setMinStockLevel(d.minStockLevel ?? '');
+    setReorderQuantity(d.reorderQuantity ?? '');
+    setNotes(d.notes ?? '');
+  }, []);
+
   const resetForm = () => {
+    setStep(1);
+    setSlideDir(1);
     setName('');
     setCategoryId('');
     setNewCategoryName('');
@@ -375,8 +488,103 @@ export function AddInventoryItemModal({
     setNotes('');
   };
 
+  /** Restore wizard draft before paint so the debounced save effect does not overwrite with empty state. */
+  useLayoutEffect(() => {
+    if (!open || !companyId) return;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<AddInventoryDraft>;
+      if (parsed && typeof parsed === 'object') {
+        applyDraft(parsed as AddInventoryDraft);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [open, companyId, draftKey, applyDraft]);
+
+  /** Debounced draft save while the modal is open. */
+  useEffect(() => {
+    if (!open || !companyId) return;
+    const id = window.setTimeout(() => {
+      const draft: AddInventoryDraft = {
+        step,
+        slideDir,
+        name,
+        categoryId,
+        newCategoryName,
+        packagingType,
+        unit,
+        amount,
+        numberOfPacks,
+        unitsPerPack,
+        pricePerPack,
+        totalPrice,
+        supplierId,
+        newSupplierName,
+        showAdvanced,
+        sku,
+        itemCode,
+        minStockLevel,
+        reorderQuantity,
+        notes,
+      };
+      try {
+        sessionStorage.setItem(draftKey, JSON.stringify(draft));
+      } catch {
+        /* ignore quota */
+      }
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [
+    open,
+    companyId,
+    draftKey,
+    step,
+    slideDir,
+    name,
+    categoryId,
+    newCategoryName,
+    packagingType,
+    unit,
+    amount,
+    numberOfPacks,
+    unitsPerPack,
+    pricePerPack,
+    totalPrice,
+    supplierId,
+    newSupplierName,
+    showAdvanced,
+    sku,
+    itemCode,
+    minStockLevel,
+    reorderQuantity,
+    notes,
+  ]);
+
+  const handleDialogOpenChange = (val: boolean) => {
+    if (!val) {
+      clearDraftStorage();
+      resetForm();
+      onOpenChange(false);
+      return;
+    }
+    onOpenChange(val);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.requestAnimationFrame(() => {
+      if (step === 1) nameInputRef.current?.focus();
+      else if (step === 2) unitSelectTriggerRef.current?.focus();
+      else if (step === 3) priceInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [open, step]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (step !== 3) return;
     if (!name.trim() || !categoryId || !unit) return;
 
     const activeCompanyId = sessionCompanyId || String(companyId ?? '').trim();
@@ -426,9 +634,7 @@ export function AddInventoryItemModal({
           return;
         }
 
-        const existing = categories.find(
-          (c) => (c.name ?? '').trim().toLowerCase() === nm.toLowerCase(),
-        );
+        const existing = categories.find((c) => (c.name ?? '').trim().toLowerCase() === nm.toLowerCase());
         if (existing) {
           resolvedCategoryUuid = existing.id;
         } else {
@@ -483,8 +689,7 @@ export function AddInventoryItemModal({
         }
         const existingSupplier = suppliers.find(
           (s) =>
-            (s.name ?? '').trim().toLowerCase() === nameTrim.toLowerCase() &&
-            s.companyId === activeCompanyId,
+            (s.name ?? '').trim().toLowerCase() === nameTrim.toLowerCase() && s.companyId === activeCompanyId,
         );
         if (existingSupplier) {
           resolvedSupplierId = existingSupplier.id;
@@ -523,8 +728,10 @@ export function AddInventoryItemModal({
         unit: normalizedUnit,
         minStockLevel: showAdvanced && minStockLevel ? Number(minStockLevel) : undefined,
         reorderQuantity: showAdvanced && reorderQuantity ? Number(reorderQuantity) : undefined,
-        averageCost: avgCost,
-        itemCode: (showAdvanced ? (itemCode || sku || undefined) : undefined) ?? undefined,
+        // DB constraint: inventory_item_master.average_cost is NOT NULL.
+        // Step 3 is optional, so default to 0 when the user doesn't provide cost.
+        averageCost: avgCost ?? 0,
+        itemCode: (showAdvanced ? itemCode || sku || undefined : undefined) ?? undefined,
         description: showAdvanced ? notes || undefined : undefined,
         unitSize: effectiveUnitsPerPack,
         unitSizeLabel: normalizedUnit,
@@ -557,7 +764,7 @@ export function AddInventoryItemModal({
         actorUserId: user?.id ?? createdBy,
         actorName: user?.name ?? user?.email,
         notes: showAdvanced ? notes || undefined : undefined,
-        metadata: { 
+        metadata: {
           category: resolvedCategoryUuid,
           packagingType,
           unit: normalizedUnit,
@@ -571,8 +778,7 @@ export function AddInventoryItemModal({
       });
 
       toast.success('Inventory item created.');
-      resetForm();
-      onOpenChange(false);
+      handleDialogOpenChange(false);
       onCreated?.();
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create inventory item.');
@@ -581,384 +787,460 @@ export function AddInventoryItemModal({
     }
   };
 
+  const formKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter') return;
+    const t = e.target as HTMLElement;
+    if (t.tagName === 'TEXTAREA') return;
+
+    if (step === 1) {
+      if (canGoToStep2) {
+        e.preventDefault();
+        goNext();
+      } else {
+        e.preventDefault();
+      }
+      return;
+    }
+    if (step === 2) {
+      if (canGoToStep3) {
+        e.preventDefault();
+        goNext();
+      } else {
+        e.preventDefault();
+      }
+    }
+  };
+
+  const stepTitle = step === 1 ? 'What are you adding?' : step === 2 ? 'How much do you have?' : 'Optional cost info';
+
+  const motionVariants = {
+    enter: (dir: number) =>
+      reducedMotion
+        ? { opacity: 0 }
+        : { opacity: 0, x: dir * 18 },
+    center: reducedMotion ? { opacity: 1 } : { opacity: 1, x: 0 },
+    exit: (dir: number) =>
+      reducedMotion
+        ? { opacity: 0 }
+        : { opacity: 0, x: -dir * 10 },
+  };
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(val) => {
-        if (!val) resetForm();
-        onOpenChange(val);
-      }}
-    >
-      <DialogContent className="max-w-2xl w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-xl">Add Inventory Item</DialogTitle>
-          <DialogDescription>
-            Add an item in under 30 seconds. Only fill what you know — you can edit later.
-          </DialogDescription>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+      <DialogContent
+        showCloseButton={step === 3}
+        onInteractOutside={(e) => {
+          if (step < 3 && !saving) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (step < 3 && !saving) e.preventDefault();
+        }}
+        className={cn(
+          'max-w-[420px] w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto gap-0',
+          'glass-strong border-border/40 shadow-md shadow-black/[0.06]',
+          'rounded-xl p-5 sm:p-6',
+        )}
+      >
+        <DialogHeader className="space-y-3 pb-4 text-left">
+          <DialogTitle className="sr-only">Add Inventory Item</DialogTitle>
+
+          <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 text-[11px] font-semibold tracking-wide text-muted-foreground sm:text-xs">
+            {([1, 2, 3] as const).map((n, i) => (
+              <React.Fragment key={n}>
+                {i > 0 && <span className="text-border">—</span>}
+                <span
+                  className={cn(
+                    'rounded-md px-2 py-0.5 transition-colors',
+                    step === n
+                      ? 'bg-primary/10 text-primary'
+                      : step > n
+                        ? 'text-foreground/80'
+                        : 'text-muted-foreground',
+                  )}
+                >
+                  [{n} {n === 1 ? 'Item' : n === 2 ? 'Quantity' : 'Cost'}]
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">{stepTitle}</h2>
+            <p className="text-xs text-muted-foreground">
+              Your progress is saved automatically. Complete all steps and tap Save item — you won’t create the item until
+              then.
+            </p>
+          </div>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* ═══════════════════════════════════════════════════════════════════
-              SECTION 1: ITEM SETUP
-          ═══════════════════════════════════════════════════════════════════ */}
-          <div className={`rounded-xl border-2 border-border/40 ${currentPackaging.bgColor} p-4 sm:p-5 transition-colors duration-300`}>
-            <div className="flex gap-4">
-              <div className={`hidden sm:flex shrink-0 w-16 h-16 rounded-xl ${currentPackaging.bgColor} border-2 border-current/10 items-center justify-center transition-all duration-300`}>
-                <PackagingIcon className={`w-8 h-8 ${currentPackaging.color} transition-all duration-300`} strokeWidth={1.5} />
-              </div>
-              
-              <div className="flex-1 space-y-4">
-                <div className="flex items-center gap-2">
-                  <PackagingIcon className={`sm:hidden w-5 h-5 ${currentPackaging.color}`} strokeWidth={1.5} />
-                  <h3 className="text-base font-semibold text-foreground">Item Setup</h3>
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-foreground">Item Name</label>
-                  <Input
-                    className="fv-input bg-white/80"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. DAP Fertilizer, Dithane, Diesel"
-                    required
-                  />
-                </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (step !== 3) return;
+            void handleSubmit(e);
+          }}
+          onKeyDown={formKeyDown}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="relative min-h-[220px] flex-1 overflow-hidden">
+            <AnimatePresence mode="wait" custom={slideDir}>
+              <motion.div
+                key={step}
+                custom={slideDir}
+                variants={motionVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: reducedMotion ? 0.12 : 0.28, ease: 'easeOut' }}
+                className="space-y-4"
+              >
+                {step === 1 && (
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-foreground" htmlFor="inv-item-name">
+                        Item name
+                      </label>
+                      <Input
+                        id="inv-item-name"
+                        ref={nameInputRef}
+                        className="fv-input h-12 text-base"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="e.g. DAP Fertilizer, Dithane, Diesel"
+                        required
+                        autoComplete="off"
+                      />
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">Category</label>
-                    <Select value={categoryId} onValueChange={handleCategoryChange}>
-                      <SelectTrigger className="fv-input bg-white/80">
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </SelectItem>
-                        ))}
-                        {predefinedCategories.map((c) => (
-                          <SelectItem key={c.value} value={c.value}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-foreground">Category</label>
+                      <Select value={categoryId} onValueChange={handleCategoryChange}>
+                        <SelectTrigger className="fv-input h-11">
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
+                          {predefinedCategories.map((c) => (
+                            <SelectItem key={c.value} value={c.value}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">Packaging Type</label>
-                    <Select
-                      value={packagingType}
-                      onValueChange={(v) => {
-                        setPackagingType(v as PackagingType);
-                        setUnitsPerPack('');
-                      }}
-                    >
-                      <SelectTrigger className="fv-input bg-white/80">
-                        <SelectValue placeholder="How is it packaged?" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(packagingConfig).map(([key, config]) => (
-                          <SelectItem key={key} value={key}>
-                            <span className="flex items-center gap-2">
-                              <config.icon className={`w-4 h-4 ${config.color}`} />
-                              {config.label}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                    {categoryId === 'add_new' && (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-foreground">New category name</label>
+                        <Input
+                          className="fv-input"
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                          placeholder="e.g. Seeds, Equipment"
+                        />
+                      </div>
+                    )}
 
-                {categoryId === 'add_new' && (
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">New Category Name</label>
-                    <Input
-                      className="fv-input bg-white/80"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      placeholder="e.g. Seeds, Equipment, Packaging"
-                    />
+                    <div className="h-px w-full bg-border/50" />
+
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-foreground">Packaging type</label>
+                      <Select
+                        value={packagingType}
+                        onValueChange={(v) => {
+                          setPackagingType(v as PackagingType);
+                          setUnitsPerPack('');
+                        }}
+                      >
+                        <SelectTrigger className="fv-input h-11">
+                          <SelectValue placeholder="How is it packaged?" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(packagingConfig).map(([key, config]) => (
+                            <SelectItem key={key} value={key}>
+                              <span className="flex items-center gap-2">
+                                <config.icon className={`h-4 w-4 ${config.color}`} />
+                                {config.label}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">Unit</label>
-                    <Select value={unit} onValueChange={(v) => setUnit(v as UnitType)}>
-                      <SelectTrigger className="fv-input bg-white/80">
-                        <SelectValue placeholder="Select unit" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {predefinedUnits.map((u) => (
-                          <SelectItem key={u.value} value={u.value}>
-                            {u.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                {step === 2 && (
+                  <div className="space-y-4 text-center">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-sm font-medium text-foreground">Unit</label>
+                      <Select value={unit} onValueChange={(v) => setUnit(v as UnitType)}>
+                        <SelectTrigger ref={unitSelectTriggerRef} className="fv-input h-11">
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {predefinedUnits.map((u) => (
+                            <SelectItem key={u.value} value={u.value}>
+                              {u.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">
-                      Amount <span className="text-muted-foreground font-normal">(per {currentPackaging.singularLabel})</span>
-                    </label>
-                    <div className="relative">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-sm font-medium text-foreground">
+                        {needsUnitsPerField ? currentPackaging.unitsPerLabel : 'Amount per item'}
+                      </label>
+                      {needsUnitsPerField ? (
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            className="fv-input pr-16"
+                            value={unitsPerPack}
+                            onChange={(e) => setUnitsPerPack(e.target.value)}
+                            placeholder={packagingType === 'box' ? '24' : '10'}
+                            min={0}
+                            step="any"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            pieces
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            className="fv-input pr-14"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            placeholder={getAmountExample()}
+                            min={0}
+                            step="any"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            {unit}
+                          </span>
+                        </div>
+                      )}
+                      {!needsUnitsPerField && (
+                        <p className="text-xs text-muted-foreground">{getAmountPlaceholder()}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-sm font-medium text-foreground">{currentPackaging.stockLabel}</label>
                       <Input
                         type="number"
-                        className="fv-input bg-white/80 pr-14"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        placeholder={getAmountExample()}
+                        className="fv-input"
+                        value={numberOfPacks}
+                        onChange={(e) => handleNumberOfPacksChange(e.target.value)}
+                        placeholder={`How many ${currentPackaging.pluralLabel}?`}
                         min={0}
-                        step="any"
+                        required
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                        {unit}
-                      </span>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {getAmountPlaceholder()}
-                    </p>
+
+                    <div className="mx-auto max-w-xs pt-1">
+                      <p className="text-sm font-medium text-primary">
+                        {liveQuantityLine ?? <span className="font-normal text-muted-foreground">Enter numbers to see total</span>}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
-              </div>
-            </div>
-          </div>
+                {step === 3 && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5 sm:col-span-1">
+                        <label className="text-sm font-medium text-foreground">{currentPackaging.priceLabel}</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            KSh
+                          </span>
+                          <Input
+                            ref={priceInputRef}
+                            type="number"
+                            step="0.01"
+                            className="fv-input pl-12"
+                            value={pricePerPack}
+                            onChange={(e) => handlePricePerPackChange(e.target.value)}
+                            placeholder="e.g. 2500"
+                            min={0}
+                          />
+                        </div>
+                      </div>
 
-          {/* ═══════════════════════════════════════════════════════════════════
-              SECTION 2: STOCK DETAILS
-          ═══════════════════════════════════════════════════════════════════ */}
-          <div className={`rounded-xl border-2 border-border/40 ${currentPackaging.bgColor.replace('50', '50')} bg-gradient-to-br from-${currentPackaging.color.replace('text-', '').replace('-600', '-50')} to-white p-4 sm:p-5 transition-colors duration-300`}
-               style={{ background: `linear-gradient(to bottom right, ${currentPackaging.bgColor === 'bg-blue-50' ? '#eff6ff' : currentPackaging.bgColor === 'bg-amber-50' ? '#fffbeb' : currentPackaging.bgColor === 'bg-orange-50' ? '#fff7ed' : currentPackaging.bgColor === 'bg-emerald-50' ? '#ecfdf5' : currentPackaging.bgColor === 'bg-purple-50' ? '#faf5ff' : '#f9fafb'}, white)` }}>
-            <div className="flex gap-4">
-              <div className={`hidden sm:flex shrink-0 w-16 h-16 rounded-xl border-2 items-center justify-center transition-all duration-300`}
-                   style={{ backgroundColor: currentPackaging.bgColor === 'bg-blue-50' ? '#dbeafe' : currentPackaging.bgColor === 'bg-amber-50' ? '#fef3c7' : currentPackaging.bgColor === 'bg-orange-50' ? '#ffedd5' : currentPackaging.bgColor === 'bg-emerald-50' ? '#d1fae5' : currentPackaging.bgColor === 'bg-purple-50' ? '#f3e8ff' : '#f3f4f6', borderColor: 'rgba(0,0,0,0.05)' }}>
-                <PackagingIcon className={`w-8 h-8 ${currentPackaging.color} transition-all duration-300`} strokeWidth={1.5} />
-              </div>
-              
-              <div className="flex-1 space-y-4">
-                <div className="flex items-center gap-2">
-                  <PackagingIcon className={`sm:hidden w-5 h-5 ${currentPackaging.color}`} strokeWidth={1.5} />
-                  <h3 className="text-base font-semibold text-foreground">Stock Details</h3>
-                </div>
-
-                <div className={`grid grid-cols-1 ${needsUnitsPerField ? 'sm:grid-cols-2' : ''} gap-3`}>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">{currentPackaging.stockLabel}</label>
-                    <Input
-                      type="number"
-                      className="fv-input bg-white/80"
-                      value={numberOfPacks}
-                      onChange={(e) => handleNumberOfPacksChange(e.target.value)}
-                      placeholder={`How many ${currentPackaging.pluralLabel}?`}
-                      min={0}
-                      required
-                    />
-                  </div>
-
-                  {needsUnitsPerField && (
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-foreground">
-                        {currentPackaging.unitsPerLabel}
-                      </label>
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          className="fv-input bg-white/80 pr-16"
-                          value={unitsPerPack}
-                          onChange={(e) => setUnitsPerPack(e.target.value)}
-                          placeholder={packagingType === 'box' ? '24' : '10'}
-                          min={0}
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                          pieces
-                        </span>
+                      <div className="space-y-1.5 sm:col-span-1">
+                        <label className="text-sm font-medium text-foreground">
+                          Auto total <span className="font-normal text-muted-foreground">(editable)</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            KSh
+                          </span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            className="fv-input pl-12"
+                            value={totalPrice}
+                            onChange={(e) => handleTotalPriceChange(e.target.value)}
+                            placeholder="Total"
+                            min={0}
+                          />
+                        </div>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                <div className="rounded-lg bg-white/60 border border-current/10 p-3">
-                  <p className="text-sm text-muted-foreground flex items-start gap-2">
-                    <Calculator className={`w-4 h-4 mt-0.5 ${currentPackaging.color} shrink-0`} />
-                    <span>{getSummaryText()}</span>
-                  </p>
-                  {calculatedTotal !== null && !calculatedTotal.isPackCount && (
-                    <p className={`mt-2 text-sm font-medium ${currentPackaging.color} flex items-center gap-2`}>
-                      <span className="inline-block w-4" />
-                      Total: {calculatedTotal.value.toLocaleString()} {calculatedTotal.unit === 'pieces' ? 'pieces' : getUnitLabel(calculatedTotal.unit as UnitType, calculatedTotal.value)}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-foreground">Supplier</label>
+                      <Select value={supplierId} onValueChange={setSupplierId}>
+                        <SelectTrigger className="fv-input h-11">
+                          <SelectValue placeholder="Optional" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="add_new">+ Add new supplier…</SelectItem>
+                          {suppliers.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {supplierId === 'add_new' && (
+                        <Input
+                          className="fv-input mt-2"
+                          value={newSupplierName}
+                          onChange={(e) => setNewSupplierName(e.target.value)}
+                          placeholder="Supplier name"
+                        />
+                      )}
+                    </div>
+
+                    <div className="h-px w-full bg-border/50" />
+
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-lg py-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      onClick={() => setShowAdvanced((v) => !v)}
+                    >
+                      <span>Optional details</span>
+                      {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+
+                    {showAdvanced && (
+                      <div className="space-y-4 pt-1">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted-foreground">SKU</label>
+                            <Input className="fv-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="Optional" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted-foreground">Item code</label>
+                            <Input className="fv-input" value={itemCode} onChange={(e) => setItemCode(e.target.value)} placeholder="Optional" />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted-foreground">Minimum stock</label>
+                            <Input
+                              type="number"
+                              className="fv-input"
+                              value={minStockLevel}
+                              onChange={(e) => setMinStockLevel(e.target.value)}
+                              placeholder="e.g. 10"
+                              min={0}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted-foreground">Reorder quantity</label>
+                            <Input
+                              type="number"
+                              className="fv-input"
+                              value={reorderQuantity}
+                              onChange={(e) => setReorderQuantity(e.target.value)}
+                              placeholder="e.g. 50"
+                              min={0}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-muted-foreground">Notes</label>
+                          <Textarea
+                            className="fv-input resize-none"
+                            rows={3}
+                            value={notes}
+                            onChange={(e) => setNotes(e.target.value)}
+                            placeholder="Extra details"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
 
-          {/* ═══════════════════════════════════════════════════════════════════
-              SECTION 3: COST & SUPPLIER (OPTIONAL)
-          ═══════════════════════════════════════════════════════════════════ */}
-          <div className="rounded-xl border-2 border-border/40 bg-gradient-to-br from-amber-50 to-yellow-50 p-4 sm:p-5">
-            <div className="flex gap-4">
-              <div className="hidden sm:flex shrink-0 w-16 h-16 rounded-xl bg-amber-100 border-2 border-amber-200/50 items-center justify-center">
-                <Coins className="w-8 h-8 text-amber-600" strokeWidth={1.5} />
-              </div>
-              
-              <div className="flex-1 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Coins className="sm:hidden w-5 h-5 text-amber-600" strokeWidth={1.5} />
-                  <h3 className="text-base font-semibold text-foreground">
-                    Cost & Supplier <span className="text-muted-foreground font-normal text-sm">(optional)</span>
-                  </h3>
-                </div>
+          <div className="mt-6 flex flex-col gap-2 border-t border-border/40 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="order-2 flex w-full flex-wrap gap-2 sm:order-1 sm:w-auto">
+              <button
+                type="button"
+                onClick={() => handleDialogOpenChange(false)}
+                disabled={saving}
+                className="fv-btn fv-btn--ghost w-full justify-center sm:w-auto"
+              >
+                Cancel
+              </button>
+              {step > 1 ? (
+                <button
+                  type="button"
+                  onClick={goBack}
+                  disabled={saving}
+                  className="fv-btn fv-btn--ghost w-full justify-center sm:w-auto"
+                >
+                  ← Back
+                </button>
+              ) : null}
+            </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">{currentPackaging.priceLabel}</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                        KSh
-                      </span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="fv-input bg-white/80 pl-12"
-                        value={pricePerPack}
-                        onChange={(e) => handlePricePerPackChange(e.target.value)}
-                        placeholder="e.g. 2,500"
-                        min={0}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-foreground">
-                      Total Price <span className="text-muted-foreground font-normal">(auto-calculated)</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                        KSh
-                      </span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="fv-input bg-white/80 pl-12"
-                        value={totalPrice}
-                        onChange={(e) => handleTotalPriceChange(e.target.value)}
-                        placeholder={`Total for all ${currentPackaging.pluralLabel}`}
-                        min={0}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-foreground">Supplier</label>
-                  <Select value={supplierId} onValueChange={setSupplierId}>
-                    <SelectTrigger className="fv-input bg-white/80">
-                      <SelectValue placeholder="Select supplier (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="add_new">+ Add new supplier…</SelectItem>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  {supplierId === 'add_new' && (
-                    <Input
-                      className="fv-input bg-white/80 mt-2"
-                      value={newSupplierName}
-                      onChange={(e) => setNewSupplierName(e.target.value)}
-                      placeholder="Supplier name (e.g. Agrovet mjini)"
-                    />
+            <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:ml-auto sm:w-auto sm:flex-row sm:justify-end">
+              {step < 3 ? (
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={step === 1 ? !canGoToStep2 : !canGoToStep3}
+                  className={cn(
+                    'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition-all',
+                    'gradient-primary text-primary-foreground btn-luxury',
+                    'disabled:pointer-events-none disabled:opacity-50',
                   )}
-                </div>
-              </div>
+                >
+                  Next →
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={saving || !name.trim() || !categoryId || !unit.trim() || !numberOfPacks}
+                  className={cn(
+                    'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition-all',
+                    'gradient-primary text-primary-foreground btn-luxury',
+                    'disabled:pointer-events-none disabled:opacity-50',
+                  )}
+                >
+                  {saving ? 'Saving…' : 'Save item'}
+                </button>
+              )}
             </div>
           </div>
-
-          {/* ═══════════════════════════════════════════════════════════════════
-              ADVANCED OPTIONS (Collapsible)
-          ═══════════════════════════════════════════════════════════════════ */}
-          <button
-            type="button"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
-            onClick={() => setShowAdvanced((v) => !v)}
-          >
-            {showAdvanced ? (
-              <>
-                <ChevronUp className="h-4 w-4" />
-                Hide advanced options
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-4 w-4" />
-                Show advanced options
-              </>
-            )}
-          </button>
-
-          {showAdvanced && (
-            <div className="rounded-xl border border-border/60 bg-muted/10 p-4 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">SKU</label>
-                  <Input className="fv-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="Optional" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">Item Code</label>
-                  <Input className="fv-input" value={itemCode} onChange={(e) => setItemCode(e.target.value)} placeholder="Optional" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">Minimum Stock Level</label>
-                  <Input type="number" className="fv-input" value={minStockLevel} onChange={(e) => setMinStockLevel(e.target.value)} placeholder="e.g. 10" min={0} />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">Reorder Quantity</label>
-                  <Input type="number" className="fv-input" value={reorderQuantity} onChange={(e) => setReorderQuantity(e.target.value)} placeholder="e.g. 50" min={0} />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-muted-foreground">Notes</label>
-                <Textarea className="fv-input resize-none" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any extra details you want to remember" />
-              </div>
-            </div>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════════
-              FOOTER
-          ═══════════════════════════════════════════════════════════════════ */}
-          <DialogFooter className="pt-2">
-            <button
-              type="button"
-              className="fv-btn fv-btn--secondary"
-              onClick={() => {
-                resetForm();
-                onOpenChange(false);
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || !name.trim() || !categoryId || !unit.trim() || !numberOfPacks}
-              className="fv-btn fv-btn--primary"
-            >
-              {saving ? 'Saving…' : 'Save Item'}
-            </button>
-          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

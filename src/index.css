@@ -179,6 +179,33 @@
     box-shadow: var(--shadow-card-hover);
   }
 
+  /* Dashboard stats: crop + revenue/expenses stack + row-2 P&L / budget (see CompanyDashboard) */
+  .dashboard-grid {
+    display: grid;
+    width: 100%;
+    grid-auto-rows: auto;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 1024px) {
+    .dashboard-grid {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    }
+  }
+
+  .dashboard-grid-right-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  @media (max-width: 1023px) {
+    .dashboard-grid-right-stack {
+      display: contents;
+    }
+  }
+
   /* Stat Card */
   .fv-stat-card {
     @apply fv-card flex flex-col gap-2;

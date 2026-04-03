@@ -446,6 +446,7 @@ export default function InventoryPage() {
         onNotesUpdated={handleInventoryChange}
         onUpdateName={handleQuickEditName}
         canEditName={canEditInventoryItem}
+        canEditCost={canEditInventoryItem}
       />
     </div>
   );

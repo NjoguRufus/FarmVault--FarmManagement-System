@@ -47,6 +47,8 @@ interface InventoryItemDrawerProps {
   onUpdateName?: (itemId: string, newName: string) => Promise<void>;
   /** Whether the user can edit the item name */
   canEditName?: boolean;
+  /** Whether the user can edit unit cost (average cost per unit) */
+  canEditCost?: boolean;
 }
 
 const formatCurrency = (amount: number | null | undefined) =>
@@ -137,6 +139,7 @@ export function InventoryItemDrawer({
   onNotesUpdated,
   onUpdateName,
   canEditName,
+  canEditCost,
 }: InventoryItemDrawerProps) {
   const { user } = useAuth();
   const companyId = user?.companyId ?? null;
@@ -162,6 +165,10 @@ export function InventoryItemDrawer({
   const [savingName, setSavingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  const [isEditingCost, setIsEditingCost] = useState(false);
+  const [editCostValue, setEditCostValue] = useState('');
+  const [savingCost, setSavingCost] = useState(false);
+
   useEffect(() => {
     if (item) {
       const notes = item.farm_usage_notes || item.description || '';
@@ -170,6 +177,10 @@ export function InventoryItemDrawer({
       // Reset name editing state when item changes
       setIsEditingName(false);
       setEditNameValue('');
+      setIsEditingCost(false);
+      setEditCostValue(
+        item.average_cost != null && Number.isFinite(item.average_cost) ? String(item.average_cost) : '',
+      );
     }
   }, [item]);
 
@@ -262,6 +273,58 @@ export function InventoryItemDrawer({
       toast.error(err?.message || 'Failed to save notes');
     } finally {
       setSavingNotes(false);
+    }
+  };
+
+  const handleStartEditCost = () => {
+    if (!item) return;
+    setEditCostValue(
+      item.average_cost != null && Number.isFinite(item.average_cost) ? String(item.average_cost) : '',
+    );
+    setIsEditingCost(true);
+  };
+
+  const handleCancelEditCost = () => {
+    setIsEditingCost(false);
+    if (item) {
+      setEditCostValue(
+        item.average_cost != null && Number.isFinite(item.average_cost) ? String(item.average_cost) : '',
+      );
+    }
+  };
+
+  const handleSaveCost = async () => {
+    if (!item || !companyId) return;
+    const v = Number(editCostValue);
+    if (!Number.isFinite(v) || v < 0) {
+      toast.error('Enter a valid cost (0 or more).');
+      return;
+    }
+    const current =
+      item.average_cost != null && Number.isFinite(item.average_cost) ? item.average_cost : 0;
+    if (v === current) {
+      setIsEditingCost(false);
+      return;
+    }
+
+    setSavingCost(true);
+    try {
+      const { error } = await db
+        .public()
+        .from('inventory_item_master')
+        .update({ average_cost: v })
+        .eq('id', item.id);
+
+      if (error) throw error;
+
+      toast.success('Unit cost updated');
+      setIsEditingCost(false);
+      onNotesUpdated?.();
+    } catch (err: any) {
+      console.error('[InventoryItemDrawer] Save cost error', err);
+      toast.error(err?.message || 'Failed to save unit cost');
+    } finally {
+      setSavingCost(false);
     }
   };
 
@@ -417,11 +480,64 @@ export function InventoryItemDrawer({
                   </p>
                 </div>
                 <div className="rounded-xl bg-muted/40 p-3">
-                  <p className="text-xs text-muted-foreground">Unit Cost</p>
-                  <p className="text-lg font-bold mt-1 text-foreground">
-                    {formatCurrency(item.average_cost ?? null)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">per {item.unit}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">Unit cost</p>
+                    {canEditCost && !isEditingCost && (
+                      <button
+                        type="button"
+                        onClick={handleStartEditCost}
+                        className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                        title="Edit unit cost"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {isEditingCost && canEditCost ? (
+                    <div className="mt-2 flex flex-col gap-2">
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          KES
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="any"
+                          className="h-9 pl-12 pr-2 text-base font-semibold"
+                          value={editCostValue}
+                          onChange={(e) => setEditCostValue(e.target.value)}
+                          disabled={savingCost}
+                          placeholder="0"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">per {item.unit}</p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveCost()}
+                          disabled={savingCost}
+                          className="flex-1 fv-btn fv-btn--primary h-9 text-sm py-0"
+                        >
+                          {savingCost ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEditCost}
+                          disabled={savingCost}
+                          className="fv-btn fv-btn--secondary h-9 text-sm py-0 px-3"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-lg font-bold mt-1 text-foreground">
+                        {formatCurrency(item.average_cost ?? null)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">per {item.unit}</p>
+                    </>
+                  )}
                 </div>
               </div>
 

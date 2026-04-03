@@ -336,7 +336,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
     // Basic plan enforcement: cap active projects unless Pro.
     if (!isProTier && activeProjectCount >= BASIC_LIMITS.maxActiveProjects) {
-      toast.error('Project limit reached', {
+      toast.warning('Project limit reached', {
         description: `Basic allows up to ${BASIC_LIMITS.maxActiveProjects} active projects. Upgrade to Pro for unlimited projects.`,
       });
       openUpgrade();
