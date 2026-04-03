@@ -568,4 +568,111 @@
       transform: rotate(-360deg);
     }
   }
+
+  /* App Lock intro — premium glass backdrop + modal entrance */
+  @keyframes fv-app-lock-backdrop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fv-app-lock-modal-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  .fv-app-lock-backdrop {
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    animation: fv-app-lock-backdrop-in 0.5s ease-out forwards;
+  }
+  .fv-app-lock-modal-shell {
+    animation: fv-app-lock-modal-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .fv-app-lock-glass-card {
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.25),
+      inset 1px 1px 0 rgba(255, 255, 255, 0.12),
+      inset -2px -3px 8px rgba(0, 0, 0, 0.18);
+    transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.4s ease;
+  }
+  .fv-app-lock-glass-card:hover {
+    transform: translateY(-3px) scale(1.008);
+    box-shadow:
+      0 28px 70px rgba(0, 0, 0, 0.28),
+      inset 1px 1px 0 rgba(255, 255, 255, 0.14),
+      inset -2px -3px 10px rgba(0, 0, 0, 0.2);
+  }
+  .fv-app-lock-icon-bubble {
+    background: linear-gradient(145deg, rgba(52, 211, 153, 0.35) 0%, rgba(22, 101, 52, 0.45) 100%);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 0 28px rgba(16, 185, 129, 0.25),
+      inset 2px 2px 6px rgba(255, 255, 255, 0.2),
+      inset -2px -2px 8px rgba(0, 0, 0, 0.15);
+  }
+  .fv-app-lock-primary-btn {
+    @apply relative isolate flex w-full items-center justify-center gap-2 font-medium text-white;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, hsl(150 38% 16%) 0%, hsl(160 52% 36%) 100%);
+    box-shadow:
+      0 6px 24px rgba(0, 0, 0, 0.28),
+      0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+    transition:
+      transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.25s ease;
+  }
+  .fv-app-lock-primary-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, transparent 42%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .fv-app-lock-primary-btn:hover {
+    transform: scale(1.02);
+    box-shadow:
+      0 10px 36px rgba(0, 0, 0, 0.32),
+      0 0 28px rgba(16, 185, 129, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+  }
+  .fv-app-lock-primary-btn:active {
+    transform: scale(0.99);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fv-app-lock-backdrop,
+    .fv-app-lock-modal-shell {
+      animation: none;
+      opacity: 1;
+    }
+    .fv-app-lock-modal-shell {
+      transform: none;
+    }
+    .fv-app-lock-glass-card,
+    .fv-app-lock-glass-card:hover {
+      transform: none;
+      transition: none;
+    }
+    .fv-app-lock-primary-btn:hover,
+    .fv-app-lock-primary-btn:active {
+      transform: none;
+    }
+  }
 }

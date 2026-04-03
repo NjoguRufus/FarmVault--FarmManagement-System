@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Paperclip, Save } from "lucide-react";
+import { ArrowLeft, Loader2, Paperclip, Save, Trash2 } from "lucide-react";
 import { db, requireCompanyId } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { useCompanyScope } from "@/hooks/useCompanyScope";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -52,6 +62,8 @@ export default function NotebookPage() {
   const [loading, setLoading] = useState<boolean>(() => !!noteIdParam && noteIdParam !== "new");
   const [saving, setSaving] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [title, setTitle] = useState<string>("");
   const [content, setContent] = useState<string>("");
   const [attachments, setAttachments] = useState<NoteAttachmentLayout[]>([]);
@@ -339,7 +351,9 @@ export default function NotebookPage() {
 
   const saveNote = async (opts?: { showToast?: boolean }) => {
     if (!isDeveloperRoute && scope.error) return;
-    if (!companyId) return;
+    // Company workspace: tenant required. Developer route: company is optional (draft / global note).
+    if (!isDeveloperRoute && !companyId) return;
+    if (deleting) return;
     if (!cropSlug) return;
     if (!user?.id) return;
 
@@ -472,12 +486,32 @@ export default function NotebookPage() {
 
   // Auto-save drafts while typing (debounced).
   useEffect(() => {
+    if (deleting) return undefined;
     const t = setTimeout(() => {
       void saveNote({ showToast: false });
     }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, content, attachmentsKey]);
+  }, [title, content, attachmentsKey, deleting]);
+
+  const handleDelete = async () => {
+    if (!noteId) return;
+    setDeleting(true);
+    setSaveError(null);
+    try {
+      const { error } = await db.public().from("farm_notebook_entries").delete().eq("id", noteId);
+      if (error) throw error;
+
+      toast.success("Note deleted");
+      setShowDeleteConfirm(false);
+      navigate(`${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to delete note.";
+      toast.error(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const structuredPreviewBlocks = useMemo(
     () => parseNotebookContentToBlocks(htmlToPlainText(content)),
@@ -565,7 +599,12 @@ export default function NotebookPage() {
             variant="outline"
             className="rounded-xl"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || saving || (!isDeveloperRoute && scope.error != null) || !companyId}
+            disabled={
+              uploading ||
+              saving ||
+              deleting ||
+              (!isDeveloperRoute && (scope.error != null || !companyId))
+            }
           >
             <Paperclip className="h-4 w-4 mr-2" />
             {uploading ? "Uploading..." : "Attach"}
@@ -581,7 +620,7 @@ export default function NotebookPage() {
           <Button
             className="rounded-xl"
             onClick={() => void saveNote({ showToast: true })}
-            disabled={saving || (!isDeveloperRoute && scope.error != null) || !companyId}
+            disabled={saving || deleting || (!isDeveloperRoute && (scope.error != null || !companyId))}
           >
             <Save className="h-4 w-4 mr-2" />
             {saving ? "Saving..." : "Save"}
@@ -634,7 +673,45 @@ export default function NotebookPage() {
             <StructuredNotePreview blocks={structuredPreviewBlocks} />
           </div>
         </div>
+
+        {noteId ? (
+          <div className="mt-8 pt-4 border-t flex justify-between">
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleting}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {deleting ? "Deleting..." : "Delete Note"}
+            </Button>
+          </div>
+        ) : null}
       </div>
+
+      {showDeleteConfirm ? (
+        <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => !open && setShowDeleteConfirm(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+                <Trash2 className="h-5 w-5" />
+                Delete note?
+              </AlertDialogTitle>
+              <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-600 text-white"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </div>
   );
 }

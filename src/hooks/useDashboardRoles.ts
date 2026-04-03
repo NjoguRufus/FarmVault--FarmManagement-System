@@ -1,46 +1,51 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
+import { fetchDashboardSwitcherCapabilities } from "@/services/dashboardSwitcherCapabilitiesService";
 
 export type DashboardRoles = {
-  /** User has an active company workspace (companyId on session). */
+  /** At least one company membership with a real company row (DB; not session-only). */
   hasCompany: boolean;
-  /** Row exists in ambassadors for this account (RPC ok). */
+  /** Row in public.ambassadors for this Clerk user (DB). */
   hasAmbassador: boolean;
-  /** Waiting on ambassador RPC while Clerk + Auth are ready. */
+  /** Waiting on capabilities RPC while Clerk + Auth are ready. */
   loading: boolean;
   hasCompanyAndAmbassador: boolean;
 };
 
 /**
- * Detects company vs ambassador capabilities for routing and the dashboard role switcher.
+ * Dashboard switcher + post-auth routing: capabilities from `dashboard_switcher_capabilities`
+ * (JWT / Clerk id), device- and cache-independent. Falls back if RPC is not deployed.
  */
 export function useDashboardRoles(): DashboardRoles {
   const { authReady, user } = useAuth();
-  const [ambassadorResolved, setAmbassadorResolved] = useState(false);
+  const [resolved, setResolved] = useState(false);
   const [hasAmbassador, setHasAmbassador] = useState(false);
+  const [hasCompany, setHasCompany] = useState(false);
 
   useEffect(() => {
     if (!authReady || !user) {
-      setAmbassadorResolved(true);
+      setResolved(true);
       setHasAmbassador(false);
+      setHasCompany(false);
       return;
     }
 
-    setAmbassadorResolved(false);
+    setResolved(false);
     let cancelled = false;
 
     (async () => {
       try {
-        const r = await fetchMyAmbassadorDashboardStats();
+        const caps = await fetchDashboardSwitcherCapabilities(user.id, Boolean(user.companyId));
         if (!cancelled) {
-          setHasAmbassador(r.ok === true);
-          setAmbassadorResolved(true);
+          setHasAmbassador(caps.isAmbassador);
+          setHasCompany(caps.hasCompany);
+          setResolved(true);
         }
       } catch {
         if (!cancelled) {
           setHasAmbassador(false);
-          setAmbassadorResolved(true);
+          setHasCompany(Boolean(user.companyId));
+          setResolved(true);
         }
       }
     })();
@@ -48,10 +53,9 @@ export function useDashboardRoles(): DashboardRoles {
     return () => {
       cancelled = true;
     };
-  }, [authReady, user?.id]);
+  }, [authReady, user?.id, user?.companyId]);
 
-  const hasCompany = Boolean(user?.companyId);
-  const loading = Boolean(authReady && user && !ambassadorResolved);
+  const loading = Boolean(authReady && user && !resolved);
 
   return {
     hasCompany,

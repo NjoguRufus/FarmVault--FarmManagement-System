@@ -13,6 +13,7 @@ import {
   clearIntendedRouteStorage,
 } from '@/lib/routing/postAuth';
 import { readAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+import { readDashboardSurfacePreference } from '@/lib/dashboard/dashboardSurfacePreference';
 import { useDashboardRoles } from '@/hooks/useDashboardRoles';
 
 function normalizeLandingPath(landing: string): string {
@@ -96,6 +97,11 @@ export default function PostAuthContinuePage() {
 
   if (intended) {
     return <Navigate to={intended} replace />;
+  }
+
+  // Dual-role: last-chosen surface only (capabilities are DB-driven). Default = company app.
+  if (hasCompany && hasAmbassador && readDashboardSurfacePreference() === 'ambassador') {
+    return <Navigate to="/ambassador/dashboard" replace />;
   }
 
   const to = normalizeLandingPath(effectiveAccess.landingPage);

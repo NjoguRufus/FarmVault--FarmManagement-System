@@ -13,6 +13,10 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 
+// Prevent multiple "Upgrade to Pro" cards stacking up on the same page.
+// Keyed by route (or an optional override).
+const upgradeCardShownGroups = new Set<string>();
+
 export interface FeatureGateProps {
   /** The feature key to check access for */
   feature: SubscriptionFeatureKey;
@@ -28,6 +32,11 @@ export interface FeatureGateProps {
   className?: string;
   /** Callback when upgrade is clicked */
   onUpgradeClick?: () => void;
+  /**
+   * Optional group key for suppressing duplicate upgrade cards.
+   * Defaults to the current route path, so only one upgrade card is shown per page.
+   */
+  upgradeCardGroupKey?: string;
 }
 
 export function FeatureGate({
@@ -38,6 +47,7 @@ export function FeatureGate({
   hideContent = false,
   className,
   onUpgradeClick,
+  upgradeCardGroupKey,
 }: FeatureGateProps) {
   const { plan, isTrial, status, isLoading, isDeveloper } = useEffectivePlanAccess();
   const { canAccess } = useFeatureAccess(feature);
@@ -75,26 +85,41 @@ export function FeatureGate({
     }
   };
 
+  const groupKey =
+    upgradeCardGroupKey ?? (typeof window !== 'undefined' ? window.location.pathname : 'ssr');
+
+  // Show full upgrade card only once per group, to avoid multiple stacked cards.
+  // Subsequent locked gates show blurred/hidden content instead of another upgrade card.
+  let shouldShowUpgradeCard = true;
+  if (upgradeCardShownGroups.has(groupKey)) {
+    shouldShowUpgradeCard = false;
+  } else {
+    upgradeCardShownGroups.add(groupKey);
+  }
+
+  // If we already rendered the upgrade card for this group, don't render another full card.
+  if (!shouldShowUpgradeCard) {
+    return (
+      <div className={cn('relative', className)}>
+        {!hideContent ? (
+          <div
+            className="pointer-events-none select-none opacity-30 blur-sm"
+            aria-hidden="true"
+          >
+            {children}
+          </div>
+        ) : (
+          <div className="min-h-[200px]" aria-hidden="true" />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={cn('relative', className)}>
-      {/* Blurred/hidden content */}
-      {!hideContent && (
-        <div
-          className="pointer-events-none select-none opacity-30 blur-sm"
-          aria-hidden="true"
-        >
-          {children}
-        </div>
-      )}
-
-      {/* Lock overlay */}
-      <div
-        className={cn(
-          'flex items-center justify-center',
-          hideContent ? 'min-h-[200px]' : 'absolute inset-0'
-        )}
-      >
-        <div className="fv-card max-w-md text-center space-y-4 bg-background/95 backdrop-blur-md border-primary/20 shadow-lg">
+      {/* Inline upgrade card (no absolute/fixed overlay) */}
+      <div className="col-span-full w-full min-h-[200px] flex items-center justify-center py-8">
+        <div className="fv-card max-w-md w-full text-center space-y-4 bg-background/95 backdrop-blur-md border-primary/20 shadow-lg">
           {/* Lock icon */}
           <div className="flex justify-center">
             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
@@ -124,19 +149,13 @@ export function FeatureGate({
           </p>
 
           {/* Upgrade button */}
-          <Button
-            onClick={handleUpgrade}
-            className="w-full gap-2"
-            size="default"
-          >
+          <Button onClick={handleUpgrade} className="w-full gap-2" size="default">
             Upgrade to Pro
             <ArrowRight className="h-4 w-4" />
           </Button>
 
           {/* Subtle note */}
-          <p className="text-[11px] text-muted-foreground">
-            Unlock all features with a Pro subscription
-          </p>
+          <p className="text-[11px] text-muted-foreground">Unlock all features with a Pro subscription</p>
         </div>
       </div>
     </div>
