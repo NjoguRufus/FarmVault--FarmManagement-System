@@ -1,11 +1,12 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { UserButton, useUser } from "@clerk/react";
+import { useUser } from "@clerk/react";
 import { ExternalLink } from "lucide-react";
 import { DeveloperPageShell } from "@/components/developer/DeveloperPageShell";
 import { SeoHead } from "@/seo/SeoHead";
 import { SEO_ROUTES } from "@/seo/routes";
 import { Button } from "@/components/ui/button";
+import { FarmVaultUserMenu } from "@/components/auth/FarmVaultUserMenu";
 import { clearAmbassadorSession, getAmbassadorSession } from "@/services/ambassadorService";
 import { toast } from "sonner";
 
@@ -24,9 +25,15 @@ export default function AmbassadorSettingsPage() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Account</p>
             {isLoaded && user ? (
-              <div className="flex items-center gap-3">
-                <UserButton afterSignOutUrl="/ambassador" />
-                <span className="text-sm text-muted-foreground">Manage your FarmVault ambassador login.</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <FarmVaultUserMenu
+                  accountLabel="Ambassador"
+                  afterSignOutUrl="/ambassador"
+                  settingsPath="/ambassador/console/settings"
+                  supportPath="/support"
+                  compact
+                />
+                <span className="text-sm text-muted-foreground">Open the menu for account actions and sign out.</span>
               </div>
             ) : legacy ? (
               <Button

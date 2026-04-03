@@ -21,7 +21,11 @@ import {
   computeCompanyDataQueriesEnabled,
   type TenantSessionTrust,
 } from '@/lib/companyTenantGate';
-import { readAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+import { hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
+import {
+  pickFirstExistingMembershipCompany,
+  repairProfileActiveCompany,
+} from '@/lib/auth/tenantMembershipRecovery';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -105,37 +109,10 @@ function isExplicitOnboardingRoute(): boolean {
     return (
       p.startsWith('/auth/continue') ||
       p.startsWith('/auth/callback') ||
+      p.startsWith('/sign-in') ||
       p.startsWith('/onboarding') ||
       p.startsWith('/accept-invitation') ||
       p.startsWith('/dev/bootstrap')
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Any `/ambassador` URL while Clerk is signed in may create a platform profile (avoids access-revoked on marketing page). */
-function isAmbassadorZonePath(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const p = window.location.pathname || '/';
-    return p === '/ambassador' || p.startsWith('/ambassador/');
-  } catch {
-    return false;
-  }
-}
-
-/** Auto-create on ambassador sub-routes when user explicitly started the funnel (intent). */
-function allowsAmbassadorProfileBootstrapPath(): boolean {
-  if (!readAmbassadorAccessIntent()) return false;
-  if (typeof window === 'undefined') return false;
-  try {
-    const p = window.location.pathname || '/';
-    return (
-      p.startsWith('/auth/ambassador-continue') ||
-      p.startsWith('/ambassador/onboarding') ||
-      p.startsWith('/ambassador/signup') ||
-      p.startsWith('/ambassador/console')
     );
   } catch {
     return false;
@@ -915,44 +892,20 @@ export function AuthProvider({
             window.location.assign(target);
           }
           return;
-        } else if (hasActiveResetRow && !resetAllowResignup) {
-          const resetUser: User = {
-            id: userId,
-            email: fallbackEmail,
-            name: resolveUserDisplayName({
-              profileDisplayName: null,
-              oauthFullName: oauthHints.oauthFullName,
-              oauthName: oauthHints.oauthName,
-              email: fallbackEmail,
-            }),
-            role: 'employee',
-            employeeRole: undefined,
-            companyId: null,
-            avatar: undefined,
-            createdAt: new Date(),
-          };
-          setUser(resetUser);
-          setEmployeeProfile(null);
-          setPermissions(getDefaultPermissions());
-          setSetupIncomplete(true);
-          setResetRequired(true);
-          writeCachedUser(null);
-          setActivationResolved(true);
-          confirmedSignedInRef.current = true;
-          setAuthReady(true);
-          // eslint-disable-next-line no-console
-          console.warn('[Auth] Re-signup blocked for this account (allow_resignup=false)', { uid: userId });
-          return;
         }
 
         setResetRequired(false);
 
-        // 3a) Platform profile MUST exist for access.
-        // IMPORTANT: Do NOT auto-create profiles on normal app loads — that resurrects deleted accounts.
-        const allowAutoCreatePlatformUser =
-          isExplicitOnboardingRoute() ||
-          isAmbassadorZonePath() ||
-          allowsAmbassadorProfileBootstrapPath();
+        // 3a) Platform profile: resolve/create when missing. Tombstones are handled above (get_reset_user_state).
+        // Revoke access only when there is still no profile AND no company membership AND no ambassador row.
+        let ambassadorAccessThisBootstrap: boolean | undefined;
+        const getAmbassadorAccessThisBootstrap = async (): Promise<boolean> => {
+          if (ambassadorAccessThisBootstrap === undefined) {
+            ambassadorAccessThisBootstrap = await hasAmbassadorRowForCurrentUser();
+          }
+          return ambassadorAccessThisBootstrap;
+        };
+
         let hasCoreProfile = false;
         try {
           const { data: coreProfileRow, error: coreProfileErr } = await db
@@ -971,34 +924,12 @@ export function AuthProvider({
         }
 
         if (!hasCoreProfile) {
-          if (!allowAutoCreatePlatformUser) {
-            // Missing platform profile on a non-onboarding route means this session is no longer authorized.
-            // Force a clean sign-out + redirect to sign-up (manual re-registration is allowed).
-            clearPendingApprovalSession();
-            writeCachedUser(null);
-            setEmployeeProfile(null);
-            setPermissions(getDefaultPermissions());
-            setSetupIncomplete(false);
-            setResetRequired(true);
-            setActivationResolved(true);
-            setAuthReady(true);
+          if (isExplicitOnboardingRoute()) {
             try {
-              await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+              await supabase.rpc('consume_reset_user_for_signup');
             } catch {
-              // ignore
+              // non-blocking
             }
-            if (typeof window !== 'undefined') {
-            redirectToSignUpAccessRevoked();
-            }
-            return;
-          }
-
-          // Explicit onboarding route: allow platform profile creation (fresh sign-up flow).
-          try {
-            // If there is a reset tombstone for this identity, consume it only in onboarding context.
-            await supabase.rpc('consume_reset_user_for_signup');
-          } catch {
-            // non-blocking; access validation already handled earlier by get_reset_user_state
           }
 
           const resolvedProfile = await resolveOrCreatePlatformUser({
@@ -1025,6 +956,77 @@ export function AuthProvider({
             console.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
               clerk_user_id: resolvedProfile.clerk_user_id,
             });
+          }
+
+          try {
+            const { data: r2 } = await db
+              .core()
+              .from('profiles')
+              .select('clerk_user_id')
+              .eq('clerk_user_id', userId)
+              .maybeSingle();
+            hasCoreProfile = !!r2?.clerk_user_id;
+          } catch {
+            hasCoreProfile = false;
+          }
+        }
+
+        if (!hasCoreProfile) {
+          const companyMembership = await pickFirstExistingMembershipCompany(userId);
+          const ambassadorRole = await getAmbassadorAccessThisBootstrap();
+
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] bootstrap access (no profile yet)', {
+              profile: null,
+              companyMembership,
+              ambassadorRole,
+            });
+          }
+
+          if (companyMembership || ambassadorRole) {
+            const { error: upsertError2 } = await db
+              .core()
+              .from('profiles')
+              .upsert(
+                { clerk_user_id: userId, email: fallbackEmail || null },
+                { onConflict: 'clerk_user_id' },
+              );
+            if (upsertError2 && import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn('[Auth] Profile upsert (membership/ambassador fallback):', upsertError2);
+            }
+            try {
+              const { data: r3 } = await db
+                .core()
+                .from('profiles')
+                .select('clerk_user_id')
+                .eq('clerk_user_id', userId)
+                .maybeSingle();
+              hasCoreProfile = !!r3?.clerk_user_id;
+            } catch {
+              hasCoreProfile = false;
+            }
+          }
+
+          if (!hasCoreProfile && !companyMembership && !ambassadorRole) {
+            clearPendingApprovalSession();
+            writeCachedUser(null);
+            setEmployeeProfile(null);
+            setPermissions(getDefaultPermissions());
+            setSetupIncomplete(false);
+            setResetRequired(true);
+            setActivationResolved(true);
+            setAuthReady(true);
+            try {
+              await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+            } catch {
+              // ignore
+            }
+            if (typeof window !== 'undefined') {
+              redirectToSignUpAccessRevoked();
+            }
+            return;
           }
         }
 
@@ -1090,33 +1092,59 @@ export function AuthProvider({
               console.warn('[Auth] company_exists RPC warning:', existsError);
             }
             if (!companyExists) {
-              // Missing company means access is no longer valid. Do NOT "repair" into onboarding; force exit to sign-up.
-              // This is the key fix for "deleted company restores access on reload".
-              // eslint-disable-next-line no-console
-              console.warn('[Auth] Company missing for membership context; forcing sign-out', {
-                uid: userId,
-                companyId: contextCompanyId,
-              });
+              const pickedCompany = await pickFirstExistingMembershipCompany(userId);
+              if (pickedCompany) {
+                await repairProfileActiveCompany(userId, pickedCompany.companyId);
+                contextCompanyId = pickedCompany.companyId;
+                contextRole = pickedCompany.role;
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.log('[Auth] Repaired context: previous company deleted, switched membership', {
+                    uid: userId,
+                    companyId: contextCompanyId,
+                    role: contextRole,
+                  });
+                }
+              } else {
+                const ambassadorOnly = await getAmbassadorAccessThisBootstrap();
+                if (ambassadorOnly) {
+                  await repairProfileActiveCompany(userId, null);
+                  contextCompanyId = null;
+                  contextRole = null;
+                  if (import.meta.env.DEV) {
+                    // eslint-disable-next-line no-console
+                    console.warn('[Auth] Company missing for context; continuing as ambassador (no farm tenant)', {
+                      uid: userId,
+                    });
+                  }
+                } else {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Auth] Company missing for membership context; forcing sign-out', {
+                    uid: userId,
+                    companyId: contextCompanyId,
+                  });
 
-              clearPendingApprovalSession();
-              writeCachedUser(null);
-              setEmployeeProfile(null);
-              setPermissions(getDefaultPermissions());
-              setSetupIncomplete(false);
-              setResetRequired(true);
-              setActivationResolved(true);
-              setAuthReady(true);
+                  clearPendingApprovalSession();
+                  writeCachedUser(null);
+                  setEmployeeProfile(null);
+                  setPermissions(getDefaultPermissions());
+                  setSetupIncomplete(false);
+                  setResetRequired(true);
+                  setActivationResolved(true);
+                  setAuthReady(true);
 
-              try {
-                await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
-              } catch {
-                // ignore
+                  try {
+                    await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+                  } catch {
+                    // ignore
+                  }
+
+                  if (typeof window !== 'undefined') {
+                    redirectToSignUpAccessRevoked();
+                  }
+                  return;
+                }
               }
-
-              if (typeof window !== 'undefined') {
-                redirectToSignUpAccessRevoked();
-              }
-              return;
             }
           } catch (existsUnexpectedError) {
             if (import.meta.env.DEV) {
@@ -1308,6 +1336,45 @@ export function AuthProvider({
         if (cancelled) return;
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
+        const needsAmbassadorCheck = setupIncompleteFlag && !hasEffectiveCompany;
+        const ambassadorAllowsNoCompany = needsAmbassadorCheck
+          ? await getAmbassadorAccessThisBootstrap()
+          : false;
+
+        if (import.meta.env.DEV) {
+          const ambassadorRoleForLog =
+            ambassadorAccessThisBootstrap !== undefined
+              ? ambassadorAccessThisBootstrap
+              : needsAmbassadorCheck
+                ? ambassadorAllowsNoCompany
+                : await getAmbassadorAccessThisBootstrap();
+          // eslint-disable-next-line no-console
+          console.log({
+            profile: hasCoreProfile,
+            companyMembership: { company_id: contextCompanyId, role: contextRole },
+            ambassadorRole: ambassadorRoleForLog,
+          });
+        }
+
+        if (needsAmbassadorCheck && ambassadorAllowsNoCompany) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[Auth] Farm setup incomplete but ambassador row exists — skip forced onboarding', {
+              uid: userId,
+            });
+          }
+          setUser({ ...mapped, companyId: null });
+          setEmployeeProfile(null);
+          setPermissions(getDefaultPermissions());
+          setSetupIncomplete(false);
+          setResetRequired(false);
+          writeCachedUser({ ...mapped, companyId: null });
+          setActivationResolved(true);
+          confirmedSignedInRef.current = true;
+          setAuthReady(true);
+          return;
+        }
+
         if (setupIncompleteFlag && !hasEffectiveCompany) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console

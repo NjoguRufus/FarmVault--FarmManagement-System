@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Search, ChevronDown, Settings, LogOut, Menu, HelpCircle, CheckCheck, AlertTriangle, Crown, CheckCircle2 } from 'lucide-react';
+import { Bell, Search, ChevronDown, Menu, HelpCircle, CheckCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -15,7 +15,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { UserAvatar } from '@/components/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
@@ -24,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
-import { DashboardRoleMenuItems } from '@/components/dashboard/DashboardRoleSwitcher';
+import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -32,7 +31,7 @@ interface TopNavbarProps {
 }
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { startTour } = useTour();
   const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
@@ -427,43 +426,13 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* User Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-1.5 md:gap-2 rounded-lg px-1.5 md:px-2 py-1.5 hover:bg-muted transition-colors">
-              <UserAvatar
-                avatarUrl={user?.avatar}
-                name={user?.name}
-                className="h-7 w-7 md:h-8 md:w-8 shrink-0"
-                size="sm"
-              />
-              <div className="hidden md:flex flex-col items-start">
-                <span className="text-sm font-medium">{user?.name}</span>
-              </div>
-              <ChevronDown className="h-4 w-4 text-muted-foreground hidden md:block" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DashboardRoleMenuItems />
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/billing')}>
-                <Crown className="mr-2 h-4 w-4" />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/settings')}>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/support')}>
-                <HelpCircle className="mr-2 h-4 w-4" />
-                Support
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive">
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <FarmVaultUserMenu
+            accountLabel="My Account"
+            afterSignOutUrl="/sign-in"
+            settingsPath="/settings"
+            supportPath="/support"
+            showBilling
+          />
         </div>
       </div>
       {!hidePaymentUpgradeModal && (
