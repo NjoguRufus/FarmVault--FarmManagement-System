@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
-import { LogOut, Menu, ChevronDown, HelpCircle, Settings, Crown, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Menu, ChevronDown, Crown, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useStaff } from '@/contexts/StaffContext';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
-import { UserAvatar } from '@/components/UserAvatar';
 import { cn } from '@/lib/utils';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import {
@@ -22,7 +21,7 @@ import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceAp
 import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
-import { DashboardRoleMenuItems } from '@/components/dashboard/DashboardRoleSwitcher';
+import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -30,9 +29,9 @@ interface StaffNavbarProps {
 }
 
 export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarProps) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { projects, activeProject, setActiveProject } = useProject();
-  const { fullName, roleLabel, companyName: staffCompanyName, avatarUrl, companyId } = useStaff();
+  const { fullName, roleLabel, companyName: staffCompanyName, companyId } = useStaff();
   const { startTour: startStaffTour } = useStaffTour();
   const {
     isTrial,
@@ -70,7 +69,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
       subPlan,
     });
   }, [companyId, isActivePaid, isTrial, status, subPlan]);
-  const navigate = useNavigate();
   const companyName = staffCompanyName || activeProject?.companyId || 'FarmVault';
 
   const displayName =
@@ -272,48 +270,13 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
             </div>
           )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted transition-colors">
-              <UserAvatar
-                avatarUrl={avatarUrl ?? user?.avatar}
-                name={displayName}
-                size="sm"
-                className="h-8 w-8"
-              />
-              <div className="hidden sm:flex flex-col items-start">
-                <span className="text-sm font-medium">{displayName}</span>
-                <span className="text-xs text-muted-foreground">{displayRole}</span>
-              </div>
-              <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>My Staff Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DashboardRoleMenuItems />
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => navigate('/settings')}
-              >
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => navigate('/staff/support')}
-              >
-                <HelpCircle className="mr-2 h-4 w-4" />
-                Support
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={logout}
-                className="cursor-pointer text-destructive"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <FarmVaultUserMenu
+            accountLabel="My Staff Account"
+            afterSignOutUrl="/sign-in"
+            settingsPath="/settings"
+            supportPath="/staff/support"
+            triggerClassName="sm:gap-2"
+          />
         </div>
       </div>
     </header>

@@ -186,6 +186,16 @@ export async function fetchMyAmbassadorDashboardStats(): Promise<
   return mapDashboardRpcPayload(data);
 }
 
+/** True when an `ambassadors` row exists for the current JWT (same RPC as dashboard). */
+export async function hasAmbassadorRowForCurrentUser(): Promise<boolean> {
+  try {
+    const r = await fetchMyAmbassadorDashboardStats();
+    return r.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 export type AmbassadorReferralRow = {
   referral_id: string;
   name: string;

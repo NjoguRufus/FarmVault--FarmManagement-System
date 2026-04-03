@@ -1,11 +1,11 @@
 import React from "react";
 import { Menu } from "lucide-react";
-import { UserButton, useUser } from "@clerk/react";
+import { useUser } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getAmbassadorSession, clearAmbassadorSession } from "@/services/ambassadorService";
 import { toast } from "sonner";
-import { DashboardRoleClerkMenuItems } from "@/components/dashboard/DashboardRoleSwitcher";
+import { FarmVaultUserMenu } from "@/components/auth/FarmVaultUserMenu";
 
 interface AmbassadorTopBarProps {
   sidebarCollapsed: boolean;
@@ -58,9 +58,13 @@ export function AmbassadorTopBar({ sidebarCollapsed, onMenuClick }: AmbassadorTo
 
         <div className="flex items-center gap-2 shrink-0">
           {isLoaded && user ? (
-            <UserButton afterSignOutUrl="/ambassador" appearance={{ elements: { userButtonAvatarBox: "h-9 w-9" } }}>
-              <DashboardRoleClerkMenuItems />
-            </UserButton>
+            <FarmVaultUserMenu
+              accountLabel="Ambassador"
+              afterSignOutUrl="/ambassador"
+              settingsPath="/ambassador/console/settings"
+              supportPath="/support"
+              triggerClassName="h-9"
+            />
           ) : isLoaded && legacySession ? (
             <Button type="button" variant="outline" size="sm" className="text-xs" onClick={handleLegacySignOut}>
               Sign out
