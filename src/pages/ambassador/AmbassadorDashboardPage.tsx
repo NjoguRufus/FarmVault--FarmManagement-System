@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/react";
-import { Banknote, ListOrdered, TrendingUp, UserCheck, UserMinus, Users, Wallet } from "lucide-react";
+import { CheckCircle, Clock, ListOrdered, TrendingUp, UserCheck, UserMinus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -36,6 +36,10 @@ function formatEarningType(type: string): string {
 export default function AmbassadorDashboardPage() {
   const navigate = useNavigate();
   const { user, isLoaded: clerkLoaded } = useUser();
+
+  useEffect(() => {
+    document.title = "Ambassador | FarmVault";
+  }, []);
 
   const statsQ = useAmbassadorConsoleStatsQuery(clerkLoaded);
   const stats = statsQ.data;
@@ -232,27 +236,56 @@ export default function AmbassadorDashboardPage() {
             variant="warning"
             compact
           />
-          <StatCard
-            title="Total earned"
-            value={formatKes(stats.total_earned)}
-            icon={<Banknote className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant="primary"
-            compact
-          />
-          <StatCard
-            title="Paid"
-            value={formatKes(stats.paid)}
-            icon={<Wallet className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant="default"
-            compact
-          />
-          <StatCard
-            title="Owed"
-            value={formatKes(stats.owed)}
-            icon={<TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant={stats.owed > 0 ? "warning" : "default"}
-            compact
-          />
+          {/* Total Earned — blue */}
+          <div className="relative overflow-hidden rounded-xl border border-blue-200 bg-blue-50 p-3 sm:p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 sm:text-xs">
+                Total Earned
+              </span>
+              <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100">
+                <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-700" />
+              </div>
+            </div>
+            <div className="mt-1">
+              <span className="font-heading text-lg sm:text-xl font-bold tracking-tight text-blue-900">
+                {formatKes(stats.total_earned)}
+              </span>
+            </div>
+          </div>
+
+          {/* Paid — green */}
+          <div className="relative overflow-hidden rounded-xl border border-green-200 bg-green-50 p-3 sm:p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-green-700 sm:text-xs">
+                Paid
+              </span>
+              <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-green-100">
+                <CheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-700" />
+              </div>
+            </div>
+            <div className="mt-1">
+              <span className="font-heading text-lg sm:text-xl font-bold tracking-tight text-green-900">
+                {formatKes(stats.paid)}
+              </span>
+            </div>
+          </div>
+
+          {/* Owed — amber */}
+          <div className="relative overflow-hidden rounded-xl border border-amber-200 bg-amber-50 p-3 sm:p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 sm:text-xs">
+                Owed
+              </span>
+              <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100">
+                <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-700" />
+              </div>
+            </div>
+            <div className="mt-1">
+              <span className="font-heading text-lg sm:text-xl font-bold tracking-tight text-amber-900">
+                {formatKes(stats.owed)}
+              </span>
+            </div>
+          </div>
         </DeveloperStatGrid>
 
         <div className="rounded-xl border border-border/60 bg-card/40 overflow-hidden mt-6">

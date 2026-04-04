@@ -23,6 +23,7 @@ import {
   QrCode,
   Mail,
   ClipboardCheck,
+  Scale,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -35,6 +36,8 @@ export interface NavItem {
   icon: LucideIcon;
   group: NavGroup;
   employeeOnly?: boolean;
+  /** Opens in a new tab using a plain <a> tag instead of React Router Link. */
+  external?: boolean;
 }
 
 /** Company nav (company-admin, fallback). Main = bottom bar, More = drawer on mobile. */
@@ -88,6 +91,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'more' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },
+  { label: 'Legal Documents', path: '/developer/documents', icon: Scale, group: 'more' },
 ];
 
 /** Manager nav. */

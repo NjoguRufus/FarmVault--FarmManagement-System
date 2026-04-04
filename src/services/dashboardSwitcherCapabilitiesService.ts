@@ -13,14 +13,27 @@ type RpcPayload = {
 };
 
 async function fetchCapabilitiesClientFallback(clerkUserId: string): Promise<DashboardSwitcherCapabilities> {
-  const [ambassadorResult, membership] = await Promise.all([
+  const [ambassadorResult, membership, profileUserType] = await Promise.all([
     fetchMyAmbassadorDashboardStats()
       .then((r) => r.ok === true)
       .catch(() => false),
     pickFirstExistingMembershipCompany(clerkUserId).catch(() => null),
+    // Secondary check: user_type on core.profiles covers brand-new ambassadors
+    // who have user_type='ambassador' set but haven't completed the onboarding wizard yet
+    // (no public.ambassadors row). Works even when the dashboard_switcher_capabilities RPC
+    // hasn't been deployed with the user_type fallback migration.
+    supabase
+      .schema('core')
+      .from('profiles')
+      .select('user_type')
+      .eq('clerk_user_id', clerkUserId)
+      .maybeSingle()
+      .then(({ data }) => (data as { user_type?: string | null } | null)?.user_type ?? null)
+      .catch(() => null),
   ]);
+  const isAmbassadorByType = profileUserType === 'ambassador' || profileUserType === 'both';
   return {
-    isAmbassador: ambassadorResult,
+    isAmbassador: ambassadorResult || isAmbassadorByType,
     hasCompany: membership != null,
   };
 }

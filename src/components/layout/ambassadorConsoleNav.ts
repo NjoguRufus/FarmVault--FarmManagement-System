@@ -3,6 +3,7 @@ import {
   Users,
   Banknote,
   Share2,
+  BookOpen,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -41,6 +42,12 @@ export const ambassadorConsoleNav: AmbassadorConsoleNavItem[] = [
     label: "Refer & QR",
     shortLabel: "Share",
     icon: Share2,
+  },
+  {
+    to: `${AMBASSADOR_CONSOLE_BASE}/learn`,
+    label: "Learn FarmVault",
+    shortLabel: "Learn",
+    icon: BookOpen,
   },
   {
     to: `${AMBASSADOR_CONSOLE_BASE}/settings`,

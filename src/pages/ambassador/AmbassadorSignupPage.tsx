@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
@@ -12,13 +12,16 @@ import { getAmbassadorSignInPath, getAmbassadorSignUpPath } from "@/lib/ambassad
 import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
 import { getStoredAmbassadorRef } from "@/services/ambassadorService";
 import { setAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
+import { setSignupType } from "@/lib/ambassador/signupType";
 
 export default function AmbassadorSignupPage() {
   const { isSignedIn, isLoaded } = useUser();
   const storedRef = getStoredAmbassadorRef();
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     setAmbassadorAccessIntent(true);
+    setSignupType('ambassador');
   }, []);
 
   return (
@@ -75,22 +78,63 @@ export default function AmbassadorSignupPage() {
                 </p>
               ) : null}
 
+              {/* Terms acceptance checkbox */}
+              <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="amb-signup-terms"
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-emerald-500"
+                />
+                <label htmlFor="amb-signup-terms" className="text-sm text-emerald-100/85 cursor-pointer leading-relaxed">
+                  I agree to FarmVault's{" "}
+                  <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
+                    Terms &amp; Conditions
+                  </Link>
+                  ,{" "}
+                  <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
+                    Privacy Policy
+                  </Link>
+                  , and{" "}
+                  <Link to="/ambassador/terms" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
+                    Ambassador Terms
+                  </Link>
+                </label>
+              </div>
+
               {isLoaded && isSignedIn ? (
                 <div className="space-y-3">
                   <p className="text-sm text-emerald-100/80">You are signed in. Continue to complete your ambassador profile.</p>
-                  <Button asChild className="w-full rounded-full bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold">
-                    <Link
-                      to="/ambassador/onboarding"
-                      onClick={() => setAmbassadorAccessIntent(true)}
-                    >
-                      Continue to onboarding
-                    </Link>
+                  <Button
+                    asChild={agreedToTerms}
+                    disabled={!agreedToTerms}
+                    className="w-full rounded-full bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {agreedToTerms ? (
+                      <Link
+                        to="/ambassador/onboarding"
+                        onClick={() => setAmbassadorAccessIntent(true)}
+                      >
+                        Continue to onboarding
+                      </Link>
+                    ) : (
+                      <span>Continue to onboarding</span>
+                    )}
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <Button asChild className="w-full rounded-full bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold">
-                    <Link to={getAmbassadorSignUpPath()}>Create FarmVault account</Link>
+                  <Button
+                    asChild={agreedToTerms}
+                    disabled={!agreedToTerms}
+                    className="w-full rounded-full bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {agreedToTerms ? (
+                      <Link to={getAmbassadorSignUpPath()}>Create FarmVault account</Link>
+                    ) : (
+                      <span>Create FarmVault account</span>
+                    )}
                   </Button>
                   <p className="text-center text-xs text-emerald-200/60">
                     Already have an account?{" "}

@@ -25,6 +25,16 @@ export function StaffLayout() {
     return <Navigate to="/dashboard" replace />;
   }
 
+  // Ambassador-only users must never land in the staff shell.
+  // They get user.role='employee' because normalizeRole(null) defaults to 'employee' when
+  // there is no company membership context — but profileUserType is the authoritative signal.
+  const isAmbassadorUser =
+    user.profileUserType === 'ambassador' ||
+    (user.profileUserType === 'both' && !user.companyId);
+  if (isAmbassadorUser) {
+    return <Navigate to="/ambassador/console/dashboard" replace />;
+  }
+
   if (import.meta.env.DEV) {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;

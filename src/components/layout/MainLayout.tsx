@@ -52,8 +52,13 @@ export function MainLayout() {
       user.role === 'company-admin' || (user as any).role === 'company_admin';
     const isDeveloper = user.role === 'developer';
     const isStaffUser = user.role === 'employee' && !isCompanyAdmin && !isDeveloper;
+    // Ambassador-only users have role='employee' (no company context) but must NOT be
+    // sent to the staff shell. profileUserType is set from core.profiles before authReady=true.
+    const isAmbassadorUser =
+      user.profileUserType === 'ambassador' ||
+      (user.profileUserType === 'both' && !user.companyId);
 
-    if (isStaffUser && !path.startsWith('/staff')) {
+    if (isStaffUser && !isAmbassadorUser && !path.startsWith('/staff')) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[Shell] staff user → /staff redirect', {

@@ -20,6 +20,8 @@ export type DeveloperUserRow = {
   company_id: string | null;
   company_name: string | null;
   role: string | null;
+  /** user_type from core.profiles: 'ambassador' | 'company_admin' | 'both' */
+  user_type: string | null;
   permissions: Record<string, unknown> | null;
   company?: {
     company_id: string | null;

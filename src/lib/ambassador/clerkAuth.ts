@@ -5,7 +5,8 @@ export const AMBASSADOR_CLERK_FLOW = "ambassador";
 export const AMBASSADOR_POST_AUTH_PATH = "/auth/ambassador-continue";
 
 export function getAmbassadorSignUpSearch(): string {
-  return `flow=${encodeURIComponent(AMBASSADOR_CLERK_FLOW)}`;
+  // Use ?type=ambassador as the canonical param; old ?flow=ambassador links remain supported.
+  return `type=${encodeURIComponent(AMBASSADOR_CLERK_FLOW)}`;
 }
 
 export function getAmbassadorSignUpPath(): string {
@@ -18,7 +19,12 @@ export function getAmbassadorSignInPath(): string {
 
 export function isAmbassadorClerkFlow(search: string): boolean {
   try {
-    return new URLSearchParams(search).get("flow") === AMBASSADOR_CLERK_FLOW;
+    const params = new URLSearchParams(search);
+    // Accept both ?type=ambassador (new) and ?flow=ambassador (legacy).
+    return (
+      params.get("type") === AMBASSADOR_CLERK_FLOW ||
+      params.get("flow") === AMBASSADOR_CLERK_FLOW
+    );
   } catch {
     return false;
   }

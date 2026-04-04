@@ -9,7 +9,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 import { getAmbassadorSignInPath } from "@/lib/ambassador/clerkAuth";
 import { clearAmbassadorAccessIntent, readAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
-import { fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
+import { clearSignupType, isAmbassadorSignupType } from "@/lib/ambassador/signupType";
+import { assignMyAmbassadorProfileRole, fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
 
 export default function AmbassadorAuthContinuePage() {
   const navigate = useNavigate();
@@ -27,6 +28,17 @@ export default function AmbassadorAuthContinuePage() {
     let cancelled = false;
 
     (async () => {
+      // Signup path: assign ambassador role to core.profiles immediately before routing.
+      // Safe to call on sign-in too — the RPC is idempotent.
+      if (isAmbassadorSignupType()) {
+        try {
+          await assignMyAmbassadorProfileRole();
+        } catch {
+          // Non-fatal: onboarding completion will set the role as a fallback.
+        }
+        clearSignupType();
+      }
+
       try {
         const r = await fetchMyAmbassadorDashboardStats();
         if (cancelled) return;

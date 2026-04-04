@@ -2,10 +2,10 @@ import { useEffect, useMemo } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
-import { UserPlus, Repeat2, Network, ArrowRight, Loader2 } from "lucide-react";
+import { UserPlus, Repeat2, Network, Gift, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeoHead } from "@/seo/SeoHead";
-import { LandingNavbar } from "@/components/landing/LandingNavbar";
+import { AmbassadorLandingNavbar } from "@/components/landing/AmbassadorLandingNavbar";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SEO_ROUTES } from "@/seo/routes";
 import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
@@ -89,6 +89,7 @@ export default function AmbassadorLandingPage() {
   }
 
   const features = [
+    { icon: Gift, title: "Welcome Bonus", amount: "KES 200", detail: "when you sign up" },
     { icon: UserPlus, title: "Refer Farmers", amount: "KES 600", detail: "per signup" },
     { icon: Repeat2, title: "Recurring Income", amount: "KES 400", detail: "monthly" },
     { icon: Network, title: "Build Network", amount: "KES 150", detail: "ambassador bonus" },
@@ -145,7 +146,7 @@ export default function AmbassadorLandingPage() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_90%_50%_at_70%_0%,hsl(45_50%_35%/0.12),transparent_55%)]" />
       </div>
 
-      <LandingNavbar />
+      <AmbassadorLandingNavbar />
 
       <main className="relative z-10 pt-28 pb-20 md:pb-28">
         <div className="container mx-auto px-5 sm:px-6 lg:px-8 max-w-6xl">
@@ -274,7 +275,7 @@ export default function AmbassadorLandingPage() {
                 How you earn
               </h2>
               <p className="text-sm text-primary-foreground/50 max-w-xs sm:text-right leading-relaxed font-light">
-                Three revenue streams. One dashboard.
+                Four revenue streams. One dashboard.
               </p>
             </div>
 
@@ -386,18 +387,24 @@ export default function AmbassadorLandingPage() {
               className="flex flex-wrap items-center justify-center gap-6 sm:justify-end order-1 sm:order-2"
               aria-label="Legal and support"
             >
-              <a
-                href="#"
+              <Link
+                to="/terms"
                 className="text-xs md:text-sm font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors"
               >
-                Terms
-              </a>
-              <a
-                href="#"
+                Terms &amp; Conditions
+              </Link>
+              <Link
+                to="/privacy"
                 className="text-xs md:text-sm font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors"
               >
-                Privacy
-              </a>
+                Privacy Policy
+              </Link>
+              <Link
+                to="/ambassador/terms"
+                className="text-xs md:text-sm font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors"
+              >
+                Ambassador Terms
+              </Link>
               <Link
                 to="/support"
                 className="text-xs md:text-sm font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors"

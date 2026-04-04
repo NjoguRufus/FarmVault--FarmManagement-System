@@ -1,24 +1,36 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SignUp } from '@clerk/react';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
 import { useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   AMBASSADOR_POST_AUTH_PATH,
   getAmbassadorSignInPath,
   isAmbassadorClerkFlow,
 } from '@/lib/ambassador/clerkAuth';
-import { setAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+import { readAmbassadorAccessIntent, setAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+import { setSignupType } from '@/lib/ambassador/signupType';
 
 export default function SignUpPage() {
   const location = useLocation();
-  const ambassadorFlow = isAmbassadorClerkFlow(location.search);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
+
+  // Freeze on first render so Clerk's internal URL navigation (OAuth callbacks,
+  // multi-step form pages like /sign-up/verify-email-address) cannot flip
+  // ambassadorFlow to false mid-flow and change afterSignUpUrl to /auth/continue.
+  // Also accept a pre-set localStorage intent from AmbassadorSignupPage.
+  const [ambassadorFlow] = useState(
+    () => isAmbassadorClerkFlow(location.search) || readAmbassadorAccessIntent()
+  );
 
   useEffect(() => {
     if (ambassadorFlow) {
       setAmbassadorAccessIntent(true);
+      setSignupType('ambassador');
     }
-  }, [ambassadorFlow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showAccessRevoked = useMemo(() => {
     const params = new URLSearchParams(location.search || '');
@@ -69,6 +81,34 @@ export default function SignUpPage() {
           </div>
         )}
 
+        {/* Terms acceptance */}
+        <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur flex items-start gap-3">
+          <input
+            type="checkbox"
+            id="signup-terms"
+            checked={agreedToTerms}
+            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-emerald-600"
+          />
+          <label htmlFor="signup-terms" className="text-sm text-white/85 cursor-pointer leading-relaxed">
+            I agree to FarmVault's{" "}
+            <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-white underline-offset-2 hover:underline font-medium">
+              Terms &amp; Conditions
+            </Link>{" "}
+            and{" "}
+            <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="text-white underline-offset-2 hover:underline font-medium">
+              Privacy Policy
+            </Link>
+          </label>
+        </div>
+
+        {!agreedToTerms && (
+          <p className="text-center text-xs text-white/50">
+            Please accept the Terms &amp; Conditions to create your account.
+          </p>
+        )}
+
+        {agreedToTerms && (
         <SignUp
           routing="path"
           path="/sign-up"
@@ -112,6 +152,7 @@ export default function SignUpPage() {
             },
           }}
         />
+        )}
       </div>
     </PremiumAuthShell>
   );

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
-import { ArrowRight, Leaf, Loader2, Mail } from "lucide-react";
+import { ArrowRight, Check, Copy, Download, Leaf, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import {
   registerAmbassadorForClerk,
   setAmbassadorSession,
 } from "@/services/ambassadorService";
+import { invokeNotifyAmbassadorOnboarding } from "@/lib/email";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { persistIntendedRoute } from "@/lib/routing/postAuth";
 import { buildAmbassadorReferralScanUrl } from "@/lib/ambassador/referralLink";
@@ -48,6 +49,7 @@ export default function AmbassadorOnboardingPage() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const qrRef = useRef<AmbassadorReferralQrBlockHandle>(null);
 
   const clerkEmail = user?.primaryEmailAddress?.emailAddress?.trim() ?? "";
@@ -176,6 +178,20 @@ export default function AmbassadorOnboardingPage() {
     setFinishing(true);
     try {
       await completeMyAmbassadorOnboarding();
+
+      // Fire-and-forget: send ambassador welcome + developer notification via same Resend system
+      if (clerkEmail) {
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        const ambassadorDashUrl = base.startsWith("https://")
+          ? `${base}/ambassador/console/dashboard`
+          : "";
+        invokeNotifyAmbassadorOnboarding({
+          to: clerkEmail,
+          ambassadorName: name.trim() || welcomeName,
+          ...(ambassadorDashUrl ? { dashboardUrl: ambassadorDashUrl } : {}),
+        }).catch((e) => console.error("[ambassador-onboarding] email notify failed", e));
+      }
+
       clearAmbassadorAccessIntent();
       navigate("/ambassador/console/refer", { replace: true });
     } catch (err) {
@@ -348,6 +364,10 @@ export default function AmbassadorOnboardingPage() {
               <h1 className="text-2xl font-bold text-white tracking-tight mb-4">How you earn</h1>
               <ul className="space-y-3 text-sm text-emerald-100/85 mb-8">
                 <li className="flex gap-3">
+                  <span className="font-bold text-gold-light tabular-nums shrink-0">KES 200</span>
+                  <span>Welcome bonus when you complete your ambassador signup.</span>
+                </li>
+                <li className="flex gap-3">
                   <span className="font-bold text-gold-light tabular-nums shrink-0">KES 600</span>
                   <span>Signup bonus when a referred farmer joins.</span>
                 </li>
@@ -374,10 +394,45 @@ export default function AmbassadorOnboardingPage() {
               <p className="text-xs text-emerald-100/65 mb-4">
                 Code: <span className="font-mono font-semibold text-lime-200">{referralCode}</span>
               </p>
-              <p className="text-xs text-emerald-100/80 break-all leading-relaxed mb-6">{referralUrl}</p>
-              <div className="mx-auto max-w-[220px] sm:max-w-[260px] mb-8">
+
+              {/* Referral URL + copy button */}
+              <div className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2.5 mb-6">
+                <span className="flex-1 text-xs text-emerald-100/80 break-all leading-relaxed font-mono">
+                  {referralUrl}
+                </span>
+                <button
+                  type="button"
+                  title="Copy referral link"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(referralUrl);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="shrink-0 rounded-md p-1.5 text-emerald-200/70 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  {copied
+                    ? <Check className="h-4 w-4 text-lime-400" />
+                    : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+
+              <div className="mx-auto max-w-[220px] sm:max-w-[260px] mb-4">
                 <AmbassadorReferralQrBlock ref={qrRef} url={referralUrl} />
               </div>
+
+              {/* Download QR code */}
+              <div className="flex justify-center mb-8">
+                <button
+                  type="button"
+                  title="Download QR code"
+                  onClick={() => void qrRef.current?.downloadPng(`farmvault-referral-${referralCode ?? 'qr'}`)}
+                  className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-emerald-200/70 hover:text-white hover:bg-white/10 border border-white/10 hover:border-white/20 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download QR
+                </button>
+              </div>
+
               <Button type="button" onClick={() => setScreen("next")} className="w-full sm:w-auto rounded-lg h-12 px-8 bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950 font-semibold">
                 Next
                 <ArrowRight className="ml-2 h-4 w-4" />

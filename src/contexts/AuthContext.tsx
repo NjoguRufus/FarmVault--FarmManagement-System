@@ -21,7 +21,8 @@ import {
   computeCompanyDataQueriesEnabled,
   type TenantSessionTrust,
 } from '@/lib/companyTenantGate';
-import { hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
+import { assignMyAmbassadorProfileRole, hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
+import { clearSignupType, isAmbassadorSignupType } from '@/lib/ambassador/signupType';
 import {
   mirrorPublicProfileForClerkUser,
   pickFirstExistingMembershipCompany,
@@ -945,6 +946,7 @@ export function AuthProvider({
                 {
                   clerk_user_id: userId,
                   email: fallbackEmail || null,
+                  user_type: isAmbassadorSignupType() ? 'ambassador' : 'company_admin',
                 },
                 { onConflict: 'clerk_user_id' },
               );
@@ -990,7 +992,11 @@ export function AuthProvider({
               .core()
               .from('profiles')
               .upsert(
-                { clerk_user_id: userId, email: fallbackEmail || null },
+                {
+                  clerk_user_id: userId,
+                  email: fallbackEmail || null,
+                  user_type: isAmbassadorSignupType() ? 'ambassador' : 'company_admin',
+                },
                 { onConflict: 'clerk_user_id' },
               );
             if (upsertError2 && import.meta.env.DEV) {
@@ -1031,14 +1037,27 @@ export function AuthProvider({
           }
         }
 
-        // 3b) Load profile full_name + avatar_url (user display + avatar priority)
+        // 3b-pre) Ambassador signup: stamp user_type='ambassador' on the profile immediately
+        // so dashboard_switcher_capabilities returns is_ambassador=true the first time it runs.
+        // This must happen BEFORE authReady=true so routing guards see the correct role.
+        if (isAmbassadorSignupType()) {
+          try {
+            await assignMyAmbassadorProfileRole();
+            clearSignupType();
+          } catch {
+            // Non-fatal: routing falls back to the ambassadorAccessIntent localStorage flag.
+          }
+        }
+
+        // 3b) Load profile full_name + avatar_url + user_type (user display + avatar priority + role)
         let profileAvatarUrl: string | null = null;
         let profileFullName: string | null = null;
+        let profileUserType: string | null = null;
         try {
           const { data: profileRow } = await db
             .core()
             .from('profiles')
-            .select('avatar_url, full_name')
+            .select('avatar_url, full_name, user_type')
             .eq('clerk_user_id', userId)
             .maybeSingle();
           profileAvatarUrl = profileRow?.avatar_url ?? null;
@@ -1046,6 +1065,7 @@ export function AuthProvider({
             profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
               ? String(profileRow.full_name)
               : null;
+          profileUserType = (profileRow as { user_type?: string | null } | null)?.user_type ?? null;
         } catch {
           // Non-blocking; fall back to Clerk image
         }
@@ -1235,6 +1255,7 @@ export function AuthProvider({
           companyId: hasCompanyId && hasRole ? contextCompanyId : null,
           avatar: resolvedAvatar ? String(resolvedAvatar) : undefined,
           createdAt: new Date(),
+          profileUserType: profileUserType ?? null,
         };
 
         // 5) CRITICAL FIX: Role priority for routing
@@ -1348,8 +1369,12 @@ export function AuthProvider({
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
         const needsAmbassadorCheck = setupIncompleteFlag && !hasEffectiveCompany;
+        // Fast-path: if core.profiles.user_type is 'ambassador' or 'both' we already know
+        // this user shouldn't be forced through company onboarding — skip the ambassador row fetch.
+        const isAmbassadorByProfileType =
+          profileUserType === 'ambassador' || profileUserType === 'both';
         const ambassadorAllowsNoCompany = needsAmbassadorCheck
-          ? await getAmbassadorAccessThisBootstrap()
+          ? (isAmbassadorByProfileType || await getAmbassadorAccessThisBootstrap())
           : false;
 
         if (import.meta.env.DEV) {

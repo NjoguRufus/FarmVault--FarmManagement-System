@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDashboardRoles } from '@/hooks/useDashboardRoles';
 import {
   clearOnboardingSessionProgress,
   readOnboardingSessionProgress,
@@ -37,6 +38,7 @@ type EmailValidationResult = { ok: boolean; message?: string | null };
 
 export default function OnboardingPage() {
   const { resetRequired, refreshAuthState, syncTenantCompanyFromServer, authReady, user: fvUser } = useAuth();
+  const { hasAmbassador, hasCompany, loading: rolesLoading } = useDashboardRoles();
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
@@ -362,6 +364,22 @@ export default function OnboardingPage() {
 
   if (resetRequired) {
     return <Navigate to="/start-fresh" replace />;
+  }
+
+  // Block rendering the company form until role resolution is complete.
+  // Without this, an ambassador-only user sees the company form momentarily
+  // before the hasAmbassador guard below fires.
+  if (!authReady || rolesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
+  // Ambassador-only users must not reach company onboarding.
+  if (hasAmbassador && !hasCompany) {
+    return <Navigate to="/ambassador/console/dashboard" replace />;
   }
 
   const goDashboard = () => {

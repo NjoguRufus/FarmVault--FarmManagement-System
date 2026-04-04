@@ -89,6 +89,10 @@ function isActivityToday(log: ActivityLogDoc): boolean {
 }
 
 export function CompanyDashboard() {
+  useEffect(() => {
+    document.title = "FarmVault Dashboard";
+  }, []);
+
   const queryClient = useQueryClient();
   const {
     activeProject,
