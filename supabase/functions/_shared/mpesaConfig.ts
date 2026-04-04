@@ -1,17 +1,12 @@
 /**
- * M-Pesa Daraja — credentials only from environment (Supabase Edge secrets / Deno.env).
+ * M-Pesa Daraja — OAuth/STK credentials for Edge Functions.
  *
- * Deno.env.get:
- *   MPESA_ENV — "sandbox" | "production" (default: sandbox)
- *   MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET (required)
- *   MPESA_SHORTCODE, MPESA_PASSKEY (required — use your Daraja sandbox or live app credentials)
- *   MPESA_CALLBACK_URL — public URL of `mpesa-stk-callback` (required)
+ * MPESA_ENV (default sandbox):
+ *   - sandbox: Daraja test shortcode 174379 + sandbox passkey + sandbox.safaricom.co.ke
+ *     (ignores MPESA_SHORTCODE / MPESA_PASSKEY so live PayBill secrets never hit sandbox STK)
+ *   - production: MPESA_SHORTCODE, MPESA_PASSKEY, api.safaricom.co.ke (both required)
  *
- * Sandbox (MPESA_ENV=sandbox):
- *   OAuth: https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials
- *   STK:   https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest
- *
- * Production: same paths on https://api.safaricom.co.ke
+ * Always from secrets: MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_CALLBACK_URL
  */
 
 export type MpesaEnvName = "sandbox" | "production";
@@ -25,6 +20,12 @@ export interface MpesaActiveConfig {
   passkey: string;
   callbackUrl: string;
 }
+
+/** Sandbox Lipa Na M-Pesa Online test paybill (STK only — UI manual PayBill unchanged). */
+const SANDBOX_STK_SHORTCODE = "174379";
+/** Daraja sandbox passkey for the test app above. */
+const SANDBOX_STK_PASSKEY =
+  "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
 
 function darajaBaseUrlForEnv(env: MpesaEnvName): string {
   return env === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
@@ -58,14 +59,21 @@ export function loadMpesaConfig(): MpesaActiveConfig {
     throw new Error("MPESA_CONSUMER_SECRET is missing — set it in Supabase Edge secrets");
   }
 
-  const shortcode = Deno.env.get("MPESA_SHORTCODE")?.trim() ?? "";
-  const passkey = Deno.env.get("MPESA_PASSKEY")?.trim() ?? "";
+  let shortcode: string;
+  let passkey: string;
 
-  if (!shortcode) {
-    throw new Error("MPESA_SHORTCODE is missing — set it in Supabase Edge secrets");
-  }
-  if (!passkey) {
-    throw new Error("MPESA_PASSKEY is missing — set it in Supabase Edge secrets");
+  if (env === "sandbox") {
+    shortcode = SANDBOX_STK_SHORTCODE;
+    passkey = SANDBOX_STK_PASSKEY;
+  } else {
+    shortcode = Deno.env.get("MPESA_SHORTCODE")?.trim() ?? "";
+    passkey = Deno.env.get("MPESA_PASSKEY")?.trim() ?? "";
+    if (!shortcode) {
+      throw new Error("MPESA_SHORTCODE is missing — set it in Supabase Edge secrets for production");
+    }
+    if (!passkey) {
+      throw new Error("MPESA_PASSKEY is missing — set it in Supabase Edge secrets for production");
+    }
   }
 
   const callbackUrl = Deno.env.get("MPESA_CALLBACK_URL")?.trim() ?? "";
@@ -74,7 +82,6 @@ export function loadMpesaConfig(): MpesaActiveConfig {
   }
 
   const baseUrl = darajaBaseUrlForEnv(env);
-  console.log("[mpesa-config] shortcode in use", { shortcode, baseUrl });
 
   return {
     env,

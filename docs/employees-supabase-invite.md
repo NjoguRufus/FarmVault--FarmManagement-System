@@ -6,7 +6,7 @@ This document describes the **Supabase-backed** employee flow (invite by email, 
 
 - **Env:** `VITE_EMPLOYEES_PROVIDER=firebase | supabase`
 - **Default:** `firebase` (no change to current behavior if unset)
-- **Helper:** `src/lib/provider.ts` exports `employeesProvider`, `isEmployeesSupabase`, `isEmployeesFirebase`
+- **Helper:** `src/lib/provider.ts` exports `employeesProvider`, `isEmployeesSupabase`
 
 When `VITE_EMPLOYEES_PROVIDER=supabase`:
 

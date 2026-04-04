@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { where } from '@/lib/firestore-stub';
+import { where } from '@/lib/documentLayer';
 import { Clock, ArrowRight, CreditCard } from 'lucide-react';
 import { useCollection } from '@/hooks/useCollection';
 import { Company } from '@/types';

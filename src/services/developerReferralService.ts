@@ -4,6 +4,8 @@ export type DevGlobalReferralStats = {
   total_ambassadors: number;
   active_ambassadors: number;
   inactive_ambassadors: number;
+  total_owed: number;
+  total_paid_out: number;
 };
 
 export type DevReferralConversionRow = {
@@ -41,6 +43,16 @@ export type DevCommissionBreakdownRow = {
   created_at: string;
 };
 
+export type DevAmbassadorEarningRow = {
+  earning_id: string;
+  ambassador_id: string;
+  amount: number;
+  earning_type: string;
+  status: string;
+  description: string | null;
+  created_at: string;
+};
+
 export async function fetchDevGlobalReferralStats(): Promise<DevGlobalReferralStats> {
   const { data, error } = await supabase.from("dev_global_referral_stats").select("*").maybeSingle();
   if (error) throw new Error(error.message);
@@ -49,6 +61,8 @@ export async function fetchDevGlobalReferralStats(): Promise<DevGlobalReferralSt
     total_ambassadors: Number(row?.total_ambassadors ?? 0),
     active_ambassadors: Number(row?.active_ambassadors ?? 0),
     inactive_ambassadors: Number(row?.inactive_ambassadors ?? 0),
+    total_owed: Number(row?.total_owed ?? 0),
+    total_paid_out: Number(row?.total_paid_out ?? 0),
   };
 }
 
@@ -137,12 +151,35 @@ export async function fetchDevCommissionBreakdown(referrerId: string): Promise<D
   }));
 }
 
-/** Mark every owed commission for this referrer as paid. */
-export async function markAmbassadorCommissionsPaid(referrerId: string): Promise<void> {
-  const { error } = await supabase
-    .from("commissions")
-    .update({ status: "paid" })
-    .eq("referrer_id", referrerId)
-    .eq("status", "owed");
+export async function fetchDevAmbassadorEarnings(ambassadorId: string): Promise<DevAmbassadorEarningRow[]> {
+  const { data, error } = await supabase
+    .from("dev_ambassador_earnings")
+    .select("*")
+    .eq("ambassador_id", ambassadorId)
+    .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    earning_id: String(r.earning_id),
+    ambassador_id: String(r.ambassador_id),
+    amount: Number(r.amount ?? 0),
+    earning_type: String(r.earning_type ?? ""),
+    status: String(r.status ?? ""),
+    description: r.description != null ? String(r.description) : null,
+    created_at: String(r.created_at ?? ""),
+  }));
+}
+
+/** Mark every owed ambassador_earnings row for this ambassador as paid (developer). */
+export async function markAmbassadorEarningsPaid(ambassadorId: string): Promise<number> {
+  const { data, error } = await supabase.rpc("dev_mark_ambassador_earnings_paid", {
+    p_ambassador_id: ambassadorId,
+  });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown> | null;
+  if (!row || row.ok !== true) {
+    const err = typeof row?.error === "string" ? row.error : "mark_paid_failed";
+    throw new Error(err);
+  }
+  return Number(row.updated ?? 0);
 }

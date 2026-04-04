@@ -8,8 +8,8 @@ import {
   limit,
   getDocsFromCache,
   type QueryConstraint,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { toast } from '@/hooks/use-toast';
 import { NO_COMPANY } from '@/hooks/useCompanyScope';
 
@@ -27,7 +27,7 @@ export type UseCollectionOptions = {
   /** Deprecated: polling is ignored; realtime snapshots drive updates. */
   refetchInterval?: number;
   enabled?: boolean;
-  /** Additional Firestore constraints (applied after companyId/projectId). */
+  /** Additional query constraints (applied after companyId/projectId). */
   constraints?: QueryConstraint[];
   /** Field path for orderBy (e.g. 'createdAt'). */
   orderByField?: string;

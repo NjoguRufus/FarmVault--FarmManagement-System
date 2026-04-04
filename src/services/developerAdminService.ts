@@ -53,6 +53,7 @@ export type DeveloperCompanyRow = {
     plan_id?: string | null;
     billing_cycle?: string | null;
     billing_mode?: string | null;
+    payment_method?: string | null;
     submitted_at?: string | null;
     mpesa_name?: string | null;
     transaction_code?: string | null;
@@ -621,7 +622,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
   const { data: coCore, error: coCoreErr } = await supabase
     .schema('core')
     .from('companies')
-    .select('name,email,created_by')
+    .select('name,email,created_by,billing_reference')
     .eq('id', cid)
     .maybeSingle();
 

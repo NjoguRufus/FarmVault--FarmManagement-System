@@ -1,13 +1,22 @@
 /**
- * Stub for firebase/firestore. Firebase has been removed; use Supabase.
- * Read operations (collection, query, onSnapshot, where, orderBy, limit, getDocsFromCache)
- * return empty/no-op so existing hooks (useCollection, cropCatalogService) do not crash.
- * Write operations still throw so callers are forced to migrate to Supabase.
+ * Legacy document-style API retained only for unmigrated call sites.
+ * New code should use Supabase (@/lib/supabase, @/lib/db).
+ *
+ * Reads resolve empty; mutating calls throw with a clear migration hint.
  */
-const msg = 'Firebase has been removed. Use Supabase for database operations.';
 
-function throwStub(): never {
-  throw new Error(msg);
+const writeMsg =
+  'This write path is disabled. The app uses Supabase — migrate this call site to the Supabase client or an RPC.';
+
+const readRetiredMsg =
+  'This read path is disabled. The app uses Supabase — migrate this call site to the Supabase client.';
+
+function throwWrite(): never {
+  throw new Error(writeMsg);
+}
+
+function throwReadRetired(): never {
+  throw new Error(readRetiredMsg);
 }
 
 export type DocumentData = Record<string, unknown>;
@@ -67,9 +76,9 @@ const EMPTY_SNAPSHOT: QuerySnapshot = {
 };
 
 export const Timestamp = {
-  now: () => throwStub(),
-  fromDate: (_: Date) => throwStub(),
-  fromMillis: (_: number) => throwStub(),
+  now: () => throwReadRetired(),
+  fromDate: (_: Date) => throwReadRetired(),
+  fromMillis: (_: number) => throwReadRetired(),
 };
 
 export function collection(_db: unknown, path: string, ...pathSegments: string[]): CollectionReference {
@@ -90,19 +99,19 @@ export function getDocs(_query: unknown): Promise<QuerySnapshot> {
 }
 
 export function addDoc(_ref: unknown, _data: unknown): Promise<DocumentReference> {
-  throwStub();
+  throwWrite();
 }
 
 export function setDoc(_ref: unknown, _data: unknown, _opts?: unknown): Promise<void> {
-  throwStub();
+  throwWrite();
 }
 
 export function updateDoc(_ref: unknown, _data: unknown): Promise<void> {
-  throwStub();
+  throwWrite();
 }
 
 export function deleteDoc(_ref: unknown): Promise<void> {
-  throwStub();
+  throwWrite();
 }
 
 export function query(_ref: unknown, ..._constraints: unknown[]): unknown {
@@ -113,7 +122,6 @@ export function where(_field: string, _op: string, _value: unknown): QueryConstr
   return {};
 }
 
-/** Accepts field name or `documentId()` (FieldPath sentinel in real Firebase). */
 export function orderBy(_field: unknown, _dir?: string): QueryConstraint {
   return {};
 }
@@ -141,21 +149,21 @@ export function writeBatch(_db: unknown): WriteBatch {
       return this;
     },
     commit() {
-      return Promise.reject(new Error(msg));
+      return Promise.reject(new Error(writeMsg));
     },
   };
 }
 
 export function increment(_n: number): unknown {
-  throwStub();
+  throwWrite();
 }
 
 export function arrayUnion(..._items: unknown[]): unknown {
-  throwStub();
+  throwWrite();
 }
 
 export function serverTimestamp(): unknown {
-  throwStub();
+  throwWrite();
 }
 
 export function getDocFromCache(_ref: unknown): Promise<DocumentSnapshot | null> {
@@ -171,16 +179,54 @@ export function documentId(): QueryConstraint {
 }
 
 export function runTransaction<T>(_db: unknown, _fn: (tx: unknown) => Promise<T>): Promise<T> {
-  throwStub();
+  throwWrite();
 }
 
 export function startAfter(_snap: unknown): QueryConstraint {
   return {};
 }
 
-/** Matches Firebase modular `getCountFromServer` aggregate snapshot: `.data().count`. */
+/** Aggregate count helper matching prior modular client shape: `.data().count`. */
 export function getCountFromServer(_query: unknown): Promise<{ data: () => { count: number } }> {
   return Promise.resolve({
     data: () => ({ count: 0 }),
   });
+}
+
+// --- App tokens (replaces former env-driven client singletons) ---
+
+export const app = null as unknown as { name?: string };
+
+function throwTokenAccess(): never {
+  throw new Error(
+    'Legacy auth/db token accessed. Use Clerk for authentication and Supabase for data.',
+  );
+}
+
+const tokenProxy = new Proxy(
+  {},
+  {
+    get() {
+      throwTokenAccess();
+    },
+  },
+);
+
+export const auth = tokenProxy as unknown as {
+  currentUser?: { uid?: string; displayName?: string | null; email?: string | null } | null;
+  signOut?: () => Promise<void>;
+};
+export const authEmployeeCreate = auth;
+export const db = tokenProxy as unknown as { type?: string };
+export const analyticsPromise = Promise.resolve(null);
+
+/** @deprecated Employee creation uses Supabase `inviteEmployee`; this path is not used when `employeesProvider` is `supabase`. */
+export function createUserWithEmailAndPassword(
+  _auth: unknown,
+  _email: string,
+  _password: string,
+): Promise<{ user: { uid: string } }> {
+  throw new Error(
+    'Legacy email/password employee creation is disabled. Use Supabase employee invites (VITE_EMPLOYEES_PROVIDER=supabase).',
+  );
 }

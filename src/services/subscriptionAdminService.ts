@@ -6,8 +6,8 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
-} from '@/lib/firestore-stub';
-import { auth, db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { auth, db } from '@/lib/documentLayer';
 import {
   type PaymentMode,
   type SubscriptionPlan,

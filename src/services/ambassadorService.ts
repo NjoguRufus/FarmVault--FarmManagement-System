@@ -118,13 +118,14 @@ export type AmbassadorDashboardStats = {
   active_referrals: number;
   inactive_referrals: number;
   total_earned: number;
+  paid: number;
   owed: number;
 };
 
 export type AmbassadorDashboardError = { ok: false; error: string };
 
 /**
- * Aggregates `referrals` and `commissions` for the ambassador; loads profile from `ambassadors`.
+ * Aggregates `referrals` and `ambassador_earnings` for the ambassador; loads profile from `ambassadors`.
  */
 export async function fetchAmbassadorDashboardStats(
   ambassadorId: string,
@@ -173,6 +174,7 @@ function mapDashboardRpcPayload(data: unknown): AmbassadorDashboardStats | Ambas
     active_referrals: Number(row.active_referrals ?? 0),
     inactive_referrals: Number(row.inactive_referrals ?? 0),
     total_earned: Number(row.total_earned ?? 0),
+    paid: Number(row.paid ?? 0),
     owed: Number(row.owed ?? 0),
   };
 }
@@ -247,6 +249,62 @@ export async function fetchMyAmbassadorReferralRows(): Promise<AmbassadorReferra
   const { data, error } = await supabase.rpc("fetch_my_ambassador_referral_rows");
   if (error) throw error;
   return mapReferralRowsPayload(data);
+}
+
+export type AmbassadorEarningTransactionRow = {
+  id: string;
+  created_at: string;
+  description: string;
+  type: string;
+  amount: number;
+  status: "owed" | "paid";
+};
+
+export type AmbassadorEarningsTransactionsResult =
+  | { ok: true; rows: AmbassadorEarningTransactionRow[] }
+  | { ok: false; error: string };
+
+function mapEarningsTransactionsPayload(data: unknown): AmbassadorEarningsTransactionsResult {
+  if (!data || typeof data !== "object") {
+    return { ok: false, error: "invalid_response" };
+  }
+  const row = data as Record<string, unknown>;
+  if (row.ok !== true) {
+    return { ok: false, error: typeof row.error === "string" ? row.error : "unknown" };
+  }
+  const rawRows = row.rows;
+  if (!Array.isArray(rawRows)) {
+    return { ok: true, rows: [] };
+  }
+  const rows: AmbassadorEarningTransactionRow[] = rawRows.map((r) => {
+    const o = r as Record<string, unknown>;
+    const st = o.status === "paid" ? "paid" : "owed";
+    return {
+      id: String(o.id ?? ""),
+      created_at: typeof o.created_at === "string" ? o.created_at : String(o.created_at ?? ""),
+      description: String(o.description ?? ""),
+      type: String(o.type ?? ""),
+      amount: Number(o.amount ?? 0),
+      status: st,
+    };
+  });
+  return { ok: true, rows };
+}
+
+export async function fetchAmbassadorEarningsTransactions(
+  ambassadorId: string,
+): Promise<AmbassadorEarningsTransactionsResult> {
+  const { data, error } = await supabase.rpc("fetch_ambassador_earnings_transactions", {
+    p_ambassador_id: ambassadorId,
+  });
+  if (error) throw error;
+  return mapEarningsTransactionsPayload(data);
+}
+
+export async function fetchMyAmbassadorEarningsTransactions(): Promise<AmbassadorEarningsTransactionsResult> {
+  const { data, error } = await supabase.rpc("fetch_my_ambassador_earnings_transactions");
+  if (error) throw error;
+  return mapEarningsTransactionsPayload(data);
 }
 
 export type RegisterAmbassadorClerkResult = {

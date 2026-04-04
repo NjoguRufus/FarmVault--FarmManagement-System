@@ -1,5 +1,18 @@
-import { addDoc, collection, doc, getDoc, query, where, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc } from '@/lib/firestore-stub';
-import { auth, db } from '@/lib/firebase';
+import {
+  addDoc,
+  auth,
+  collection,
+  db,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+} from '@/lib/documentLayer';
 import {
   type SubscriptionPlan,
   type PaymentMode,

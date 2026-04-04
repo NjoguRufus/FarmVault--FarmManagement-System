@@ -5,7 +5,19 @@ import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { fetchDeveloperCompanies, fetchPayments, fetchSubscriptionAnalytics } from '@/services/developerService';
+import {
+  fetchDeveloperCompanies,
+  fetchMpesaStkPaymentsForDeveloper,
+  fetchPayments,
+  fetchSubscriptionAnalytics,
+} from '@/services/developerService';
+import {
+  buildLatestSdkMpesaByCompany,
+  formatPaymentRelativeDay,
+  isManualApprovedSubscriptionRow,
+  mpesaRowIsSdkSuccess,
+  resolveLatestCompanyPayment,
+} from '@/features/developer/subscriptionPaymentSource';
 import {
   computeCompanyStatus,
   companyStatusAccessLabel,
@@ -42,6 +54,7 @@ function computeResolvedStatus(row: any, now: Date): CompanyStatus {
 }
 
 type StatusFilter = 'all' | 'active' | 'trialing' | 'expired' | 'rejected';
+type PaymentTypeFilter = 'all' | 'manual' | 'sdk';
 type RevenueWindowDays = 7 | 30 | 90;
 
 function clamp01(n: number): number {
@@ -98,6 +111,62 @@ function buildDailyBuckets(rows: Array<{ amount?: number | null; approved_at?: s
   const series = keys.map((k) => map.get(k) ?? 0);
   const total = series.reduce((s, n) => s + n, 0);
   return { keys, series, total };
+}
+
+function StackedRevenueMini({
+  keys,
+  manual,
+  sdk,
+}: {
+  keys: string[];
+  manual: number[];
+  sdk: number[];
+}) {
+  const n = keys.length;
+  if (n === 0) {
+    return <div className="h-11 w-40 text-[10px] text-muted-foreground">—</div>;
+  }
+  const max = Math.max(
+    1,
+    ...keys.map((_, i) => Number(manual[i] ?? 0) + Number(sdk[i] ?? 0)),
+  );
+  const barH = 40;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex h-11 w-44 items-end gap-px">
+        {keys.map((_, i) => {
+          const mm = Number(manual[i] ?? 0);
+          const sm = Number(sdk[i] ?? 0);
+          const hSdk = (sm / max) * barH;
+          const hMan = (mm / max) * barH;
+          return (
+            <div key={i} className="flex min-w-0 flex-1 flex-col justify-end gap-px">
+              <div
+                className="w-full min-h-[1px] rounded-[1px] bg-emerald-500/80"
+                style={{ height: `${Math.max(hSdk, sm > 0 ? 2 : 0)}px` }}
+                title={`SDK KES ${sm.toLocaleString()}`}
+              />
+              <div
+                className="w-full min-h-[1px] rounded-[1px] bg-muted-foreground/40"
+                style={{ height: `${Math.max(hMan, mm > 0 ? 2 : 0)}px` }}
+                title={`Manual KES ${mm.toLocaleString()}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+        <span>
+          <span className="inline-block h-2 w-2 rounded-sm bg-muted-foreground/40 align-middle mr-1" />
+          Manual
+        </span>
+        <span>
+          <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500/80 align-middle mr-1" />
+          SDK
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function Sparkline({
@@ -177,6 +246,7 @@ function statusBadgeFromResolved(status: CompanyStatus) {
 
 export default function DeveloperSubscriptionAnalyticsPage() {
   const [status, setStatus] = useState<StatusFilter>('all');
+  const [paymentType, setPaymentType] = useState<PaymentTypeFilter>('all');
   const [plan, setPlan] = useState<string>('');
   const [revenueWindowDays, setRevenueWindowDays] = useState<RevenueWindowDays>(30);
   const now = useNow(60_000);
@@ -184,6 +254,12 @@ export default function DeveloperSubscriptionAnalyticsPage() {
   const companiesQuery = useQuery({
     queryKey: ['developer', 'companies', 'subscription-counters'],
     queryFn: () => fetchDeveloperCompanies({ limit: 200, offset: 0 }),
+  });
+
+  const { data: mpesaStkRows = [] } = useQuery({
+    queryKey: ['developer', 'mpesa-stk'],
+    queryFn: fetchMpesaStkPaymentsForDeveloper,
+    staleTime: 60_000,
   });
 
   const {
@@ -204,23 +280,41 @@ export default function DeveloperSubscriptionAnalyticsPage() {
   });
 
   const approvedRevenueSeriesQuery = useQuery({
-    queryKey: ['developer', 'payments', 'approved', 'series', revenueWindowDays],
+    queryKey: ['developer', 'payments', 'approved', 'series', 'manual-sdk', revenueWindowDays],
     queryFn: async () => {
-      // Fetch 2x window so we can compute current vs previous period deltas in one call.
       const days = revenueWindowDays;
       const from = new Date(Date.now() - days * 2 * 24 * 60 * 60 * 1000).toISOString();
-      const resp = await fetchPayments({ status: 'approved', dateFrom: from, limit: 2000, offset: 0 });
-      const rows = resp.rows ?? [];
+      const [resp, stkList] = await Promise.all([
+        fetchPayments({ status: 'approved', dateFrom: from, limit: 2000, offset: 0 }),
+        fetchMpesaStkPaymentsForDeveloper(),
+      ]);
+      const manualRows = (resp.rows ?? []).filter((r) => isManualApprovedSubscriptionRow(r));
+      const sdkRows = (stkList ?? [])
+        .filter((r) => mpesaRowIsSdkSuccess(r))
+        .map((r) => ({
+          amount: r.amount,
+          approved_at: r.paid_at,
+          created_at: r.created_at,
+        }));
 
-      const current = buildDailyBuckets(rows, days, now);
+      const currentManual = buildDailyBuckets(manualRows, days, now);
+      const currentSdk = buildDailyBuckets(sdkRows, days, now);
       const prevNow = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const previous = buildDailyBuckets(rows, days, prevNow);
+      const previousManual = buildDailyBuckets(manualRows, days, prevNow);
+      const previousSdk = buildDailyBuckets(sdkRows, days, prevNow);
 
-      const deltaRatio = previous.total > 0 ? (current.total - previous.total) / previous.total : current.total > 0 ? 1 : 0;
+      const currentTotal = currentManual.total + currentSdk.total;
+      const previousTotal = previousManual.total + previousSdk.total;
+      const deltaRatio =
+        previousTotal > 0 ? (currentTotal - previousTotal) / previousTotal : currentTotal > 0 ? 1 : 0;
+
       return {
         days,
-        current,
-        previous,
+        keys: currentManual.keys,
+        seriesManual: currentManual.series,
+        seriesSdk: currentSdk.series,
+        currentTotal,
+        previousTotal,
         deltaRatio,
       };
     },
@@ -230,6 +324,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
   const rows = data?.rows ?? [];
   const planDistribution = data?.plan_distribution ?? [];
   const statusDistribution = data?.status_distribution ?? [];
+
   const pay = data?.payment_stats;
 
   const counters = useMemo(() => {
@@ -257,13 +352,13 @@ export default function DeveloperSubscriptionAnalyticsPage() {
       activeProSubscriptions: 0,
       expiredTrials: 0,
       expiredSubscriptions: 0,
-      pendingConfirmation: 0,
+      pendingConfirmation: Number(pay?.pending_total_count ?? 0),
       expiringSoon: [] as typeof computedRows,
       computedRows,
     };
 
     return out;
-  }, [companiesQuery.data, now]);
+  }, [companiesQuery.data, now, pay?.pending_total_count]);
 
   const conversionRate = useMemo(() => {
     const denom = counters.paidActive + counters.trialActive + counters.trialExpired;
@@ -271,10 +366,9 @@ export default function DeveloperSubscriptionAnalyticsPage() {
     return counters.paidActive / denom;
   }, [counters.paidActive, counters.trialActive, counters.trialExpired]);
 
-  const windowRevenueKes = Number(approvedRevenueSeriesQuery.data?.current.total ?? 0);
+  const windowRevenueKes = Number(approvedRevenueSeriesQuery.data?.currentTotal ?? 0);
   const windowTrend = trendLabel(Number(approvedRevenueSeriesQuery.data?.deltaRatio ?? 0));
   const totalRevenueKes = Number(pay?.approved_revenue ?? 0);
-  const avgPerCompanyKes = counters.totalCompanies > 0 ? totalRevenueKes / counters.totalCompanies : 0;
 
   const chartTotals = useMemo(() => {
     const active = counters.paidActive + counters.trialActive;
@@ -294,6 +388,36 @@ export default function DeveloperSubscriptionAnalyticsPage() {
       planTotal,
     };
   }, [counters, planDistribution]);
+
+  const avgPerCompanyKes =
+    chartTotals.active > 0 ? totalRevenueKes / chartTotals.active : 0;
+
+  const sdkByCompany = useMemo(() => buildLatestSdkMpesaByCompany(mpesaStkRows), [mpesaStkRows]);
+
+  const companyById = useMemo(() => {
+    const items = (companiesQuery.data?.items ?? []) as any[];
+    const m = new Map<string, any>();
+    for (const r of items) {
+      const id = String(r.company_id ?? r.id ?? '');
+      if (id) m.set(id, r);
+    }
+    return m;
+  }, [companiesQuery.data?.items]);
+
+  const filteredAnalyticsRows = useMemo(() => {
+    if (paymentType === 'all') return rows;
+    return rows.filter((row) => {
+      const cid = String(row.company_id ?? '');
+      const c = companyById.get(cid);
+      const resolved = resolveLatestCompanyPayment(
+        c?.latest_subscription_payment ?? null,
+        sdkByCompany.get(cid),
+      );
+      if (paymentType === 'manual') return resolved?.kind === 'manual';
+      if (paymentType === 'sdk') return resolved?.kind === 'sdk';
+      return true;
+    });
+  }, [rows, paymentType, companyById, sdkByCompany]);
 
   return (
     <DeveloperPageShell
@@ -358,7 +482,9 @@ export default function DeveloperSubscriptionAnalyticsPage() {
             <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums text-blue-700 dark:text-blue-400">
               {counters.pendingConfirmation.toLocaleString()}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">Submitted payments awaiting review</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Manual pipeline only (M-Pesa manual pending); STK / SDK pending is excluded
+            </p>
           </div>
 
           <div className={cn('fv-card p-4', metricCardTone('warning'))}>
@@ -422,7 +548,11 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                     </button>
                   ))}
                 </div>
-                <Sparkline series={approvedRevenueSeriesQuery.data?.current.series ?? []} />
+                <StackedRevenueMini
+                  keys={approvedRevenueSeriesQuery.data?.keys ?? []}
+                  manual={approvedRevenueSeriesQuery.data?.seriesManual ?? []}
+                  sdk={approvedRevenueSeriesQuery.data?.seriesSdk ?? []}
+                />
               </div>
             </div>
           </div>
@@ -541,18 +671,18 @@ export default function DeveloperSubscriptionAnalyticsPage() {
 
         <div className="fv-card p-4 lg:col-span-1">
           <p className="text-sm font-semibold">Payment risk</p>
-          <p className="text-xs text-muted-foreground">Pending verification & revenue exposure</p>
+          <p className="text-xs text-muted-foreground">Manual pending only — SDK / STK pending is excluded</p>
           <div className="mt-4 space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Pending verification</span>
               <span className="font-medium tabular-nums">{Number(pay?.pending_verification_count ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Pending revenue (KES)</span>
+              <span className="text-muted-foreground">Revenue exposure (KES)</span>
               <span className="font-medium tabular-nums">{Number(pay?.pending_revenue ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex items-center justify-between pt-2 border-t border-border/50">
-              <span className="text-muted-foreground">Approved revenue (KES)</span>
+              <span className="text-muted-foreground">Confirmed revenue (KES)</span>
               <span className="font-semibold tabular-nums">{Number(pay?.approved_revenue ?? 0).toLocaleString()}</span>
             </div>
           </div>
@@ -588,18 +718,28 @@ export default function DeveloperSubscriptionAnalyticsPage() {
       <section className="mb-5 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="fv-card p-4">
           <p className="text-sm font-semibold">Revenue analytics</p>
-          <p className="text-xs text-muted-foreground">Approved revenue + windowed trend</p>
+          <p className="text-xs text-muted-foreground">Manual + SDK combined; window chart stacks both</p>
           <div className="mt-4 space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Total revenue (KES)</span>
               <span className="font-semibold tabular-nums">{fmtKes(totalRevenueKes)}</span>
             </div>
             <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Manual confirmed (KES)</span>
+              <span className="font-medium tabular-nums text-muted-foreground">{fmtKes(Number(pay?.manual_approved_revenue ?? 0))}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">SDK confirmed (KES)</span>
+              <span className="font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
+                {fmtKes(Number(pay?.sdk_confirmed_revenue ?? 0))}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Revenue last {revenueWindowDays}d (KES)</span>
               <span className="font-semibold tabular-nums">{fmtKes(windowRevenueKes)}</span>
             </div>
             <div className="flex items-center justify-between pt-2 border-t border-border/50">
-              <span className="text-muted-foreground">Avg per company (KES)</span>
+              <span className="text-muted-foreground">Avg per active company (KES)</span>
               <span className="font-medium tabular-nums">{Math.round(avgPerCompanyKes).toLocaleString()}</span>
             </div>
           </div>
@@ -607,9 +747,28 @@ export default function DeveloperSubscriptionAnalyticsPage() {
         <div className="fv-card p-4 lg:col-span-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold">Filters (legacy)</p>
-            <p className="text-xs text-muted-foreground">Affects the subscriptions table below</p>
+            <p className="text-xs text-muted-foreground">Affects the companies table below</p>
           </div>
           <div className="mt-3 flex flex-col gap-3 text-xs sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="shrink-0 text-muted-foreground">Payment:</span>
+              <div className="flex flex-wrap gap-1 rounded-xl bg-muted/40 border border-border/70 p-0.5">
+                {(['all', 'manual', 'sdk'] as PaymentTypeFilter[]).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`px-2.5 py-1.5 rounded-lg sm:rounded-full sm:px-3 ${
+                      paymentType === value
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    onClick={() => setPaymentType(value)}
+                  >
+                    {value === 'all' ? 'All' : value === 'manual' ? 'Manual' : 'SDK'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
               <span className="shrink-0 text-muted-foreground">Status:</span>
               <div className="flex flex-wrap gap-1 rounded-xl bg-muted/40 border border-border/70 p-0.5">
@@ -657,23 +816,30 @@ export default function DeveloperSubscriptionAnalyticsPage() {
           </div>
         </div>
 
-        {rows.length > 0 ? (
+        {filteredAnalyticsRows.length > 0 ? (
           <div className="fv-card mt-3 overflow-x-visible md:overflow-x-auto">
-            <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[860px]">
+            <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[960px]">
               <thead className="border-b border-border/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="py-2 text-left font-medium">Company</th>
                   <th className="py-2 text-left font-medium">Plan type</th>
                   <th className="py-2 text-left font-medium">Badges</th>
                   <th className="py-2 text-left font-medium">Billing</th>
+                  <th className="py-2 text-left font-medium">Payment</th>
                   <th className="py-2 text-left font-medium">Access end</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {filteredAnalyticsRows.map((row) => {
                   const statusResolved = computeResolvedStatus(row, now);
                   const planLabel = String(row.plan_code ?? row.plan ?? row.selected_plan ?? '—');
                   const endIso = String(row.active_until ?? row.current_period_end ?? row.trial_ends_at ?? '');
+                  const cid = String(row.company_id ?? '');
+                  const c = companyById.get(cid);
+                  const latestPay = resolveLatestCompanyPayment(
+                    c?.latest_subscription_payment ?? null,
+                    sdkByCompany.get(cid),
+                  );
 
                   return (
                     <tr key={row.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
@@ -696,6 +862,25 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                         <div className="text-foreground">{row.billing_mode ?? '—'}</div>
                         <div className="text-[11px] text-muted-foreground">{row.billing_cycle ?? '—'}</div>
                       </td>
+                      <td className="py-3 pr-4 text-xs align-top" data-label="Payment">
+                        {latestPay ? (
+                          <div className="max-w-[200px] space-y-1">
+                            <Badge
+                              variant={latestPay.kind === 'sdk' ? 'success' : 'secondary'}
+                              className="font-normal text-[10px] px-1.5 py-0"
+                            >
+                              {latestPay.kind === 'sdk' ? 'SDK' : 'Manual'}
+                            </Badge>
+                            <div className="text-foreground">
+                              {latestPay.amount != null
+                                ? `${latestPay.currency} ${latestPay.amount.toLocaleString()} — ${formatPaymentRelativeDay(latestPay.atMs, now)}`
+                                : `— — ${formatPaymentRelativeDay(latestPay.atMs, now)}`}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="py-3 pr-4 text-xs" data-label="Access end">
                         <div className="text-foreground">{endIso || '—'}</div>
                       </td>
@@ -709,7 +894,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
           !isLoading &&
           !error && (
             <div className="fv-card mt-3 text-sm text-muted-foreground">
-              No subscriptions match the current filters.
+              No companies match the current filters.
             </div>
           )
         )}

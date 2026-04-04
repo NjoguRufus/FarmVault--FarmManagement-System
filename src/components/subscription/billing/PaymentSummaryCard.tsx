@@ -18,6 +18,10 @@ export interface PaymentSummaryCardProps {
   tillNumber: string;
   businessName: string;
   workspaceName?: string | null;
+  /** Overrides catalog headline amount when dynamic pricing is loaded. */
+  displayAmountKes?: number | null;
+  /** When provided with dynamic pricing, controls the savings line (vs catalog). */
+  bundleSavingsKes?: number;
   className?: string;
 }
 
@@ -27,12 +31,16 @@ export function PaymentSummaryCard({
   tillNumber,
   businessName,
   workspaceName,
+  displayAmountKes,
+  bundleSavingsKes,
   className,
 }: PaymentSummaryCardProps) {
   const [copied, setCopied] = useState(false);
-  const amount = getBillingAmountKes(plan, cycle);
+  const catalogAmount = getBillingAmountKes(plan, cycle);
+  const amount = displayAmountKes != null ? displayAmountKes : catalogAmount;
   const months = billingCycleDurationMonths(cycle);
-  const savings = computeBundleSavingsKes(plan, cycle);
+  const savings =
+    bundleSavingsKes !== undefined ? bundleSavingsKes : computeBundleSavingsKes(plan, cycle);
 
   const copyTill = async () => {
     try {

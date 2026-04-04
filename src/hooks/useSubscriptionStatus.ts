@@ -48,6 +48,8 @@ export interface SubscriptionStatusResult {
   /** From get_subscription_gate_state (same source as plan/status). */
   billingModeFromGate: string | null;
   billingCycleFromGate: string | null;
+  /** From get_subscription_gate_state — fallback when company doc has no billing_reference yet. */
+  billingReferenceFromGate: string | null;
 }
 
 export function useSubscriptionStatus(): SubscriptionStatusResult {
@@ -93,7 +95,14 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
       isActivePaid: resolved.isActivePaid,
       billingModeFromGate: subscriptionState?.billing_mode ?? null,
       billingCycleFromGate: subscriptionState?.billing_cycle ?? null,
+      billingReferenceFromGate: subscriptionState?.billing_reference ?? null,
     }),
-    [resolved, isLoading, subscriptionState?.billing_mode, subscriptionState?.billing_cycle],
+    [
+      resolved,
+      isLoading,
+      subscriptionState?.billing_mode,
+      subscriptionState?.billing_cycle,
+      subscriptionState?.billing_reference,
+    ],
   );
 }

@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
     let companyPlan: "starter" | "professional" | "enterprise" = "starter";
     if (planRaw === "enterprise") companyPlan = "enterprise";
     else if (planRaw === "pro" || planRaw === "professional") companyPlan = "professional";
-    else companyPlan = "starter"; // basic/pro default to starter, matching Firebase quirk
+    else companyPlan = "starter"; // basic tier maps to starter plan code
 
     const now = new Date();
     const trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);

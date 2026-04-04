@@ -1,24 +1,24 @@
 import {
-  collection,
-  doc,
-  setDoc,
   addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  documentId,
+  getCountFromServer,
   getDoc,
   getDocs,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
+  db,
   limit,
-  startAfter,
+  orderBy,
+  query,
   serverTimestamp,
-  getCountFromServer,
-  writeBatch,
-  documentId,
+  setDoc,
+  startAfter,
   type DocumentSnapshot,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+  updateDoc,
+  where,
+  writeBatch,
+} from '@/lib/documentLayer';
 import { getCompany } from '@/services/companyService';
 import { supabase } from '@/lib/supabase';
 import type {

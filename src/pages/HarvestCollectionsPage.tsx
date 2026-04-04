@@ -52,7 +52,7 @@ import {
   setBuyerPriceAndMaybeClose,
   registerHarvestCash,
   applyHarvestCashPayment,
-  payPickersFromWalletBatchFirestore,
+  payPickersFromWalletBatch,
   syncClosedCollectionToHarvestSale,
   listHarvestCollections,
   listPickersByCollectionIds,
@@ -2410,7 +2410,7 @@ export default function HarvestCollectionsPage() {
 
     try {
       if (isFrenchBeansCollection && user?.companyId && effectiveProject) {
-        await payPickersFromWalletBatchFirestore({
+        await payPickersFromWalletBatch({
           companyId,
           projectId: effectiveProject.id,
           cropType: String(effectiveProject.cropType),

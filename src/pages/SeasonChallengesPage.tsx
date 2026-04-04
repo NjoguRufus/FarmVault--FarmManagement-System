@@ -10,8 +10,8 @@ import {
   createSeasonChallenge,
   updateSeasonChallenge,
 } from '@/services/seasonChallengesService';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
+import { db } from '@/lib/documentLayer';
+import { collection, addDoc, serverTimestamp } from '@/lib/documentLayer';
 import { useCollection } from '@/hooks/useCollection';
 import { formatDate } from '@/lib/dateUtils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -994,6 +994,7 @@ export default function SeasonChallengesPage() {
         isTrial={isTrial}
         isExpired={isExpired}
         daysRemaining={daysRemaining}
+        workspaceCompanyId={user?.companyId ?? null}
       />
     </div>
   );

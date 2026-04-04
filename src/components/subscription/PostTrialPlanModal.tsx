@@ -119,6 +119,7 @@ export function PostTrialPlanModal({ open }: PostTrialPlanModalProps) {
         isExpired={true}
         daysRemaining={null}
         checkoutPlan="pro"
+        workspaceCompanyId={user?.companyId ?? null}
       />
     </>
   );

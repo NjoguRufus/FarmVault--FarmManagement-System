@@ -8,9 +8,9 @@ import {
   orderBy,
   serverTimestamp,
   Timestamp,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
-import { getDocsWithCache } from '@/lib/firestoreCache';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
+import { getDocsWithCache } from '@/lib/documentCache';
 
 export interface PlatformExpenseDoc {
   id: string;

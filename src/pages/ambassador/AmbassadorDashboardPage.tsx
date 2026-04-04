@@ -1,8 +1,10 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/react";
-import { Banknote, TrendingUp, UserCheck, UserMinus, Users } from "lucide-react";
+import { Banknote, ListOrdered, TrendingUp, UserCheck, UserMinus, Users, Wallet } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SeoHead } from "@/seo/SeoHead";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getAmbassadorSignUpPath } from "@/lib/ambassador/clerkAuth";
@@ -14,7 +16,9 @@ import { AmbassadorReferralsTable } from "@/components/ambassador/AmbassadorRefe
 import {
   useAmbassadorConsoleReferralsQuery,
   useAmbassadorConsoleStatsQuery,
+  useAmbassadorEarningsTransactionsQuery,
 } from "@/hooks/useAmbassadorConsoleQueries";
+import { cn } from "@/lib/utils";
 
 function formatKes(n: number): string {
   return new Intl.NumberFormat("en-KE", {
@@ -22,6 +26,11 @@ function formatKes(n: number): string {
     currency: "KES",
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0);
+}
+
+function formatEarningType(type: string): string {
+  if (!type) return "—";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function AmbassadorDashboardPage() {
@@ -32,6 +41,7 @@ export default function AmbassadorDashboardPage() {
   const stats = statsQ.data;
   const statsReady = Boolean(stats && stats.ok && stats.onboarding_complete);
   const refQ = useAmbassadorConsoleReferralsQuery(clerkLoaded && statsReady);
+  const earningsTxQ = useAmbassadorEarningsTransactionsQuery(clerkLoaded && statsReady);
 
   useEffect(() => {
     if (!statsQ.isFetched || !stats) return;
@@ -73,11 +83,12 @@ export default function AmbassadorDashboardPage() {
       <>
         <SeoHead title="Ambassador dashboard" description="FarmVault ambassador dashboard" canonical={SEO_ROUTES.ambassadorDashboard} />
         <DeveloperPageShell title="Ambassador Dashboard" isLoading>
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-5">
-            {[1, 2, 3, 4, 5].map((i) => (
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
               <div key={i} className="h-28 rounded-xl border border-border/50 bg-muted/20 animate-pulse" />
             ))}
           </div>
+          <div className="h-40 rounded-xl border border-border/50 bg-muted/20 animate-pulse mt-4" />
           <div className="h-64 rounded-xl border border-border/50 bg-muted/20 animate-pulse mt-4" />
         </DeveloperPageShell>
       </>
@@ -167,16 +178,18 @@ export default function AmbassadorDashboardPage() {
   }
 
   const referralRows = refQ.data?.ok ? refQ.data.rows : [];
+  const earningsRows = earningsTxQ.data?.ok ? earningsTxQ.data.rows : [];
 
   return (
     <>
       <SeoHead title="Ambassador dashboard" description="Your FarmVault ambassador referrals and commissions." canonical={SEO_ROUTES.ambassadorDashboard} />
       <DeveloperPageShell
         title="Ambassador Dashboard"
-        isRefetching={statsQ.isFetching || refQ.isFetching}
+        isRefetching={statsQ.isFetching || refQ.isFetching || earningsTxQ.isFetching}
         onRefresh={() => {
           void statsQ.refetch();
           void refQ.refetch();
+          void earningsTxQ.refetch();
         }}
         toolbarEnd={
           <Button asChild variant="secondary" size="sm" className="shrink-0">
@@ -197,7 +210,7 @@ export default function AmbassadorDashboardPage() {
           </p>
         </div>
 
-        <DeveloperStatGrid cols="5">
+        <DeveloperStatGrid cols="6">
           <StatCard
             title="Total referrals"
             value={String(stats.total_referrals)}
@@ -227,6 +240,13 @@ export default function AmbassadorDashboardPage() {
             compact
           />
           <StatCard
+            title="Paid"
+            value={formatKes(stats.paid)}
+            icon={<Wallet className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant="default"
+            compact
+          />
+          <StatCard
             title="Owed"
             value={formatKes(stats.owed)}
             icon={<TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />}
@@ -234,6 +254,84 @@ export default function AmbassadorDashboardPage() {
             compact
           />
         </DeveloperStatGrid>
+
+        <div className="rounded-xl border border-border/60 bg-card/40 overflow-hidden mt-6">
+          <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3">
+            <ListOrdered className="h-4 w-4 text-emerald-600 shrink-0" />
+            <h2 className="text-sm font-semibold text-foreground">Transactions</h2>
+          </div>
+          <div className="overflow-x-auto">
+            {earningsTxQ.isError ? (
+              <p className="text-sm text-destructive px-4 py-6">
+                {earningsTxQ.error instanceof Error ? earningsTxQ.error.message : "Could not load transactions."}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border/50 hover:bg-transparent">
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                      Date
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                      Type
+                    </TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                      Amount
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                      Status
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {earningsTxQ.isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        Loading…
+                      </TableCell>
+                    </TableRow>
+                  ) : !earningsTxQ.data?.ok ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        Could not load transactions.
+                      </TableCell>
+                    </TableRow>
+                  ) : earningsRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        No transactions yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    earningsRows.map((tx) => (
+                      <TableRow key={tx.id} className="border-border/40">
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm text-foreground max-w-[200px] truncate">{tx.description || "—"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{formatEarningType(tx.type)}</TableCell>
+                        <TableCell className="text-right text-sm font-medium tabular-nums">{formatKes(tx.amount)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              tx.status === "paid"
+                                ? "border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
+                                : "border-amber-500/50 text-amber-800 dark:text-amber-300",
+                            )}
+                          >
+                            {tx.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </div>
 
         <AmbassadorReferralsTable rows={referralRows} loading={refQ.isLoading} />
       </DeveloperPageShell>

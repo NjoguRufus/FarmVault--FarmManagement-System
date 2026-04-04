@@ -4,8 +4,8 @@ import { Plus, Search, TrendingUp, TrendingDown, MoreHorizontal, LayoutGrid, Lis
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
+import { db } from '@/lib/documentLayer';
+import { collection, addDoc, serverTimestamp } from '@/lib/documentLayer';
 import { useCollection } from '@/hooks/useCollection';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
@@ -144,8 +144,8 @@ export default function HarvestSalesPage() {
     return stock;
   }, [harvests, sales]);
 
-  const firestoreTotalHarvest = harvests.reduce((sum, h) => sum + h.quantity, 0);
-  const firestoreTotalSales = sales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const hookTotalHarvest = harvests.reduce((sum, h) => sum + h.quantity, 0);
+  const hookTotalSales = sales.reduce((sum, s) => sum + s.totalAmount, 0);
 
   const { data: harvestSalesTotals } = useQuery({
     queryKey: ['harvestSalesTotals', companyId, activeProject?.id],
@@ -159,10 +159,10 @@ export default function HarvestSalesPage() {
 
   const totalHarvestKg = useSupabaseHarvestTotals
     ? harvestSalesTotals!.totalHarvestKg
-    : firestoreTotalHarvest;
+    : hookTotalHarvest;
   const totalSalesAmount = useSupabaseHarvestTotals
     ? harvestSalesTotals!.totalSales
-    : firestoreTotalSales;
+    : hookTotalSales;
   const completedSalesAmount = useSupabaseHarvestTotals
     ? harvestSalesTotals!.completedSales
     : sales.filter((s) => s.status === 'completed').reduce((sum, s) => sum + s.totalAmount, 0);
@@ -550,7 +550,7 @@ export default function HarvestSalesPage() {
         saleData.brokerId = saleBrokerId;
       }
 
-      // Close immediately once validation passes; Firestore persistence handles offline sync.
+      // Close immediately once validation passes; offline sync handles the rest.
       setSaleOpen(false);
 
       await addDoc(collection(db, 'sales'), saleData);
@@ -1663,7 +1663,7 @@ export default function HarvestSalesPage() {
         </FeatureGate>
       )}
 
-      {/* Harvests Section (Firestore – non–French Beans or legacy) */}
+      {/* Harvests Section (non–French Beans or legacy) */}
       {!showHarvestCollections && (
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">

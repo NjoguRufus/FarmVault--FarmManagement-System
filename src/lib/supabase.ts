@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 // Prefer the new publishable key; fall back to anon for backwards compatibility.
@@ -10,6 +10,15 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase configuration. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
 }
 
+/**
+ * Clerk JWT template name (Dashboard → JWT Templates → New → name: `supabase`).
+ * Claims should include at least:
+ *   "sub": "{{user.id}}"
+ *   "email": "{{user.primary_email_address.email_address}}"
+ * so Supabase `auth.jwt()->>'sub'` and edge functions (e.g. mpesa-stk-push) resolve the Clerk user id.
+ */
+export const CLERK_JWT_TEMPLATE_SUPABASE = 'supabase' as const;
+
 /** Set by ClerkSupabaseTokenBridge so token comes from useAuth().getToken() (reliable in React). */
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 
@@ -18,9 +27,8 @@ export function setClerkTokenGetter(getter: (() => Promise<string | null>) | nul
 }
 
 /**
- * Get the Supabase access token from Clerk.
- * Uses the NATIVE Clerk-Supabase integration (standard session token, no JWT template).
- * This ensures proper authentication with Supabase RLS policies via Clerk's JWKS.
+ * Clerk JWT for Supabase (PostgREST RLS, Edge Functions, Realtime).
+ * Must use JWT template {@link CLERK_JWT_TEMPLATE_SUPABASE} so `sub` is the Clerk user id.
  */
 export async function getSupabaseAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
@@ -57,8 +65,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
       return null;
     }
 
-    // Use standard session token - native Supabase integration (no template needed)
-    const token = await session.getToken();
+    const token = await session.getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE });
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -79,6 +86,41 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
     }
     return null;
   }
+}
+
+type ClerkSupabaseTokenProvider = () => Promise<string | null>;
+
+/**
+ * Short-lived Supabase client: every HTTP request attaches a fresh `Authorization: Bearer <Clerk JWT>`.
+ * Use for billing / STK when you want the same token source as {@link CLERK_JWT_TEMPLATE_SUPABASE}
+ * (e.g. pass `() => getToken({ template: 'supabase' })` from `useAuth()` in `@clerk/react`).
+ */
+export async function getAuthedSupabase(
+  tokenProvider: ClerkSupabaseTokenProvider = getSupabaseAccessToken,
+): Promise<SupabaseClient> {
+  const probe = await tokenProvider();
+  if (!probe) {
+    throw new Error(
+      `Not signed in: missing Clerk JWT for template "${CLERK_JWT_TEMPLATE_SUPABASE}".`,
+    );
+  }
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      detectSessionInUrl: false,
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      fetch: async (url, options = {}) => {
+        const token = await tokenProvider();
+        const headers = new Headers(options.headers);
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        return fetch(url, { ...options, headers });
+      },
+    },
+  });
 }
 
 /**

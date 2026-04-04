@@ -5,8 +5,8 @@ import {
   query,
   Timestamp,
   where,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { supabase } from '@/lib/supabase';
 import type { SubscriptionPaymentDoc } from '@/services/subscriptionPaymentService';
 import type { CompanySubscriptionRecord } from '@/services/subscriptionAdminService';

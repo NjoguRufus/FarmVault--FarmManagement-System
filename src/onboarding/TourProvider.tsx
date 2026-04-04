@@ -1,11 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Joyride, { ACTIONS, CallBackProps, EVENTS, STATUS } from "@/onboarding/JoyrideShim";
 import { useLocation, useNavigate } from "react-router-dom";
-import { doc, getDoc, setDoc } from "@/lib/firestore-stub";
+import { doc, getDoc, setDoc, db } from "@/lib/documentLayer";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { db } from "@/lib/firebase";
 import { AppTourStep, getTourSteps, TourRole } from "@/onboarding/tours";
 
 type TourCompletionState = Record<TourRole, boolean>;

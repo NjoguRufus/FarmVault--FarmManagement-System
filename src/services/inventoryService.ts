@@ -1,3 +1,11 @@
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  db as legacyDb,
+} from '@/lib/documentLayer';
 import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
@@ -725,7 +733,7 @@ export async function getInventoryAuditLogs(params: {
   return (data ?? []).map(mapRowToAuditLog);
 }
 
-// --- Legacy Firestore helpers used by Operations (Phase 1) ---
+// --- Legacy document-layer shims used by Operations (Phase 1) ---
 
 export type RecordInventoryUsageInput = {
   companyId: string;
@@ -744,7 +752,7 @@ export type RecordInventoryUsageInput = {
 };
 
 export async function recordInventoryUsage(input: RecordInventoryUsageInput) {
-  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
+  await addDoc(collection(legacyDb, 'inventoryUsage'), {
     ...input,
     createdAt: serverTimestamp(),
   });
@@ -767,7 +775,7 @@ export async function checkStockForWorkCard(
   const { companyId, inventoryItemId, quantity } = input;
   if (!inventoryItemId || quantity <= 0) return { sufficient: true };
 
-  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  const snap = await getDoc(doc(legacyDb, 'inventoryItems', inventoryItemId));
   if (!snap.exists()) {
     return {
       sufficient: false,
@@ -818,7 +826,7 @@ export type DeductInventoryForHarvestInput = {
 };
 
 /**
- * Legacy Firestore helper: deduct wooden crates from inventory when recording a harvest.
+ * Legacy shim: deduct wooden crates when recording a harvest.
  * Phase 1 harvest flows still call this directly.
  */
 export async function deductInventoryForHarvest(
@@ -827,7 +835,7 @@ export async function deductInventoryForHarvest(
   const { companyId, inventoryItemId, quantity } = input;
   if (!inventoryItemId || quantity <= 0) return;
 
-  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  const snap = await getDoc(doc(legacyDb, 'inventoryItems', inventoryItemId));
   if (!snap.exists()) throw new Error('Inventory item not found');
   const item = snap.data() as InventoryItem;
   if (item.companyId !== companyId) throw new Error('Item does not belong to company');
@@ -837,7 +845,7 @@ export async function deductInventoryForHarvest(
     throw new Error(`Insufficient wooden crates: ${item.name} has ${currentQty}, need ${quantity}`);
   }
 
-  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
+  await addDoc(collection(legacyDb, 'inventoryUsage'), {
     companyId,
     projectId: input.projectId,
     inventoryItemId,

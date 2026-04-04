@@ -1,4 +1,4 @@
-/** Minimal user shape for feature checks (was firebase/auth User). */
+/** Minimal user shape for feature checks. */
 interface User {
   uid?: string;
   email?: string | null;

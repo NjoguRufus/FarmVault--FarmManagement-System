@@ -11,9 +11,9 @@ import {
   orderBy,
   limit,
   Timestamp,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
-import { getDocWithCache, getDocsWithCache } from '@/lib/firestoreCache';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
+import { getDocWithCache, getDocsWithCache } from '@/lib/documentCache';
 
 const CODE_RED_COLLECTION = 'codeRed';
 

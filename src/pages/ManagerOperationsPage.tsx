@@ -44,8 +44,8 @@ import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { toDate } from '@/lib/dateUtils';
 import { exportToExcel } from '@/lib/exportUtils';
-import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp, updateDoc, doc, writeBatch, increment } from '@/lib/firestore-stub';
+import { db } from '@/lib/documentLayer';
+import { addDoc, collection, serverTimestamp, updateDoc, doc, writeBatch, increment } from '@/lib/documentLayer';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { recordInventoryUsage } from '@/services/inventoryService';
 import { getCompany, updateCompany } from '@/services/companyService';
@@ -66,7 +66,7 @@ export default function ManagerOperationsPage() {
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
-  // Fetch data from Firestore
+  // Fetch data (legacy collection hook + Supabase where applicable)
   const { data: allWorkLogs = [], isLoading } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
   const { data: allEmployees = [] } = useCollection<Employee>('employees', 'employees', scope);
   const { data: allStages = [] } = useCompanyProjectStages(companyId);
@@ -695,7 +695,7 @@ export default function ManagerOperationsPage() {
       alert('No crop stage available for this project');
       return;
     }
-    // Resolve full stage with id (needed for Firestore); stageToUse may be from getCurrentStageForProject and lack id.
+    // Resolve full stage with id; stageToUse from getCurrentStageForProject may lack id.
     const fullStage =
       projectStages.find(
         (s) =>
@@ -754,7 +754,7 @@ export default function ManagerOperationsPage() {
               .join('; ');
 
       // Create a manager-originated work card so it first appears in "My Work Cards" for both manager and admin.
-      // Firestore does not accept undefined. Use fullStage (has id); stageToUse from getCurrentStageForProject has no id.
+      // Omit undefined fields. Use fullStage (has id); stageToUse may have no id.
       const stageIdVal = (fullStage as CropStage | undefined)?.id ?? (stageToUse as { stageName?: string }).stageName ?? 'default';
       const stageNameVal = (fullStage as CropStage | undefined)?.stageName ?? (stageToUse as { stageName?: string }).stageName ?? '';
       await addDoc(collection(db, 'operationsWorkCards'), {
@@ -926,7 +926,7 @@ export default function ManagerOperationsPage() {
     const resourceQtySecondary = item && recordResourceQuantitySecondary ? parseQuantityOrFraction(recordResourceQuantitySecondary) : undefined;
 
     setSubmittingWorkCardRecord(true);
-    // Close immediately; Firestore/local cache will sync pending writes.
+    // Close immediately; pending writes sync in the background.
     setWorkCardRecordOpen(false);
     setSelectedWorkCard(null);
     try {

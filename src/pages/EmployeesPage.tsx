@@ -2,9 +2,15 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreHorizontal, Phone, Mail, Eye, EyeOff, User as UserIcon, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { db, authEmployeeCreate } from '@/lib/firebase';
-import { serverTimestamp, doc, setDoc, updateDoc } from '@/lib/firestore-stub';
-import { createUserWithEmailAndPassword } from '@/lib/auth-stub';
+import {
+  authEmployeeCreate,
+  createUserWithEmailAndPassword,
+  db,
+  doc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from '@/lib/documentLayer';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee, PermissionMap, PermissionPresetKey, User } from '@/types';
 import { employeesProvider } from '@/lib/provider';
@@ -2617,6 +2623,7 @@ export default function EmployeesPage() {
         isTrial={isTrial}
         isExpired={isExpired}
         daysRemaining={daysRemaining}
+        workspaceCompanyId={user?.companyId ?? null}
       />
 
       {/* Deactivate Employee Confirmation */}

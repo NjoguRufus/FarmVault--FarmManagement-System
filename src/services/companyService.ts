@@ -1,3 +1,5 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { mirrorPublicProfileForClerkUser } from '@/lib/auth/tenantMembershipRecovery';
 import { db } from '@/lib/db';
 
 export type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'enterprise';
@@ -28,6 +30,8 @@ export interface CompanyDoc {
   email?: string;
   status?: string;
   plan?: string;
+  /** PayBill account number (e.g. FV-xxxxxxxx) for STK / manual payments. */
+  billingReference?: string | null;
   userCount?: number;
   projectCount?: number;
   revenue?: number;
@@ -52,6 +56,12 @@ function mapRowToCompanyDoc(row: Record<string, unknown>): CompanyDoc {
     email: row.email != null ? String(row.email) : undefined,
     status: row.status != null ? String(row.status) : undefined,
     plan: row.plan != null ? String(row.plan) : undefined,
+    billingReference: (() => {
+      const raw = row.billing_reference ?? row.billingReference;
+      if (raw == null) return undefined;
+      const s = String(raw).trim();
+      return s !== '' ? s : undefined;
+    })(),
     userCount: row.user_count != null ? Number(row.user_count) : undefined,
     projectCount: row.project_count != null ? Number(row.project_count) : undefined,
     revenue: row.revenue != null ? Number(row.revenue) : undefined,
@@ -61,21 +71,28 @@ function mapRowToCompanyDoc(row: Record<string, unknown>): CompanyDoc {
   };
 }
 
-export async function getCompany(companyId: string): Promise<CompanyDoc | null> {
-  const { data, error } = await db
-    .core()
-    .from('companies')
-    .select('*')
-    .eq('id', companyId)
-    .maybeSingle();
+export async function getCompany(
+  companyId: string,
+  client?: SupabaseClient,
+): Promise<CompanyDoc | null> {
+  const from = client ? client.schema('core').from('companies') : db.core().from('companies');
+  // `*` ensures `billing_reference` and any env-specific columns are never omitted by a narrow select.
+  const { data, error } = await from.select('*').eq('id', companyId).maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('[getCompany] core.companies load failed', { companyId, message: error.message });
+    }
+    return null;
+  }
+  if (!data) return null;
   return mapRowToCompanyDoc(data as Record<string, unknown>);
 }
 
 /** List all companies (developer use, e.g. share records). */
 export async function listCompanies(): Promise<{ id: string; name: string }[]> {
-  const { data, error } = await db.core().from('companies').select('id, name');
+  const { data, error } = await db.core().from('companies').select('id, name, billing_reference');
 
   if (error || !data) return [];
   return (data as { id: string; name: string }[]).map((r) => ({
@@ -89,7 +106,7 @@ export async function listCompanies(): Promise<{ id: string; name: string }[]> {
  * Uses `core.companies` via the project DB wrapper (not unqualified `public.companies`).
  */
 export async function getAllCompanies(): Promise<{ id: string; name: string | null }[]> {
-  const { data, error } = await db.core().from('companies').select('id, name').order('name');
+  const { data, error } = await db.core().from('companies').select('id, name, billing_reference').order('name');
 
   if (error) {
     throw new Error(error.message ?? 'Failed to load companies');
@@ -98,7 +115,12 @@ export async function getAllCompanies(): Promise<{ id: string; name: string | nu
 }
 
 export async function setPaymentReminder(companyId: string, nextPaymentAt?: Date): Promise<void> {
-  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const { data } = await db
+    .core()
+    .from('companies')
+    .select('subscription, billing_reference')
+    .eq('id', companyId)
+    .single();
   const subscription = (data?.subscription as Record<string, unknown>) ?? {};
   await db
     .core()
@@ -116,7 +138,12 @@ export async function setPaymentReminder(companyId: string, nextPaymentAt?: Date
 }
 
 export async function clearPaymentReminder(companyId: string, dismissedByUserId?: string): Promise<void> {
-  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const { data } = await db
+    .core()
+    .from('companies')
+    .select('subscription, billing_reference')
+    .eq('id', companyId)
+    .single();
   const subscription = (data?.subscription as Record<string, unknown>) ?? {};
   const updates: Record<string, unknown> = { ...subscription, paymentReminderActive: false };
   if (dismissedByUserId) {
@@ -127,7 +154,12 @@ export async function clearPaymentReminder(companyId: string, dismissedByUserId?
 }
 
 export async function setCompanyNextPayment(companyId: string, nextPaymentAt: Date): Promise<void> {
-  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const { data } = await db
+    .core()
+    .from('companies')
+    .select('subscription, billing_reference')
+    .eq('id', companyId)
+    .single();
   const subscription = ((data?.subscription as Record<string, unknown>) ?? {}) as Record<string, unknown>;
   await db
     .core()
@@ -170,7 +202,7 @@ export async function updateCompany(
     .from('companies')
     .update(updates)
     .eq('id', companyId)
-    .select('id, name, email, plan, status')
+    .select('id, name, email, plan, status, billing_reference')
     .maybeSingle();
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
@@ -259,7 +291,12 @@ export async function setCompanyPaidPlan(
   const paidUntil = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
   const legacyPlan = plan === 'basic' ? 'starter' : plan === 'pro' ? 'professional' : 'enterprise';
 
-  const { data } = await db.core().from('companies').select('subscription').eq('id', companyId).single();
+  const { data } = await db
+    .core()
+    .from('companies')
+    .select('subscription, billing_reference')
+    .eq('id', companyId)
+    .single();
   const subscription = ((data?.subscription as Record<string, unknown>) ?? {}) as Record<string, unknown>;
   await db
     .core()
@@ -285,7 +322,7 @@ export async function createCompanyUserProfile(params: {
   name: string;
   email: string;
 }): Promise<void> {
-  const { uid, companyId } = params;
+  const { uid, companyId, email } = params;
   await db
     .core()
     .from('profiles')
@@ -296,4 +333,5 @@ export async function createCompanyUserProfile(params: {
       },
       { onConflict: 'clerk_user_id' },
     );
+  await mirrorPublicProfileForClerkUser(uid, email || null, companyId);
 }

@@ -4,7 +4,7 @@
  * harvest.picker_intake_entries, harvest.picker_payment_entries.
  * Wallet: finance.project_wallets + finance.project_wallet_ledger (source of truth).
  * Prefers RPCs (harvest.record_intake, harvest.record_payment) when recording intake/payment by picker_id.
- * No Firebase/Firestore.
+ * Harvest collections backed by Supabase.
  * Offline: intake/payment are queued via lib/offlineQueue and synced later with client_entry_id for dedup.
  */
 
@@ -1152,7 +1152,7 @@ export async function setBuyerPriceAndClose(params: {
   }
 }
 
-// ---- Legacy-compat names (same as old Firebase service) ----
+// ---- Legacy-compat export names ----
 
 export async function addHarvestPicker(params: {
   companyId: string;
@@ -1440,7 +1440,7 @@ export async function applyHarvestCashPayment(params: {
 }
 
 /** Mark multiple pickers as paid: record payment entries, sync each to expenses, and one wallet DEBIT for total. */
-export async function payPickersFromWalletBatchFirestore(params: {
+export async function payPickersFromWalletBatch(params: {
   companyId: string;
   projectId: string;
   cropType: string;

@@ -10,8 +10,8 @@ import {
   onSnapshot,
   type QueryConstraint,
   type Unsubscribe,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 
 export type ActivityLogStatus = 'info' | 'success' | 'warning' | 'danger';
 

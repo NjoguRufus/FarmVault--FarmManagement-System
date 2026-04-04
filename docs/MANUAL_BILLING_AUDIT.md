@@ -2,13 +2,13 @@
 
 **Purpose:** Document the existing manual billing pipeline before migrating to automated M-Pesa STK.  
 **Date:** 2026-04-03  
-**Scope:** Codebase as of this audit (Supabase-first; Firebase admin path stubbed).
+**Scope:** Codebase as of this audit (Supabase-first; legacy admin billing UI uses retired document-layer writes).
 
 ---
 
 ## Executive summary
 
-The **canonical** manual flow is **Supabase**: tenants submit via `submit_manual_subscription_payment`, developers approve via `approve_subscription_payment` (and the Developer Billing UI also calls `set_company_paid_access`). The **`/admin/billing` Firestore-based UI is not viable** for writes because Firestore is stubbed and throws on mutations.
+The **canonical** manual flow is **Supabase**: tenants submit via `submit_manual_subscription_payment`, developers approve via `approve_subscription_payment` (and the Developer Billing UI also calls `set_company_paid_access`). The **`/admin/billing` UI** still targets the retired **`subscriptionPaymentService` / `useCollection`** document-layer path: **writes throw**; use the **Developer Billing** console for approvals.
 
 ---
 
@@ -49,8 +49,7 @@ flowchart TD
 
 ### Legacy / broken path
 
-- **`/admin/billing`**, `AdminPendingPaymentsPage`, `subscriptionPaymentService` use **Firestore**.
-- `src/lib/firestore-stub.ts` throws on writes: **approvals from that UI will fail** until migrated to Supabase.
+- **`/admin/billing`**, `AdminPendingPaymentsPage`, and **`subscriptionPaymentService`** use **`src/lib/documentLayer.ts`** (retired document-style API). **Mutating calls throw** — approvals from that UI **fail** until rewired to Supabase (same as today’s Developer console flow).
 
 ---
 
@@ -234,7 +233,7 @@ flowchart TD
 
 ### Remove / retire
 
-- Firestore **`AdminBillingPage`** approval path (writes throw) or rewire to Supabase.
+- **`AdminBillingPage`** approval path (document-layer writes throw) — rewire to Supabase RPCs like Developer Billing.
 - Redundant **`setCompanyPaidAccess` after approve** once a single SQL function encodes cycle → `active_until`.
 
 ---
@@ -255,7 +254,7 @@ flowchart TD
 
 ## Issues found (summary)
 
-1. **`/admin/billing` Firestore path broken** for approvals (writes throw).
+1. **`/admin/billing` legacy path broken** for approvals (document-layer writes throw).
 2. **Two activation steps** in Developer UI — easy to desync if one path is omitted elsewhere.
 3. **`approve_subscription_payment` (30 days)** vs **`set_company_paid_access` (months)** — conflicting single-source-of-truth.
 4. **`set_company_paid_access` forces `billing_cycle = 'monthly'`** on upsert.
@@ -282,7 +281,7 @@ flowchart TD
 | Tenant submit | **Ready** — RPC validation, membership, amount check, rate limit. |
 | Operator queue | **Ready** on Developer console + Supabase RPCs. |
 | Activation | **Works** but **logic should be unified** before STK. |
-| Legacy admin | **Not safe** until migrated off Firestore stub. |
+| Legacy admin | **Not safe** until `/admin/billing` uses Supabase (same as Developer Billing). |
 | Audit trail | **Gaps** — no screenshot, no submitted-by user, weak receipt deduplication. |
 
 ---
@@ -299,4 +298,4 @@ flowchart TD
 | Realtime | `src/hooks/useCompanySubscriptionRealtime.ts` |
 | SQL | `supabase/migrations/20260322120000_manual_mpesa_payment_submissions.sql`, `20260322190000_*.sql`, `20260331180000_payments_lifecycle_and_ordering_fix.sql`, `20260402131500_company_pending_confirmation_and_paid_access_rpc.sql`, `20260403180000_manual_mpesa_phone_optional.sql` |
 | STK tracking | `supabase/migrations/20260403201000_mpesa_payments.sql`, `src/services/mpesaStkService.ts` |
-| Legacy (broken writes) | `src/lib/firestore-stub.ts`, `src/pages/admin/AdminBillingPage.tsx`, `src/services/subscriptionPaymentService.ts` |
+| Legacy (broken writes) | `src/lib/documentLayer.ts`, `src/pages/admin/AdminBillingPage.tsx`, `src/services/subscriptionPaymentService.ts` |

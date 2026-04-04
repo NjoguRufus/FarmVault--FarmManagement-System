@@ -96,9 +96,17 @@ Deno.serve(async (req) => {
       }
 
       if (checkoutId) {
+        const { data: payBefore } = await admin
+          .from("mpesa_payments")
+          .select("plan")
+          .eq("checkout_request_id", checkoutId)
+          .maybeSingle();
+
         const success = resultCode === 0;
         const amountNum = parseCallbackAmount(amount);
         const paidAt = success ? new Date().toISOString() : null;
+        const rc = Number.isFinite(resultCode) ? resultCode : null;
+
         const { error: payUpdErr } = await admin
           .from("mpesa_payments")
           .update({
@@ -106,12 +114,24 @@ Deno.serve(async (req) => {
             ...(amountNum != null ? { amount: amountNum } : {}),
             phone: phoneNumber ?? null,
             status: success ? "SUCCESS" : "FAILED",
+            result_code: success ? 0 : rc,
             result_desc: resultDesc.slice(0, 2000) || null,
             paid_at: paidAt,
           })
           .eq("checkout_request_id", checkoutId);
         if (payUpdErr) {
           console.error("[mpesa-stk-callback] mpesa_payments update failed", payUpdErr.message);
+        }
+
+        if (success && payBefore?.plan != null && String(payBefore.plan).trim() !== "") {
+          const { error: actErr } = await admin.rpc("activate_subscription_from_mpesa_stk", {
+            _checkout_request_id: checkoutId,
+          });
+          if (actErr) {
+            console.error("[mpesa-stk-callback] activate_subscription_from_mpesa_stk", actErr.message);
+          } else {
+            console.log("[mpesa-stk-callback] subscription activated for checkout", checkoutId);
+          }
         }
       }
     } else {

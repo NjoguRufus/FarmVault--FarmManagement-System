@@ -443,6 +443,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           isExpired={isExpired && !trialExpiredNeedsPlan}
           daysRemaining={daysRemaining}
           checkoutPlan={checkoutPlan}
+          workspaceCompanyId={user?.companyId ?? null}
         />
       )}
     </header>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import {
@@ -8,8 +8,14 @@ import {
   fetchPayments,
   rejectSubscriptionPayment,
   type MpesaStkPaymentRow,
+  type PaymentRow,
   type PendingPayment,
 } from '@/services/developerService';
+import {
+  isManualApprovedSubscriptionRow,
+  mpesaRowIsSdkSuccess,
+  sumAmounts,
+} from '@/features/developer/subscriptionPaymentSource';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -17,11 +23,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchSubscriptionAnalytics } from '@/services/developerService';
 import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
 import { setCompanyPaidAccess } from '@/services/developerService';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { initiateMpesaStkDeveloperTest } from '@/services/mpesaStkService';
+import { CLERK_JWT_TEMPLATE_SUPABASE } from '@/lib/supabase';
+import { sendDeveloperStkTest } from '@/services/mpesaStkService';
 import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
+import { DeveloperBillingPricingControl } from '@/features/developer/billing/DeveloperBillingPricingControl';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -59,15 +76,48 @@ function formatCheckoutIdDisplay(id: string | null | undefined): string {
   return id.length > 20 ? `${id.slice(0, 14)}…${id.slice(-6)}` : id;
 }
 
+function PaymentTypeBadge({ source }: { source: 'manual' | 'sdk' }) {
+  if (source === 'sdk') {
+    return (
+      <Badge variant="success" className="font-normal">
+        SDK
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="font-normal">
+      Manual
+    </Badge>
+  );
+}
+
+type PaymentTypeFilter = 'all' | 'manual' | 'sdk';
+
 export default function DeveloperBillingConfirmationPage() {
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'pending' | 'approved' | 'rejected' | 'stk_confirmation'>('pending');
+  const [tab, setTab] = useState<'pending' | 'manual_confirmed' | 'rejected' | 'stk_confirmation'>('pending');
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentTypeFilter>('all');
+  const [confirmedPaymentsModalOpen, setConfirmedPaymentsModalOpen] = useState(false);
+  const [confirmedRevenueModalOpen, setConfirmedRevenueModalOpen] = useState(false);
+  const [confirmedModalFilter, setConfirmedModalFilter] = useState<PaymentTypeFilter>('all');
+  const [revenueModalFilter, setRevenueModalFilter] = useState<PaymentTypeFilter>('all');
   const [stkTestPhone, setStkTestPhone] = useState('');
+  const [stkTestAmount, setStkTestAmount] = useState(1);
   const [stkTestLoading, setStkTestLoading] = useState(false);
   const [stkTestCheckoutId, setStkTestCheckoutId] = useState<string | null>(null);
+  const [pricingControlDialogOpen, setPricingControlDialogOpen] = useState(false);
+  const [stkTestDialogOpen, setStkTestDialogOpen] = useState(false);
+  const handleDevStkPaymentSuccess = useCallback(() => {
+    window.setTimeout(() => setStkTestCheckoutId(null), 800);
+  }, []);
   const queryClient = useQueryClient();
   const { isDeveloper } = useAuth();
+  const { getToken } = useClerkAuth();
   const { toast } = useToast();
+  const clerkSupabaseToken = useCallback(
+    () => getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE }),
+    [getToken],
+  );
 
   useEffect(() => {
     if (!isDeveloper && tab === 'stk_confirmation') {
@@ -310,11 +360,15 @@ export default function DeveloperBillingConfirmationPage() {
     });
   }, [payments, search]);
 
-  const approvedRows = approvedPaymentsResp?.rows ?? [];
-  const approvedFiltered = useMemo(() => {
+  const approvedRows = (approvedPaymentsResp?.rows ?? []) as PaymentRow[];
+  const manualApprovedRows = useMemo(
+    () => approvedRows.filter((p) => isManualApprovedSubscriptionRow(p)),
+    [approvedRows],
+  );
+  const manualApprovedFiltered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return approvedRows;
-    return approvedRows.filter((p) => {
+    if (!term) return manualApprovedRows;
+    return manualApprovedRows.filter((p) => {
       const company = (p.company_name ?? '').toLowerCase();
       const plan = (p.plan_id ?? '').toLowerCase();
       const mode = (p.billing_mode ?? '').toLowerCase();
@@ -330,7 +384,7 @@ export default function DeveloperBillingConfirmationPage() {
         reviewer.includes(term)
       );
     });
-  }, [approvedRows, search]);
+  }, [manualApprovedRows, search]);
 
   const rejectedRows = rejectedPaymentsResp?.rows ?? [];
   const rejectedFiltered = useMemo(() => {
@@ -378,16 +432,79 @@ export default function DeveloperBillingConfirmationPage() {
     });
   }, [stkRows, search]);
 
+  const sdkSuccessRows = useMemo(() => stkRows.filter((r) => mpesaRowIsSdkSuccess(r)), [stkRows]);
+  const confirmedPaymentsTotal = manualApprovedRows.length + sdkSuccessRows.length;
+  const confirmedRevenueTotal = sumAmounts(manualApprovedRows) + sumAmounts(sdkSuccessRows);
+  const manualRevenueTotal = sumAmounts(manualApprovedRows);
+  const sdkRevenueTotal = sumAmounts(sdkSuccessRows);
+
+  const pendingTabRows = useMemo(() => {
+    if (paymentTypeFilter === 'sdk') return [];
+    return filtered;
+  }, [filtered, paymentTypeFilter]);
+
+  const manualTabRows = useMemo(() => {
+    if (paymentTypeFilter === 'sdk') return [];
+    return manualApprovedFiltered;
+  }, [manualApprovedFiltered, paymentTypeFilter]);
+
+  const rejectedTabRows = useMemo(() => {
+    if (paymentTypeFilter === 'sdk') return [];
+    return rejectedFiltered;
+  }, [rejectedFiltered, paymentTypeFilter]);
+
+  const sdkTabRows = useMemo(() => {
+    if (paymentTypeFilter === 'manual') return [];
+    return stkFiltered;
+  }, [stkFiltered, paymentTypeFilter]);
+
   const paymentStats = analyticsResp?.payment_stats;
-  const pendingCount = Number(paymentStats?.pending_total_count ?? filtered.length ?? 0);
-  const approvedCount = Number(paymentStats?.approved_count ?? approvedFiltered.length ?? 0);
-  const rejectedCount = Number(paymentStats?.rejected_count ?? rejectedFiltered.length ?? 0);
+  const pendingCount = Number(paymentStats?.pending_total_count ?? pendingTabRows.length ?? 0);
+  const confirmedPaymentsStat = confirmedPaymentsTotal;
+  const rejectedCount = Number(paymentStats?.rejected_count ?? rejectedTabRows.length ?? 0);
   const pendingRevenue = Number(paymentStats?.pending_revenue ?? 0);
-  const approvedRevenue = Number(paymentStats?.approved_revenue ?? 0);
+  const confirmedRevenueStat = confirmedRevenueTotal;
   const thisMonthRevenue = useMemo(() => {
-    const rows = thisMonthApprovedResp?.rows ?? [];
-    return rows.reduce((sum: number, r: any) => sum + Number(r.amount ?? 0), 0);
-  }, [thisMonthApprovedResp]);
+    const start = new Date(monthStartIso).getTime();
+    const manualRows = ((thisMonthApprovedResp?.rows ?? []) as PaymentRow[]).filter((r) =>
+      isManualApprovedSubscriptionRow(r),
+    );
+    const manualSum = sumAmounts(manualRows);
+    const sdkSum = sdkSuccessRows.reduce((s, r) => {
+      const t = r.paid_at ?? r.created_at;
+      if (!t) return s;
+      const ts = new Date(t).getTime();
+      if (Number.isNaN(ts) || ts < start) return s;
+      return s + Number(r.amount ?? 0);
+    }, 0);
+    return manualSum + sdkSum;
+  }, [thisMonthApprovedResp, sdkSuccessRows, monthStartIso]);
+
+  const confirmedPaymentsModalRows = useMemo(() => {
+    if (confirmedModalFilter === 'manual') {
+      return manualApprovedRows.map((r) => ({ source: 'manual' as const, sub: r, mpesa: null as MpesaStkPaymentRow | null }));
+    }
+    if (confirmedModalFilter === 'sdk') {
+      return sdkSuccessRows.map((r) => ({ source: 'sdk' as const, sub: null as PaymentRow | null, mpesa: r }));
+    }
+    return [
+      ...manualApprovedRows.map((r) => ({ source: 'manual' as const, sub: r, mpesa: null as MpesaStkPaymentRow | null })),
+      ...sdkSuccessRows.map((r) => ({ source: 'sdk' as const, sub: null as PaymentRow | null, mpesa: r })),
+    ];
+  }, [confirmedModalFilter, manualApprovedRows, sdkSuccessRows]);
+
+  const confirmedRevenueModalRows = useMemo(() => {
+    if (revenueModalFilter === 'manual') {
+      return manualApprovedRows.map((r) => ({ source: 'manual' as const, sub: r, mpesa: null as MpesaStkPaymentRow | null }));
+    }
+    if (revenueModalFilter === 'sdk') {
+      return sdkSuccessRows.map((r) => ({ source: 'sdk' as const, sub: null as PaymentRow | null, mpesa: r }));
+    }
+    return [
+      ...manualApprovedRows.map((r) => ({ source: 'manual' as const, sub: r, mpesa: null as MpesaStkPaymentRow | null })),
+      ...sdkSuccessRows.map((r) => ({ source: 'sdk' as const, sub: null as PaymentRow | null, mpesa: r })),
+    ];
+  }, [revenueModalFilter, manualApprovedRows, sdkSuccessRows]);
 
   return (
     <DeveloperPageShell
@@ -437,51 +554,115 @@ export default function DeveloperBillingConfirmationPage() {
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2">
+        <span className="text-xs font-medium text-muted-foreground">Payment type</span>
+        {(['all', 'manual', 'sdk'] as const).map((k) => (
+          <Button
+            key={k}
+            type="button"
+            size="sm"
+            variant={paymentTypeFilter === k ? 'secondary' : 'outline'}
+            className="h-8 text-xs"
+            onClick={() => setPaymentTypeFilter(k)}
+          >
+            {k === 'all' ? 'All' : k === 'manual' ? 'Manual' : 'SDK'}
+          </Button>
+        ))}
+      </div>
+
       <div className="space-y-4">
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div className="fv-card py-3">
             <div className="text-xs text-muted-foreground">Pending confirmations</div>
             <div className="mt-1 text-lg font-semibold">{pendingCount}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual pipeline only</p>
           </div>
-          <div className="fv-card py-3">
+          <button
+            type="button"
+            className="fv-card py-3 text-left transition-colors hover:bg-muted/40"
+            onClick={() => {
+              setConfirmedModalFilter('all');
+              setConfirmedPaymentsModalOpen(true);
+            }}
+          >
             <div className="text-xs text-muted-foreground">Confirmed payments</div>
-            <div className="mt-1 text-lg font-semibold">{approvedCount}</div>
-          </div>
+            <div className="mt-1 text-lg font-semibold">{confirmedPaymentsStat}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual + SDK · Click to drill down</p>
+          </button>
           <div className="fv-card py-3">
             <div className="text-xs text-muted-foreground">Rejected payments</div>
             <div className="mt-1 text-lg font-semibold">{rejectedCount}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual only</p>
           </div>
           <div className="fv-card py-3">
             <div className="text-xs text-muted-foreground">Pending revenue</div>
             <div className="mt-1 text-lg font-semibold">KES {pendingRevenue.toLocaleString()}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual pending only</p>
           </div>
-          <div className="fv-card py-3">
+          <button
+            type="button"
+            className="fv-card py-3 text-left transition-colors hover:bg-muted/40"
+            onClick={() => {
+              setRevenueModalFilter('all');
+              setConfirmedRevenueModalOpen(true);
+            }}
+          >
             <div className="text-xs text-muted-foreground">Confirmed revenue</div>
-            <div className="mt-1 text-lg font-semibold">KES {approvedRevenue.toLocaleString()}</div>
-          </div>
+            <div className="mt-1 text-lg font-semibold">KES {confirmedRevenueStat.toLocaleString()}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual + SDK · Click to drill down</p>
+          </button>
           <div className="fv-card py-3">
             <div className="text-xs text-muted-foreground">This month revenue</div>
             <div className="mt-1 text-lg font-semibold">KES {thisMonthRevenue.toLocaleString()}</div>
+            <p className="mt-1 text-[10px] text-muted-foreground">Manual + SDK</p>
           </div>
         </section>
 
         {isDeveloper ? (
-          <section className="fv-card space-y-3 border-dashed border-primary/25 bg-primary/[0.03]">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">M-Pesa STK test (KES 1)</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sends a real Daraja STK prompt for <span className="font-medium text-foreground">1 bob</span> using the
-                active <code className="rounded bg-muted px-1 py-0.5 text-[11px]">MPESA_ENV</code> credentials. Use a
-                sandbox test number in Daraja sandbox. Inserts a tracking row in{' '}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setPricingControlDialogOpen(true)}>
+              Pricing control
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setStkTestDialogOpen(true)}>
+              M-Pesa STK test
+            </Button>
+          </div>
+        ) : null}
+
+        <Dialog open={pricingControlDialogOpen} onOpenChange={setPricingControlDialogOpen}>
+          <DialogContent className="max-h-[min(90vh,720px)] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Pricing control</DialogTitle>
+              <DialogDescription>
+                Basic and Pro checkout amounts (KES). Changes save as you edit (debounced). Company billing modals update
+                live via Realtime — no page reload.
+              </DialogDescription>
+            </DialogHeader>
+            <DeveloperBillingPricingControl
+              getAccessToken={clerkSupabaseToken}
+              enabled={isDeveloper === true && pricingControlDialogOpen}
+              embeddedInDialog
+            />
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={stkTestDialogOpen} onOpenChange={setStkTestDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>M-Pesa STK test</DialogTitle>
+              <DialogDescription>
+                Sends a real Daraja STK prompt for the amount you set (KES) using the active{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">MPESA_ENV</code> credentials. Use a sandbox test
+                number in Daraja sandbox. Inserts a row in{' '}
                 <code className="rounded bg-muted px-1 py-0.5 text-[11px]">mpesa_payments</code> (not a subscription
                 submission).
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <div className="min-w-0 flex-1 space-y-1.5">
-                <label htmlFor="dev-stk-test-phone" className="text-xs font-medium text-foreground">
+                <Label htmlFor="dev-stk-test-phone" className="text-xs font-medium text-foreground">
                   Phone (receives prompt)
-                </label>
+                </Label>
                 <Input
                   id="dev-stk-test-phone"
                   type="tel"
@@ -491,23 +672,44 @@ export default function DeveloperBillingConfirmationPage() {
                   value={stkTestPhone}
                   disabled={stkTestLoading}
                   onChange={(e) => setStkTestPhone(e.target.value)}
-                  className="h-9 max-w-md"
+                  className="h-9"
+                />
+              </div>
+              <div className="w-full min-w-[8rem] max-w-[10rem] space-y-1.5 sm:w-auto">
+                <Label htmlFor="dev-stk-test-amount" className="text-xs font-medium text-foreground">
+                  Test amount (KES)
+                </Label>
+                <Input
+                  id="dev-stk-test-amount"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={stkTestAmount}
+                  disabled={stkTestLoading}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setStkTestAmount(Number.isFinite(n) && n >= 1 ? Math.round(n) : 1);
+                  }}
+                  className="h-9"
                 />
               </div>
               <Button
                 type="button"
                 variant="secondary"
                 className="h-9 shrink-0"
-                disabled={stkTestLoading || stkTestPhone.trim().length < 9}
+                disabled={stkTestLoading || stkTestPhone.trim().length < 9 || stkTestAmount < 1}
                 onClick={() => {
                   void (async () => {
                     setStkTestLoading(true);
                     try {
-                      const res = await initiateMpesaStkDeveloperTest(stkTestPhone);
+                      const res = await sendDeveloperStkTest(
+                        { phone: stkTestPhone, amount: stkTestAmount },
+                        { getAccessToken: clerkSupabaseToken },
+                      );
                       setStkTestCheckoutId(res.checkoutRequestId);
                       void queryClient.invalidateQueries({ queryKey: ['developer', 'mpesa-stk-payments'] });
                       toast({
-                        title: 'STK test sent (KES 1)',
+                        title: `STK test sent (KES ${stkTestAmount.toLocaleString()})`,
                         description: res.customerMessage ?? 'Check the handset for the M-Pesa prompt.',
                       });
                     } catch (e) {
@@ -519,42 +721,45 @@ export default function DeveloperBillingConfirmationPage() {
                   })();
                 }}
               >
-                {stkTestLoading ? 'Sending…' : 'Send KES 1 STK'}
+                {stkTestLoading ? 'Sending…' : `Send KES ${stkTestAmount.toLocaleString()} STK`}
               </Button>
             </div>
             {stkTestCheckoutId ? (
-              <div className="pt-1">
-                <StkPushConfirmation checkoutRequestId={stkTestCheckoutId} />
+              <div className="border-t border-border/50 pt-4">
+                <StkPushConfirmation
+                  checkoutRequestId={stkTestCheckoutId}
+                  confirmationContext="developer"
+                  onPaymentSuccess={handleDevStkPaymentSuccess}
+                />
               </div>
             ) : null}
-          </section>
-        ) : null}
+          </DialogContent>
+        </Dialog>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="space-y-3">
           <TabsList className="flex w-full flex-wrap justify-start gap-1">
-            <TabsTrigger value="pending">Pending ({filtered.length})</TabsTrigger>
-            <TabsTrigger value="approved">Confirmed ({approvedFiltered.length})</TabsTrigger>
-            <TabsTrigger value="rejected">Rejected ({rejectedFiltered.length})</TabsTrigger>
+            <TabsTrigger value="pending">Pending ({pendingTabRows.length})</TabsTrigger>
+            <TabsTrigger value="manual_confirmed">Manual Confirmed ({manualTabRows.length})</TabsTrigger>
+            <TabsTrigger value="rejected">Rejected ({rejectedTabRows.length})</TabsTrigger>
             {isDeveloper ? (
-              <TabsTrigger value="stk_confirmation">
-                STK confirmation ({stkFiltered.length})
-              </TabsTrigger>
+              <TabsTrigger value="stk_confirmation">SDK Confirmation ({sdkTabRows.length})</TabsTrigger>
             ) : null}
           </TabsList>
 
           <TabsContent value="pending" className="space-y-2">
-            {!isLoading && !error && (!filtered || filtered.length === 0) ? (
+            {!isLoading && !error && (!pendingTabRows || pendingTabRows.length === 0) ? (
               <div className="fv-card text-sm text-muted-foreground">
                 No pending manual M-Pesa submissions. New rows in{' '}
                 <code className="text-foreground/90">subscription_payments</code> (pending / pending_verification) appear here.
               </div>
             ) : (
-              filtered &&
-              filtered.length > 0 && (
+              pendingTabRows &&
+              pendingTabRows.length > 0 && (
                 <div className="fv-card overflow-x-visible md:overflow-x-auto">
                   <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[920px]">
                     <thead className="border-b border-border/60 text-xs text-muted-foreground">
                       <tr>
+                        <th className="py-2 text-left font-medium">Type</th>
                         <th className="py-2 text-left font-medium">Company</th>
                         <th className="py-2 text-left font-medium">Plan / cycle</th>
                         <th className="py-2 text-left font-medium">Amount</th>
@@ -567,7 +772,7 @@ export default function DeveloperBillingConfirmationPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((p) => {
+                      {pendingTabRows.map((p) => {
                         const approving = approveMutation.isPending && approveMutation.variables === p.id;
                         const rejecting = rejectMutation.isPending && rejectMutation.variables === p.id;
                         const predicted = computeCompanySubscriptionState({
@@ -582,6 +787,9 @@ export default function DeveloperBillingConfirmationPage() {
                         });
                         return (
                           <tr key={p.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                            <td className="py-3 pr-4" data-label="Type">
+                              <PaymentTypeBadge source="manual" />
+                            </td>
                             <td className="max-md:items-start max-md:gap-2 py-3 pr-4" data-label="Company">
                               <div className="font-medium text-foreground">{p.company_name ?? 'Unknown company'}</div>
                               <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
@@ -654,15 +862,16 @@ export default function DeveloperBillingConfirmationPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="approved" className="space-y-2">
-            {!loadingApproved && !approvedError && approvedFiltered.length === 0 ? (
-              <div className="fv-card text-sm text-muted-foreground">No approved payments found.</div>
+          <TabsContent value="manual_confirmed" className="space-y-2">
+            {!loadingApproved && !approvedError && manualTabRows.length === 0 ? (
+              <div className="fv-card text-sm text-muted-foreground">No manual confirmed payments found.</div>
             ) : (
-              approvedFiltered.length > 0 && (
+              manualTabRows.length > 0 && (
                 <div className="fv-card overflow-x-visible md:overflow-x-auto">
                   <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[980px]">
                     <thead className="border-b border-border/60 text-xs text-muted-foreground">
                       <tr>
+                        <th className="py-2 text-left font-medium">Type</th>
                         <th className="py-2 text-left font-medium">Company</th>
                         <th className="py-2 text-left font-medium">Plan</th>
                         <th className="py-2 text-left font-medium">Amount</th>
@@ -674,8 +883,11 @@ export default function DeveloperBillingConfirmationPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {approvedFiltered.map((p: any) => (
+                      {manualTabRows.map((p: PaymentRow) => (
                         <tr key={p.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                          <td className="py-3 pr-4" data-label="Type">
+                            <PaymentTypeBadge source="manual" />
+                          </td>
                           <td className="max-md:items-start max-md:gap-2 py-3 pr-4" data-label="Company">
                             <div className="font-medium text-foreground">{p.company_name ?? 'Unknown company'}</div>
                             <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
@@ -716,14 +928,15 @@ export default function DeveloperBillingConfirmationPage() {
           </TabsContent>
 
           <TabsContent value="rejected" className="space-y-2">
-            {!loadingRejected && !rejectedError && rejectedFiltered.length === 0 ? (
+            {!loadingRejected && !rejectedError && rejectedTabRows.length === 0 ? (
               <div className="fv-card text-sm text-muted-foreground">No rejected payments found.</div>
             ) : (
-              rejectedFiltered.length > 0 && (
+              rejectedTabRows.length > 0 && (
                 <div className="fv-card overflow-x-visible md:overflow-x-auto">
                   <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[980px]">
                     <thead className="border-b border-border/60 text-xs text-muted-foreground">
                       <tr>
+                        <th className="py-2 text-left font-medium">Type</th>
                         <th className="py-2 text-left font-medium">Company</th>
                         <th className="py-2 text-left font-medium">Plan</th>
                         <th className="py-2 text-left font-medium">Amount</th>
@@ -735,8 +948,11 @@ export default function DeveloperBillingConfirmationPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rejectedFiltered.map((p: any) => (
+                      {rejectedTabRows.map((p: any) => (
                         <tr key={p.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                          <td className="py-3 pr-4" data-label="Type">
+                            <PaymentTypeBadge source="manual" />
+                          </td>
                           <td className="max-md:items-start max-md:gap-2 py-3 pr-4" data-label="Company">
                             <div className="font-medium text-foreground">{p.company_name ?? 'Unknown company'}</div>
                             <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
@@ -785,16 +1001,17 @@ export default function DeveloperBillingConfirmationPage() {
               </p>
               {loadingStkPayments ? (
                 <div className="fv-card text-sm text-muted-foreground">Loading STK push payments…</div>
-              ) : !stkPaymentsError && stkFiltered.length === 0 ? (
+              ) : !stkPaymentsError && sdkTabRows.length === 0 ? (
                 <div className="fv-card text-sm text-muted-foreground">
-                  No STK push records yet. Billing checkout or the KES 1 test above will create rows here after Daraja
+                  No STK push records yet. Billing checkout or the STK test above will create rows here after Daraja
                   accepts the push.
                 </div>
-              ) : stkFiltered.length > 0 ? (
+              ) : sdkTabRows.length > 0 ? (
                   <div className="fv-card overflow-x-visible md:overflow-x-auto">
                     <table className="fv-table-mobile w-full min-w-0 text-sm md:min-w-[960px]">
                       <thead className="border-b border-border/60 text-xs text-muted-foreground">
                         <tr>
+                          <th className="py-2 text-left font-medium">Type</th>
                           <th className="py-2 text-left font-medium">Status</th>
                           <th className="py-2 text-left font-medium">Checkout request</th>
                           <th className="py-2 text-left font-medium">Company</th>
@@ -807,8 +1024,11 @@ export default function DeveloperBillingConfirmationPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {stkFiltered.map((r) => (
+                        {sdkTabRows.map((r) => (
                           <tr key={r.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                            <td className="py-3 pr-4" data-label="Type">
+                              <PaymentTypeBadge source="sdk" />
+                            </td>
                             <td className="py-3 pr-4 text-xs" data-label="Status">
                               <Badge
                                 variant="outline"
@@ -868,6 +1088,167 @@ export default function DeveloperBillingConfirmationPage() {
             </TabsContent>
           ) : null}
         </Tabs>
+
+        <Dialog open={confirmedPaymentsModalOpen} onOpenChange={setConfirmedPaymentsModalOpen}>
+          <DialogContent className="max-h-[min(90vh,720px)] max-w-3xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Confirmed payments</DialogTitle>
+              <DialogDescription>
+                Manual confirmed (subscription approvals) and successful SDK pushes ({sdkSuccessRows.length} SDK).
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-wrap gap-2">
+              {(['all', 'manual', 'sdk'] as const).map((k) => (
+                <Button
+                  key={k}
+                  type="button"
+                  size="sm"
+                  variant={confirmedModalFilter === k ? 'secondary' : 'outline'}
+                  className="h-8 text-xs"
+                  onClick={() => setConfirmedModalFilter(k)}
+                >
+                  {k === 'all' ? 'All' : k === 'manual' ? 'Manual Confirmed' : 'SDK Confirmed'}
+                </Button>
+              ))}
+            </div>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-border/60">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Type</th>
+                    <th className="px-3 py-2 text-left font-medium">Company</th>
+                    <th className="px-3 py-2 text-left font-medium">Plan</th>
+                    <th className="px-3 py-2 text-left font-medium">Cycle</th>
+                    <th className="px-3 py-2 text-left font-medium">Amount</th>
+                    <th className="px-3 py-2 text-left font-medium">Date</th>
+                    <th className="px-3 py-2 text-left font-medium">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {confirmedPaymentsModalRows.map((item, idx) => {
+                    if (item.source === 'manual' && item.sub) {
+                      const p = item.sub;
+                      return (
+                        <tr key={`m-${p.id}`} className="border-b border-border/40">
+                          <td className="px-3 py-2">
+                            <PaymentTypeBadge source="manual" />
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{p.company_name ?? '—'}</div>
+                            <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
+                          </td>
+                          <td className="px-3 py-2">{p.plan_id ?? '—'}</td>
+                          <td className="px-3 py-2">{p.billing_cycle ?? p.billing_mode ?? '—'}</td>
+                          <td className="px-3 py-2 tabular-nums">KES {Number(p.amount ?? 0).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-xs">{p.approved_at ?? p.created_at ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{p.reference ?? '—'}</td>
+                        </tr>
+                      );
+                    }
+                    if (item.source === 'sdk' && item.mpesa) {
+                      const r = item.mpesa;
+                      return (
+                        <tr key={`s-${r.id}-${idx}`} className="border-b border-border/40">
+                          <td className="px-3 py-2">
+                            <PaymentTypeBadge source="sdk" />
+                          </td>
+                          <td className="px-3 py-2 font-mono text-[11px]">{r.company_id ?? '—'}</td>
+                          <td className="px-3 py-2">{r.plan ?? '—'}</td>
+                          <td className="px-3 py-2">{r.billing_cycle ?? '—'}</td>
+                          <td className="px-3 py-2 tabular-nums">KES {Number(r.amount ?? 0).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-xs">{r.paid_at ?? r.created_at ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.mpesa_receipt ?? '—'}</td>
+                        </tr>
+                      );
+                    }
+                    return null;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={confirmedRevenueModalOpen} onOpenChange={setConfirmedRevenueModalOpen}>
+          <DialogContent className="max-h-[min(90vh,720px)] max-w-3xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Confirmed revenue</DialogTitle>
+              <DialogDescription>
+                KES {manualRevenueTotal.toLocaleString()} manual + KES {sdkRevenueTotal.toLocaleString()} SDK = KES{' '}
+                {confirmedRevenueTotal.toLocaleString()} total.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-wrap gap-2">
+              {(['all', 'manual', 'sdk'] as const).map((k) => (
+                <Button
+                  key={k}
+                  type="button"
+                  size="sm"
+                  variant={revenueModalFilter === k ? 'secondary' : 'outline'}
+                  className="h-8 text-xs"
+                  onClick={() => setRevenueModalFilter(k)}
+                >
+                  {k === 'all' ? 'All' : k === 'manual' ? 'Manual Revenue' : 'SDK Revenue'}
+                </Button>
+              ))}
+            </div>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-border/60">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Type</th>
+                    <th className="px-3 py-2 text-left font-medium">Amount</th>
+                    <th className="px-3 py-2 text-left font-medium">Company</th>
+                    <th className="px-3 py-2 text-left font-medium">Plan</th>
+                    <th className="px-3 py-2 text-left font-medium">Cycle</th>
+                    <th className="px-3 py-2 text-left font-medium">Date</th>
+                    <th className="px-3 py-2 text-left font-medium">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {confirmedRevenueModalRows.map((item, idx) => {
+                    if (item.source === 'manual' && item.sub) {
+                      const p = item.sub;
+                      return (
+                        <tr key={`mr-${p.id}`} className="border-b border-border/40">
+                          <td className="px-3 py-2">
+                            <PaymentTypeBadge source="manual" />
+                          </td>
+                          <td className="px-3 py-2 font-semibold tabular-nums">KES {Number(p.amount ?? 0).toLocaleString()}</td>
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{p.company_name ?? '—'}</div>
+                            <div className="text-[11px] text-muted-foreground">{p.company_id}</div>
+                          </td>
+                          <td className="px-3 py-2">{p.plan_id ?? '—'}</td>
+                          <td className="px-3 py-2">{p.billing_cycle ?? p.billing_mode ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs">{p.approved_at ?? p.created_at ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{p.reference ?? '—'}</td>
+                        </tr>
+                      );
+                    }
+                    if (item.source === 'sdk' && item.mpesa) {
+                      const r = item.mpesa;
+                      return (
+                        <tr key={`sr-${r.id}-${idx}`} className="border-b border-border/40">
+                          <td className="px-3 py-2">
+                            <PaymentTypeBadge source="sdk" />
+                          </td>
+                          <td className="px-3 py-2 font-semibold tabular-nums">KES {Number(r.amount ?? 0).toLocaleString()}</td>
+                          <td className="px-3 py-2 font-mono text-[11px]">{r.company_id ?? '—'}</td>
+                          <td className="px-3 py-2">{r.plan ?? '—'}</td>
+                          <td className="px-3 py-2">{r.billing_cycle ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs">{r.paid_at ?? r.created_at ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.mpesa_receipt ?? '—'}</td>
+                        </tr>
+                      );
+                    }
+                    return null;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Approval duration is derived from the submitted billing_cycle (monthly/seasonal/annual). */}
       </div>

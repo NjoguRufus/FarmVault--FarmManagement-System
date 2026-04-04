@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 
@@ -69,8 +70,12 @@ function normalizeRpcErrorMessage(raw: string): string {
   return raw;
 }
 
-export async function createPaymentSubmission(input: CreatePaymentSubmissionInput): Promise<string> {
-  const { data, error } = await supabase.rpc('submit_manual_subscription_payment', {
+export async function createPaymentSubmission(
+  input: CreatePaymentSubmissionInput,
+  client?: SupabaseClient,
+): Promise<string> {
+  const sb = client ?? supabase;
+  const { data, error } = await sb.rpc('submit_manual_subscription_payment', {
     _plan_code: input.planCode,
     _billing_cycle: input.billingCycle,
     _amount: input.amount,
@@ -147,10 +152,14 @@ export async function listCompanySubscriptionPayments(companyId: string): Promis
   return (data as PaymentSubmissionRow[]) ?? [];
 }
 
-export async function getPendingPaymentStatus(companyId: string): Promise<PendingPaymentStatusResult> {
-  const { data, error } = await db
-    .public()
-    .from('subscription_payments')
+export async function getPendingPaymentStatus(
+  companyId: string,
+  client?: SupabaseClient,
+): Promise<PendingPaymentStatusResult> {
+  const from = client
+    ? client.schema('public').from('subscription_payments')
+    : db.public().from('subscription_payments');
+  const { data, error } = await from
     .select(
       'id, company_id, plan_id, amount, status, billing_mode, billing_cycle, currency, payment_method, mpesa_name, mpesa_phone, transaction_code, created_at, submitted_at',
     )

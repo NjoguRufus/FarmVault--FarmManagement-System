@@ -11,8 +11,8 @@ import {
   startAfter,
   Timestamp,
   where,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import type {
   SubscriptionPaymentDoc,
   SubscriptionPaymentStatus,

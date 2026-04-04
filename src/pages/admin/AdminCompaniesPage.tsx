@@ -27,8 +27,8 @@ import {
 } from '@/services/companyService';
 import { overrideSubscription } from '@/services/developerAdminService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { collection, getDocs, query, where, Timestamp } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, Timestamp } from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';

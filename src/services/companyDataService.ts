@@ -6,8 +6,8 @@ import {
   where,
   writeBatch,
   deleteDoc,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 
 /** Company-scoped collections to wipe when "Delete everything" is used. Company doc and users are kept. */
 const COMPANY_DATA_COLLECTIONS = [

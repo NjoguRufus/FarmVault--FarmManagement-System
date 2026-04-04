@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/react";
-import { Banknote, TrendingUp } from "lucide-react";
+import { Banknote, TrendingUp, Wallet } from "lucide-react";
 import { DeveloperPageShell } from "@/components/developer/DeveloperPageShell";
 import { DeveloperStatGrid } from "@/components/developer/DeveloperStatGrid";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -48,7 +48,8 @@ export default function AmbassadorEarningsPage() {
       <>
         <SeoHead title="Earnings" description="Ambassador commissions and payouts." canonical={SEO_ROUTES.ambassadorDashboard} />
         <DeveloperPageShell title="Earnings" isLoading>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <div className="h-28 rounded-xl border border-border/50 bg-muted/20 animate-pulse" />
             <div className="h-28 rounded-xl border border-border/50 bg-muted/20 animate-pulse" />
             <div className="h-28 rounded-xl border border-border/50 bg-muted/20 animate-pulse" />
           </div>
@@ -81,16 +82,23 @@ export default function AmbassadorEarningsPage() {
       <SeoHead title="Earnings" description="Ambassador commissions and payouts." canonical={SEO_ROUTES.ambassadorDashboard} />
       <DeveloperPageShell
         title="Earnings"
-        description="Commission totals from paid and pending (owed) rows in your ambassador account."
+        description="Totals from your ambassador earnings (paid and owed)."
         isRefetching={statsQ.isFetching}
         onRefresh={() => void statsQ.refetch()}
       >
-        <DeveloperStatGrid cols="2">
+        <DeveloperStatGrid cols="3">
           <StatCard
-            title="Total earned (paid)"
+            title="Total earned"
             value={formatKes(stats.total_earned)}
             icon={<Banknote className="h-4 w-4 sm:h-5 sm:w-5" />}
             variant="primary"
+            compact
+          />
+          <StatCard
+            title="Paid"
+            value={formatKes(stats.paid)}
+            icon={<Wallet className="h-4 w-4 sm:h-5 sm:w-5" />}
+            variant="default"
             compact
           />
           <StatCard

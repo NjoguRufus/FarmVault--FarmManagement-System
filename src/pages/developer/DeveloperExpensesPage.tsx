@@ -2,7 +2,7 @@ import React from 'react';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 
 // Phase 1: scaffold UI shell. Detailed FarmVault expense breakdown can be wired
-// to a dedicated Supabase view or Firestore export in a later phase.
+// to a dedicated Supabase view or export in a later phase.
 
 export default function DeveloperExpensesPage() {
   return (

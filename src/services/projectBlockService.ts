@@ -7,8 +7,8 @@ import {
   orderBy,
   serverTimestamp,
   Timestamp,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import type { ProjectBlock } from '@/types';
 
 const COLLECTION = 'projectBlocks';

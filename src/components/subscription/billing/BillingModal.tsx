@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Sparkles } from 'lucide-react';
+import { CheckCircle2, Smartphone, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { BillingSubmissionCycle, BillingSubmissionPlan } from '@/lib/billingPricing';
-import { getBillingAmountKes } from '@/lib/billingPricing';
+import { computeBundleSavingsKes } from '@/lib/billingPricing';
+import { SUBSCRIPTION_PLANS } from '@/config/plans';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 import { PaymentSummaryCard } from '@/components/subscription/billing/PaymentSummaryCard';
@@ -19,9 +22,15 @@ import {
   extractMpesaCodeFromPastedMessage,
   extractMpesaNameFromPastedMessage,
 } from '@/lib/mpesaExtract';
-import { getCompany } from '@/services/companyService';
+import { getCompany, type CompanyDoc } from '@/services/companyService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { useToast } from '@/hooks/use-toast';
+import { useCompanyScope, TENANT_SYNC_REQUIRED } from '@/hooks/useCompanyScope';
+import { useCompanyContext } from '@/hooks/useCompanyContext';
+import { useActiveCompany } from '@/hooks/useActiveCompany';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { useBillingPrices } from '@/hooks/useBillingPrices';
+import { CLERK_JWT_TEMPLATE_SUPABASE, getAuthedSupabase } from '@/lib/supabase';
 import { initiateMpesaStkPush } from '@/services/mpesaStkService';
 import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
 
@@ -34,6 +43,11 @@ export interface BillingModalProps {
   /** When opening checkout, pre-select plan/cycle from the billing page. */
   checkoutPlan?: BillingSubmissionPlan;
   checkoutCycle?: BillingSubmissionCycle;
+  /**
+   * When auth `user.companyId` is briefly empty, pass the workspace id from the parent
+   * (same source as the billing page / shell). Optional; modal also reads `profiles.active_company_id`.
+   */
+  workspaceCompanyId?: string | null;
 }
 
 const TILL = '5334350';
@@ -47,19 +61,94 @@ export function BillingModal({
   daysRemaining,
   checkoutPlan,
   checkoutCycle,
+  workspaceCompanyId: workspaceCompanyIdProp,
 }: BillingModalProps) {
   const { user } = useAuth();
+  const { getToken, isLoaded: clerkAuthLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const companyId = user?.companyId ?? null;
+  const scope = useCompanyScope();
+  const { activeCompanyId } = useCompanyContext();
+  const { activeCompanyId: profileActiveCompanyId } = useActiveCompany();
+  const { billingReferenceFromGate } = useSubscriptionStatus();
+  const { matrix: billingPriceMatrix, getAmount: getBillingPriceAmount, getBundleSavings: getBillingBundleSavings } =
+    useBillingPrices();
+
+  const clerkSupabaseToken = useCallback(
+    () => getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE }),
+    [getToken],
+  );
+
+  const seedCompanyId = useMemo(() => {
+    const pick = (v: string | null | undefined) => {
+      const t = v?.trim();
+      return t ? t : null;
+    };
+    const fromProp = pick(workspaceCompanyIdProp);
+    if (fromProp) return fromProp;
+    const fromScope = pick(scope.companyId);
+    if (fromScope) return fromScope;
+    const fromContext = pick(activeCompanyId);
+    if (fromContext) return fromContext;
+    const fromUser = pick(user?.companyId);
+    if (fromUser) return fromUser;
+    return pick(profileActiveCompanyId);
+  }, [
+    workspaceCompanyIdProp,
+    scope.companyId,
+    activeCompanyId,
+    user?.companyId,
+    profileActiveCompanyId,
+  ]);
 
   const { data: companyDoc } = useQuery({
-    queryKey: ['company-billing', companyId],
-    enabled: open && !!companyId,
-    queryFn: () => getCompany(companyId!),
+    queryKey: ['company-billing', seedCompanyId],
+    enabled: open && !!seedCompanyId && clerkAuthLoaded,
+    queryFn: async () => {
+      const client = await getAuthedSupabase(clerkSupabaseToken);
+      return getCompany(seedCompanyId!, client);
+    },
     staleTime: 60_000,
   });
+
+  const effectiveCompanyId = useMemo(() => {
+    const fromDoc = companyDoc?.id?.trim();
+    if (fromDoc) return fromDoc;
+    if (seedCompanyId) return seedCompanyId;
+    return null;
+  }, [companyDoc?.id, seedCompanyId]);
+
+  const companyId = effectiveCompanyId;
   const workspaceName = companyDoc?.name ?? null;
+
+  /** PayBill ref: row (`billing_reference` | `billingReference`) → gate RPC → `FV-` + first 8 chars of company id (UI only). */
+  const billingReference = useMemo(() => {
+    const row = companyDoc as CompanyDoc & { billing_reference?: string | null };
+    const fromSnake =
+      row?.billing_reference != null && String(row.billing_reference).trim() !== ''
+        ? String(row.billing_reference).trim()
+        : '';
+    const fromCamel = row?.billingReference?.trim() ?? '';
+    const fromServer = fromSnake || fromCamel;
+    if (fromServer) return fromServer;
+    const fromGate = billingReferenceFromGate?.trim() ?? '';
+    if (fromGate) return fromGate;
+    const id = row?.id ?? companyId ?? seedCompanyId ?? '';
+    const prefix = id.slice(0, 8);
+    return prefix ? `FV-${prefix}` : '';
+  }, [companyDoc, billingReferenceFromGate, companyId, seedCompanyId]);
+
+  /** Only DB/gate values — omit from STK body when empty so edge uses `core.companies.billing_reference`. */
+  const stkBillingReference = useMemo(() => {
+    const row = companyDoc as CompanyDoc & { billing_reference?: string | null };
+    const fromSnake =
+      row?.billing_reference != null && String(row.billing_reference).trim() !== ''
+        ? String(row.billing_reference).trim()
+        : '';
+    const fromCamel = row?.billingReference?.trim() ?? '';
+    if (fromSnake || fromCamel) return fromSnake || fromCamel;
+    return billingReferenceFromGate?.trim() ?? '';
+  }, [companyDoc, billingReferenceFromGate]);
 
   const [plan, setPlan] = useState<BillingSubmissionPlan>(() => checkoutPlan ?? 'pro');
   const [cycle, setCycle] = useState<BillingSubmissionCycle>(() => checkoutCycle ?? 'monthly');
@@ -71,19 +160,26 @@ export function BillingModal({
   const [fieldErrors, setFieldErrors] = useState<MpesaFieldErrors>({});
   const [stkLoading, setStkLoading] = useState(false);
   const [stkCheckoutRequestId, setStkCheckoutRequestId] = useState<string | null>(null);
+  const [stkPhone, setStkPhone] = useState('');
   const upgradeOpenTrackedRef = useRef(false);
   const planRef = useRef(plan);
   planRef.current = plan;
 
   const { data: pendingStatus, isLoading: pendingLoading } = useQuery({
     queryKey: ['subscription-payment-pending', companyId],
-    enabled: open && !!companyId,
-    queryFn: () => getPendingPaymentStatus(companyId!),
+    enabled: open && !!companyId && clerkAuthLoaded,
+    queryFn: async () => {
+      const client = await getAuthedSupabase(clerkSupabaseToken);
+      return getPendingPaymentStatus(companyId!, client);
+    },
     staleTime: 30_000,
   });
 
   const mutation = useMutation({
-    mutationFn: createPaymentSubmission,
+    mutationFn: async (input: Parameters<typeof createPaymentSubmission>[0]) => {
+      const client = await getAuthedSupabase(clerkSupabaseToken);
+      return createPaymentSubmission(input, client);
+    },
     onSuccess: async () => {
       setSuccess(true);
       if (companyId) {
@@ -119,6 +215,7 @@ export function BillingModal({
       setFieldErrors({});
       setStkLoading(false);
       setStkCheckoutRequestId(null);
+      setStkPhone('');
     }
   }, [open]);
 
@@ -150,18 +247,47 @@ export function BillingModal({
 
   const subtitle = useMemo(() => {
     if (isExpired) {
-      return 'Your trial has ended. Choose a plan, pay via M-Pesa, and we will activate access after we verify your payment — usually within one business day.';
+      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or use PayBill and submit details for manual verification.';
     }
-    return 'Pick a plan and billing cycle, pay the exact amount to our till, then submit your M-Pesa details. Your subscription stays inactive until we manually verify the payment.';
+    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or use PayBill and submit your confirmation for manual review.';
   }, [isExpired]);
 
-  const amount = useMemo(() => getBillingAmountKes(plan, cycle), [plan, cycle]);
+  const selectedPlan = useMemo(() => {
+    const p = SUBSCRIPTION_PLANS.find((x) => x.value === plan);
+    if (!p || (p.value !== 'basic' && p.value !== 'pro')) return null;
+    return {
+      id: p.value as BillingSubmissionPlan,
+      monthlyPrice: p.pricing.monthly,
+      seasonalPrice: p.pricing.season,
+      annualPrice: p.pricing.annual,
+    };
+  }, [plan]);
+
+  const amount = useMemo(() => {
+    if (!selectedPlan) return null;
+    const fromDb = getBillingPriceAmount(selectedPlan.id, cycle);
+    if (fromDb != null) return fromDb;
+    if (cycle === 'monthly') return selectedPlan.monthlyPrice;
+    if (cycle === 'seasonal') return selectedPlan.seasonalPrice;
+    return selectedPlan.annualPrice;
+  }, [selectedPlan, cycle, getBillingPriceAmount]);
+
+  const summaryBundleSavingsKes = useMemo(() => {
+    if (billingPriceMatrix && getBillingPriceAmount(plan, cycle) != null) {
+      return getBillingBundleSavings(plan, cycle);
+    }
+    return computeBundleSavingsKes(plan, cycle);
+  }, [billingPriceMatrix, getBillingPriceAmount, getBillingBundleSavings, plan, cycle]);
 
   const handleSubmit = async () => {
     setFormError(null);
     setFieldErrors({});
     if (!companyId) {
-      onOpenChange(false);
+      setFormError('Workspace not found. Please refresh.');
+      return;
+    }
+    if (amount == null || typeof amount !== 'number') {
+      setFormError('Price not available for this plan. Choose Basic or Pro.');
       return;
     }
     const nextErrors: MpesaFieldErrors = {};
@@ -192,27 +318,94 @@ export function BillingModal({
 
   const handleStkPush = async () => {
     setFormError(null);
-    if (!companyId) {
-      onOpenChange(false);
-      return;
-    }
-    const phoneTrim = mpesaPhone.trim();
-    if (phoneTrim.length < 9) {
+    if (!clerkAuthLoaded || !clerkSignedIn) {
       toast({
         variant: 'destructive',
-        title: 'Phone required for STK',
-        description: 'Enter the M-Pesa number that should receive the payment prompt (e.g. 07… or +254…).',
+        title: 'Sign in required',
+        description: 'Wait for sign-in to finish, then try STK again.',
       });
       return;
     }
+    if (!scope.isDeveloper && scope.error) {
+      toast({
+        variant: 'destructive',
+        title: 'No active workspace',
+        description:
+          scope.error === TENANT_SYNC_REQUIRED
+            ? 'Your workspace is still syncing. Wait a moment and try again, or refresh the page.'
+            : 'Pick your farm workspace in the app (or finish company setup), then retry STK.',
+      });
+      setFormError('No active company for STK. Use the workspace switcher or finish setup.');
+      return;
+    }
+    const phoneTrim = stkPhone.trim();
+    const billingRefTrim = stkBillingReference.trim();
+    const safeAmount = Math.round(Number(amount));
+
+    const missing: string[] = [];
+    if (!companyId) missing.push('company_id');
+    if (plan !== 'basic' && plan !== 'pro') missing.push('plan');
+    if (cycle !== 'monthly' && cycle !== 'seasonal' && cycle !== 'annual') missing.push('billing_cycle');
+    if (!phoneTrim || phoneTrim.length < 9) missing.push('phone');
+    if (!Number.isFinite(safeAmount) || safeAmount <= 0) missing.push('amount');
+
+    // eslint-disable-next-line no-console
+    console.log('STK preflight (BillingModal):', {
+      company_id: companyId,
+      billing_reference: billingRefTrim || '(omitted — server uses DB)',
+      plan,
+      billing_cycle: cycle,
+      phone: phoneTrim || null,
+      amount_raw: amount,
+      amount_rounded: safeAmount,
+      companyDocLoaded: companyDoc != null,
+      missing_fields: missing,
+    });
+
+    if (missing.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn('[BillingModal] STK blocked — missing or invalid:', missing.join(', '));
+      const label =
+        missing[0] === 'company_id'
+          ? 'Workspace not found'
+          : missing[0] === 'phone'
+            ? 'Phone required for STK'
+            : missing[0] === 'amount'
+              ? 'Invalid amount'
+              : 'Cannot start STK';
+      const description =
+        missing[0] === 'company_id'
+          ? 'Sign in again or pick your workspace, then retry.'
+          : missing[0] === 'phone'
+            ? 'Enter the M-Pesa number that should receive the prompt (e.g. 07… or +254…).'
+            : missing[0] === 'amount'
+              ? 'Choose Basic or Pro and a billing cycle so the price is set.'
+              : `Fix: ${missing.join(', ')}`;
+      toast({ variant: 'destructive', title: label, description });
+      setFormError(`${label}. ${description}`);
+      return;
+    }
+
     setStkLoading(true);
     try {
-      const res = await initiateMpesaStkPush({
-        companyId,
-        phoneNumber: phoneTrim,
-        planCode: plan,
-        billingCycle: cycle,
+      // eslint-disable-next-line no-console
+      console.log('STK company context:', {
+        company_id: companyId,
+        billing_reference: billingRefTrim || undefined,
+        plan,
+        billing_cycle: cycle,
       });
+      const res = await initiateMpesaStkPush(
+        {
+          companyId: companyId!,
+          phoneNumber: phoneTrim,
+          planCode: plan,
+          billingCycle: cycle,
+          ...(billingRefTrim ? { billingReference: billingRefTrim } : {}),
+          amount: safeAmount,
+        },
+        { getAccessToken: clerkSupabaseToken },
+      );
       setStkCheckoutRequestId(res.checkoutRequestId);
       toast({
         title: 'Check your phone',
@@ -224,6 +417,23 @@ export function BillingModal({
       toast({ variant: 'destructive', title: 'STK failed', description: msg });
     } finally {
       setStkLoading(false);
+    }
+  };
+
+  const handleStkPaymentSuccess = useCallback(() => {
+    window.setTimeout(() => onOpenChange(false), 800);
+  }, [onOpenChange]);
+
+  const handleSubscriptionActivatedFromStk = async () => {
+    if (companyId) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['company-subscription', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['subscription-gate', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['subscription-payment-pending', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['subscription-payments-supabase', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['company-subscription-row', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['company-billing', companyId] }),
+      ]);
     }
   };
 
@@ -313,15 +523,9 @@ export function BillingModal({
                   </div>
                 ) : null}
 
-                {stkCheckoutRequestId ? (
-                  <div className="mb-4 sm:mb-6">
-                    <StkPushConfirmation checkoutRequestId={stkCheckoutRequestId} />
-                  </div>
-                ) : null}
-
                 {/*
-                  Mobile (<lg): plan → billing cycle → summary → M-Pesa (flex order).
-                  Desktop (lg+): plan + cycle + form in col 1–3; sticky summary in col 4–5.
+                  Mobile: plan → cycle → summary → STK → manual PayBill.
+                  Desktop: summary (left col) + STK + manual (right col).
                 */}
                 <div
                   className={cn(
@@ -349,37 +553,108 @@ export function BillingModal({
                     tillNumber={TILL}
                     businessName={BUSINESS}
                     workspaceName={workspaceName}
+                    displayAmountKes={amount}
+                    bundleSavingsKes={summaryBundleSavingsKes}
                     className={cn(
                       'order-3 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-1 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0',
                     )}
                   />
 
-                  <MpesaPaymentForm
-                    mpesaName={mpesaName}
-                    mpesaPhone={mpesaPhone}
-                    transactionCode={transactionCode}
-                    onMpesaNameChange={(v) => {
-                      setMpesaName(v);
-                      if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
-                    }}
-                    onMpesaPhoneChange={(v) => {
-                      setMpesaPhone(v);
-                      if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
-                    }}
-                    onTransactionCodeChange={(v) => {
-                      setTransactionCode(v);
-                      if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
-                    }}
-                    onTransactionCodePaste={handleTransactionCodePaste}
-                    fieldErrors={fieldErrors}
-                    disabled={busy}
-                    onSubmit={() => void handleSubmit()}
-                    onDismiss={() => onOpenChange(false)}
-                    submitLoading={mutation.isPending}
-                    onStkPush={() => void handleStkPush()}
-                    stkLoading={stkLoading}
-                    className="order-4 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start"
-                  />
+                  <div className="order-4 flex flex-col gap-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0">
+                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Pay via M-Pesa STK push
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Amount due matches your selected plan (KES{' '}
+                          {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
+                          phone; your subscription activates automatically.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
+                          Phone number
+                        </label>
+                        <Input
+                          id="billing-stk-phone"
+                          className="h-9 rounded-md bg-background lg:h-10 lg:rounded-lg"
+                          value={stkPhone}
+                          disabled={busy}
+                          onChange={(e) => setStkPhone(e.target.value)}
+                          placeholder="07… or +254…"
+                          inputMode="tel"
+                          autoComplete="tel"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || stkLoading}
+                        className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
+                        onClick={() => void handleStkPush()}
+                      >
+                        <Smartphone className="h-3.5 w-3.5" />
+                        {stkLoading ? 'Sending STK prompt…' : 'Send STK prompt'}
+                      </Button>
+                      {stkCheckoutRequestId ? (
+                        <StkPushConfirmation
+                          checkoutRequestId={stkCheckoutRequestId}
+                          confirmationContext="billing"
+                          onPaymentSuccess={handleStkPaymentSuccess}
+                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
+                        />
+                      ) : null}
+                    </section>
+
+                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Pay via PayBill (manual)
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Pay the amount shown in the summary to our PayBill. Use this account number so we can match your
+                          payment.
+                        </p>
+                      </div>
+                      <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">PayBill number</dt>
+                          <dd className="font-mono font-medium text-foreground">{TILL}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Account number</dt>
+                          <dd className="font-mono font-medium text-foreground">
+                            {billingReference || '—'}
+                          </dd>
+                        </div>
+                      </dl>
+                      <MpesaPaymentForm
+                        mpesaName={mpesaName}
+                        mpesaPhone={mpesaPhone}
+                        transactionCode={transactionCode}
+                        onMpesaNameChange={(v) => {
+                          setMpesaName(v);
+                          if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
+                        }}
+                        onMpesaPhoneChange={(v) => {
+                          setMpesaPhone(v);
+                          if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
+                        }}
+                        onTransactionCodeChange={(v) => {
+                          setTransactionCode(v);
+                          if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
+                        }}
+                        onTransactionCodePaste={handleTransactionCodePaste}
+                        fieldErrors={fieldErrors}
+                        disabled={busy}
+                        onSubmit={() => void handleSubmit()}
+                        onDismiss={() => onOpenChange(false)}
+                        submitLoading={mutation.isPending}
+                        className="space-y-3 lg:space-y-4"
+                      />
+                    </section>
+                  </div>
                 </div>
               </div>
             </>

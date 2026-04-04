@@ -1,4 +1,4 @@
-import { auth, db } from '@/lib/firebase';
+import { auth, db } from '@/lib/documentLayer';
 import {
   addDoc,
   collection,
@@ -15,7 +15,7 @@ import {
   where,
   writeBatch,
   type Query,
-} from '@/lib/firestore-stub';
+} from '@/lib/documentLayer';
 import { db as dbSupabase } from '@/lib/db';
 
 const LEDGER_COLLECTION = 'projectWalletLedger';
@@ -435,7 +435,7 @@ export function subscribeWalletLedger(
     where('projectId', '==', projectId),
   );
 
-  // Fire and forget: migration only needed for legacy Firestore wallet; skip to avoid Firebase stub errors when using Supabase.
+  // Fire-and-forget: legacy wallet migration skipped when using Supabase-backed ledger only.
   void ensureProjectWalletMigration(projectId, companyId).catch(() => {});
 
   return onSnapshot(

@@ -9,8 +9,8 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { normalizeCropTypeKey, type CropCatalogDoc, type CropKnowledge } from '@/knowledge/cropCatalog';
 
 const CROP_CATALOG_COLLECTION = 'cropCatalog';
@@ -77,7 +77,7 @@ export function subscribeCropCatalog(companyId: string, onData: CropCatalogCallb
         if (!hasLoggedCropCatalogPermissionError) {
           hasLoggedCropCatalogPermissionError = true;
           console.warn(
-            'Crop catalog access denied by Firestore rules. Showing built-in crops only.',
+            'Crop catalog access denied. Showing built-in crops only.',
           );
         }
       } else {

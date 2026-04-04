@@ -1,133 +1,176 @@
-import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
-import type { BillingSubmissionCycle, BillingSubmissionPlan } from '@/lib/billingPricing';
+/**
+ * STK initiation: direct POST to `mpesa-stk-push` with the billing UI body.
+ * Uses the signed-in user's Clerk JWT. No profile, company, or workspace lookups in this module.
+ */
+import { CLERK_JWT_TEMPLATE_SUPABASE, getSupabaseAccessToken } from '@/lib/supabase';
 
-export interface MpesaStkPushResult {
+function supabaseFunctionsOrigin(): string {
+  const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+  if (!url) {
+    throw new Error('Missing VITE_SUPABASE_URL for M-Pesa STK.');
+  }
+  return url;
+}
+
+function supabaseAnonApiKey(): string {
+  const key =
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim() ||
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+  if (!key) {
+    throw new Error('Missing VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) for M-Pesa STK.');
+  }
+  return key;
+}
+
+export type MpesaStkAuthOptions = {
+  getAccessToken: () => Promise<string | null>;
+};
+
+export interface StkPushParams {
+  companyId: string;
+  phoneNumber: string;
+  planCode: 'basic' | 'pro';
+  billingCycle: 'monthly' | 'seasonal' | 'annual';
+  billingReference?: string;
+  amount: number;
+}
+
+export interface StkPushResult {
   checkoutRequestId: string;
-  merchantRequestId: string;
   customerMessage?: string;
 }
 
-export async function initiateMpesaStkPush(params: {
-  companyId: string;
-  phoneNumber: string;
-  planCode: BillingSubmissionPlan;
-  billingCycle: BillingSubmissionCycle;
-}): Promise<MpesaStkPushResult> {
-  const token = await getSupabaseAccessToken();
-  if (!token) {
-    throw new Error('You must be signed in to pay with M-Pesa STK.');
-  }
+/** @deprecated Use {@link StkPushResult} */
+export type MpesaStkPushResult = StkPushResult & { merchantRequestId?: string };
 
-  const { data, error } = await supabase.functions.invoke<{
-    success?: boolean;
-    ok?: boolean;
-    checkoutRequestId?: string;
-    merchantRequestId?: string;
-    customerMessage?: string;
-    error?: string;
-    detail?: string;
-    stack?: string | null;
-  }>('mpesa-stk-push', {
-    body: {
-      companyId: params.companyId,
-      phoneNumber: params.phoneNumber.trim(),
-      planCode: params.planCode,
-      billingCycle: params.billingCycle,
+type StkEdgeBody = {
+  success?: boolean;
+  ok?: boolean;
+  checkoutRequestId?: string;
+  merchantRequestId?: string;
+  customerMessage?: string;
+  error?: string;
+  detail?: string;
+  message?: string;
+};
+
+function formatStkEdgeError(data: StkEdgeBody): string {
+  const err = typeof data.error === 'string' ? data.error : '';
+  const det = typeof data.detail === 'string' ? data.detail : '';
+  const msg = typeof data.message === 'string' ? data.message : '';
+  if (err && det && det !== err) return `${err}: ${det}`;
+  return err || det || msg || 'STK Push failed';
+}
+
+async function postMpesaStkPush(body: Record<string, unknown>, token: string): Promise<StkPushResult> {
+  const res = await fetch(`${supabaseFunctionsOrigin()}/functions/v1/mpesa-stk-push`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonApiKey(),
     },
-    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
   });
 
+  let data: StkEdgeBody;
+  try {
+    data = (await res.json()) as StkEdgeBody;
+  } catch {
+    throw new Error(!res.ok ? `STK Push failed (${res.status})` : 'STK Push failed');
+  }
+
   if (data && typeof data === 'object' && data.success === false) {
-    const msg =
-      (typeof data.error === 'string' && data.error) ||
-      (typeof data.detail === 'string' && data.detail) ||
-      'STK request failed';
-    throw new Error(msg);
+    throw new Error(formatStkEdgeError(data));
   }
 
-  if (error) {
-    const message =
-      (data && typeof data === 'object' && typeof data.detail === 'string' && data.detail) ||
-      (data && typeof data === 'object' && typeof data.error === 'string' && data.error) ||
-      error.message ||
-      'STK request failed';
-    throw new Error(message);
-  }
-
-  if (data && typeof data === 'object' && data.error) {
-    throw new Error(
-      typeof data.detail === 'string' && data.detail ? data.detail : String(data.error),
-    );
+  if (!res.ok) {
+    throw new Error(formatStkEdgeError(data));
   }
 
   const checkoutRequestId = data?.checkoutRequestId;
-  if (!checkoutRequestId) {
+  if (typeof checkoutRequestId !== 'string' || !checkoutRequestId.trim()) {
     throw new Error('STK initiated but no checkout reference was returned.');
   }
 
   return {
-    checkoutRequestId,
-    merchantRequestId: data?.merchantRequestId ?? '',
-    customerMessage: data?.customerMessage,
+    checkoutRequestId: checkoutRequestId.trim(),
+    customerMessage:
+      typeof data.customerMessage === 'string' && data.customerMessage.trim()
+        ? data.customerMessage.trim()
+        : undefined,
   };
 }
 
-/** Platform developers only: Daraja STK for KES 1 (sandbox/production per MPESA_ENV). */
-export async function initiateMpesaStkDeveloperTest(phoneNumber: string): Promise<MpesaStkPushResult> {
-  const token = await getSupabaseAccessToken();
+export async function initiateMpesaStkPush(
+  params: StkPushParams,
+  auth: MpesaStkAuthOptions,
+): Promise<StkPushResult> {
+  const token = await auth.getAccessToken();
+  // eslint-disable-next-line no-console
+  console.log('Token attached:', !!token);
   if (!token) {
-    throw new Error('You must be signed in to run the STK test.');
-  }
-
-  const { data, error } = await supabase.functions.invoke<{
-    success?: boolean;
-    ok?: boolean;
-    checkoutRequestId?: string;
-    merchantRequestId?: string;
-    customerMessage?: string;
-    amountKes?: number;
-    error?: string;
-    detail?: string;
-    stack?: string | null;
-  }>('mpesa-stk-push', {
-    body: {
-      developerStkTest: true,
-      phoneNumber: phoneNumber.trim(),
-    },
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (data && typeof data === 'object' && data.success === false) {
-    const msg =
-      (typeof data.error === 'string' && data.error) ||
-      (typeof data.detail === 'string' && data.detail) ||
-      'STK test failed';
-    throw new Error(msg);
-  }
-
-  if (error) {
-    const message =
-      (data && typeof data === 'object' && typeof data.detail === 'string' && data.detail) ||
-      (data && typeof data === 'object' && typeof data.error === 'string' && data.error) ||
-      error.message ||
-      'STK test failed';
-    throw new Error(message);
-  }
-
-  if (data && typeof data === 'object' && data.error) {
     throw new Error(
-      typeof data.detail === 'string' && data.detail ? data.detail : String(data.error),
+      `You must be signed in to pay with M-Pesa STK. If you are signed in, ensure a Clerk JWT template named "${CLERK_JWT_TEMPLATE_SUPABASE}" exists with claim "sub" set to the user id.`,
     );
   }
 
-  const checkoutRequestId = data?.checkoutRequestId;
-  if (!checkoutRequestId) {
-    throw new Error('STK test started but no checkout reference was returned.');
+  const safeAmount = Math.round(Number(params.amount));
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    throw new Error('Invalid amount');
   }
 
-  return {
-    checkoutRequestId,
-    merchantRequestId: data?.merchantRequestId ?? '',
-    customerMessage: data?.customerMessage,
-  };
+  const billingRefTrim = params.billingReference?.trim() ?? '';
+
+  // eslint-disable-next-line no-console
+  console.log('Initiating STK with params:', {
+    phone: params.phoneNumber.trim(),
+    amount: safeAmount,
+    company_id: params.companyId,
+    billing_reference: billingRefTrim || '(empty — edge falls back from company_id)',
+    plan: params.planCode,
+    billing_cycle: params.billingCycle,
+  });
+
+  return postMpesaStkPush(
+    {
+      company_id: params.companyId,
+      phone: params.phoneNumber.trim(),
+      plan: params.planCode,
+      billing_cycle: params.billingCycle,
+      billing_reference: billingRefTrim,
+      amount: safeAmount,
+    },
+    token,
+  );
+}
+
+/** Platform developers only: Daraja STK with configurable KES amount (sandbox/production per MPESA_ENV). */
+export async function sendDeveloperStkTest(
+  params: { phone: string; amount: number },
+  auth?: { getAccessToken?: () => Promise<string | null> },
+): Promise<StkPushResult> {
+  const getTok = auth?.getAccessToken ?? getSupabaseAccessToken;
+  const token = await getTok();
+  // eslint-disable-next-line no-console
+  console.log('Token attached:', !!token);
+  if (!token) {
+    throw new Error(
+      `You must be signed in to run the STK test. Ensure Clerk JWT template "${CLERK_JWT_TEMPLATE_SUPABASE}" exists.`,
+    );
+  }
+
+  const safeAmount = Math.round(Number(params.amount));
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    throw new Error('Invalid STK amount');
+  }
+
+  return postMpesaStkPush(
+    {
+      developerStkTest: true,
+      phoneNumber: params.phone.trim(),
+      amount: safeAmount,
+    },
+    token,
+  );
 }

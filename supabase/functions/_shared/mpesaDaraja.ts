@@ -9,6 +9,10 @@ const STK_TRANSACTION_DESC = "FarmVault Sub";
 export interface StkPushInput {
   phone254: string;
   amountKes: number;
+  /** Daraja AccountReference — max 12 chars (e.g. company PayBill account). */
+  accountReference?: string;
+  /** Daraja TransactionDesc — max 13 chars. */
+  transactionDesc?: string;
 }
 
 export interface StkPushSuccess {
@@ -122,6 +126,9 @@ export async function initiateStkPush(
 
   const phone = params.phone254;
 
+  const accountRef = (params.accountReference ?? STK_ACCOUNT_REFERENCE).trim().slice(0, 12) || STK_ACCOUNT_REFERENCE;
+  const txDesc = (params.transactionDesc ?? STK_TRANSACTION_DESC).trim().slice(0, 13) || STK_TRANSACTION_DESC;
+
   const body = {
     BusinessShortCode: cfg.shortcode,
     Password: password,
@@ -132,8 +139,8 @@ export async function initiateStkPush(
     PartyB: cfg.shortcode,
     PhoneNumber: phone,
     CallBackURL: cfg.callbackUrl,
-    AccountReference: STK_ACCOUNT_REFERENCE,
-    TransactionDesc: STK_TRANSACTION_DESC,
+    AccountReference: accountRef,
+    TransactionDesc: txDesc,
   };
 
   console.log("[mpesa] STK request sent", {

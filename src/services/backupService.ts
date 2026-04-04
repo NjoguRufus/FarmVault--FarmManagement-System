@@ -10,9 +10,9 @@ import {
   serverTimestamp,
   writeBatch,
   Timestamp,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
-import { getDocWithCache, getDocsWithCache } from '@/lib/firestoreCache';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
+import { getDocWithCache, getDocsWithCache } from '@/lib/documentCache';
 
 const BACKUP_ROOT = 'developerBackups';
 
