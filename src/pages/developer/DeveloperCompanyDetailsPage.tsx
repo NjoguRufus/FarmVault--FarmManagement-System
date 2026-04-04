@@ -17,6 +17,7 @@ import { CompanyActivityTimelineTab } from '@/components/developer/company-intel
 import { CompanySeasonChallengesTab } from '@/components/developer/company-intelligence/CompanySeasonChallengesTab';
 import { CompanySubscriptionTab } from '@/components/developer/company-intelligence/CompanySubscriptionTab';
 import { CompanyAuditLogsTab } from '@/components/developer/company-intelligence/CompanyAuditLogsTab';
+import { CompanyPaymentHistoryTab } from '@/components/developer/company-intelligence/CompanyPaymentHistoryTab';
 import { LoadingSkeletonBlock } from '@/components/developer/company-intelligence/LoadingSkeletonBlock';
 import { EmptyStateBlock } from '@/components/developer/company-intelligence/EmptyStateBlock';
 import type { ActivityFeedItemData } from '@/components/developer/company-intelligence/ActivityFeedItem';
@@ -159,6 +160,9 @@ export default function DeveloperCompanyDetailsPage() {
               <TabsTrigger value="subscription" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
                 Subscription
               </TabsTrigger>
+              <TabsTrigger value="payments" className="text-xs sm:text-sm whitespace-nowrap rounded-lg px-3 py-2">
+                Payments
+              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -223,6 +227,9 @@ export default function DeveloperCompanyDetailsPage() {
               header={data?.header as Record<string, unknown> | undefined}
               payments={(data?.subscription_payments ?? []) as Record<string, unknown>[]}
             />
+          </TabsContent>
+          <TabsContent value="payments" className="mt-4 focus-visible:outline-none">
+            <CompanyPaymentHistoryTab companyId={id} active={tab === 'payments'} />
           </TabsContent>
         </Tabs>
       )}

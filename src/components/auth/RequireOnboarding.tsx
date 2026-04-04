@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
+import { useDashboardRoles } from '@/hooks/useDashboardRoles';
 interface RequireOnboardingProps {
   children: React.ReactElement;
 }
@@ -17,6 +18,7 @@ interface RequireOnboardingProps {
  */
 export function RequireOnboarding({ children }: RequireOnboardingProps) {
   const { user, authReady, isDeveloper, setupIncomplete, employeeProfile, resetRequired } = useAuth();
+  const { hasAmbassador, hasCompany, loading: rolesLoading } = useDashboardRoles();
   const location = useLocation();
 
   if (!authReady) {
@@ -38,6 +40,24 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
       console.log('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
     }
     return <Navigate to="/developer" replace />;
+  }
+
+  // Wait for ambassador role resolution before rendering company-scoped content.
+  // Without this, an ambassador-only user could briefly see company onboarding before redirect.
+  if (rolesLoading) {
+    return <AuthLoadingScreen message="Preparing your FarmVault workspace..." />;
+  }
+
+  // Ambassador-only users have no company — bypass all company onboarding guards.
+  if (hasAmbassador && !hasCompany) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[RequireOnboarding] Ambassador-only bypass → /ambassador/console/dashboard', {
+        hasAmbassador,
+        hasCompany,
+      });
+    }
+    return <Navigate to="/ambassador/console/dashboard" replace />;
   }
 
   // If this session has an employee profile (from RPC activation or existing membership),

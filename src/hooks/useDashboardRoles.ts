@@ -23,7 +23,14 @@ export function useDashboardRoles(): DashboardRoles {
   const [hasCompany, setHasCompany] = useState(false);
 
   useEffect(() => {
-    if (!authReady || !user) {
+    // Wait for auth to be ready before making any decision.
+    // Setting resolved=true here while authReady=false would leave hasAmbassador=false
+    // in state — causing PostAuthContinuePage to bypass the rolesLoading guard and
+    // incorrectly route ambassador-only users to company onboarding.
+    if (!authReady) return;
+
+    if (!user) {
+      // Auth is ready but no user → definitively logged out, nothing to fetch.
       setResolved(true);
       setHasAmbassador(false);
       setHasCompany(false);

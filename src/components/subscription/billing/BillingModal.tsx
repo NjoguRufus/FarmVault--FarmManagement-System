@@ -247,9 +247,9 @@ export function BillingModal({
 
   const subtitle = useMemo(() => {
     if (isExpired) {
-      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or use PayBill and submit details for manual verification.';
+      return 'Your trial has ended. Choose a plan, then pay via PayBill and submit your confirmation for manual verification.';
     }
-    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or use PayBill and submit your confirmation for manual review.';
+    return 'Choose a plan and cycle. Pay via PayBill and submit your M-Pesa confirmation for manual review.';
   }, [isExpired]);
 
   const selectedPlan = useMemo(() => {
@@ -316,14 +316,19 @@ export function BillingModal({
     });
   };
 
+  // STK push is reserved for future use — show coming soon toast instead of initiating.
+  const handleStkComingSoon = () => {
+    toast({
+      title: 'Coming soon',
+      description: 'M-Pesa STK Push will be available soon. For now, please pay manually using PayBill and submit your confirmation.',
+    });
+  };
+
+  // Backend STK logic preserved for future re-enable.
   const handleStkPush = async () => {
     setFormError(null);
     if (!clerkAuthLoaded || !clerkSignedIn) {
-      toast({
-        variant: 'destructive',
-        title: 'Sign in required',
-        description: 'Wait for sign-in to finish, then try STK again.',
-      });
+      toast({ variant: 'destructive', title: 'Sign in required', description: 'Wait for sign-in to finish, then try STK again.' });
       return;
     }
     if (!scope.isDeveloper && scope.error) {
@@ -349,38 +354,17 @@ export function BillingModal({
     if (!phoneTrim || phoneTrim.length < 9) missing.push('phone');
     if (!Number.isFinite(safeAmount) || safeAmount <= 0) missing.push('amount');
 
-    // eslint-disable-next-line no-console
-    console.log('STK preflight (BillingModal):', {
-      company_id: companyId,
-      billing_reference: billingRefTrim || '(omitted — server uses DB)',
-      plan,
-      billing_cycle: cycle,
-      phone: phoneTrim || null,
-      amount_raw: amount,
-      amount_rounded: safeAmount,
-      companyDocLoaded: companyDoc != null,
-      missing_fields: missing,
-    });
-
     if (missing.length > 0) {
-      // eslint-disable-next-line no-console
-      console.warn('[BillingModal] STK blocked — missing or invalid:', missing.join(', '));
       const label =
-        missing[0] === 'company_id'
-          ? 'Workspace not found'
-          : missing[0] === 'phone'
-            ? 'Phone required for STK'
-            : missing[0] === 'amount'
-              ? 'Invalid amount'
-              : 'Cannot start STK';
+        missing[0] === 'company_id' ? 'Workspace not found'
+          : missing[0] === 'phone' ? 'Phone required for STK'
+          : missing[0] === 'amount' ? 'Invalid amount'
+          : 'Cannot start STK';
       const description =
-        missing[0] === 'company_id'
-          ? 'Sign in again or pick your workspace, then retry.'
-          : missing[0] === 'phone'
-            ? 'Enter the M-Pesa number that should receive the prompt (e.g. 07… or +254…).'
-            : missing[0] === 'amount'
-              ? 'Choose Basic or Pro and a billing cycle so the price is set.'
-              : `Fix: ${missing.join(', ')}`;
+        missing[0] === 'company_id' ? 'Sign in again or pick your workspace, then retry.'
+          : missing[0] === 'phone' ? 'Enter the M-Pesa number that should receive the prompt (e.g. 07… or +254…).'
+          : missing[0] === 'amount' ? 'Choose Basic or Pro and a billing cycle so the price is set.'
+          : `Fix: ${missing.join(', ')}`;
       toast({ variant: 'destructive', title: label, description });
       setFormError(`${label}. ${description}`);
       return;
@@ -388,13 +372,6 @@ export function BillingModal({
 
     setStkLoading(true);
     try {
-      // eslint-disable-next-line no-console
-      console.log('STK company context:', {
-        company_id: companyId,
-        billing_reference: billingRefTrim || undefined,
-        plan,
-        billing_cycle: cycle,
-      });
       const res = await initiateMpesaStkPush(
         {
           companyId: companyId!,
@@ -407,10 +384,7 @@ export function BillingModal({
         { getAccessToken: clerkSupabaseToken },
       );
       setStkCheckoutRequestId(res.checkoutRequestId);
-      toast({
-        title: 'Check your phone',
-        description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.',
-      });
+      toast({ title: 'Check your phone', description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'STK request failed.';
       setFormError(msg);
@@ -523,10 +497,6 @@ export function BillingModal({
                   </div>
                 ) : null}
 
-                {/*
-                  Mobile: plan → cycle → summary → STK → manual PayBill.
-                  Desktop: summary (left col) + STK + manual (right col).
-                */}
                 <div
                   className={cn(
                     'flex flex-col gap-3.5 sm:gap-4',
@@ -561,74 +531,8 @@ export function BillingModal({
                   />
 
                   <div className="order-4 flex flex-col gap-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0">
+                    {/* ── Manual PayBill — primary payment path ── */}
                     <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Pay via M-Pesa STK push
-                        </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Amount due matches your selected plan (KES{' '}
-                          {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
-                          phone; your subscription activates automatically.
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
-                          Phone number
-                        </label>
-                        <Input
-                          id="billing-stk-phone"
-                          className="h-9 rounded-md bg-background lg:h-10 lg:rounded-lg"
-                          value={stkPhone}
-                          disabled={busy}
-                          onChange={(e) => setStkPhone(e.target.value)}
-                          placeholder="07… or +254…"
-                          inputMode="tel"
-                          autoComplete="tel"
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={busy || stkLoading}
-                        className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
-                        onClick={() => void handleStkPush()}
-                      >
-                        <Smartphone className="h-3.5 w-3.5" />
-                        {stkLoading ? 'Sending STK prompt…' : 'Send STK prompt'}
-                      </Button>
-                      {stkCheckoutRequestId ? (
-                        <StkPushConfirmation
-                          checkoutRequestId={stkCheckoutRequestId}
-                          confirmationContext="billing"
-                          onPaymentSuccess={handleStkPaymentSuccess}
-                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
-                        />
-                      ) : null}
-                    </section>
-
-                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Pay via PayBill (manual)
-                        </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Pay the amount shown in the summary to our PayBill. Use this account number so we can match your
-                          payment.
-                        </p>
-                      </div>
-                      <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
-                        <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">PayBill number</dt>
-                          <dd className="font-mono font-medium text-foreground">{TILL}</dd>
-                        </div>
-                        <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">Account number</dt>
-                          <dd className="font-mono font-medium text-foreground">
-                            {billingReference || '—'}
-                          </dd>
-                        </div>
-                      </dl>
                       <MpesaPaymentForm
                         mpesaName={mpesaName}
                         mpesaPhone={mpesaPhone}
@@ -653,6 +557,63 @@ export function BillingModal({
                         submitLoading={mutation.isPending}
                         className="space-y-3 lg:space-y-4"
                       />
+                    </section>
+
+                    {/* ── Divider ── */}
+                    <div className="flex items-center gap-3">
+                      <div className="h-px flex-1 bg-border/50" />
+                      <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">or</span>
+                      <div className="h-px flex-1 bg-border/50" />
+                    </div>
+
+                    {/* ── STK Push — coming soon, UI disabled ── */}
+                    <section className="space-y-3 rounded-xl border border-border/40 bg-muted/5 p-3 opacity-60 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <div className="mb-1.5 flex items-center gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Pay via M-Pesa STK push
+                          </p>
+                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                            Coming soon
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          STK Push will be available soon. For now, please pay manually using PayBill and submit your
+                          confirmation above.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground/60">
+                          Phone number
+                        </label>
+                        <Input
+                          id="billing-stk-phone"
+                          className="h-9 cursor-not-allowed rounded-md bg-background opacity-50 lg:h-10 lg:rounded-lg"
+                          value={stkPhone}
+                          disabled
+                          onChange={(e) => setStkPhone(e.target.value)}
+                          placeholder="07… or +254…"
+                          inputMode="tel"
+                          autoComplete="tel"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 w-full gap-2 rounded-md text-xs opacity-70 lg:h-10 lg:rounded-lg lg:text-sm"
+                        onClick={handleStkComingSoon}
+                      >
+                        <Smartphone className="h-3.5 w-3.5" />
+                        Send STK prompt
+                      </Button>
+                      {stkCheckoutRequestId ? (
+                        <StkPushConfirmation
+                          checkoutRequestId={stkCheckoutRequestId}
+                          confirmationContext="billing"
+                          onPaymentSuccess={handleStkPaymentSuccess}
+                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
+                        />
+                      ) : null}
                     </section>
                   </div>
                 </div>

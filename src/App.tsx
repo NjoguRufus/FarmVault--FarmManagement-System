@@ -79,13 +79,20 @@ import PricingPage from "@/pages/PricingPage";
 import AboutPage from "@/pages/AboutPage";
 import AmbassadorLandingPage from "@/pages/ambassador/AmbassadorLandingPage";
 import AmbassadorSignupPage from "@/pages/ambassador/AmbassadorSignupPage";
+import AmbassadorTermsPage from "@/pages/ambassador/AmbassadorTermsPage";
+import TermsPage from "@/pages/legal/TermsPage";
+import PrivacyPage from "@/pages/legal/PrivacyPage";
+import RefundPage from "@/pages/legal/RefundPage";
 import AmbassadorDashboardPage from "@/pages/ambassador/AmbassadorDashboardPage";
 import AmbassadorOnboardingPage from "@/pages/ambassador/AmbassadorOnboardingPage";
 import AmbassadorReferPage from "@/pages/ambassador/AmbassadorReferPage";
 import AmbassadorReferralsPage from "@/pages/ambassador/AmbassadorReferralsPage";
 import AmbassadorEarningsPage from "@/pages/ambassador/AmbassadorEarningsPage";
 import AmbassadorSettingsPage from "@/pages/ambassador/AmbassadorSettingsPage";
+import AmbassadorLearnPage from "@/pages/ambassador/AmbassadorLearnPage";
+import AmbassadorLearnConsolePage from "@/pages/ambassador/AmbassadorLearnConsolePage";
 import { AmbassadorLayout } from "@/components/layout/AmbassadorLayout";
+import { RequireAmbassador } from "@/components/auth/RequireAmbassador";
 import SignInPage from "@/pages/Auth/SignInPage";
 import SignUpPage from "@/pages/Auth/SignUpPage";
 import ScanPage from "@/pages/ScanPage";
@@ -160,6 +167,7 @@ import DeveloperHomePage from "@/pages/developer/DeveloperHomePage";
 import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
 import DeveloperSettingsPage from "@/pages/developer/DeveloperSettingsPage";
+import DeveloperDocumentsPage from "@/pages/developer/DeveloperDocumentsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
 
@@ -262,19 +270,26 @@ const AppRoutesWithLock = () => {
       <Route path="/features" element={<FeaturesPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/about" element={<AboutPage />} />
+      {/* Legal pages — no auth required */}
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/refund" element={<RefundPage />} />
       <Route path="/ambassador" element={<AmbassadorLandingPage />} />
       <Route path="/ambassador/signup" element={<AmbassadorSignupPage />} />
+      <Route path="/ambassador/terms" element={<AmbassadorTermsPage />} />
       <Route path="/ambassador/onboarding" element={<AmbassadorOnboardingPage />} />
+      <Route path="/ambassador/learn" element={<AmbassadorLearnPage />} />
       <Route path="/ambassador/refer" element={<Navigate to="/ambassador/console/refer" replace />} />
       <Route path="/ambassador/dashboard" element={<Navigate to="/ambassador/console/dashboard" replace />} />
       <Route path="/ambassador/console" element={<AmbassadorLayout />}>
         <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<AmbassadorDashboardPage />} />
-        <Route path="referrals" element={<AmbassadorReferralsPage />} />
-        <Route path="earnings" element={<AmbassadorEarningsPage />} />
-        <Route path="refer" element={<AmbassadorReferPage />} />
+        <Route path="dashboard" element={<RequireAmbassador><AmbassadorDashboardPage /></RequireAmbassador>} />
+        <Route path="referrals" element={<RequireAmbassador><AmbassadorReferralsPage /></RequireAmbassador>} />
+        <Route path="earnings" element={<RequireAmbassador><AmbassadorEarningsPage /></RequireAmbassador>} />
+        <Route path="refer" element={<RequireAmbassador><AmbassadorReferPage /></RequireAmbassador>} />
         <Route path="qr" element={<Navigate to="refer" replace />} />
-        <Route path="settings" element={<AmbassadorSettingsPage />} />
+        <Route path="learn" element={<RequireAmbassador><AmbassadorLearnConsolePage /></RequireAmbassador>} />
+        <Route path="settings" element={<RequireAmbassador><AmbassadorSettingsPage /></RequireAmbassador>} />
       </Route>
       <Route path="/scan" element={<ScanPage />} />
 
@@ -491,6 +506,7 @@ const AppRoutesWithLock = () => {
         <Route path="records/:cropSlug/:noteId" element={<NotebookPage />} />
         <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
         <Route path="qr" element={<DevQRGeneratorPage />} />
+        <Route path="documents" element={<DeveloperDocumentsPage />} />
       </Route>
       
       {/* 404 route */}

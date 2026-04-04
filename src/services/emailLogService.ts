@@ -27,6 +27,8 @@ export const FARMVAULT_EMAIL_TYPES = [
   'workspace_ready',
   'submission_received',
   'submission_admin_notify',
+  'ambassador_onboarding',
+  'ambassador_onboarding_admin_notify',
   'custom_manual',
 ] as const;
 

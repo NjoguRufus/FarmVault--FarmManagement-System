@@ -128,47 +128,67 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
               !isDeveloper &&
               !canAccessTier(requiredTier);
 
+            const sharedClassName = cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+              isActive
+                ? 'bg-sidebar-accent text-sidebar-primary'
+                : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+            );
+
+            const sharedChildren = (
+              <>
+                <Icon className={cn('h-5 w-5 shrink-0', isActive && 'text-sidebar-primary')} />
+                {!collapsed && (
+                  <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+                    <span className="truncate">{item.label}</span>
+                    {isLocked ? (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <Lock className="h-3.5 w-3.5" />
+                        <ProBadge />
+                      </span>
+                    ) : null}
+                  </span>
+                )}
+              </>
+            );
+
             return (
               <li key={item.path}>
-                <Link
-                  to={itemPath}
-                  data-tour={getSidebarTourId(itemPath)}
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                    isActive
-                      ? 'bg-sidebar-accent text-sidebar-primary'
-                      : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-                  )}
-                  aria-disabled={isLocked ? true : undefined}
-                  onMouseDown={(e) => {
-                    if (!isLocked) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onClick={(e) => {
-                    if (!isLocked) {
+                {item.external ? (
+                  <a
+                    href={itemPath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={sharedClassName}
+                    onClick={() => { if (isMobile) onToggle(); }}
+                  >
+                    {sharedChildren}
+                  </a>
+                ) : (
+                  <Link
+                    to={itemPath}
+                    data-tour={getSidebarTourId(itemPath)}
+                    className={sharedClassName}
+                    aria-disabled={isLocked ? true : undefined}
+                    onMouseDown={(e) => {
+                      if (!isLocked) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      if (!isLocked) {
+                        if (isMobile) onToggle();
+                        return;
+                      }
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openUpgradeModal({ checkoutPlan: 'pro' });
                       if (isMobile) onToggle();
-                      return;
-                    }
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openUpgradeModal({ checkoutPlan: 'pro' });
-                    if (isMobile) onToggle();
-                  }}
-                >
-                  <Icon className={cn('h-5 w-5 shrink-0', isActive && 'text-sidebar-primary')} />
-                  {!collapsed && (
-                    <span className="min-w-0 flex-1 truncate flex items-center gap-2">
-                      <span className="truncate">{item.label}</span>
-                      {isLocked ? (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground">
-                          <Lock className="h-3.5 w-3.5" />
-                          <ProBadge />
-                        </span>
-                      ) : null}
-                    </span>
-                  )}
-                </Link>
+                    }}
+                  >
+                    {sharedChildren}
+                  </Link>
+                )}
               </li>
             );
           })}

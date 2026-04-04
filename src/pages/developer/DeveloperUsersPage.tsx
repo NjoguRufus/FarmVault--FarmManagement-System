@@ -14,9 +14,37 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Trash2, Loader2, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import type { DeveloperUserRow } from '@/services/developerService';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
+
+function UserTypeBadge({ userType }: { userType: string | null | undefined }) {
+  const t = (userType ?? 'company_admin').toLowerCase();
+  if (t === 'ambassador') {
+    return (
+      <span className="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-amber-100 text-amber-700">
+        Ambassador
+      </span>
+    );
+  }
+  if (t === 'both') {
+    return (
+      <span className={cn(
+        'inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium',
+        'bg-blue-100 text-blue-700'
+      )}>
+        Company Admin (Ambassador)
+      </span>
+    );
+  }
+  // 'company_admin' or anything else
+  return (
+    <span className="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-muted text-muted-foreground">
+      Company Admin
+    </span>
+  );
+}
 
 export default function DeveloperUsersPage() {
   const [search, setSearch] = useState('');
@@ -149,8 +177,8 @@ export default function DeveloperUsersPage() {
                       <div>{companyName}</div>
                       <div className="text-[11px] text-muted-foreground">{u.company_id ?? u.company?.company_id ?? ''}</div>
                     </td>
-                    <td className="py-2 pr-4 text-xs capitalize" data-label="Role">
-                      {role}
+                    <td className="py-2 pr-4" data-label="Role">
+                      <UserTypeBadge userType={u.user_type} />
                     </td>
                     <td className="py-2 pr-4 text-xs" data-label="Joined">
                       {createdAt}

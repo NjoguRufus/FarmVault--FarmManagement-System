@@ -88,11 +88,15 @@ export function Footer() {
             © {new Date().getFullYear()} FarmVault. Smart Farm Management for Africa.
           </p>
           <div className="flex gap-6">
-            {["Privacy", "Terms", "Cookies"].map((item) => (
-              <a key={item} href="#" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
-                {item}
-              </a>
-            ))}
+            <Link to="/terms" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+              Terms &amp; Conditions
+            </Link>
+            <Link to="/privacy" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+              Privacy Policy
+            </Link>
+            <Link to="/refund" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+              Refund Policy
+            </Link>
           </div>
         </div>
       </div>

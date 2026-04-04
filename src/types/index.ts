@@ -158,6 +158,8 @@ export interface User {
   companyId: string | null;
   avatar?: string;
   createdAt: Date;
+  /** Raw user_type from core.profiles: 'ambassador' | 'company_admin' | 'both' | null */
+  profileUserType?: string | null;
 }
 
 export interface Company {

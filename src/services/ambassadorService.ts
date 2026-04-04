@@ -146,6 +146,21 @@ export async function completeAmbassadorOnboarding(ambassadorId: string): Promis
 }
 
 /** Marks onboarding complete for the signed-in Clerk user (no arbitrary ambassador id). */
+/**
+ * Immediately assign user_type='ambassador' (or 'both' if the user already has a company) in
+ * core.profiles. Called right after Clerk signup when signup_type='ambassador' is set.
+ * Idempotent: safe to call multiple times.
+ */
+export async function assignMyAmbassadorProfileRole(): Promise<void> {
+  const { data, error } = await supabase.rpc("set_my_ambassador_profile_role");
+  if (error) throw error;
+  const row = data as Record<string, unknown> | null;
+  if (!row || row.ok !== true) {
+    const err = typeof row?.error === "string" ? row.error : "role_assignment_failed";
+    throw new Error(err);
+  }
+}
+
 export async function completeMyAmbassadorOnboarding(): Promise<void> {
   const { data, error } = await supabase.rpc("complete_my_ambassador_onboarding");
   if (error) throw error;

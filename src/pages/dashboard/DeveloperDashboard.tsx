@@ -10,6 +10,10 @@ import { Company } from '@/types';
 import { getDevDashboardKpis, DevDashboardKpis } from '@/services/developerAdminService';
 
 export function DeveloperDashboard() {
+  useEffect(() => {
+    document.title = "Developer Console | FarmVault";
+  }, []);
+
   const navigate = useNavigate();
   const { data: companies = [], isLoading } = useCollection<Company>('companies', 'companies', {
     companyScoped: false,

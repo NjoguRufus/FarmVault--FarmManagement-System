@@ -10,3 +10,4 @@ export * from './manualEmailHtml';
 export * from './invokeSendFarmVaultEmail';
 export * from './invokeNotifyCompanyWorkspaceReady';
 export * from './invokeNotifyCompanySubmissionReceived';
+export * from './invokeNotifyAmbassadorOnboarding';

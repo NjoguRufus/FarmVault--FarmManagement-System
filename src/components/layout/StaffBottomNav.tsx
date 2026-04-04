@@ -18,6 +18,7 @@ export function StaffBottomNav() {
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const location = useLocation();
+  const normalizedPath = useMemo(() => location.pathname.replace(/\/+/g, '/'), [location.pathname]);
   const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
   const [isDesktop, setIsDesktop] = useState(false);
 
@@ -80,8 +81,6 @@ export function StaffBottomNav() {
       items: items.map((i) => i.path),
     });
   }
-
-  const normalizedPath = useMemo(() => location.pathname.replace(/\/+/g, '/'), [location.pathname]);
 
   return (
     <div

@@ -6,22 +6,40 @@ import { AmbassadorSidebar } from "@/components/layout/AmbassadorSidebar";
 import { AmbassadorTopBar } from "@/components/layout/AmbassadorTopBar";
 import { AmbassadorMobileBottomNav } from "@/components/layout/AmbassadorMobileBottomNav";
 import { getAmbassadorSession } from "@/services/ambassadorService";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function AmbassadorLayout() {
-  const { user, isLoaded } = useUser();
+  const { user: clerkUser, isLoaded } = useUser();
+  const { authReady, user: fvUser } = useAuth();
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [gateOk, setGateOk] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    // Wait for both Clerk and FarmVault auth to be ready — this is what kills the flicker.
+    // Rendering anything before authReady=true risks showing the wrong layout or triggering
+    // role-based redirects mid-render.
+    if (!isLoaded || !authReady) return;
+
     const s = getAmbassadorSession();
-    if (!user && !s?.id) {
+    if (!clerkUser && !s?.id) {
       navigate("/ambassador/signup", { replace: true });
       return;
     }
+
+    // If FarmVault auth resolved a user, verify they're an ambassador before showing the shell.
+    // profileUserType is set from core.profiles before authReady=true — no extra DB call needed.
+    if (fvUser) {
+      const pt = fvUser.profileUserType;
+      const isAmbassador = pt === "ambassador" || pt === "both";
+      if (!isAmbassador) {
+        navigate("/auth/continue", { replace: true });
+        return;
+      }
+    }
+
     setGateOk(true);
-  }, [isLoaded, user, navigate]);
+  }, [isLoaded, authReady, clerkUser, fvUser, navigate]);
 
   const handleMenuClick = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth >= 1024) {
@@ -29,15 +47,10 @@ export function AmbassadorLayout() {
     }
   }, []);
 
-  if (!isLoaded || !gateOk) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div
-          className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin"
-          aria-hidden
-        />
-      </div>
-    );
+  // Render nothing until Clerk + FarmVault auth + role check are all confirmed.
+  // null (not a spinner) is the correct choice — any visible content here causes flicker.
+  if (!isLoaded || !authReady || !gateOk) {
+    return null;
   }
 
   return (
