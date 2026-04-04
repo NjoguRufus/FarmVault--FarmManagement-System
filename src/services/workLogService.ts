@@ -6,11 +6,11 @@ import {
   doc,
   query,
   where,
-} from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+} from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { safeFormatDate, safeToDate } from '@/lib/safeTime';
 import { WorkLog, Expense, ExpenseCategory } from '@/types';
-import { getDocsWithCache } from '@/lib/firestoreCache';
+import { getDocsWithCache } from '@/lib/documentCache';
 
 type CreateWorkLogInput = Omit<WorkLog, 'id' | 'createdAt'>;
 

@@ -1,19 +1,18 @@
 /**
  * Bridges Clerk authentication to Supabase.
- * 
- * Uses the NATIVE Clerk-Supabase integration (no JWT template required).
- * This is the modern approach as of April 2025 - simpler and more reliable.
  *
- * REQUIRED: Register your Clerk domain in Supabase Dashboard → Auth → Third-party Auth
- * 
- * The native integration uses Clerk's standard session token which:
- * - Is signed with Clerk's JWKS (verifiable via Clerk's public keys)
- * - Automatically includes the "role": "authenticated" claim when the integration is enabled
- * - No need to share Supabase JWT secret with Clerk
+ * REQUIRED — Clerk Dashboard → JWT Templates → template name: `supabase`
+ * Claims (minimum):
+ *   { "sub": "{{user.id}}", "email": "{{user.primary_email_address.email_address}}" }
+ *
+ * REQUIRED — Supabase Dashboard → Auth → Third-party Auth: Clerk issuer / JWKS so JWTs verify.
+ *
+ * The `supabase` template ensures `auth.jwt()->>'sub'` is the Clerk user id (default session
+ * tokens may not match what RLS and edge functions expect).
  */
 import { useLayoutEffect, useEffect } from 'react';
 import { useAuth, useClerk } from '@clerk/react';
-import { setClerkTokenGetter } from '@/lib/supabase';
+import { CLERK_JWT_TEMPLATE_SUPABASE, setClerkTokenGetter } from '@/lib/supabase';
 
 export function ClerkSupabaseTokenBridge() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -35,12 +34,14 @@ export function ClerkSupabaseTokenBridge() {
 
     setClerkTokenGetter(async () => {
       try {
-        const token = await getToken();
+        const token = await getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE });
         if (import.meta.env.DEV) {
           console.log('[ClerkBridge] Token request result:', token ? 'success (token exists)' : 'null (no token)');
         }
         if (!token && import.meta.env.DEV) {
-          console.warn('[ClerkBridge] No token returned. User may not be fully authenticated.');
+          console.warn(
+            `[ClerkBridge] No JWT for template "${CLERK_JWT_TEMPLATE_SUPABASE}". Create it in Clerk Dashboard (JWT Templates) with sub = user id.`,
+          );
         }
         return token ?? null;
       } catch (err) {

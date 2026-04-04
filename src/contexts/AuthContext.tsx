@@ -23,6 +23,7 @@ import {
 } from '@/lib/companyTenantGate';
 import { hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
 import {
+  mirrorPublicProfileForClerkUser,
   pickFirstExistingMembershipCompany,
   repairProfileActiveCompany,
 } from '@/lib/auth/tenantMembershipRecovery';
@@ -1334,6 +1335,16 @@ export function AuthProvider({
           }
         }
         if (cancelled) return;
+
+        try {
+          await mirrorPublicProfileForClerkUser(
+            userId,
+            fallbackEmail,
+            effectiveCompanyId != null && effectiveCompanyId !== '' ? effectiveCompanyId : null,
+          );
+        } catch {
+          // non-blocking; core.profiles remains canonical
+        }
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
         const needsAmbassadorCheck = setupIncompleteFlag && !hasEffectiveCompany;

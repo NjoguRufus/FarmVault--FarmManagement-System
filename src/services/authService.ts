@@ -1,8 +1,6 @@
-import { createUserWithEmailAndPassword } from '@/lib/auth-stub';
-import { auth } from '@/lib/firebase';
-
-export async function registerCompanyAdmin(email: string, password: string) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  return cred.user;
+/**
+ * @deprecated Company registration uses Clerk. Do not call from new code.
+ */
+export async function registerCompanyAdmin(_email: string, _password: string): Promise<never> {
+  throw new Error('Registration uses Clerk. Use the Clerk sign-up flow instead.');
 }
-

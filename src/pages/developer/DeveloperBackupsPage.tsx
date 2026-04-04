@@ -22,7 +22,7 @@ export default function DeveloperBackupsPage() {
   return (
     <DeveloperPageShell
       title="Backups"
-      description="Company-level Firestore backup snapshots for disaster recovery."
+      description="Company-level backup snapshots for disaster recovery."
       isLoading={isLoading}
       isRefetching={isFetching}
       onRefresh={() => companyId && void refetch()}
@@ -33,7 +33,7 @@ export default function DeveloperBackupsPage() {
         </p>
         <div className="flex gap-2 max-w-md">
           <Input
-            placeholder="Company ID (Firestore / Supabase UUID)…"
+            placeholder="Company ID (UUID)…"
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
           />

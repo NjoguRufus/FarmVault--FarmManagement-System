@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Leaf, Radio, RefreshCw, Sprout, Users } from "lucide-react";
+import { Banknote, Leaf, Radio, RefreshCw, Sprout, Users, Wallet } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,8 @@ export default function DevReferralsPage() {
           </div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Referral dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground max-w-xl">
-            Live view of ambassadors, referral funnel, and commission exposure. Table updates in realtime when
-            ambassadors, referrals, or commissions change.
+            Live view of ambassadors, referral funnel, and ambassador earnings. Table updates in realtime when
+            ambassadors, referrals, or earnings change.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -93,22 +93,37 @@ export default function DevReferralsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         {[
           {
             label: "Total ambassadors",
             value: stats?.total_ambassadors ?? "—",
             icon: Users,
+            format: "count" as const,
           },
           {
             label: "Active ambassadors",
             value: stats?.active_ambassadors ?? "—",
             icon: Leaf,
+            format: "count" as const,
           },
           {
             label: "Inactive ambassadors",
             value: stats?.inactive_ambassadors ?? "—",
             icon: Users,
+            format: "count" as const,
+          },
+          {
+            label: "Total owed",
+            value: stats?.total_owed ?? "—",
+            icon: Banknote,
+            format: "kes" as const,
+          },
+          {
+            label: "Total paid out",
+            value: stats?.total_paid_out ?? "—",
+            icon: Wallet,
+            format: "kes" as const,
           },
         ].map((card, i) => (
           <motion.div
@@ -122,10 +137,16 @@ export default function DevReferralsPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                 <card.icon className="h-5 w-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</p>
-                <p className="text-2xl font-semibold tabular-nums text-foreground">
-                  {loading ? "…" : typeof card.value === "number" ? card.value.toLocaleString() : card.value}
+                <p className="text-2xl font-semibold tabular-nums text-foreground truncate">
+                  {loading
+                    ? "…"
+                    : typeof card.value === "number"
+                      ? card.format === "kes"
+                        ? formatKes(card.value)
+                        : card.value.toLocaleString()
+                      : card.value}
                 </p>
               </div>
             </div>
@@ -170,7 +191,7 @@ export default function DevReferralsPage() {
                   Conv. %
                 </TableHead>
                 <TableHead className="whitespace-nowrap text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Total vol.
+                  Total earned
                 </TableHead>
                 <TableHead className="whitespace-nowrap text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Owed

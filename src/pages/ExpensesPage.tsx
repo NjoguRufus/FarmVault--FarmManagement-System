@@ -1419,6 +1419,7 @@ export default function ExpensesPage() {
         isTrial={isTrial}
         isExpired={isExpired}
         daysRemaining={daysRemaining}
+        workspaceCompanyId={user?.companyId ?? null}
       />
     </div>
   );

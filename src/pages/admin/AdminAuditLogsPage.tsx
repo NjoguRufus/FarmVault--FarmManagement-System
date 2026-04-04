@@ -95,7 +95,7 @@ export default function AdminAuditLogsPage() {
             )}
             {error && (
               <p className="text-sm text-destructive mb-4">
-                Failed to load audit logs. Check that you are signed in as a developer and that Firestore rules allow read on <code>auditLogs</code>.
+                Failed to load audit logs. Check that you are signed in as a developer and that you have access to <code>auditLogs</code>.
               </p>
             )}
             {!isLoading && !error && logs.length === 0 && (

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/firestore-stub', () => {
+vi.mock('@/lib/documentLayer', () => {
   const where = vi.fn((field: string, op: string, value: unknown) => ({
     type: 'where',
     field,

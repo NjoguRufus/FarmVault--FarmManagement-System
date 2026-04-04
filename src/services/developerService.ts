@@ -67,6 +67,7 @@ export interface PaymentRow {
   reviewed_by: string | null;
   payment_method?: string | null;
   reference?: string | null;
+  billing_cycle?: string | null;
 }
 
 export type ListPaymentsRpcResponse = {
@@ -86,6 +87,11 @@ export type MpesaStkPaymentRow = {
   result_desc: string | null;
   paid_at: string | null;
   created_at: string;
+  billing_reference?: string | null;
+  plan?: string | null;
+  billing_cycle?: string | null;
+  result_code?: number | null;
+  subscription_activated?: boolean;
 };
 
 export async function fetchMpesaStkPaymentsForDeveloper(): Promise<MpesaStkPaymentRow[]> {
@@ -144,10 +150,15 @@ export interface SubscriptionPaymentStats {
   pending_verification_count: number;
   pending_legacy_count: number;
   pending_total_count: number;
+  /** Manual (subscription_payments approved, not STK method) + SDK (mpesa_payments SUCCESS). */
   approved_count: number;
+  manual_approved_count: number;
+  sdk_success_count: number;
   rejected_count: number;
   pending_revenue: number;
   approved_revenue: number;
+  manual_approved_revenue: number;
+  sdk_confirmed_revenue: number;
   rejected_revenue: number;
 }
 
@@ -334,9 +345,13 @@ export async function fetchSubscriptionAnalytics(params?: {
     pending_legacy_count: 0,
     pending_total_count: 0,
     approved_count: 0,
+    manual_approved_count: 0,
+    sdk_success_count: 0,
     rejected_count: 0,
     pending_revenue: 0,
     approved_revenue: 0,
+    manual_approved_revenue: 0,
+    sdk_confirmed_revenue: 0,
     rejected_revenue: 0,
   };
 
@@ -361,9 +376,13 @@ export async function fetchSubscriptionAnalytics(params?: {
         pending_legacy_count: Number(rawStats.pending_legacy_count ?? 0),
         pending_total_count: Number(rawStats.pending_total_count ?? 0),
         approved_count: Number(rawStats.approved_count ?? 0),
+        manual_approved_count: Number(rawStats.manual_approved_count ?? 0),
+        sdk_success_count: Number(rawStats.sdk_success_count ?? 0),
         rejected_count: Number(rawStats.rejected_count ?? 0),
         pending_revenue: Number(rawStats.pending_revenue ?? 0),
         approved_revenue: Number(rawStats.approved_revenue ?? 0),
+        manual_approved_revenue: Number(rawStats.manual_approved_revenue ?? 0),
+        sdk_confirmed_revenue: Number(rawStats.sdk_confirmed_revenue ?? 0),
         rejected_revenue: Number(rawStats.rejected_revenue ?? 0),
       }
     : emptyPaymentStats;

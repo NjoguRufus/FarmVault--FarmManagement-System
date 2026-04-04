@@ -144,7 +144,7 @@ export type EmployeeStatus =
   | 'active'
   | 'suspended'
   | 'archived'
-  // Legacy / non-Supabase statuses (Firebase, etc.)
+  // Legacy / non-Supabase statuses
   | 'inactive'
   | 'on-leave';
 

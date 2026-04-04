@@ -279,7 +279,7 @@ export default function SettingsPage() {
       const { data: verifiedCompany, error: verifyError } = await db
         .core()
         .from('companies')
-        .select('id, name, email, plan, status')
+        .select('id, name, email, plan, status, billing_reference')
         .eq('id', companyId)
         .maybeSingle();
 

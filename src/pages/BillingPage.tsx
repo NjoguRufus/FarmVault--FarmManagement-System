@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { useBillingPrices } from '@/hooks/useBillingPrices';
 import { getCompany, type CompanyDoc } from '@/services/companyService';
 import {
   getCurrentCompanySubscription,
@@ -98,6 +99,9 @@ export default function BillingPage() {
     billingCycleFromGate,
   } = useSubscriptionStatus();
 
+  const { matrix: billingPriceMatrix, getAmount: getLivePrice, getBundleSavings: getLiveBundleSavings } =
+    useBillingPrices({ enabled: !isDeveloper });
+
   const { data: company } = useQuery<CompanyDoc | null>({
     queryKey: ['company-billing', companyId],
     enabled: !!companyId,
@@ -165,15 +169,16 @@ export default function BillingPage() {
     });
   }, [companyId, isDeveloper, isActivePaid, gateStatus, displayAccessEndIso, subRow]);
 
-  const checkoutAmount = useMemo(
-    () => getBillingAmountKes(selectedPlan, selectedCycle),
-    [selectedPlan, selectedCycle],
-  );
+  const checkoutAmount = useMemo(() => {
+    const live = getLivePrice(selectedPlan, selectedCycle);
+    if (live != null) return live;
+    return getBillingAmountKes(selectedPlan, selectedCycle);
+  }, [selectedPlan, selectedCycle, getLivePrice]);
 
-  const checkoutSavings = useMemo(
-    () => computeBundleSavingsKes(selectedPlan, selectedCycle),
-    [selectedPlan, selectedCycle],
-  );
+  const checkoutSavings = useMemo(() => {
+    if (billingPriceMatrix) return getLiveBundleSavings(selectedPlan, selectedCycle);
+    return computeBundleSavingsKes(selectedPlan, selectedCycle);
+  }, [selectedPlan, selectedCycle, billingPriceMatrix, getLiveBundleSavings]);
 
   const periodSuffix = useMemo(() => {
     switch (selectedCycle) {
@@ -566,7 +571,10 @@ export default function BillingPage() {
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {SUBSCRIPTION_PLANS.filter((p) => p.value === 'basic' || p.value === 'pro').map((planOpt) => {
                 const isPro = planOpt.value === 'pro';
-                const price = planOpt.pricing[selectedCycle === 'seasonal' ? 'season' : selectedCycle];
+                const planKey = planOpt.value as BillingSubmissionPlan;
+                const live = getLivePrice(planKey, selectedCycle);
+                const catalogMode = selectedCycle === 'seasonal' ? 'season' : selectedCycle;
+                const price = live ?? planOpt.pricing[catalogMode];
                 return (
                   <div
                     key={planOpt.value}
@@ -639,6 +647,7 @@ export default function BillingPage() {
           daysRemaining={daysRemaining}
           checkoutPlan={selectedPlan}
           checkoutCycle={selectedCycle}
+          workspaceCompanyId={companyId}
         />
       ) : null}
     </div>

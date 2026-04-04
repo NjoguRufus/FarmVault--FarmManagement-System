@@ -141,7 +141,7 @@ export function CompanyDashboard() {
     setDashboardFocusProjectId((prev) => (prev === projectId ? null : projectId));
   }, []);
 
-  const { data: firestoreProjects = [], isLoading: firestoreProjectsLoading } = useCollection<Project>(
+  const { data: hookProjects = [], isLoading: hookProjectsLoading } = useCollection<Project>(
     'dashboard-projects',
     'projects',
     {
@@ -155,18 +155,18 @@ export function CompanyDashboard() {
   const mergedProjects = useMemo(() => {
     const m = new Map<string, Project>();
     const scopeId = queryCompanyId ?? companyId;
-    for (const p of firestoreProjects) {
+    for (const p of hookProjects) {
       if (!scopeId || p.companyId === scopeId) m.set(p.id, p);
     }
     for (const p of supabaseProjects) {
       if (p.companyId === scopeId) m.set(p.id, p);
     }
     return Array.from(m.values());
-  }, [firestoreProjects, supabaseProjects, companyId, queryCompanyId]);
+  }, [hookProjects, supabaseProjects, companyId, queryCompanyId]);
 
   const projectsLoading =
     isLoadingProjects ||
-    firestoreProjectsLoading ||
+    hookProjectsLoading ||
     (Boolean(companyId && hasClerkSession && !authReady));
   // Expenses from Supabase (canonical source)
   const {
@@ -444,7 +444,7 @@ export function CompanyDashboard() {
     );
   }, [allStages, companyId, activeProject, hasProjectAccess]);
 
-  // Compute stages from plantingDate + crop timeline when Firestore stages are empty
+  // Compute stages from plantingDate + crop timeline when hook-sourced stages are empty
   const computedStagesFromTimeline = useMemo(() => {
     if (!activeProject?.plantingDate) return [];
     const timeline = getCropTimeline(activeProject.cropTypeKey ?? activeProject.cropType);
@@ -483,7 +483,7 @@ export function CompanyDashboard() {
     });
   }, [activeProject?.plantingDate, activeProject?.cropType, activeProject?.cropTypeKey, activeProject?.id]);
 
-  // Use Firestore stages if available, otherwise use computed stages from timeline
+  // Prefer hook-sourced stages when present, otherwise use computed stages from timeline
   const effectiveActiveProjectStages = useMemo(() => {
     if (activeProjectStages.length > 0) return activeProjectStages;
     return computedStagesFromTimeline;
@@ -825,20 +825,20 @@ export function CompanyDashboard() {
     dashboardFocusProjectId,
   ]);
 
-  const firestoreExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const firestoreSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalRevenue = firestoreSales + (fbTotalsGlobal?.totalRevenue ?? 0);
-  const totalExpenses = firestoreExpenses + (fbTotalsGlobal?.totalExpenses ?? 0);
+  const hookLedgerExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const hookLedgerSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const totalRevenue = hookLedgerSales + (fbTotalsGlobal?.totalRevenue ?? 0);
+  const totalExpenses = hookLedgerExpenses + (fbTotalsGlobal?.totalExpenses ?? 0);
   const profitLoss = totalRevenue - totalExpenses;
   const netBalance = profitLoss;
   const totalSales = totalRevenue;
   const totalBudget = filteredProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
   const remainingBudget = totalBudget - totalExpenses;
 
-  const statCardsFirestoreExpenses = financialLedgerExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const statCardsFirestoreSales = financialLedgerSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const displayTotalRevenue = statCardsFirestoreSales + (effectiveFbTotalsForStatCards?.totalRevenue ?? 0);
-  const displayTotalExpenses = statCardsFirestoreExpenses + (effectiveFbTotalsForStatCards?.totalExpenses ?? 0);
+  const statCardsHookExpenses = financialLedgerExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const statCardsHookSales = financialLedgerSales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const displayTotalRevenue = statCardsHookSales + (effectiveFbTotalsForStatCards?.totalRevenue ?? 0);
+  const displayTotalExpenses = statCardsHookExpenses + (effectiveFbTotalsForStatCards?.totalExpenses ?? 0);
   const displayNetBalance = displayTotalRevenue - displayTotalExpenses;
   const displayRemainingBudget = statCardsBudgetTotal - displayTotalExpenses;
 

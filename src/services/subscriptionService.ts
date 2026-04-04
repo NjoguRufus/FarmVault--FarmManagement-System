@@ -15,6 +15,8 @@ export interface CompanySubscriptionGateState {
   company_name: string | null;
   /** core.companies.status: pending | active | suspended */
   company_status?: string | null;
+  /** PayBill account number from core.companies (FV- + md8); exposed for billing UI when company row select omits it. */
+  billing_reference?: string | null;
   selected_plan: 'basic' | 'pro' | string;
   billing_mode: 'manual' | string;
   status: CompanySubscriptionGateStatus | string;

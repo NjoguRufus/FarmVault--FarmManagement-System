@@ -9,7 +9,7 @@ import {
   Clock4,
   ShieldCheck,
 } from 'lucide-react';
-import { where } from '@/lib/firestore-stub';
+import { where } from '@/lib/documentLayer';
 import { useCollection } from '@/hooks/useCollection';
 import type { CompanySubscriptionRecord } from '@/services/subscriptionAdminService';
 import {

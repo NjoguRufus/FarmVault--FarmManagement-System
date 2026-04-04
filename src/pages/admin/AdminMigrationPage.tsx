@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { collection, getDocs, writeBatch, doc, limit, query } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, writeBatch, doc, limit, query } from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

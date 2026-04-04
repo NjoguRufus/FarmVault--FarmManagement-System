@@ -1029,6 +1029,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         isTrial={isTrial}
         isExpired={isExpired}
         daysRemaining={daysRemaining}
+        workspaceCompanyId={user?.companyId ?? null}
       />
     </div>
   );

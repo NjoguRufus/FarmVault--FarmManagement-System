@@ -1,5 +1,6 @@
 /**
- * Server-side checkout amounts (KES) — must stay aligned with `src/config/plans.ts`.
+ * Legacy static checkout amounts (KES). Production STK validation uses `core.billing_prices` in `mpesa-stk-push`.
+ * Kept for tooling / docs; prefer DB-backed prices.
  */
 
 export type CheckoutPlanCode = "basic" | "pro";

@@ -1,5 +1,5 @@
 /**
- * Safely converts Firestore Timestamp, Date, or string to a Date object
+ * Safely converts Timestamp-like values, Date, or string to a Date object
  * Returns null if the date is invalid
  */
 export function toDate(date: any): Date | null {
@@ -10,7 +10,7 @@ export function toDate(date: any): Date | null {
     return isNaN(date.getTime()) ? null : date;
   }
   
-  // Firestore Timestamp
+  // { seconds, nanoseconds } Timestamp shape
   if (date && typeof date.toDate === 'function') {
     try {
       const d = date.toDate();

@@ -8,7 +8,7 @@ import {
   type DocumentSnapshot,
   type Query,
   type QuerySnapshot,
-} from '@/lib/firestore-stub';
+} from '@/lib/documentLayer';
 
 type WithCacheOptions = {
   /** When true, try cache first before hitting the server. Default: false (server first). */
@@ -31,9 +31,7 @@ function isOfflineLikeError(error: unknown): boolean {
 }
 
 /**
- * getDoc with offline fallback.
- * - Server first; on offline/unavailable errors falls back to getDocFromCache.
- * - If both fail, rethrows the original error so callers can keep previous UI state.
+ * getDoc with offline fallback (legacy). Prefer Supabase + React Query.
  */
 export async function getDocWithCache<T = DocumentData>(
   ref: DocumentReference<T>,
@@ -41,27 +39,24 @@ export async function getDocWithCache<T = DocumentData>(
 ): Promise<DocumentSnapshot<T>> {
   if (opts?.preferCache) {
     try {
-      return await getDocFromCache(ref);
+      return (await getDocFromCache(ref)) as DocumentSnapshot<T>;
     } catch {
       // Fall through to server attempt.
     }
   }
 
   try {
-    return await getDoc(ref);
+    return (await getDoc(ref)) as DocumentSnapshot<T>;
   } catch (err) {
     if (!isOfflineLikeError(err)) {
       throw err;
     }
-    // Try cache on offline-like errors.
-    return await getDocFromCache(ref);
+    return (await getDocFromCache(ref)) as DocumentSnapshot<T>;
   }
 }
 
 /**
- * getDocs with offline fallback.
- * - Server first; on offline/unavailable errors falls back to getDocsFromCache.
- * - If both fail, rethrows so callers can keep last known list in state/React Query.
+ * getDocs with offline fallback (legacy). Prefer Supabase + React Query.
  */
 export async function getDocsWithCache<T = DocumentData>(
   q: Query<T>,
@@ -69,19 +64,18 @@ export async function getDocsWithCache<T = DocumentData>(
 ): Promise<QuerySnapshot<T>> {
   if (opts?.preferCache) {
     try {
-      return await getDocsFromCache(q);
+      return (await getDocsFromCache(q)) as QuerySnapshot<T>;
     } catch {
       // Fall through to server attempt.
     }
   }
 
   try {
-    return await getDocs(q);
+    return (await getDocs(q)) as QuerySnapshot<T>;
   } catch (err) {
     if (!isOfflineLikeError(err)) {
       throw err;
     }
-    return await getDocsFromCache(q);
+    return (await getDocsFromCache(q)) as QuerySnapshot<T>;
   }
 }
-

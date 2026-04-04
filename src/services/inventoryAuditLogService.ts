@@ -1,5 +1,5 @@
-import { collection, addDoc, getDocs, serverTimestamp, Timestamp, query, where, limit, type QueryConstraint } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { collection, addDoc, getDocs, serverTimestamp, Timestamp, query, where, limit, type QueryConstraint } from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 
 export type InventoryAuditActionType = 'RESTOCK' | 'DEDUCT' | 'DELETE' | 'ADD_ITEM' | 'ADD_NEEDED';
 

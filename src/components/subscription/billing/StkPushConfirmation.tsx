@@ -1,33 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui/sonner';
+import type { MpesaPaymentRow } from '@/types/mpesa';
 
-export interface MpesaPaymentRow {
-  id: string;
-  checkout_request_id: string | null;
-  company_id: string | null;
-  mpesa_receipt: string | null;
-  amount: number | string | null;
-  phone: string | null;
-  status: string;
-  result_desc: string | null;
-  paid_at: string | null;
-  created_at: string;
-}
+export type { MpesaPaymentRow };
+
+export type StkConfirmationContext = 'billing' | 'developer';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object';
 }
 
-export function StkPushConfirmation({ checkoutRequestId }: { checkoutRequestId: string }) {
+export function StkPushConfirmation({
+  checkoutRequestId,
+  onSubscriptionActivated,
+  onPaymentSuccess,
+  confirmationContext = 'billing',
+}: {
+  checkoutRequestId: string;
+  /** Fired once when the server marks `subscription_activated` (after STK success + activation RPC). Billing only. */
+  onSubscriptionActivated?: () => void;
+  /** Fired once when M-Pesa status is SUCCESS (after global success toast). Use to close modal or clear UI. */
+  onPaymentSuccess?: () => void;
+  confirmationContext?: StkConfirmationContext;
+}) {
   const [payment, setPayment] = useState<MpesaPaymentRow | null>(null);
   const [loading, setLoading] = useState(true);
+  const activatedFiredRef = useRef(false);
+  const successFiredRef = useRef(false);
+  const failedFiredRef = useRef(false);
+  const loadingToastIdRef = useRef<string | number | undefined>(undefined);
+
+  const onPaymentSuccessRef = useRef(onPaymentSuccess);
+  onPaymentSuccessRef.current = onPaymentSuccess;
 
   useEffect(() => {
     const id = checkoutRequestId.trim();
     if (!id) return;
 
     let cancelled = false;
+    loadingToastIdRef.current = toast.loading('Waiting for confirmation...');
 
     const channel = supabase
       .channel(`mpesa_payment:${id}`)
@@ -66,8 +79,60 @@ export function StkPushConfirmation({ checkoutRequestId }: { checkoutRequestId: 
     return () => {
       cancelled = true;
       void supabase.removeChannel(channel);
+      const tid = loadingToastIdRef.current;
+      if (tid !== undefined) {
+        toast.dismiss(tid);
+        loadingToastIdRef.current = undefined;
+      }
     };
   }, [checkoutRequestId]);
+
+  const firePaymentSuccess = useCallback(() => {
+    if (successFiredRef.current) return;
+    successFiredRef.current = true;
+
+    const tid = loadingToastIdRef.current;
+    const message =
+      confirmationContext === 'developer'
+        ? '✅ Payment confirmed.'
+        : '✅ Payment confirmed. Activating your subscription…';
+
+    toast.success(message, {
+      id: tid,
+      duration: 5000,
+    });
+    loadingToastIdRef.current = undefined;
+
+    onPaymentSuccessRef.current?.();
+  }, [confirmationContext]);
+
+  useEffect(() => {
+    if (!payment) return;
+    const st = String(payment.status || '').toUpperCase();
+    if (st !== 'SUCCESS') return;
+    firePaymentSuccess();
+  }, [payment, firePaymentSuccess]);
+
+  useEffect(() => {
+    if (!payment) return;
+    const st = String(payment.status || '').toUpperCase();
+    if (st !== 'FAILED') return;
+    if (failedFiredRef.current) return;
+    failedFiredRef.current = true;
+
+    const tid = loadingToastIdRef.current;
+    const desc = payment.result_desc ? String(payment.result_desc) : 'Payment was not completed.';
+    toast.error(`Payment failed: ${desc}`, { id: tid, duration: 6000 });
+    loadingToastIdRef.current = undefined;
+  }, [payment]);
+
+  useEffect(() => {
+    if (!payment || !onSubscriptionActivated) return;
+    if (!payment.subscription_activated) return;
+    if (activatedFiredRef.current) return;
+    activatedFiredRef.current = true;
+    onSubscriptionActivated();
+  }, [payment, onSubscriptionActivated]);
 
   if (!checkoutRequestId.trim()) return null;
 
@@ -103,25 +168,7 @@ export function StkPushConfirmation({ checkoutRequestId }: { checkoutRequestId: 
   }
 
   if (st === 'SUCCESS') {
-    return (
-      <div
-        className={cn(
-          'rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm',
-          'text-emerald-950 dark:text-emerald-100/90',
-        )}
-      >
-        <span aria-hidden>✅</span> Payment confirmed
-        {payment.mpesa_receipt ? (
-          <>
-            {' '}
-            — receipt <span className="font-mono font-medium">{payment.mpesa_receipt}</span>
-          </>
-        ) : null}
-        <p className="mt-1 text-xs opacity-90">
-          Your subscription is still subject to manual verification if required by your plan.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   if (st === 'FAILED') {

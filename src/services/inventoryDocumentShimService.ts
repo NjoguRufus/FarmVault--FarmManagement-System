@@ -1,5 +1,4 @@
-import { collection, addDoc, getDoc, doc, serverTimestamp } from '@/lib/firestore-stub';
-import { db as firestoreDb } from '@/lib/firebase';
+import { collection, addDoc, getDoc, doc, serverTimestamp, db } from '@/lib/documentLayer';
 import type { InventoryItem, InventoryCategory } from '@/types';
 
 export type RecordInventoryUsageInput = {
@@ -19,7 +18,7 @@ export type RecordInventoryUsageInput = {
 };
 
 export async function recordInventoryUsage(input: RecordInventoryUsageInput) {
-  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
+  await addDoc(collection(db, 'inventoryUsage'), {
     ...input,
     createdAt: serverTimestamp(),
   });
@@ -42,7 +41,7 @@ export async function checkStockForWorkCard(
   const { companyId, inventoryItemId, quantity } = input;
   if (!inventoryItemId || quantity <= 0) return { sufficient: true };
 
-  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  const snap = await getDoc(doc(db, 'inventoryItems', inventoryItemId));
   if (!snap.exists()) {
     return {
       sufficient: false,
@@ -93,8 +92,8 @@ export type DeductInventoryForHarvestInput = {
 };
 
 /**
- * Legacy Firestore helper: deduct wooden crates from inventory when recording a harvest.
- * Phase 1 harvest flows still call this directly.
+ * Legacy shim: deduct crates from inventory when recording a harvest.
+ * Prefer Supabase inventory APIs when available.
  */
 export async function deductInventoryForHarvest(
   input: DeductInventoryForHarvestInput,
@@ -102,7 +101,7 @@ export async function deductInventoryForHarvest(
   const { companyId, inventoryItemId, quantity } = input;
   if (!inventoryItemId || quantity <= 0) return;
 
-  const snap = await getDoc(doc(firestoreDb, 'inventoryItems', inventoryItemId));
+  const snap = await getDoc(doc(db, 'inventoryItems', inventoryItemId));
   if (!snap.exists()) throw new Error('Inventory item not found');
   const item = snap.data() as InventoryItem;
   if (item.companyId !== companyId) throw new Error('Item does not belong to company');
@@ -112,7 +111,7 @@ export async function deductInventoryForHarvest(
     throw new Error(`Insufficient wooden crates: ${item.name} has ${currentQty}, need ${quantity}`);
   }
 
-  await addDoc(collection(firestoreDb, 'inventoryUsage'), {
+  await addDoc(collection(db, 'inventoryUsage'), {
     companyId,
     projectId: input.projectId,
     inventoryItemId,
@@ -125,4 +124,3 @@ export async function deductInventoryForHarvest(
     createdAt: serverTimestamp(),
   });
 }
-

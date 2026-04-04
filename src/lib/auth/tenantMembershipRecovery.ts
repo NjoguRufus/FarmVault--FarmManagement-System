@@ -46,6 +46,42 @@ export async function pickFirstExistingMembershipCompany(
   return firstMembershipWithExistingCompany(pubRows as MemRow[] | null);
 }
 
+/**
+ * Keeps legacy public.profiles in sync with core.profiles (STK edge + helpers still read public on some paths).
+ * Omit email when you must not overwrite an existing public email; omit activeCompanyId when not changing workspace.
+ */
+export async function mirrorPublicProfileForClerkUser(
+  clerkUserId: string,
+  email?: string | null,
+  activeCompanyId?: string | null,
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const row: Record<string, unknown> = {
+    id: clerkUserId,
+    clerk_user_id: clerkUserId,
+    updated_at: nowIso,
+  };
+  if (email !== undefined) {
+    row.email = email != null && String(email).trim() !== '' ? String(email).trim() : null;
+  }
+  if (activeCompanyId !== undefined) {
+    if (activeCompanyId != null && String(activeCompanyId).trim() !== '') {
+      const cid = String(activeCompanyId).trim();
+      row.active_company_id = cid;
+      row.company_id = cid;
+    } else {
+      row.active_company_id = null;
+      row.company_id = null;
+    }
+  }
+
+  const { error } = await db.public().from('profiles').upsert(row, { onConflict: 'id' });
+  if (error && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn('[mirrorPublicProfileForClerkUser] public.profiles upsert:', error.message);
+  }
+}
+
 export async function repairProfileActiveCompany(clerkUserId: string, companyId: string | null): Promise<void> {
   const nowIso = new Date().toISOString();
   await db
@@ -53,4 +89,5 @@ export async function repairProfileActiveCompany(clerkUserId: string, companyId:
     .from('profiles')
     .update({ active_company_id: companyId, updated_at: nowIso })
     .eq('clerk_user_id', clerkUserId);
+  await mirrorPublicProfileForClerkUser(clerkUserId, undefined, companyId);
 }

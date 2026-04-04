@@ -14,8 +14,8 @@ import { syncTodaysLabourExpenses } from '@/services/workLogService';
 import { useWorkCardsForManager } from '@/hooks/useWorkCards';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { doc, updateDoc, serverTimestamp, writeBatch } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { doc, updateDoc, serverTimestamp, writeBatch } from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { Button } from '@/components/ui/button';
 
 export function ManagerDashboard() {

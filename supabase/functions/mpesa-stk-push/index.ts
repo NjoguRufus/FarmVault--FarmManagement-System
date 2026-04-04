@@ -1,14 +1,16 @@
 // M-Pesa STK Push — Daraja Lipa Na M-Pesa Online (Paybill).
-// Auth: Clerk session JWT (Bearer).
-//   - Normal: profile.company_id must match body.companyId; amount from plan/cycle.
-//   - developerStkTest: platform developer only (is_developer RPC); fixed KES 1.
+// Auth: Clerk session JWT (Bearer) — required (signed-in user); billing path does NOT read profiles or company_members.
+//   - Billing: company_id + billing_reference from client (UI already resolved). No DB lookup for billing_reference. If omitted, AccountReference falls back to FV-{first 8 of company_id}.
+//   - Body: plan + billing_cycle + amount + billing_reference (camelCase or snake_case OK).
+//   - developerStkTest / developer_stk_test: platform developer only; phone + amount only.
+// All JSON responses use HTTP 200 so supabase.functions.invoke parses the body reliably.
 // Deploy: supabase functions deploy mpesa-stk-push --no-verify-jwt
 //
-// Secrets: MPESA_ENV, MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_CALLBACK_URL, MPESA_SHORTCODE, MPESA_PASSKEY (see _shared/mpesaConfig.ts).
+// Secrets: MPESA_ENV (sandbox|production), MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_CALLBACK_URL;
+// sandbox STK uses hardcoded 174379 + sandbox passkey in mpesaConfig; production adds MPESA_SHORTCODE, MPESA_PASSKEY.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { loadMpesaConfig } from "../_shared/mpesaConfig.ts";
-import { resolveCheckoutAmountKes, type CheckoutBillingCycle, type CheckoutPlanCode } from "../_shared/billingCheckoutAmount.ts";
 import { normalizeKenyaPhoneTo254 } from "../_shared/kenyaPhone.ts";
 import { fetchMpesaAccessToken, initiateStkPush } from "../_shared/mpesaDaraja.ts";
 
@@ -18,10 +20,9 @@ const corsHeaders: Record<string, string> = {
   "Content-Type": "application/json",
 };
 
-const DEV_TEST_AMOUNT_KES = 1;
-
-function json(body: object, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
+/** Always 200 — clients read `success` / `error` / `detail`. */
+function json(body: object) {
+  return new Response(JSON.stringify(body), { status: 200, headers: corsHeaders });
 }
 
 function stkUnhandledErrorResponse(error: unknown): Response {
@@ -57,6 +58,23 @@ function clerkSubFromBearer(token: string): string | null {
   }
 }
 
+function asTrimmedString(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/** Strip leading +, apply 07→2547… then full Kenya normalization (254 / 9-digit). */
+function normalizePhoneForStk(raw: string): string | null {
+  let p = raw.trim().replace(/\s+/g, "");
+  if (!p) return null;
+  p = p.replace(/^\+/, "");
+  if (p.startsWith("07")) {
+    p = "254" + p.slice(1);
+  } else if (p.startsWith("01")) {
+    p = "254" + p.slice(1);
+  }
+  return normalizeKenyaPhoneTo254(p);
+}
+
 async function assertPlatformDeveloper(
   supabaseUrl: string,
   supabaseAnonKey: string,
@@ -69,18 +87,18 @@ async function assertPlatformDeveloper(
     const { data, error: devErr } = await userClient.rpc("is_developer");
     if (devErr) {
       console.error("[mpesa-stk-push] is_developer RPC error", devErr.message);
-      return json({ success: false, error: "Forbidden", detail: devErr.message || "Developer check failed" }, 403);
+      return json({ success: false, error: "Forbidden", detail: devErr.message || "Developer check failed" });
     }
     if (data !== true) {
       return json({
         success: false,
         error: "Forbidden",
         detail: "Developer STK test is only available to platform developers.",
-      }, 403);
+      });
     }
   } catch (rpcErr) {
     console.error("[mpesa-stk-push] is_developer threw", rpcErr);
-    return json({ success: false, error: "Forbidden", detail: "Developer check failed" }, 403);
+    return json({ success: false, error: "Forbidden", detail: "Developer check failed" });
   }
   return null;
 }
@@ -92,53 +110,113 @@ export default async function handler(req: Request): Promise<Response> {
 
   try {
     if (req.method !== "POST") {
-      return json({ success: false, error: "Method not allowed" }, 405);
+      return json({ success: false, error: "Method not allowed" });
     }
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return json({ success: false, error: "Unauthorized", detail: "Missing Bearer token" }, 401);
+      return json({ success: false, error: "Unauthorized", detail: "Missing Bearer token" });
     }
     const token = authHeader.replace("Bearer ", "").trim();
     const clerkUserId = clerkSubFromBearer(token);
     if (!clerkUserId) {
-      return json({ success: false, error: "Unauthorized", detail: "Invalid token" }, 401);
+      return json({ success: false, error: "Unauthorized", detail: "Invalid token" });
     }
 
-    const body = (await req.json()) as {
-      developerStkTest?: boolean;
-      companyId?: string;
-      phoneNumber?: string;
-      planCode?: string;
-      billingCycle?: string;
-    };
-
-    const phoneNumber = typeof body.phoneNumber === "string" ? body.phoneNumber.trim() : "";
-    if (!phoneNumber) {
-      return json({ success: false, error: "Invalid payload", detail: "phoneNumber is required" }, 400);
+    let body: Record<string, unknown>;
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      throw new Error("Invalid JSON body");
+    }
+    if (!body || typeof body !== "object") {
+      throw new Error("Invalid JSON body");
     }
 
-    const phone254 = normalizeKenyaPhoneTo254(phoneNumber);
-    if (!phone254) {
-      return json({
-        success: false,
-        error: "Invalid payload",
-        detail: "Enter a valid Kenya number (e.g. 07… or +254…)",
-      }, 400);
+    const phone =
+      asTrimmedString(body.phone) ||
+      asTrimmedString(body.phoneNumber);
+    if (!phone) {
+      throw new Error("Missing phone");
     }
+
+    const amount = Number(body.amount);
+    if (amount == null || Number.isNaN(amount)) {
+      throw new Error("Missing amount");
+    }
+    if (amount <= 0) {
+      throw new Error("Invalid amount");
+    }
+    const amountRounded = Math.round(amount);
+
+    const normalizedPhone = normalizePhoneForStk(phone);
+    if (!normalizedPhone) {
+      throw new Error("Enter a valid Kenya number (e.g. 07… or +254…)");
+    }
+
+    const company_id =
+      asTrimmedString(body.company_id) ||
+      asTrimmedString(body.companyId) ||
+      null;
+    const plan =
+      asTrimmedString(body.plan) ||
+      asTrimmedString(body.planCode) ||
+      null;
+    const billing_cycle =
+      asTrimmedString(body.billing_cycle) ||
+      asTrimmedString(body.billingCycle) ||
+      null;
+    const billing_reference =
+      asTrimmedString(body.billing_reference) ||
+      asTrimmedString(body.billingReference) ||
+      null;
+
+    const isDeveloperPayload =
+      body.developerStkTest === true ||
+      body.developer_stk_test === true;
+
+    if (!isDeveloperPayload) {
+      if (!company_id) throw new Error("Missing company_id");
+      if (!plan) throw new Error("Missing plan");
+      if (!billing_cycle) throw new Error("Missing billing_cycle");
+      console.log("STK Init:", {
+        company_id,
+        billing_reference,
+        plan,
+        billing_cycle,
+        phone: normalizedPhone,
+        amount: amountRounded,
+      });
+    }
+
+    console.log("STK PAYLOAD:", {
+      phone: normalizedPhone,
+      amount: amountRounded,
+      company_id,
+      plan,
+      billing_cycle,
+      billing_reference: billing_reference ?? "(dev or omitted)",
+      developer: isDeveloperPayload,
+    });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !serviceKey) {
       console.error("[mpesa-stk-push] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-      return json({ success: false, error: "Server misconfiguration" }, 500);
+      return json({ success: false, error: "Server misconfiguration" });
     }
 
-    let amountKes: number;
-    /** For `public.mpesa_payments` (RLS + realtime). Null only if developer profile has no company. */
-    let paymentCompanyId: string | null = null;
+    const admin = createClient(supabaseUrl, serviceKey);
 
-    if (body.developerStkTest === true) {
+    let amountKes: number;
+    let paymentCompanyId: string | null = null;
+    let billingPlan: string | null = null;
+    let billingCycleStored: string | null = null;
+    let accountReferenceForStk: string | undefined;
+    let transactionDescForStk: string | undefined;
+    let resolvedBillingReference: string | null = null;
+
+    if (isDeveloperPayload) {
       const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
       if (!supabaseAnonKey) {
         console.error("[mpesa-stk-push] Missing SUPABASE_ANON_KEY (required for developer STK test)");
@@ -146,91 +224,119 @@ export default async function handler(req: Request): Promise<Response> {
           success: false,
           error: "Server misconfiguration",
           detail: "SUPABASE_ANON_KEY missing",
-        }, 500);
+        });
       }
       const devGate = await assertPlatformDeveloper(supabaseUrl, supabaseAnonKey, authHeader);
       if (devGate) return devGate;
 
-      const adminDev = createClient(supabaseUrl, serviceKey);
-      const { data: devProfile } = await adminDev
-        .from("profiles")
-        .select("company_id")
-        .eq("clerk_user_id", clerkUserId)
-        .maybeSingle();
-      paymentCompanyId = (devProfile?.company_id as string | undefined) ?? null;
+      paymentCompanyId = null;
 
-      amountKes = DEV_TEST_AMOUNT_KES;
+      amountKes = amountRounded;
+      console.log("STK Amount:", amountRounded);
+      accountReferenceForStk = "FV-DEVSTK";
+      transactionDescForStk = "FV dev STK";
     } else {
-      const companyId = typeof body.companyId === "string" ? body.companyId.trim() : "";
-      const planCode = typeof body.planCode === "string" ? body.planCode.trim().toLowerCase() : "";
-      const billingCycle = typeof body.billingCycle === "string" ? body.billingCycle.trim().toLowerCase() : "";
+      const planCode = plan!.toLowerCase();
+      const billingCycle = billing_cycle!.toLowerCase();
 
-      if (!companyId) {
-        return json({ success: false, error: "Invalid payload", detail: "companyId is required" }, 400);
-      }
       if (planCode !== "basic" && planCode !== "pro") {
-        return json({ success: false, error: "Invalid payload", detail: "planCode must be basic or pro" }, 400);
+        throw new Error("plan must be basic or pro");
       }
       if (billingCycle !== "monthly" && billingCycle !== "seasonal" && billingCycle !== "annual") {
-        return json({
-          success: false,
-          error: "Invalid payload",
-          detail: "billingCycle must be monthly, seasonal, or annual",
-        }, 400);
+        throw new Error("billing_cycle must be monthly, seasonal, or annual");
       }
 
-      const resolved = resolveCheckoutAmountKes(planCode as CheckoutPlanCode, billingCycle as CheckoutBillingCycle);
-      if (resolved == null) {
-        return json({
-          success: false,
-          error: "Invalid checkout",
-          detail: "Could not resolve amount for plan/cycle",
-        }, 400);
-      }
-      amountKes = resolved;
-
-      const admin = createClient(supabaseUrl, serviceKey);
-      const { data: profile, error: profErr } = await admin
-        .from("profiles")
-        .select("company_id")
-        .eq("clerk_user_id", clerkUserId)
+      const { data: priceRow, error: priceErr } = await admin
+        .schema("core")
+        .from("billing_prices")
+        .select("amount")
+        .eq("plan", planCode)
+        .eq("cycle", billingCycle)
         .maybeSingle();
 
-      if (profErr) {
-        console.error("[mpesa-stk-push] profile lookup", profErr.message);
-        return json({ success: false, error: "Failed to verify workspace" }, 500);
-      }
-      const profileCompany = profile?.company_id as string | undefined;
-      if (!profileCompany || profileCompany !== companyId) {
+      if (priceErr) {
+        console.error("[mpesa-stk-push] billing_prices load", priceErr.message);
         return json({
           success: false,
-          error: "Forbidden",
-          detail: "You cannot initiate payment for this workspace",
-        }, 403);
+          error: "Failed to load checkout pricing",
+          detail: priceErr.message,
+        });
       }
-      paymentCompanyId = companyId;
+
+      const resolved = priceRow != null && priceRow.amount != null && String(priceRow.amount).trim() !== ""
+        ? Math.round(Number(priceRow.amount))
+        : NaN;
+      if (!Number.isFinite(resolved) || resolved < 0) {
+        return json({
+          success: false,
+          error: "Pricing not configured",
+          detail: `Missing or invalid core.billing_prices for ${planCode} / ${billingCycle}`,
+        });
+      }
+      if (amountRounded !== resolved) {
+        throw new Error("Amount does not match selected plan");
+      }
+      amountKes = amountRounded;
+      console.log("STK Amount:", amountRounded);
+
+      console.log("[mpesa-stk-push] billing STK", {
+        company_id,
+        clerk_sub: clerkUserId,
+      });
+
+      paymentCompanyId = company_id || null;
+      billingPlan = planCode;
+      billingCycleStored = billingCycle;
+
+      const refFromBody = billing_reference?.trim() ?? "";
+      const accountRefFull =
+        refFromBody || (company_id ? `FV-${company_id.slice(0, 8)}` : "");
+      if (!accountRefFull) {
+        return json({
+          success: false,
+          error: "Bad request",
+          detail: "company_id required to build billing account reference",
+        });
+      }
+      resolvedBillingReference = accountRefFull;
+      accountReferenceForStk = accountRefFull.slice(0, 12);
+      transactionDescForStk = `FV ${planCode}`.slice(0, 13);
     }
 
     const cfg = loadMpesaConfig();
+    console.log("[mpesa-stk-debug] MPESA_ENV:", cfg.env);
+    console.log("[mpesa-stk-debug] Using shortcode:", cfg.shortcode);
+    console.log("[mpesa-stk-debug] Using baseURL:", cfg.baseUrl);
+
     const accessToken = await fetchMpesaAccessToken(cfg);
     const stk = await initiateStkPush(cfg, accessToken, {
-      phone254,
+      phone254: normalizedPhone,
       amountKes,
+      accountReference: accountReferenceForStk,
+      transactionDesc: transactionDescForStk,
     });
 
     console.log("[mpesa] STK push completed", {
       env: cfg.env,
       checkoutRequestId: stk.checkoutRequestId,
-      developerTest: body.developerStkTest === true,
+      developerTest: isDeveloperPayload,
     });
 
-    const adminPay = createClient(supabaseUrl, serviceKey);
-    const { error: payInsErr } = await adminPay.from("mpesa_payments").insert({
+    const billingRefForRow: string | null = isDeveloperPayload
+      ? (accountReferenceForStk ?? null)
+      : resolvedBillingReference;
+
+    const { error: payInsErr } = await admin.from("mpesa_payments").insert({
       checkout_request_id: stk.checkoutRequestId,
       company_id: paymentCompanyId,
+      billing_reference: billingRefForRow,
+      plan: billingPlan,
+      billing_cycle: billingCycleStored,
       amount: amountKes,
-      phone: phone254,
+      phone: normalizedPhone,
       status: "PENDING",
+      subscription_activated: false,
+      result_code: null,
     });
     if (payInsErr) {
       console.error("[mpesa-stk-push] mpesa_payments insert failed", payInsErr.message);
@@ -244,7 +350,7 @@ export default async function handler(req: Request): Promise<Response> {
       customerMessage: stk.customerMessage,
       amountKes,
       mpesaEnv: cfg.env,
-      developerStkTest: body.developerStkTest === true,
+      developerStkTest: isDeveloperPayload,
     });
   } catch (error) {
     return stkUnhandledErrorResponse(error);

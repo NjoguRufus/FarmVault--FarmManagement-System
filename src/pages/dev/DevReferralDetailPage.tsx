@@ -16,11 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAmbassadorProgramRealtime } from "@/hooks/developer/useAmbassadorProgramRealtime";
 import {
-  fetchDevCommissionBreakdown,
+  fetchDevAmbassadorEarnings,
   fetchDevReferralConversionById,
   fetchDevReferrerDetails,
-  markAmbassadorCommissionsPaid,
-  type DevCommissionBreakdownRow,
+  markAmbassadorEarningsPaid,
+  type DevAmbassadorEarningRow,
   type DevReferrerDetailRow,
 } from "@/services/developerReferralService";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,11 @@ function formatKes(n: number): string {
     currency: "KES",
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0);
+}
+
+function formatEarningType(type: string): string {
+  if (!type) return "—";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function DevReferralDetailPage() {
@@ -56,9 +61,9 @@ export default function DevReferralDetailPage() {
     enabled: idValid,
   });
 
-  const { data: commissions = [], isLoading: loadingCommissions } = useQuery({
-    queryKey: [...detailKey, "commissions"],
-    queryFn: () => fetchDevCommissionBreakdown(ambassadorId),
+  const { data: earnings = [], isLoading: loadingEarnings } = useQuery({
+    queryKey: [...detailKey, "earnings"],
+    queryFn: () => fetchDevAmbassadorEarnings(ambassadorId),
     enabled: idValid,
   });
 
@@ -70,18 +75,22 @@ export default function DevReferralDetailPage() {
   useAmbassadorProgramRealtime(refetchDetail);
 
   const totalOwed = useMemo(
-    () => commissions.filter((c) => c.status === "owed").reduce((s, c) => s + c.amount, 0),
-    [commissions],
+    () => earnings.filter((e) => e.status === "owed").reduce((s, e) => s + e.amount, 0),
+    [earnings],
   );
   const totalPaid = useMemo(
-    () => commissions.filter((c) => c.status === "paid").reduce((s, c) => s + c.amount, 0),
-    [commissions],
+    () => earnings.filter((e) => e.status === "paid").reduce((s, e) => s + e.amount, 0),
+    [earnings],
   );
 
   const markPaidMutation = useMutation({
-    mutationFn: () => markAmbassadorCommissionsPaid(ambassadorId),
-    onSuccess: () => {
-      toast.success("Owed commissions marked as paid.");
+    mutationFn: () => markAmbassadorEarningsPaid(ambassadorId),
+    onSuccess: (updated) => {
+      if (updated > 0) {
+        toast.success(`Marked ${updated} earning row${updated === 1 ? "" : "s"} as paid.`);
+      } else {
+        toast.message("No owed earnings to mark.");
+      }
       void refetchDetail();
       void queryClient.invalidateQueries({ queryKey: ["dev", "referral-stats"] });
       void queryClient.invalidateQueries({ queryKey: ["dev", "referral-conversion"] });
@@ -105,8 +114,8 @@ export default function DevReferralDetailPage() {
     );
   }
 
-  const loading = loadingSummary || loadingReferred || loadingCommissions;
-  const hasOwed = totalOwed > 0;
+  const loading = loadingSummary || loadingReferred || loadingEarnings;
+  const hasOwed = Boolean(summary && summary.owed > 0);
 
   return (
     <div className="space-y-6 sm:space-y-8 pb-8">
@@ -155,7 +164,7 @@ export default function DevReferralDetailPage() {
               ) : (
                 <Banknote className="mr-2 h-4 w-4" />
               )}
-              Mark owed as paid
+              Mark as paid
             </Button>
           </div>
         ) : null}
@@ -170,7 +179,7 @@ export default function DevReferralDetailPage() {
       {summary ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { label: "Total commission volume", value: formatKes(summary.total_earned) },
+            { label: "Total earned", value: formatKes(summary.total_earned) },
             { label: "Owed", value: formatKes(summary.owed), accent: "text-amber-600 dark:text-amber-400" },
             { label: "Paid out", value: formatKes(summary.paid), accent: "text-emerald-600 dark:text-emerald-400" },
             { label: "Active / inactive refs", value: `${summary.active_referrals} / ${summary.inactive_referrals}` },
@@ -258,7 +267,7 @@ export default function DevReferralDetailPage() {
           <div className="flex flex-col gap-1 border-b border-border/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Banknote className="h-4 w-4 text-emerald-600" />
-              <h2 className="text-sm font-semibold">Commission breakdown</h2>
+              <h2 className="text-sm font-semibold">Earnings transactions</h2>
             </div>
             <div className="flex gap-3 text-xs text-muted-foreground">
               <span>
@@ -273,44 +282,46 @@ export default function DevReferralDetailPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/50">
+                  <TableHead className="text-xs uppercase text-muted-foreground whitespace-nowrap">Date</TableHead>
+                  <TableHead className="text-xs uppercase text-muted-foreground">Description</TableHead>
                   <TableHead className="text-xs uppercase text-muted-foreground">Type</TableHead>
                   <TableHead className="text-xs uppercase text-muted-foreground text-right">Amount</TableHead>
                   <TableHead className="text-xs uppercase text-muted-foreground">Status</TableHead>
-                  <TableHead className="text-xs uppercase text-muted-foreground">When</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                       Loading…
                     </TableCell>
                   </TableRow>
-                ) : commissions.length === 0 ? (
+                ) : earnings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
-                      No commission rows.
+                    <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                      No earnings rows.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  commissions.map((c: DevCommissionBreakdownRow) => (
-                    <TableRow key={c.commission_id} className="border-border/40">
-                      <TableCell className="capitalize text-muted-foreground">{c.commission_type.replace(/_/g, " ")}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">{formatKes(c.amount)}</TableCell>
+                  earnings.map((e: DevAmbassadorEarningRow) => (
+                    <TableRow key={e.earning_id} className="border-border/40">
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm text-foreground max-w-[180px] truncate">{e.description ?? "—"}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatEarningType(e.earning_type)}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{formatKes(e.amount)}</TableCell>
                       <TableCell>
                         <Badge
                           variant="outline"
                           className={cn(
-                            c.status === "paid"
+                            e.status === "paid"
                               ? "border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
                               : "border-amber-500/40 text-amber-800 dark:text-amber-300",
                           )}
                         >
-                          {c.status}
+                          {e.status}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
                       </TableCell>
                     </TableRow>
                   ))

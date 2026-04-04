@@ -4,8 +4,8 @@ import { Plus, Search, Wrench, MoreHorizontal, CheckCircle, Clock, CalendarDays,
 import { useProject } from '@/contexts/ProjectContext';
 import { cn } from '@/lib/utils';
 import { isProjectClosed } from '@/lib/projectClosed';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/firestore-stub';
+import { db } from '@/lib/documentLayer';
+import { collection, addDoc, serverTimestamp, doc, updateDoc } from '@/lib/documentLayer';
 import { useCollection } from '@/hooks/useCollection';
 import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { WorkLog, Employee, CropStage, InventoryItem, InventoryCategory, User, Expense, ExpenseCategory, OperationsWorkCard } from '@/types';
@@ -22,7 +22,7 @@ import {
   deleteWorkCard,
   canAdminApproveOrReject,
 } from '@/services/operationsWorkCardService';
-import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryFirebaseService';
+import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryDocumentShimService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -921,12 +921,12 @@ export default function OperationsPage() {
         createdAt: serverTimestamp(),
       };
 
-      // Only include employeeIds if it has values (Firestore doesn't allow undefined)
+      // Only include employeeIds when set (avoid undefined in payloads)
       if (selectedEmployeeIds.length > 0) {
         workLogData.employeeIds = selectedEmployeeIds;
       }
 
-      // Remove undefined values to avoid Firestore errors
+      // Remove undefined values from payloads
       Object.keys(workLogData).forEach(key => {
         if (workLogData[key] === undefined) {
           delete workLogData[key];

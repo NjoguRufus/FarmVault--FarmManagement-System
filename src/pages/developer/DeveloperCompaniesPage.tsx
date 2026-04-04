@@ -3,7 +3,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
-import { fetchDeveloperCompanies } from '@/services/developerService';
+import { fetchDeveloperCompanies, fetchMpesaStkPaymentsForDeveloper } from '@/services/developerService';
+import {
+  buildLatestSdkMpesaByCompany,
+  formatPaymentRelativeDay,
+  resolveLatestCompanyPayment,
+} from '@/features/developer/subscriptionPaymentSource';
 import {
   overrideSubscription,
   deleteCompanySafely,
@@ -72,6 +77,7 @@ type LatestSubscriptionPayment = {
   currency?: string | null;
   plan_id?: string | null;
   billing_cycle?: string | null;
+  payment_method?: string | null;
   submitted_at?: string | null;
   mpesa_name?: string | null;
   transaction_code?: string | null;
@@ -138,23 +144,6 @@ function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
-function latestPaymentStatusStyles(status: string | undefined | null): string {
-  const s = (status ?? '').toLowerCase();
-  if (s === 'pending_verification' || s === 'pending') {
-    return 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200';
-  }
-  if (s === 'approved') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200';
-  if (s === 'rejected') return 'border-red-500/40 bg-red-500/10 text-red-800 dark:text-red-200';
-  return 'border-border bg-muted text-muted-foreground';
-}
-
-function latestPaymentStatusLabel(status: string | undefined | null): string {
-  const s = (status ?? '').toLowerCase();
-  if (s === 'pending_verification') return 'Pending verification';
-  if (s === 'pending') return 'Pending';
-  return (status ?? '—').replace(/_/g, ' ');
-}
-
 function isNewCompany(createdAt?: string | null, daysWindow: number = 7): boolean {
   if (!createdAt) return false;
   const created = new Date(createdAt);
@@ -171,6 +160,7 @@ export default function DeveloperCompaniesPage() {
   const [overrideFilter, setOverrideFilter] = useState<'all' | 'overridden' | 'pilot' | 'collaborator' | 'free_access' | 'trial_override'>('all');
   const [newOnly, setNewOnly] = useState(false);
   const [newWindowDays, setNewWindowDays] = useState<3 | 7 | 14>(7);
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'manual' | 'sdk'>('all');
   const [searchParams, setSearchParams] = useSearchParams();
   const subscriptionFilter = (searchParams.get('subscription') || '').toLowerCase();
   const { activeCompanyId } = useActiveCompany();
@@ -230,6 +220,14 @@ export default function DeveloperCompaniesPage() {
     queryFn: () => fetchDeveloperCompanies({ limit: 200, offset: 0 }),
   });
 
+  const { data: mpesaStkRows = [] } = useQuery({
+    queryKey: ['developer', 'mpesa-stk'],
+    queryFn: fetchMpesaStkPaymentsForDeveloper,
+    staleTime: 60_000,
+  });
+
+  const sdkByCompany = useMemo(() => buildLatestSdkMpesaByCompany(mpesaStkRows), [mpesaStkRows]);
+
   const companies = (data?.items ?? []) as CompanyRow[];
 
   const filtered = useMemo(() => {
@@ -239,6 +237,7 @@ export default function DeveloperCompaniesPage() {
       const plan = (c.plan_code ?? '').toLowerCase();
       const status = (c.subscription_status ?? '').toLowerCase();
       const id = (c.company_id ?? c.id ?? '').toLowerCase();
+      const companyId = String(c.company_id ?? c.id ?? '');
       const mode = (c.override?.mode ?? '').toLowerCase();
       const hasOverride = Boolean(c.override?.enabled);
       const computedStatus = computeResolvedStatus(c, now);
@@ -266,6 +265,15 @@ export default function DeveloperCompaniesPage() {
       const isNew = isNewCompany(c.created_at, newWindowDays);
       if (newOnly && !isNew) return false;
 
+      if (paymentTypeFilter !== 'all') {
+        const resolved = resolveLatestCompanyPayment(
+          c.latest_subscription_payment ?? null,
+          sdkByCompany.get(companyId),
+        );
+        if (paymentTypeFilter === 'manual' && resolved?.kind !== 'manual') return false;
+        if (paymentTypeFilter === 'sdk' && resolved?.kind !== 'sdk') return false;
+      }
+
       if (!term) return true;
       return (
         name.includes(term) ||
@@ -275,7 +283,18 @@ export default function DeveloperCompaniesPage() {
         companyStatusAccessLabel(computedStatus).toLowerCase().includes(term)
       );
     });
-  }, [companies, search, statusFilter, overrideFilter, newOnly, newWindowDays, subscriptionFilter, now]);
+  }, [
+    companies,
+    search,
+    statusFilter,
+    overrideFilter,
+    newOnly,
+    newWindowDays,
+    subscriptionFilter,
+    paymentTypeFilter,
+    sdkByCompany,
+    now,
+  ]);
 
   const formatCreatedTime = (dateStr: string | null | undefined): string => {
     if (!dateStr) return 'Unknown';
@@ -700,6 +719,29 @@ export default function DeveloperCompaniesPage() {
             </button>
           ))}
         </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Payment type:</span>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'manual', label: 'Manual' },
+            { key: 'sdk', label: 'SDK' },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setPaymentTypeFilter(f.key as typeof paymentTypeFilter)}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs border transition-colors',
+                paymentTypeFilter === f.key
+                  ? 'bg-primary/15 text-primary border-primary/40'
+                  : 'bg-background text-muted-foreground border-border hover:border-primary/30',
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -738,7 +780,7 @@ export default function DeveloperCompaniesPage() {
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
                 <th className="py-2 text-left font-medium">Access</th>
-                <th className="py-2 text-left font-medium">Latest M-Pesa</th>
+                <th className="py-2 text-left font-medium">Payment</th>
                 <th className="py-2 text-left font-medium">Users</th>
                 <th className="py-2 text-left font-medium">Trial ends</th>
                 <th className="py-2 text-left font-medium">Active until</th>
@@ -756,6 +798,17 @@ export default function DeveloperCompaniesPage() {
                   lowerName === 'keyfarm' ||
                   // Any company that is currently active in this session
                   (activeCompanyId != null && id === activeCompanyId);
+
+                const latestPay = resolveLatestCompanyPayment(
+                  c.latest_subscription_payment ?? null,
+                  sdkByCompany.get(id),
+                );
+                const st = String(latestPay?.status ?? '').toLowerCase();
+                const showStatusNote =
+                  latestPay &&
+                  st &&
+                  st !== 'approved' &&
+                  st !== 'success';
 
                 return (
                   <tr key={id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
@@ -783,28 +836,29 @@ export default function DeveloperCompaniesPage() {
                         </Badge>
                       </div>
                     </td>
-                    <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Latest M-Pesa">
-                      {c.latest_subscription_payment ? (
-                        <div className="max-w-[200px] space-y-1 md:max-w-[200px]">
+                    <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Payment">
+                      {latestPay ? (
+                        <div className="max-w-[220px] space-y-1 md:max-w-[220px]">
                           <Badge
-                            variant="outline"
-                            className={cn('font-normal text-[10px] px-1.5 py-0', latestPaymentStatusStyles(c.latest_subscription_payment.status))}
+                            variant={latestPay.kind === 'sdk' ? 'success' : 'secondary'}
+                            className="font-normal text-[10px] px-1.5 py-0"
                           >
-                            {latestPaymentStatusLabel(c.latest_subscription_payment.status)}
+                            {latestPay.kind === 'sdk' ? 'SDK' : 'Manual'}
                           </Badge>
                           <div className="text-foreground">
-                            {c.latest_subscription_payment.amount != null && c.latest_subscription_payment.amount !== ''
-                              ? `${c.latest_subscription_payment.currency ?? 'KES'} ${Number(c.latest_subscription_payment.amount).toLocaleString()}`
-                              : '—'}
+                            {latestPay.amount != null
+                              ? `${latestPay.currency} ${latestPay.amount.toLocaleString()} — ${formatPaymentRelativeDay(latestPay.atMs, now)}`
+                              : `— — ${formatPaymentRelativeDay(latestPay.atMs, now)}`}
                           </div>
-                          <div className="text-[11px] text-muted-foreground">
-                            {formatDate(
-                              c.latest_subscription_payment.submitted_at ?? undefined,
-                            )}
-                          </div>
-                          {(c.latest_subscription_payment.plan_id || c.latest_subscription_payment.billing_cycle) && (
-                            <div className="text-[10px] text-muted-foreground truncate" title={`${c.latest_subscription_payment.plan_id ?? ''} ${c.latest_subscription_payment.billing_cycle ?? ''}`}>
-                              {[c.latest_subscription_payment.plan_id, c.latest_subscription_payment.billing_cycle].filter(Boolean).join(' · ')}
+                          {showStatusNote && (
+                            <div className="text-[10px] text-muted-foreground capitalize">{latestPay.status}</div>
+                          )}
+                          {(latestPay.plan_id || latestPay.billing_cycle) && (
+                            <div
+                              className="text-[10px] text-muted-foreground truncate"
+                              title={`${latestPay.plan_id ?? ''} ${latestPay.billing_cycle ?? ''}`}
+                            >
+                              {[latestPay.plan_id, latestPay.billing_cycle].filter(Boolean).join(' · ')}
                             </div>
                           )}
                         </div>

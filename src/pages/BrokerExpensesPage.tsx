@@ -3,8 +3,8 @@ import { Plus, Receipt, List, LayoutGrid } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { useQueryClient } from '@tanstack/react-query';
-import { collection, addDoc, serverTimestamp } from '@/lib/firestore-stub';
-import { db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from '@/lib/documentLayer';
+import { db } from '@/lib/documentLayer';
 import { Expense, ExpenseCategory, Harvest } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -366,6 +366,7 @@ export default function BrokerExpensesPage() {
         isTrial={isTrial}
         isExpired={isExpired}
         daysRemaining={daysRemaining}
+        workspaceCompanyId={user?.companyId ?? null}
       />
     </div>
   );
