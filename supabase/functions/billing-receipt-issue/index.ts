@@ -2,7 +2,8 @@
 //
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY,
 //   RESEND_API_KEY (for email), BILLING_RECEIPT_ISSUE_SECRET (server-to-server, e.g. STK callback),
-//   optional FARMVAULT_BILLING_EMAIL_FROM (Resend From for receipts; default FarmVault <billing@farmvault.africa>),
+//   optional FARMVAULT_EMAIL_FROM (same default as notify-developer / notify-company-transactional),
+//   optional FARMVAULT_BILLING_EMAIL_FROM (override for receipts only),
 //   optional FARMVAULT_RECEIPT_LOGO_URL, FARMVAULT_PUBLIC_APP_URL
 //
 // Auth:
@@ -24,7 +25,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-farmvault-receipt-secret",
 };
 
-const DEFAULT_FROM = "FarmVault <billing@farmvault.africa>";
+const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_TYPE = "billing_receipt";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -281,6 +282,12 @@ function memberClerkId(row: { clerk_user_id?: string | null; user_id?: string | 
   return String(row.clerk_user_id ?? row.user_id ?? "").trim();
 }
 
+/** Same role check as fetchCompanyWorkspaceNotifyPayload (developerAdminService). */
+function isAdminishMemberRole(role: string): boolean {
+  const r = (role || "").toLowerCase().replace(/-/g, "_");
+  return r === "company_admin" || r === "companyadmin" || r === "owner" || r === "admin";
+}
+
 /** Merge core + public profile fields so receipts show real contact data when only one schema is populated. */
 async function loadProfileMap(
   admin: SupabaseClient,
@@ -329,40 +336,6 @@ async function loadProfileMap(
   }
 
   return out;
-}
-
-async function loadReviewerProfile(
-  admin: SupabaseClient,
-  reviewedBy: string,
-): Promise<{ email: string; full_name: string } | null> {
-  const rb = reviewedBy.trim();
-  if (!rb || rb.toLowerCase() === "mpesa_stk") return null;
-
-  const { data: coreRp } = await admin
-    .schema("core")
-    .from("profiles")
-    .select("email,full_name")
-    .eq("clerk_user_id", rb)
-    .maybeSingle();
-  let email = String((coreRp as { email?: string } | null)?.email ?? "").trim();
-  let fullName = String((coreRp as { full_name?: string } | null)?.full_name ?? "").trim();
-  if (email || fullName) return { email, full_name: fullName };
-
-  const { data: pubClerk } = await admin
-    .from("profiles")
-    .select("email,full_name")
-    .eq("clerk_user_id", rb)
-    .maybeSingle();
-  email = String((pubClerk as { email?: string } | null)?.email ?? "").trim();
-  fullName = String((pubClerk as { full_name?: string } | null)?.full_name ?? "").trim();
-  if (email || fullName) return { email, full_name: fullName };
-
-  const { data: pubId } = await admin.from("profiles").select("email,full_name").eq("id", rb).maybeSingle();
-  email = String((pubId as { email?: string } | null)?.email ?? "").trim();
-  fullName = String((pubId as { full_name?: string } | null)?.full_name ?? "").trim();
-  if (email || fullName) return { email, full_name: fullName };
-
-  return null;
 }
 
 async function fetchApprovedSubscriptionPayment(
@@ -430,7 +403,7 @@ async function loadIssueContextLegacy(
   const { data: comp } = await admin
     .schema("core")
     .from("companies")
-    .select("id,name,created_at,created_by,owner_email")
+    .select("id,name,created_at,created_by,email,owner_email")
     .eq("id", companyId)
     .maybeSingle();
 
@@ -458,6 +431,8 @@ async function loadIssueContextLegacy(
         ? String((pubComp as { created_by?: string }).created_by)
         : null;
 
+  const coreEmail = String((comp as { email?: string } | null)?.email ?? "").trim();
+  const ownerEmail = String((comp as { owner_email?: string } | null)?.owner_email ?? "").trim();
   const publicCompanyPhone = String((pubComp as { phone?: string } | null)?.phone ?? "").trim();
 
   const { data: subRow } = await admin
@@ -466,11 +441,8 @@ async function loadIssueContextLegacy(
     .eq("company_id", companyId)
     .maybeSingle();
 
-  const reviewedBy = String((pay as { reviewed_by?: string }).reviewed_by ?? "").trim();
   const mpesaName = String((pay as { mpesa_name?: string }).mpesa_name ?? "").trim();
   const mpesaPhone = String((pay as { mpesa_phone?: string }).mpesa_phone ?? "").trim();
-
-  const reviewerProf = await loadReviewerProfile(admin, reviewedBy);
 
   const { data: coreMembers } = await admin
     .schema("core")
@@ -514,38 +486,59 @@ async function loadIssueContextLegacy(
   }
 
   const memberIds = members.map((m) => m.clerk_user_id);
-  const profileMap = await loadProfileMap(admin, memberIds);
+  const idsForProfiles = [...new Set([...(createdBy ? [createdBy] : []), ...memberIds])];
+  const profileMap = await loadProfileMap(admin, idsForProfiles);
 
-  const byId = new Map<string, { email: string; full_name: string }>();
-  for (const id of memberIds) {
-    byId.set(id, profileMap.get(id) ?? { email: "", full_name: "" });
+  const emailFor = (uid: string): string => String(profileMap.get(uid)?.email ?? "").trim();
+  const nameFor = (uid: string): string => String(profileMap.get(uid)?.full_name ?? "").trim();
+
+  const admins = members.filter((m) => isAdminishMemberRole(m.role));
+  const nonAdmins = members.filter((m) => !isAdminishMemberRole(m.role));
+
+  let adminEmail = "";
+  let resolvedUid: string | null = null;
+
+  if (createdBy) {
+    const e = emailFor(createdBy);
+    if (e) {
+      adminEmail = e;
+      resolvedUid = createdBy;
+    }
   }
 
-  let pick = createdBy ? byId.get(createdBy) : undefined;
-  if (!pick || (!pick.email && !pick.full_name)) {
-    const adminMember = members.find((m) => m.role.toLowerCase().includes("admin"));
-    if (adminMember) pick = byId.get(adminMember.clerk_user_id);
-  }
-  if (!pick || (!pick.email && !pick.full_name)) {
-    pick = memberIds.length ? byId.get(memberIds[0]) : undefined;
+  if (!adminEmail) {
+    adminEmail = coreEmail || ownerEmail || "";
   }
 
-  const pickEmail = String(pick?.email ?? "").trim();
-  const pickName = String(pick?.full_name ?? "").trim();
-  const reviewerEmail = String(reviewerProf?.email ?? "").trim();
-  const reviewerName = String(reviewerProf?.full_name ?? "").trim();
+  if (!adminEmail) {
+    for (const m of admins) {
+      const e = emailFor(m.clerk_user_id);
+      if (e) {
+        adminEmail = e;
+        resolvedUid = m.clerk_user_id;
+        break;
+      }
+    }
+  }
 
-  const fallbackEmail = memberIds.map((id) => byId.get(id)?.email ?? "").map((e) => e.trim()).find(Boolean) ?? "";
+  if (!adminEmail) {
+    for (const m of nonAdmins) {
+      const e = emailFor(m.clerk_user_id);
+      if (e) {
+        adminEmail = e;
+        resolvedUid = m.clerk_user_id;
+        break;
+      }
+    }
+  }
 
-  const ownerEmail = String((comp as { owner_email?: string } | null)?.owner_email ?? "").trim();
-  // Priority: owner_email (company contact) → company admin profile → first member → never reviewer.
-  // reviewer* fields belong to the developer who approved — they must NOT receive the company receipt.
-  let adminEmail = ownerEmail || pickEmail || fallbackEmail;
+  const memberName =
+    resolvedUid != null && resolvedUid.length > 0 ? nameFor(resolvedUid) : "";
+
   const adminName =
     mpesaName ||
-    pickName ||
-    (pickEmail ? pickEmail.split("@")[0] : "") ||
-    (adminEmail ? adminEmail.split("@")[0] : "") ||
+    memberName ||
+    (adminEmail && adminEmail.includes("@") ? adminEmail.split("@")[0] : "") ||
     "Customer";
   const adminPhone = mpesaPhone || publicCompanyPhone;
 
@@ -767,8 +760,10 @@ Deno.serve(async (req) => {
   const receiptLogoUrl =
     Deno.env.get("FARMVAULT_RECEIPT_LOGO_URL")?.trim() ??
     "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
-  // Do not use FARMVAULT_EMAIL_FROM here — it is often set to noreply@ for other Edge functions.
-  const from = Deno.env.get("FARMVAULT_BILLING_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+  const from =
+    Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() ||
+    Deno.env.get("FARMVAULT_BILLING_EMAIL_FROM")?.trim() ||
+    DEFAULT_FROM;
   const logsClient = getServiceRoleClientForEmailLogs();
 
   try {
