@@ -1,5 +1,6 @@
 import { invokeNotifyDeveloperTransactional } from '@/lib/email';
 import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
+import { issueBillingReceiptForPayment } from '@/services/receiptsService';
 import {
   getDevDashboardKpis,
   listCompanies,
@@ -300,6 +301,10 @@ export async function approveSubscriptionPayment(
     getSupabaseAccessToken,
   ).catch(() => {
     /* non-fatal */
+  });
+
+  void issueBillingReceiptForPayment(id, getSupabaseAccessToken, { sendEmail: true }).catch(() => {
+    /* non-fatal — company may issue from Billing if this fails */
   });
 }
 

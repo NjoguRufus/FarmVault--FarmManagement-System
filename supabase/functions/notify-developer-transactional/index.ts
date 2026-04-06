@@ -11,6 +11,12 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import {
+  buildCompanyManualPaymentSubmittedEmail,
+  buildCompanyPaymentApprovedEmail,
+  buildCompanyStkPaymentReceivedEmail,
+  buildCompanySubscriptionActivatedEmail,
+} from "../_shared/farmvault-email/companyTransactionalTemplates.ts";
+import {
   buildDeveloperManualPaymentSubmittedEmail,
   buildDeveloperPaymentApprovedEmail,
   buildDeveloperStkPaymentReceivedEmail,
@@ -29,6 +35,11 @@ const TYPE_MANUAL_SUBMITTED = "developer_manual_payment_submitted";
 const TYPE_STK_RECEIVED = "developer_stk_payment_received";
 const TYPE_PAYMENT_APPROVED = "developer_payment_approved";
 const TYPE_SUB_ACTIVATED = "developer_subscription_activated";
+
+const TYPE_COMPANY_MANUAL_SUBMITTED = "company_manual_payment_submitted";
+const TYPE_COMPANY_STK_RECEIVED = "company_stk_payment_received";
+const TYPE_COMPANY_PAYMENT_APPROVED = "company_payment_approved";
+const TYPE_COMPANY_SUB_ACTIVATED = "company_subscription_activated";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,6 +114,60 @@ function fmtIso(v: string | null | undefined): string {
   return new Date(t).toISOString();
 }
 
+function publicAppBillingUrl(): string {
+  const base = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");
+  return `${base}/billing`;
+}
+
+/** Same recipient rules as receipts / workspace-ready; never fails the request. */
+async function trySendCompanyCopy(input: {
+  admin: SupabaseClient;
+  logAdmin: SupabaseClient | null;
+  resendKey: string;
+  from: string;
+  companyId: string;
+  companyName: string;
+  companyDedupeKey: string;
+  emailType: string;
+  subject: string;
+  html: string;
+}): Promise<void> {
+  try {
+    if (await dedupeSent(input.admin, input.emailType, input.companyDedupeKey)) return;
+    const { data: rawEmail, error: rpcErr } = await input.admin.rpc("company_billing_contact_email", {
+      p_company_id: input.companyId,
+    });
+    if (rpcErr) {
+      console.warn("[notify-developer-transactional] company_billing_contact_email", rpcErr.message);
+      return;
+    }
+    const to = typeof rawEmail === "string" ? rawEmail.trim() : "";
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      console.warn("[notify-developer-transactional] company copy skipped — no contact email", input.companyId);
+      return;
+    }
+    const send = await sendResendWithEmailLog({
+      admin: input.logAdmin,
+      resendKey: input.resendKey,
+      from: input.from,
+      to,
+      subject: input.subject,
+      html: input.html,
+      email_type: input.emailType,
+      company_id: input.companyId,
+      company_name: input.companyName,
+      metadata: {
+        dedupe_key: input.companyDedupeKey,
+        branch: "company_copy",
+        source: "notify-developer-transactional",
+      },
+    });
+    if (!send.ok) console.warn("[notify-developer-transactional] company copy Resend failed", send.error);
+  } catch (e) {
+    console.warn("[notify-developer-transactional] company copy", e);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
@@ -161,41 +226,68 @@ Deno.serve(async (req: Request) => {
       if (!okMember) return jsonResponse({ error: "Forbidden" }, 403);
 
       const dedupeKey = `manual_submitted:${paymentId}`;
-      if (await dedupeSent(admin, TYPE_MANUAL_SUBMITTED, dedupeKey)) {
-        return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
-      }
+      const devDeduped = await dedupeSent(admin, TYPE_MANUAL_SUBMITTED, dedupeKey);
 
       const { data: comp } = await admin.schema("core").from("companies").select("name").eq("id", companyUuid).maybeSingle();
       const companyName = String((comp as { name?: string } | null)?.name ?? "Workspace");
 
-      const built = buildDeveloperManualPaymentSubmittedEmail({
+      let devResendId: string | undefined;
+      if (!devDeduped) {
+        const built = buildDeveloperManualPaymentSubmittedEmail({
+          companyName,
+          companyId: companyUuid,
+          paymentId,
+          plan: String(p.plan_id ?? "—"),
+          amount: fmtMoney(Number(p.amount ?? 0), String(p.currency ?? "KES")),
+          currency: String(p.currency ?? "KES"),
+          billingCycle: String(p.billing_cycle ?? "—"),
+          mpesaName: String(p.mpesa_name ?? "—"),
+          mpesaPhone: String(p.mpesa_phone ?? "—"),
+          transactionCode: String(p.transaction_code ?? "—"),
+          submittedAt: fmtIso(String(p.submitted_at ?? p.created_at ?? "")),
+        });
+
+        const send = await sendResendWithEmailLog({
+          admin: logAdmin,
+          resendKey,
+          from,
+          to: developerTo,
+          subject: built.subject,
+          html: built.html,
+          email_type: TYPE_MANUAL_SUBMITTED,
+          company_id: companyUuid,
+          company_name: companyName,
+          metadata: { dedupe_key: dedupeKey, payment_id: paymentId, source: "notify-developer-transactional" },
+        });
+        if (!send.ok) return jsonResponse({ error: send.error }, 500);
+        devResendId = send.resendId;
+      }
+
+      const billingUrl = publicAppBillingUrl();
+      const companyBuilt = buildCompanyManualPaymentSubmittedEmail({
         companyName,
-        companyId: companyUuid,
-        paymentId,
         plan: String(p.plan_id ?? "—"),
         amount: fmtMoney(Number(p.amount ?? 0), String(p.currency ?? "KES")),
         currency: String(p.currency ?? "KES"),
         billingCycle: String(p.billing_cycle ?? "—"),
-        mpesaName: String(p.mpesa_name ?? "—"),
-        mpesaPhone: String(p.mpesa_phone ?? "—"),
         transactionCode: String(p.transaction_code ?? "—"),
-        submittedAt: fmtIso(String(p.submitted_at ?? p.created_at ?? "")),
+        billingUrl,
       });
-
-      const send = await sendResendWithEmailLog({
-        admin: logAdmin,
+      await trySendCompanyCopy({
+        admin,
+        logAdmin,
         resendKey,
         from,
-        to: developerTo,
-        subject: built.subject,
-        html: built.html,
-        email_type: TYPE_MANUAL_SUBMITTED,
-        company_id: companyUuid,
-        company_name: companyName,
-        metadata: { dedupe_key: dedupeKey, payment_id: paymentId, source: "notify-developer-transactional" },
+        companyId: companyUuid,
+        companyName,
+        companyDedupeKey: `company_manual_submitted:${paymentId}`,
+        emailType: TYPE_COMPANY_MANUAL_SUBMITTED,
+        subject: companyBuilt.subject,
+        html: companyBuilt.html,
       });
-      if (!send.ok) return jsonResponse({ error: send.error }, 500);
-      return jsonResponse({ ok: true, id: send.resendId });
+
+      if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
+      return jsonResponse({ ok: true, id: devResendId });
     }
 
     if (event === "stk_payment_received") {
@@ -204,9 +296,7 @@ Deno.serve(async (req: Request) => {
       if (!checkoutRequestId) return jsonResponse({ error: "checkout_request_id required" }, 400);
 
       const dedupeKey = `stk_received:${checkoutRequestId}`;
-      if (await dedupeSent(admin, TYPE_STK_RECEIVED, dedupeKey)) {
-        return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
-      }
+      const devDeduped = await dedupeSent(admin, TYPE_STK_RECEIVED, dedupeKey);
 
       const { data: mp, error: me } = await admin.from("mpesa_payments").select("*").eq("checkout_request_id", checkoutRequestId).maybeSingle();
       if (me || !mp) return jsonResponse({ error: "mpesa_payments row not found" }, 404);
@@ -219,31 +309,60 @@ Deno.serve(async (req: Request) => {
       const companyName = String((comp as { name?: string } | null)?.name ?? "Workspace");
       const amt = m.amount != null ? fmtMoney(Number(m.amount), "KES") : "—";
 
-      const built = buildDeveloperStkPaymentReceivedEmail({
+      let devResendId: string | undefined;
+      if (!devDeduped) {
+        const built = buildDeveloperStkPaymentReceivedEmail({
+          companyName,
+          companyId,
+          checkoutRequestId,
+          mpesaReceipt: String(m.mpesa_receipt ?? "—"),
+          amount: amt,
+          phone: String(m.phone ?? "—"),
+          plan: String(m.plan ?? "—"),
+          billingCycle: String(m.billing_cycle ?? "—"),
+        });
+
+        const send = await sendResendWithEmailLog({
+          admin: logAdmin,
+          resendKey,
+          from,
+          to: developerTo,
+          subject: built.subject,
+          html: built.html,
+          email_type: TYPE_STK_RECEIVED,
+          company_id: companyId,
+          company_name: companyName,
+          metadata: { dedupe_key: dedupeKey, checkout_request_id: checkoutRequestId, source: "notify-developer-transactional" },
+        });
+        if (!send.ok) return jsonResponse({ error: send.error }, 500);
+        devResendId = send.resendId;
+      }
+
+      const billingUrl = publicAppBillingUrl();
+      const companyBuilt = buildCompanyStkPaymentReceivedEmail({
         companyName,
-        companyId,
-        checkoutRequestId,
         mpesaReceipt: String(m.mpesa_receipt ?? "—"),
         amount: amt,
         phone: String(m.phone ?? "—"),
         plan: String(m.plan ?? "—"),
         billingCycle: String(m.billing_cycle ?? "—"),
+        billingUrl,
       });
-
-      const send = await sendResendWithEmailLog({
-        admin: logAdmin,
+      await trySendCompanyCopy({
+        admin,
+        logAdmin,
         resendKey,
         from,
-        to: developerTo,
-        subject: built.subject,
-        html: built.html,
-        email_type: TYPE_STK_RECEIVED,
-        company_id: companyId,
-        company_name: companyName,
-        metadata: { dedupe_key: dedupeKey, checkout_request_id: checkoutRequestId, source: "notify-developer-transactional" },
+        companyId,
+        companyName,
+        companyDedupeKey: `company_copy_stk:${checkoutRequestId}`,
+        emailType: TYPE_COMPANY_STK_RECEIVED,
+        subject: companyBuilt.subject,
+        html: companyBuilt.html,
       });
-      if (!send.ok) return jsonResponse({ error: send.error }, 500);
-      return jsonResponse({ ok: true, id: send.resendId });
+
+      if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
+      return jsonResponse({ ok: true, id: devResendId });
     }
 
     if (event === "payment_approved") {
@@ -255,9 +374,7 @@ Deno.serve(async (req: Request) => {
       if (!paymentId) return jsonResponse({ error: "payment_id required" }, 400);
 
       const dedupeKey = `payment_approved:${paymentId}`;
-      if (await dedupeSent(admin, TYPE_PAYMENT_APPROVED, dedupeKey)) {
-        return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
-      }
+      const devDeduped = await dedupeSent(admin, TYPE_PAYMENT_APPROVED, dedupeKey);
 
       const { data: pay, error: pe } = await admin.from("subscription_payments").select("*").eq("id", paymentId).maybeSingle();
       if (pe || !pay) return jsonResponse({ error: "Payment not found" }, 404);
@@ -273,32 +390,61 @@ Deno.serve(async (req: Request) => {
       const { data: comp } = await admin.schema("core").from("companies").select("name").eq("id", companyUuid).maybeSingle();
       const companyName = String((comp as { name?: string } | null)?.name ?? "Workspace");
 
-      const built = buildDeveloperPaymentApprovedEmail({
+      let devResendId: string | undefined;
+      if (!devDeduped) {
+        const built = buildDeveloperPaymentApprovedEmail({
+          companyName,
+          companyId: companyUuid,
+          paymentId,
+          plan: String(p.plan_id ?? "—"),
+          amount: fmtMoney(Number(p.amount ?? 0), String(p.currency ?? "KES")),
+          currency: String(p.currency ?? "KES"),
+          billingCycle: String(p.billing_cycle ?? "—"),
+          transactionCode: String(p.transaction_code ?? "—"),
+          approvedAt: fmtIso(String(p.approved_at ?? "")),
+        });
+
+        const send = await sendResendWithEmailLog({
+          admin: logAdmin,
+          resendKey,
+          from,
+          to: developerTo,
+          subject: built.subject,
+          html: built.html,
+          email_type: TYPE_PAYMENT_APPROVED,
+          company_id: companyUuid,
+          company_name: companyName,
+          metadata: { dedupe_key: dedupeKey, payment_id: paymentId, source: "notify-developer-transactional" },
+        });
+        if (!send.ok) return jsonResponse({ error: send.error }, 500);
+        devResendId = send.resendId;
+      }
+
+      const billingUrl = publicAppBillingUrl();
+      const companyBuilt = buildCompanyPaymentApprovedEmail({
         companyName,
-        companyId: companyUuid,
-        paymentId,
         plan: String(p.plan_id ?? "—"),
         amount: fmtMoney(Number(p.amount ?? 0), String(p.currency ?? "KES")),
         currency: String(p.currency ?? "KES"),
         billingCycle: String(p.billing_cycle ?? "—"),
         transactionCode: String(p.transaction_code ?? "—"),
-        approvedAt: fmtIso(String(p.approved_at ?? "")),
+        billingUrl,
       });
-
-      const send = await sendResendWithEmailLog({
-        admin: logAdmin,
+      await trySendCompanyCopy({
+        admin,
+        logAdmin,
         resendKey,
         from,
-        to: developerTo,
-        subject: built.subject,
-        html: built.html,
-        email_type: TYPE_PAYMENT_APPROVED,
-        company_id: companyUuid,
-        company_name: companyName,
-        metadata: { dedupe_key: dedupeKey, payment_id: paymentId, source: "notify-developer-transactional" },
+        companyId: companyUuid,
+        companyName,
+        companyDedupeKey: `company_payment_approved:${paymentId}`,
+        emailType: TYPE_COMPANY_PAYMENT_APPROVED,
+        subject: companyBuilt.subject,
+        html: companyBuilt.html,
       });
-      if (!send.ok) return jsonResponse({ error: send.error }, 500);
-      return jsonResponse({ ok: true, id: send.resendId });
+
+      if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
+      return jsonResponse({ ok: true, id: devResendId });
     }
 
     if (event === "subscription_activated") {
@@ -323,9 +469,7 @@ Deno.serve(async (req: Request) => {
         const checkoutRequestId = typeof body.checkout_request_id === "string" ? body.checkout_request_id.trim() : "";
         if (!checkoutRequestId) return jsonResponse({ error: "checkout_request_id required" }, 400);
         const dedupeKey = `sub_act_stk:${checkoutRequestId}`;
-        if (await dedupeSent(admin, TYPE_SUB_ACTIVATED, dedupeKey)) {
-          return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
-        }
+        const devDeduped = await dedupeSent(admin, TYPE_SUB_ACTIVATED, dedupeKey);
 
         const { data: mp } = await admin.from("mpesa_payments").select("*").eq("checkout_request_id", checkoutRequestId).maybeSingle();
         const m = mp as Record<string, unknown> | null;
@@ -346,39 +490,64 @@ Deno.serve(async (req: Request) => {
         const { data: sp } = await admin.from("subscription_payments").select("id").eq("company_id", companyUuid).order("approved_at", { ascending: false }).limit(1).maybeSingle();
         paymentId = (sp as { id?: string } | null)?.id;
 
-        const built = buildDeveloperSubscriptionActivatedEmail({
+        let devResendId: string | undefined;
+        if (!devDeduped) {
+          const built = buildDeveloperSubscriptionActivatedEmail({
+            companyName,
+            companyId: companyUuid,
+            source: "M-Pesa STK",
+            paymentId,
+            plan,
+            billingCycle,
+            activeUntil,
+          });
+
+          const send = await sendResendWithEmailLog({
+            admin: logAdmin,
+            resendKey,
+            from,
+            to: developerTo,
+            subject: built.subject,
+            html: built.html,
+            email_type: TYPE_SUB_ACTIVATED,
+            company_id: companyUuid,
+            company_name: companyName,
+            metadata: { dedupe_key: dedupeKey, checkout_request_id: checkoutRequestId, source: "notify-developer-transactional" },
+          });
+          if (!send.ok) return jsonResponse({ error: send.error }, 500);
+          devResendId = send.resendId;
+        }
+
+        const billingUrl = publicAppBillingUrl();
+        const companyBuilt = buildCompanySubscriptionActivatedEmail({
           companyName,
-          companyId: companyUuid,
-          source: "M-Pesa STK",
-          paymentId,
           plan,
           billingCycle,
           activeUntil,
+          billingUrl,
         });
-
-        const send = await sendResendWithEmailLog({
-          admin: logAdmin,
+        await trySendCompanyCopy({
+          admin,
+          logAdmin,
           resendKey,
           from,
-          to: developerTo,
-          subject: built.subject,
-          html: built.html,
-          email_type: TYPE_SUB_ACTIVATED,
-          company_id: companyUuid,
-          company_name: companyName,
-          metadata: { dedupe_key: dedupeKey, checkout_request_id: checkoutRequestId, source: "notify-developer-transactional" },
+          companyId: companyUuid,
+          companyName,
+          companyDedupeKey: `company_sub_act_stk:${checkoutRequestId}`,
+          emailType: TYPE_COMPANY_SUB_ACTIVATED,
+          subject: companyBuilt.subject,
+          html: companyBuilt.html,
         });
-        if (!send.ok) return jsonResponse({ error: send.error }, 500);
-        return jsonResponse({ ok: true, id: send.resendId });
+
+        if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
+        return jsonResponse({ ok: true, id: devResendId });
       }
 
       // manual_approval
       const pid = typeof body.payment_id === "string" ? body.payment_id.trim() : "";
       if (!pid) return jsonResponse({ error: "payment_id required" }, 400);
       const dedupeKey = `sub_act_manual:${pid}`;
-      if (await dedupeSent(admin, TYPE_SUB_ACTIVATED, dedupeKey)) {
-        return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
-      }
+      const devDeduped = await dedupeSent(admin, TYPE_SUB_ACTIVATED, dedupeKey);
 
       const { data: pay, error: pe } = await admin.from("subscription_payments").select("*").eq("id", pid).maybeSingle();
       if (pe || !pay) return jsonResponse({ error: "Payment not found" }, 404);
@@ -396,30 +565,57 @@ Deno.serve(async (req: Request) => {
       const { data: comp } = await admin.schema("core").from("companies").select("name").eq("id", companyUuid).maybeSingle();
       companyName = String((comp as { name?: string } | null)?.name ?? "Workspace");
 
-      const built = buildDeveloperSubscriptionActivatedEmail({
+      let devResendId: string | undefined;
+      if (!devDeduped) {
+        const built = buildDeveloperSubscriptionActivatedEmail({
+          companyName,
+          companyId: companyUuid,
+          source: "Manual approval",
+          paymentId: pid,
+          plan,
+          billingCycle,
+          activeUntil,
+        });
+
+        const send = await sendResendWithEmailLog({
+          admin: logAdmin,
+          resendKey,
+          from,
+          to: developerTo,
+          subject: built.subject,
+          html: built.html,
+          email_type: TYPE_SUB_ACTIVATED,
+          company_id: companyUuid,
+          company_name: companyName,
+          metadata: { dedupe_key: dedupeKey, payment_id: pid, source: "notify-developer-transactional" },
+        });
+        if (!send.ok) return jsonResponse({ error: send.error }, 500);
+        devResendId = send.resendId;
+      }
+
+      const billingUrl = publicAppBillingUrl();
+      const companyBuilt = buildCompanySubscriptionActivatedEmail({
         companyName,
-        companyId: companyUuid,
-        source: "Manual approval",
-        paymentId: pid,
         plan,
         billingCycle,
         activeUntil,
+        billingUrl,
       });
-
-      const send = await sendResendWithEmailLog({
-        admin: logAdmin,
+      await trySendCompanyCopy({
+        admin,
+        logAdmin,
         resendKey,
         from,
-        to: developerTo,
-        subject: built.subject,
-        html: built.html,
-        email_type: TYPE_SUB_ACTIVATED,
-        company_id: companyUuid,
-        company_name: companyName,
-        metadata: { dedupe_key: dedupeKey, payment_id: pid, source: "notify-developer-transactional" },
+        companyId: companyUuid,
+        companyName,
+        companyDedupeKey: `company_sub_act_manual:${pid}`,
+        emailType: TYPE_COMPANY_SUB_ACTIVATED,
+        subject: companyBuilt.subject,
+        html: companyBuilt.html,
       });
-      if (!send.ok) return jsonResponse({ error: send.error }, 500);
-      return jsonResponse({ ok: true, id: send.resendId });
+
+      if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
+      return jsonResponse({ ok: true, id: devResendId });
     }
 
     return jsonResponse({ error: "Unknown event" }, 400);
