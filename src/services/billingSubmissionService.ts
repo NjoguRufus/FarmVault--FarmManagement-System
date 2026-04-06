@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { invokeNotifyDeveloperTransactional } from '@/lib/email';
+import {
+  invokeNotifyCompanyManualPaymentSubmitted,
+  invokeNotifyDeveloperTransactional,
+} from '@/lib/email';
 import { mpesaRowIndicatesConfirmedPayment, mpesaRowIndicatesFailedPayment } from '@/services/subscriptionService';
-import { supabase } from '@/lib/supabase';
+import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 
 type TokenProvider = () => Promise<string | null>;
@@ -105,14 +108,29 @@ export async function createPaymentSubmission(
   }
   // eslint-disable-next-line no-console
   console.log('[BillingSubmit] submit_manual_subscription_payment → public.subscription_payments id:', id);
-  if (getToken) {
-    void invokeNotifyDeveloperTransactional(
-      { event: 'manual_payment_submitted', payment_id: id },
-      getToken,
-    ).catch(() => {
-      /* non-fatal */
+  const notifyToken = getToken ?? getSupabaseAccessToken;
+  const { data: payRow } = await sb
+    .from('subscription_payments')
+    .select('company_id')
+    .eq('id', id)
+    .maybeSingle();
+  const companyId =
+    payRow && typeof (payRow as { company_id?: unknown }).company_id === 'string'
+      ? String((payRow as { company_id: string }).company_id).trim()
+      : '';
+  if (companyId) {
+    void invokeNotifyCompanyManualPaymentSubmitted({ companyId, paymentId: id }, notifyToken).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[BillingSubmit] notify company (manual awaiting approval) failed:', err);
     });
   }
+  void invokeNotifyDeveloperTransactional(
+    { event: 'manual_payment_submitted', payment_id: id },
+    notifyToken,
+  ).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[BillingSubmit] notify developer (manual_payment_submitted) failed:', err);
+  });
   return id;
 }
 

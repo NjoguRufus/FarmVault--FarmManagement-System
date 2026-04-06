@@ -1,6 +1,6 @@
-import { invokeNotifyDeveloperTransactional } from '@/lib/email';
+import { invokeNotifyCompanyTransactional, invokeNotifyDeveloperTransactional } from '@/lib/email';
 import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
-import { issueBillingReceiptForPayment } from '@/services/receiptsService';
+import { sendCompanyPaymentReceipt } from '@/services/receiptsService';
 import {
   getDevDashboardKpis,
   listCompanies,
@@ -251,21 +251,50 @@ export async function approveSubscriptionPayment(
   // eslint-disable-next-line no-console
   console.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
 
+  // eslint-disable-next-line no-console
+  console.log('PAYMENT EMAIL TRIGGERED', payment?.company_id ?? '(unknown)');
+  try {
+    await sendCompanyPaymentReceipt(id, getSupabaseAccessToken, { sendEmail: false });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('PAYMENT RECEIPT PDF ERROR (billing-receipt-issue):', e);
+  }
+
+  let companyIdForNotify =
+    payment?.company_id != null && String(payment.company_id).trim() !== ''
+      ? String(payment.company_id).trim()
+      : '';
+  if (!companyIdForNotify) {
+    const { data: payRow } = await supabase
+      .from('subscription_payments')
+      .select('company_id')
+      .eq('id', id)
+      .maybeSingle();
+    companyIdForNotify =
+      payRow?.company_id != null && String(payRow.company_id).trim() !== ''
+        ? String(payRow.company_id).trim()
+        : '';
+  }
+  if (companyIdForNotify) {
+    void invokeNotifyCompanyTransactional(
+      {
+        companyId: companyIdForNotify,
+        kind: 'payment_received',
+        subscriptionPaymentId: id,
+      },
+      getSupabaseAccessToken,
+    ).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.error('PAYMENT EMAIL ERROR (notify-company-transactional):', e);
+    });
+  }
+
+  // Single developer alert after receipt (notifyDeveloperTransaction / alerts@).
   void invokeNotifyDeveloperTransactional(
     { event: 'payment_approved', payment_id: id },
     getSupabaseAccessToken,
   ).catch(() => {
     /* non-fatal */
-  });
-  void invokeNotifyDeveloperTransactional(
-    { event: 'subscription_activated', source: 'manual_approval', payment_id: id },
-    getSupabaseAccessToken,
-  ).catch(() => {
-    /* non-fatal */
-  });
-
-  void issueBillingReceiptForPayment(id, getSupabaseAccessToken, { sendEmail: true }).catch(() => {
-    /* non-fatal — company may issue from Billing if this fails */
   });
 }
 

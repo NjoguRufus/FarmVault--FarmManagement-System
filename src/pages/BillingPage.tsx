@@ -39,7 +39,7 @@ import { BillingCycleSelector } from '@/components/subscription/billing/BillingC
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import {
   createReceiptPdfSignedUrl,
-  issueBillingReceiptForPayment,
+  sendCompanyPaymentReceipt,
   listReceiptsForCompany,
   type BillingReceiptRow,
 } from '@/services/receiptsService';
@@ -237,7 +237,7 @@ export default function BillingPage() {
       if (!companyId) return;
       setReceiptIssuingPaymentId(paymentId);
       try {
-        await issueBillingReceiptForPayment(paymentId, undefined, { sendEmail: false });
+        await sendCompanyPaymentReceipt(paymentId, undefined, { sendEmail: false });
         const rows = await listReceiptsForCompany(companyId);
         await queryClient.invalidateQueries({ queryKey: ['billing-receipts', 'company', companyId] });
         const key = billingPaymentLookupKey(paymentId);
@@ -302,7 +302,7 @@ export default function BillingPage() {
     void (async () => {
       for (const p of missing) {
         try {
-          await issueBillingReceiptForPayment(p.id, undefined, { sendEmail: false });
+          await sendCompanyPaymentReceipt(p.id, undefined, { sendEmail: false });
         } catch (e) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console

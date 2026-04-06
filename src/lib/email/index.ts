@@ -14,3 +14,5 @@ export * from './invokeNotifyAmbassadorOnboarding';
 export * from './invokeNotifyDeveloperCompanyRegistered';
 export * from './invokeNotifyDeveloperTransactional';
 export * from './invokeNotifyCompanyProTrialStarted';
+export * from './invokeNotifyCompanyManualPaymentSubmitted';
+export * from './invokeNotifyCompanyTransactional';

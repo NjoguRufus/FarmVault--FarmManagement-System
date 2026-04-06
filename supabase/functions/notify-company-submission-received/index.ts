@@ -1,7 +1,8 @@
 // Public (anon-key) invoke: user confirmation + optional admin notify. No Supabase user JWT.
 //
 // Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs), SUPABASE_ANON_KEY (caller check).
-// Optional: FARMVAULT_EMAIL_FROM; developer copy uses FARMVAULT_DEVELOPER_INBOX_EMAIL (see farmvaultDeveloperInbox.ts)
+// Optional: FARMVAULT_EMAIL_FROM_ONBOARDING / FARMVAULT_EMAIL_FROM_ALERTS;
+//   developer copy uses FARMVAULT_DEVELOPER_INBOX_EMAIL (see farmvaultDeveloperInbox.ts)
 //
 // Body:
 //   to, companyName, dashboardUrl (user confirmation — unchanged)
@@ -19,6 +20,7 @@ import {
   buildOnboardingCompleteDeveloperNotifyEmail,
 } from "../_shared/farmvault-email/onboardingAdminNotifyTemplate.ts";
 import { buildSubmissionReceivedEmail } from "../_shared/farmvault-email/submissionReceivedTemplate.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const EMAIL_LOG_TYPE_USER = "submission_received";
@@ -30,7 +32,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -213,12 +214,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+    const fromUser = getFarmVaultEmailFrom("onboarding");
+    const fromAdmin = getFarmVaultEmailFrom("developer");
 
     const userSend = await sendResendWithEmailLog({
       admin,
       resendKey,
-      from,
+      from: fromUser,
       to,
       subject,
       html,
@@ -264,7 +266,7 @@ Deno.serve(async (req: Request) => {
     const adminSend = await sendResendWithEmailLog({
       admin,
       resendKey,
-      from,
+      from: fromAdmin,
       to: adminRecipient,
       subject: adminBuilt.subject,
       html: adminBuilt.html,

@@ -2,7 +2,7 @@
 // Invoke with Supabase publishable/anon key only (no Clerk JWT at gateway).
 //
 // Secrets: RESEND_API_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
-// Optional: FARMVAULT_EMAIL_FROM, FARMVAULT_DEVELOPER_INBOX_EMAIL (default farmvaultke@gmail.com)
+// Optional: FARMVAULT_EMAIL_FROM_DEVELOPER; FARMVAULT_DEVELOPER_INBOX_EMAIL
 //
 // Body: { company_id: string } — must match a workspace with onboarding_completed = true.
 //
@@ -13,11 +13,11 @@ import {
   buildDeveloperCompanyRegisteredNotifyEmail,
   type DeveloperCompanyRegisteredAmbassador,
 } from "../_shared/farmvault-email/developerCompanyRegisteredNotifyTemplate.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const EMAIL_LOG_TYPE = "company_registration_developer_notify";
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -305,7 +305,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+    const from = getFarmVaultEmailFrom("developer");
     const developerTo = getFarmvaultDeveloperInboxEmail();
 
     const send = await sendResendWithEmailLog({

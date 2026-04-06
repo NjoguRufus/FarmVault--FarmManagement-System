@@ -70,3 +70,7 @@ verify_jwt = false
 
 [functions.notify-ambassador-onboarding]
 verify_jwt = false
+
+# Secret header only; no Supabase JWT.
+[functions.farmvault-email-test]
+verify_jwt = false

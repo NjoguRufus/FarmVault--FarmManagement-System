@@ -1,7 +1,7 @@
 // Developer-triggered: send workspace-ready email via Resend (no database reads in this function).
 //
 // Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs).
-// Optional: FARMVAULT_EMAIL_FROM
+// Optional: FARMVAULT_EMAIL_FROM_ONBOARDING
 // Auth: Authorization Bearer + Supabase anon + is_developer() RPC (no table reads here).
 //
 // Body JSON (caller resolves recipient — no company table reads here):
@@ -16,6 +16,7 @@ import {
   updateEmailLogRow,
 } from "../_shared/emailLogs.ts";
 import { buildCompanyApprovedEmail } from "../_shared/farmvault-email/companyApprovedTemplate.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 
 const EMAIL_LOG_TYPE = "workspace_ready";
 
@@ -24,7 +25,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -214,7 +214,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+    const from = getFarmVaultEmailFrom("onboarding");
 
     let logId: string | null = null;
     if (admin) {

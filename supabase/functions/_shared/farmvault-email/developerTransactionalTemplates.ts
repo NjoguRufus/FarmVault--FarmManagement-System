@@ -79,7 +79,7 @@ export function buildDeveloperStkPaymentReceivedEmail(input: {
         ["Billing cycle", escapeHtml(input.billingCycle)],
       ],
     ),
-    subject: `STK payment received — ${input.companyName}`,
+    subject: "New Payment Approved",
   };
 }
 
@@ -109,7 +109,7 @@ export function buildDeveloperPaymentApprovedEmail(input: {
         ["Approved", escapeHtml(input.approvedAt)],
       ],
     ),
-    subject: `Payment approved — ${input.companyName}`,
+    subject: "New Payment Approved",
   };
 }
 
@@ -135,6 +135,6 @@ export function buildDeveloperSubscriptionActivatedEmail(input: {
   }
   return {
     ...shell("Subscription activated", "A workspace subscription is now active.", rows),
-    subject: `Subscription activated — ${input.companyName}`,
+    subject: "New Payment Approved",
   };
 }

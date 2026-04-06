@@ -2,8 +2,8 @@
  * FarmVault transactional email to a workspace contact (Resend + email_logs).
  * Same pipeline as notify-company-transactional (e.g. pro trial) and billing-receipt-issue.
  *
- * For payment receipts with PDF attachment, the billing-receipt-issue Edge function
- * builds HTML + PDF and uses sendReceiptEmail; that path is equivalent in logging terms.
+ * Use `EMAIL_SENDERS` / `getFarmVaultEmailFrom` from `farmvaultEmailFrom.ts` for `from`.
+ * For payment receipts with PDF, billing-receipt-issue uses companyEmailPipeline (core.companies.email).
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendResendWithEmailLog } from "./resendSendLogged.ts";

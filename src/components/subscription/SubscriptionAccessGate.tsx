@@ -87,7 +87,7 @@ export function SubscriptionAccessGate({ children }: { children: React.ReactElem
           <Button variant="outline" onClick={() => navigate('/about')}>
             Take a Quick Tour
           </Button>
-          <Button variant="outline" onClick={() => window.location.assign('mailto:support@farmvault.co.ke')}>
+          <Button variant="outline" onClick={() => window.location.assign('mailto:support@farmvault.africa')}>
             <Mail className="h-4 w-4 mr-2" />
             Contact Support
           </Button>

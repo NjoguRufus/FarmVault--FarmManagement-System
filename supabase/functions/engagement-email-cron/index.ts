@@ -5,7 +5,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY         — required (DB reads + email_logs)
 //   SUPABASE_URL                      — required
 //   ENGAGEMENT_EMAIL_CRON_SECRET      — required; Bearer token from cron (match Vault secret)
-// Optional: FARMVAULT_EMAIL_FROM, FARMVAULT_PUBLIC_APP_URL (default https://farmvault.africa)
+// Optional: FARMVAULT_EMAIL_FROM_ALERTS (trial/daily/engagement); FARMVAULT_PUBLIC_APP_URL
 //
 // Body JSON: { "run": "morning" | "evening" | "inactivity" | "weekly" | "trial_expiring" | "trial_expired" }
 //
@@ -15,10 +15,10 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { buildTrialEndingEmail } from "../_shared/farmvault-email/trialEndingTemplate.ts";
 import { buildTrialExpiredEmail } from "../_shared/farmvault-email/trialExpiredTemplate.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
 
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const TYPE_MORNING = "engagement_morning";
@@ -902,7 +902,7 @@ Deno.serve(async (req: Request) => {
 
   const admin = createServiceRoleSupabaseClient(supabaseUrl, serviceKey);
   const logAdmin = getServiceRoleClientForEmailLogs();
-  const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+  const from = getFarmVaultEmailFrom("alerts");
   const appUrl = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");
 
   const base = { admin, logAdmin, resendKey, from, appUrl };
