@@ -90,9 +90,9 @@ function paymentHistoryDisplayIso(p: PaymentSubmissionRow): string | null {
   return p.approved_at ?? p.submitted_at ?? p.created_at ?? null;
 }
 
-/** Status label for tenant table: STK mirrors show “Paid” like developer “STK Confirmed”. */
+/** Status label for tenant table: approved rows show “Paid” (manual + STK). */
 function tenantPaymentStatusMeta(p: PaymentSubmissionRow): { label: string; className: string } {
-  if (paymentRowKind(p) === 'stk' && String(p.status).toLowerCase() === 'approved') {
+  if (String(p.status).toLowerCase() === 'approved') {
     return { label: 'Paid', className: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' };
   }
   return paymentStatusMeta(String(p.status));
@@ -157,6 +157,9 @@ export default function BillingPage() {
     queryKey: ['company-billing', companyId],
     enabled: !!companyId,
     queryFn: () => getCompany(companyId!),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   const { data: subRow, isLoading: subLoading } = useQuery({
@@ -170,6 +173,20 @@ export default function BillingPage() {
     enabled: !!companyId && !isDeveloper,
     queryFn: () => listCompanySubscriptionPayments(companyId!),
   });
+
+  const paymentsSyncKey = useMemo(
+    () =>
+      (payments as PaymentSubmissionRow[])
+        .map((p) => `${p.id}:${String(p.status).toLowerCase()}:${p.amount}`)
+        .sort()
+        .join('|'),
+    [payments],
+  );
+
+  useEffect(() => {
+    if (!companyId || isDeveloper || paymentsLoading) return;
+    void queryClient.refetchQueries({ queryKey: ['company-billing', companyId], type: 'active' });
+  }, [companyId, isDeveloper, paymentsLoading, paymentsSyncKey, queryClient]);
 
   const {
     data: billingReceipts = [],
@@ -745,6 +762,7 @@ export default function BillingPage() {
               <span className="font-medium text-foreground">View receipt</span>. STK-only rows show the M-Pesa receipt
               code.
             </p>
+
             <div className="mt-4 overflow-x-auto rounded-xl border border-border/50">
               {paymentsLoading ? (
                 <p className="p-6 text-sm text-muted-foreground">Loading payments…</p>
@@ -754,7 +772,7 @@ export default function BillingPage() {
                 <table className="fv-table-mobile w-full min-w-0 text-left text-sm md:min-w-[960px]">
                   <thead>
                     <tr className="border-b border-border/60 bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Paid at</th>
                       <th className="px-4 py-3">Type</th>
                       <th className="px-4 py-3">Plan</th>
                       <th className="px-4 py-3">Cycle</th>
@@ -783,7 +801,7 @@ export default function BillingPage() {
                         >
                           <td
                             className="whitespace-nowrap px-4 py-3 text-muted-foreground max-md:px-0"
-                            data-label="Date"
+                            data-label="Paid at"
                           >
                             {displayIso ? format(parseISO(displayIso), 'PPp') : '—'}
                           </td>

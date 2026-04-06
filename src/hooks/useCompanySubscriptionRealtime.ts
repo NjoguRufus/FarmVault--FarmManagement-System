@@ -33,8 +33,23 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
     const mpesaFilter = `company_id=eq.${companyId.trim()}`;
     const channelName = `workspace_subscription_billing:${companyId}`;
 
+    const companyCoreFilter = `id=eq.${companyId.trim()}`;
     const channel = supabase
       .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'core', table: 'companies', filter: companyCoreFilter },
+        (payload) => {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.log('[SubscriptionRealtime] core.companies change', {
+              companyId,
+              event: payload.eventType,
+            });
+          }
+          refetchWorkspaceBillingQueries(queryClient, companyId);
+        },
+      )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'company_subscriptions', filter: subFilter },
