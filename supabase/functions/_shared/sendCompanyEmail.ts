@@ -1,24 +1,39 @@
 /**
- * FarmVault transactional email to a workspace contact (Resend + email_logs).
- * Same pipeline as notify-company-transactional (e.g. pro trial) and billing-receipt-issue.
+ * FarmVault unified company email sender.
  *
- * Use `EMAIL_SENDERS` / `getFarmVaultEmailFrom` from `farmvaultEmailFrom.ts` for `from`.
- * For payment receipts with PDF, billing-receipt-issue uses companyEmailPipeline (core.companies.email).
+ * Pass `type` and the correct sender is resolved automatically:
+ *   "onboarding" → FarmVault <hello@farmvault.africa>
+ *   "billing"    → FarmVault Billing <billing@farmvault.africa>
+ *   "alerts"     → FarmVault Alerts <alerts@farmvault.africa>
+ *
+ * All sends are logged to email_logs via sendResendWithEmailLog.
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getFarmVaultEmailFrom } from "./farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "./resendSendLogged.ts";
 
+export type CompanyEmailType = "onboarding" | "billing" | "alerts";
+
+export function getSender(type: CompanyEmailType): string {
+  if (type === "billing") return getFarmVaultEmailFrom("billing");
+  if (type === "alerts") return getFarmVaultEmailFrom("alerts");
+  return getFarmVaultEmailFrom("onboarding");
+}
+
 export type SendCompanyEmailInput = {
-  admin: SupabaseClient | null;
-  resendKey: string;
-  from: string;
   to: string;
   subject: string;
   html: string;
+  /** Determines sender address. "onboarding"→hello@ "billing"→billing@ "alerts"→alerts@ */
+  type: CompanyEmailType;
+  admin: SupabaseClient | null;
+  resendKey: string;
   companyId: string;
   companyName: string;
+  /** Logical email type persisted in email_logs (e.g. "company_payment_received"). */
   email_type: string;
   metadata: Record<string, unknown>;
+  attachments?: { filename: string; content: string }[];
 };
 
 export async function sendCompanyEmail(
@@ -29,7 +44,7 @@ export async function sendCompanyEmail(
   return sendResendWithEmailLog({
     admin: input.admin,
     resendKey: input.resendKey,
-    from: input.from,
+    from: getSender(input.type),
     to: input.to,
     subject: input.subject,
     html: input.html,
@@ -37,5 +52,6 @@ export async function sendCompanyEmail(
     company_id: input.companyId,
     company_name: input.companyName,
     metadata: input.metadata,
+    attachments: input.attachments,
   });
 }

@@ -86,9 +86,11 @@ export function getFarmVaultEmailFromForEmailType(emailType: string): string {
     "company_payment_received",
     "payment_received",
     "payment_approved",
+    "company_payment_approved",
     "billing_receipt",
     "company_manual_payment_awaiting_approval",
     "company_manual_payment_submitted",
+    "company_stk_payment_received",
     "subscription_activated",
   ]);
   if (billingTypes.has(t)) return getFarmVaultEmailFrom("billing");

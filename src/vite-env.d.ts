@@ -18,6 +18,8 @@ interface ImportMetaEnv {
   readonly VITE_MPESA_TILL_NUMBER?: string;
   /** Display name for M-Pesa till (e.g. FarmVault). */
   readonly VITE_MPESA_BUSINESS_NAME?: string;
+  /** When "false", hides M-Pesa STK push on billing checkout; default is on. */
+  readonly VITE_ENABLE_MPESA_STK?: string;
   /** PostHog project API key (public). Preferred name for new setups. */
   readonly VITE_PUBLIC_POSTHOG_PROJECT_TOKEN?: string;
   /** @deprecated use VITE_PUBLIC_POSTHOG_PROJECT_TOKEN */

@@ -21,6 +21,10 @@ Allow: /farm-budget-guides
 Allow: /farm-chemicals-guide
 Allow: /crop-disease-database
 Allow: /farm-calculators
+Allow: /learn
+Allow: /faq
+Allow: /what-is-farmvault
+Allow: /agriculture-software-kenya
 
 # Block authenticated/private areas
 Disallow: /admin
@@ -59,5 +63,6 @@ Disallow: /feedback
 Disallow: /support
 Disallow: /accept-invitation
 
-# Sitemap
+# Sitemap & AI discovery
 Sitemap: https://farmvault.africa/sitemap.xml
+LLM: https://farmvault.africa/llm.txt

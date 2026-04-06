@@ -7,8 +7,10 @@
 // `/api/mpesa/callback` → `https://<ref>.supabase.co/functions/v1/mpesa-stk-callback` if needed.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { readMpesaEnvMode } from "../_shared/mpesaConfig.ts";
 import { sendCompanyPaymentReceipt } from "../_shared/sendCompanyPaymentReceipt.ts";
+import { handleSuccessfulPayment } from "../_shared/handleSuccessfulPayment.ts";
 
 function metadataItem(metadata: unknown, name: string): string | null {
   if (!metadata || typeof metadata !== "object") return null;
@@ -78,8 +80,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
     if (supabaseUrl && serviceKey) {
       const admin = createClient(supabaseUrl, serviceKey);
       const { error: insertErr } = await admin.from("mpesa_stk_callbacks").insert({
@@ -125,6 +127,9 @@ Deno.serve(async (req) => {
         }
 
         const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+        const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
+        const logAdmin = getServiceRoleClientForEmailLogs();
+        const appUrl = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");
         const postDeveloperNotify = (jsonBody: Record<string, unknown>) => {
           const base = (supabaseUrl ?? "").replace(/\/$/, "");
           if (!base || !serviceKey) return Promise.resolve(new Response("", { status: 204 }));
@@ -138,22 +143,31 @@ Deno.serve(async (req) => {
             body: JSON.stringify(jsonBody),
           });
         };
-
         const logDevNotifyFailure = (label: string, r: Response, t: string) => {
           console.error(`[mpesa-stk-callback] ${label} failed`, r.status, t.slice(0, 400));
         };
-
-        // Activate + company receipt (sendCompanyPaymentReceipt → billing-receipt-issue) before developer alerts.
+        // Activate + PDF receipt; unified success email / admin / commission via handleSuccessfulPayment.
         const stkCompanyId =
           payBefore != null && payBefore.company_id != null && String(payBefore.company_id).trim() !== ""
             ? String(payBefore.company_id).trim()
             : "";
+
         if (success && stkCompanyId) {
           const { data: subPayId, error: actErr } = await admin.rpc("activate_subscription_from_mpesa_stk", {
             _checkout_request_id: checkoutId,
           });
           if (actErr) {
             console.error("[mpesa-stk-callback] activate_subscription_from_mpesa_stk", actErr.message);
+            postDeveloperNotify({
+              event: "stk_payment_received",
+              checkout_request_id: checkoutId,
+            })
+              .then((r) => {
+                if (!r.ok) {
+                  return r.text().then((t) => logDevNotifyFailure("notify stk_payment_received", r, t));
+                }
+              })
+              .catch((e) => console.error("[mpesa-stk-callback] notify stk_payment_received", e));
           } else {
             console.log("[mpesa-stk-callback] subscription activated for checkout", checkoutId);
           }
@@ -162,7 +176,7 @@ Deno.serve(async (req) => {
             subPayId != null && String(subPayId).trim() !== "" ? String(subPayId).trim() : null;
           if (!payId) {
             console.warn(
-              "[mpesa-stk-callback] no subscription_payment id after activation — customer receipt email skipped",
+              "[mpesa-stk-callback] no subscription_payment id after activation — unified success handler skipped",
               { checkoutId, stkCompanyId },
             );
           }
@@ -175,50 +189,50 @@ Deno.serve(async (req) => {
               subscriptionPaymentId: payId,
               sendEmail: false,
             });
-            const base = supabaseUrl.replace(/\/$/, "");
-            const payNotify = await fetch(`${base}/functions/v1/notify-company-transactional`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${serviceKey}`,
-                apikey: anonKey ?? serviceKey,
-              },
-              body: JSON.stringify({
-                company_id: stkCompanyId,
-                kind: "payment_received",
-                subscription_payment_id: payId,
-              }),
-            });
-            if (!payNotify.ok) {
-              const t = await payNotify.text().catch(() => "");
-              console.error("[mpesa-stk-callback] notify-company-transactional payment_received", payNotify.status, t.slice(0, 400));
-            }
-          }
 
-          // One developer email per callback: STK-only if activation failed; otherwise subscription activated (includes renewals).
-          if (actErr) {
-            postDeveloperNotify({
-              event: "stk_payment_received",
-              checkout_request_id: checkoutId,
-            })
-              .then((r) => {
-                if (!r.ok) {
-                  return r.text().then((t) => logDevNotifyFailure("notify stk_payment_received", r, t));
+            const companyIdForSuccess =
+              payBefore?.company_id != null ? String(payBefore.company_id).trim() : stkCompanyId;
+            if (companyIdForSuccess && resendKey) {
+              if (!logAdmin) {
+                console.warn(
+                  "[mpesa-stk-callback] email_logs client unavailable — sending success emails without DB logging",
+                );
+              }
+              const { data: stkCompanyRow } = await admin
+                .schema("core")
+                .from("companies")
+                .select("email")
+                .eq("id", companyIdForSuccess)
+                .maybeSingle();
+              const companyEmail =
+                stkCompanyRow != null && typeof (stkCompanyRow as { email?: string }).email === "string"
+                  ? String((stkCompanyRow as { email: string }).email).trim()
+                  : "";
+              console.log(
+                "Sending success email to:",
+                companyEmail || "(resolved in handleSuccessfulPayment — see next log line)",
+              );
+              try {
+                const succ = await handleSuccessfulPayment({
+                  admin,
+                  logAdmin,
+                  resendKey,
+                  appUrl,
+                  companyId: companyIdForSuccess,
+                  subscriptionPaymentId: payId,
+                  source: "mpesa_stk_callback",
+                });
+                if (!succ.ok) {
+                  console.error("[mpesa-stk-callback] handleSuccessfulPayment failed", succ.status, succ.error);
+                } else if ("skipped" in succ && succ.skipped) {
+                  console.log("[mpesa-stk-callback] handleSuccessfulPayment skipped:", succ.reason);
                 }
-              })
-              .catch((e) => console.error("[mpesa-stk-callback] notify stk_payment_received", e));
-          } else {
-            postDeveloperNotify({
-              event: "subscription_activated",
-              source: "mpesa_stk",
-              checkout_request_id: checkoutId,
-            })
-              .then((r) => {
-                if (!r.ok) {
-                  return r.text().then((t) => logDevNotifyFailure("notify subscription_activated", r, t));
-                }
-              })
-              .catch((e) => console.error("[mpesa-stk-callback] notify subscription_activated", e));
+              } catch (e) {
+                console.error("[mpesa-stk-callback] handleSuccessfulPayment threw", e);
+              }
+            } else if (companyIdForSuccess && !resendKey) {
+              console.error("[mpesa-stk-callback] RESEND_API_KEY missing — success emails / commission not run");
+            }
           }
         } else if (success && !stkCompanyId) {
           console.log("[mpesa-stk-callback] STK success without company_id on mpesa_payments — skip activate/receipt", {

@@ -10,13 +10,10 @@
 // Deploy: npx supabase functions deploy notify-company-workspace-ready --no-verify-jwt
 //
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import {
-  getServiceRoleClientForEmailLogs,
-  insertEmailLogRow,
-  updateEmailLogRow,
-} from "../_shared/emailLogs.ts";
+import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { buildCompanyApprovedEmail } from "../_shared/farmvault-email/companyApprovedTemplate.ts";
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
+import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const EMAIL_LOG_TYPE = "workspace_ready";
 
@@ -53,16 +50,6 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
   }
 }
 
-/** Parse Resend (or any) HTTP body into a plain object for logging / detail. */
-async function readResponsePayload(res: Response): Promise<Record<string, unknown>> {
-  const text = await res.text().catch(() => "");
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return { message: text.slice(0, 500) };
-  }
-}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -195,135 +182,26 @@ Deno.serve(async (req: Request) => {
     const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
     if (!resendKey) {
       console.error("[notify-company-workspace-ready] RESEND_API_KEY is not set");
-      if (admin) {
-        await insertEmailLogRow(admin, {
-          company_id: null,
-          company_name: companyName,
-          recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject,
-          status: "failed",
-          provider: "resend",
-          error_message: "RESEND_API_KEY missing",
-          metadata: logMeta,
-        });
-      }
-      return jsonResponse(
-        { error: "Email service not configured", detail: "RESEND_API_KEY missing" },
-        500,
-      );
+      return jsonResponse({ error: "Email service not configured", detail: "RESEND_API_KEY missing" }, 500);
     }
 
-    const from = getFarmVaultEmailFrom("onboarding");
+    const result = await sendResendWithEmailLog({
+      admin,
+      resendKey,
+      from: getFarmVaultEmailFrom("onboarding"),
+      to,
+      subject,
+      html,
+      email_type: EMAIL_LOG_TYPE,
+      company_id: null,
+      company_name: companyName,
+      metadata: logMeta,
+    });
 
-    let logId: string | null = null;
-    if (admin) {
-      logId = await insertEmailLogRow(admin, {
-        company_id: null,
-        company_name: companyName,
-        recipient_email: to.toLowerCase(),
-        email_type: EMAIL_LOG_TYPE,
-        subject,
-        status: "pending",
-        provider: "resend",
-        metadata: logMeta,
-      });
+    if (!result.ok) {
+      return jsonResponse({ error: "Failed to send email", detail: result.error }, 500);
     }
-
-    let res: Response;
-    try {
-      res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject,
-          html,
-        }),
-      });
-    } catch (fetchErr) {
-      console.error("[notify-company-workspace-ready] Resend fetch network error", fetchErr);
-      const detail = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      if (admin && logId) {
-        await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
-      } else if (admin && !logId) {
-        await insertEmailLogRow(admin, {
-          company_id: null,
-          company_name: companyName,
-          recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject,
-          status: "failed",
-          provider: "resend",
-          error_message: detail,
-          metadata: logMeta,
-        });
-      }
-      return jsonResponse(
-        {
-          error: "Failed to send email",
-          detail,
-        },
-        500,
-      );
-    }
-
-    const resBody = await readResponsePayload(res);
-
-    if (!res.ok) {
-      console.error("[notify-company-workspace-ready] Resend error", res.status, resBody);
-      const detail =
-        typeof resBody.message === "string"
-          ? resBody.message
-          : typeof resBody.name === "string"
-            ? resBody.name
-            : `HTTP ${res.status}`;
-      if (admin && logId) {
-        await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
-      } else if (admin && !logId) {
-        await insertEmailLogRow(admin, {
-          company_id: null,
-          company_name: companyName,
-          recipient_email: to.toLowerCase(),
-          email_type: EMAIL_LOG_TYPE,
-          subject,
-          status: "failed",
-          provider: "resend",
-          error_message: detail,
-          metadata: logMeta,
-        });
-      }
-      return jsonResponse({ error: "Failed to send email", detail }, 500);
-    }
-
-    const id = typeof resBody.id === "string" ? resBody.id : undefined;
-    const sentAt = new Date().toISOString();
-    if (admin && logId) {
-      await updateEmailLogRow(admin, logId, {
-        status: "sent",
-        provider_message_id: id ?? null,
-        sent_at: sentAt,
-      });
-    } else if (admin && !logId) {
-      await insertEmailLogRow(admin, {
-        company_id: null,
-        company_name: companyName,
-        recipient_email: to.toLowerCase(),
-        email_type: EMAIL_LOG_TYPE,
-        subject,
-        status: "sent",
-        provider: "resend",
-        provider_message_id: id ?? null,
-        sent_at: sentAt,
-        metadata: logMeta,
-      });
-    }
-
-    return jsonResponse({ ok: true, id, to, logId: logId ?? undefined }, 200);
+    return jsonResponse({ ok: true, id: result.resendId, to, logId: result.logId ?? undefined }, 200);
   } catch (unexpected) {
     console.error("[notify-company-workspace-ready] Unhandled error", unexpected);
     return jsonResponse(

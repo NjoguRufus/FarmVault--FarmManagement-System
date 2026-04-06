@@ -25,7 +25,6 @@ import {
 import { getCompany, type CompanyDoc } from '@/services/companyService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { useToast } from '@/hooks/use-toast';
-import { getSupabaseAccessToken } from '@/lib/supabase';
 import { useCompanyScope, TENANT_SYNC_REQUIRED } from '@/hooks/useCompanyScope';
 import { useCompanyContext } from '@/hooks/useCompanyContext';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
@@ -54,8 +53,9 @@ export interface BillingModalProps {
 const TILL = '5334350';
 const BUSINESS = 'FarmVault';
 
-/** Set to `true` when M-Pesa STK push is ready to ship. */
-const STK_PUSH_ENABLED = false;
+/** M-Pesa STK (Daraja via `mpesa-stk-push`). Set `VITE_ENABLE_MPESA_STK=false` to hide the STK block. */
+const STK_PUSH_ENABLED =
+  String(import.meta.env.VITE_ENABLE_MPESA_STK ?? 'true').toLowerCase() !== 'false';
 
 export function BillingModal({
   open,
@@ -186,7 +186,8 @@ export function BillingModal({
   const mutation = useMutation({
     mutationFn: async (input: Parameters<typeof createPaymentSubmission>[0]) => {
       const client = await getAuthedSupabase(clerkSupabaseToken);
-      return createPaymentSubmission(input, client, getSupabaseAccessToken);
+      // Same JWT as `client` — `getSupabaseAccessToken` can be null before Clerk bridge runs, which skipped emails silently.
+      return createPaymentSubmission(input, client, clerkSupabaseToken);
     },
     onSuccess: async () => {
       setSuccess(true);
