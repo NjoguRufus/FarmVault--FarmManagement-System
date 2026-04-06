@@ -8,7 +8,7 @@ interface RequireDeveloperProps {
 }
 
 export function RequireDeveloper({ children }: RequireDeveloperProps) {
-  const { isAuthenticated, authReady, isDeveloper, user, isEmergencySession } = useAuth();
+  const { isAuthenticated, authReady, isDeveloper, user, isEmergencySession, effectiveAccess } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -16,7 +16,7 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
   }
 
   if (isEmergencySession) {
-    return <Navigate to="/staff/staff-dashboard" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (!isAuthenticated) {
@@ -37,7 +37,11 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
         companyId: user?.companyId ?? null,
       });
     }
-    return <Navigate to="/staff/staff-dashboard" replace />;
+    const dest = effectiveAccess.landingPage;
+    if (dest && dest !== '/developer') {
+      return <Navigate to={dest} replace />;
+    }
+    return <Navigate to="/" replace />;
   }
 
   return children;

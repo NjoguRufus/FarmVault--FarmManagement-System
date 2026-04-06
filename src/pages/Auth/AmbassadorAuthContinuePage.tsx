@@ -45,7 +45,7 @@ export default function AmbassadorAuthContinuePage() {
         if (r.ok) {
           if (r.onboarding_complete) {
             clearAmbassadorAccessIntent();
-            navigate("/ambassador/dashboard", { replace: true });
+            navigate("/ambassador/console/dashboard", { replace: true });
           } else {
             navigate("/ambassador/onboarding", { replace: true });
           }
@@ -71,7 +71,7 @@ export default function AmbassadorAuthContinuePage() {
   }
 
   if (!readAmbassadorAccessIntent()) {
-    return <Navigate to="/auth/continue" replace />;
+    return <Navigate to="/auth/callback" replace />;
   }
 
   if (!authReady) {

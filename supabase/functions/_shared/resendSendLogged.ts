@@ -9,6 +9,8 @@ export type SendResendWithEmailLogInput = {
   subject: string;
   html: string;
   email_type: string;
+  /** When set, links the log row to a workspace (developer notifications, tenant mail, etc.). */
+  company_id?: string | null;
   company_name: string | null;
   metadata: Record<string, unknown>;
 };
@@ -31,13 +33,15 @@ export async function sendResendWithEmailLog(
 ): Promise<
   { ok: true; resendId?: string; logId: string | null } | { ok: false; error: string }
 > {
-  const { admin, resendKey, from, to, subject, html, email_type, company_name, metadata } = input;
+  const { admin, resendKey, from, to, subject, html, email_type, company_id, company_name, metadata } =
+    input;
   const recipientLower = to.trim().toLowerCase();
+  const logCompanyId = company_id ?? null;
 
   let logId: string | null = null;
   if (admin) {
     logId = await insertEmailLogRow(admin, {
-      company_id: null,
+      company_id: logCompanyId,
       company_name,
       recipient_email: recipientLower,
       email_type,
@@ -69,7 +73,7 @@ export async function sendResendWithEmailLog(
       await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
     } else if (admin && !logId) {
       await insertEmailLogRow(admin, {
-        company_id: null,
+        company_id: logCompanyId,
         company_name,
         recipient_email: recipientLower,
         email_type,
@@ -96,7 +100,7 @@ export async function sendResendWithEmailLog(
       await updateEmailLogRow(admin, logId, { status: "failed", error_message: detail });
     } else if (admin && !logId) {
       await insertEmailLogRow(admin, {
-        company_id: null,
+        company_id: logCompanyId,
         company_name,
         recipient_email: recipientLower,
         email_type,
@@ -120,7 +124,7 @@ export async function sendResendWithEmailLog(
     });
   } else if (admin && !logId) {
     await insertEmailLogRow(admin, {
-      company_id: null,
+      company_id: logCompanyId,
       company_name,
       recipient_email: recipientLower,
       email_type,

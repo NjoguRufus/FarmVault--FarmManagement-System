@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { getSubscriptionGateState } from '@/services/subscriptionService';
+import { getSubscriptionGateState, hasConfirmedMpesaStkForCompany } from '@/services/subscriptionService';
 import { resolveWorkspaceSubscriptionState } from '@/lib/resolveWorkspaceSubscriptionState';
 import type { WorkspaceSubscriptionPlan, WorkspaceSubscriptionStatus } from '@/lib/resolveWorkspaceSubscriptionState';
 
@@ -58,15 +58,30 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
   const companyId = user?.companyId ?? null;
 
   const { data: subscriptionState, isLoading } = useQuery({
-    queryKey: ['company-subscription', companyId],
+    // Shared key with SubscriptionAccessGate + billing realtime refetch (single cache for gate RPC).
+    queryKey: ['subscription-gate', companyId],
     enabled: !!companyId,
     queryFn: () => getSubscriptionGateState(),
-    staleTime: 30_000,
+    // Paid-plan transitions must show immediately after payment; refetch is driven by realtime + explicit refetchQueries.
+    staleTime: 0,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: stkConfirmed, isLoading: stkConfirmedLoading } = useQuery({
+    queryKey: ['company-mpesa-stk-confirmed', companyId],
+    enabled: !!companyId && !isDeveloper,
+    queryFn: () => hasConfirmedMpesaStkForCompany(companyId!),
+    staleTime: 0,
+    gcTime: 5 * 60_000,
   });
 
   const resolved = useMemo(
-    () => resolveWorkspaceSubscriptionState(subscriptionState ?? null, companyId, Boolean(isDeveloper)),
-    [subscriptionState, companyId, isDeveloper],
+    () =>
+      resolveWorkspaceSubscriptionState(subscriptionState ?? null, companyId, Boolean(isDeveloper), new Date(), {
+        hasConfirmedStkPayment: stkConfirmed === true,
+      }),
+    [subscriptionState, companyId, isDeveloper, stkConfirmed],
   );
 
   useEffect(() => {
@@ -80,26 +95,40 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
   }, [companyId, subscriptionState, resolved]);
 
   return useMemo<SubscriptionStatusResult>(
-    () => ({
-      canWrite: resolved.canWrite,
-      isTrial: resolved.isTrial,
-      isExpired: resolved.isExpired,
-      daysRemaining: resolved.daysRemaining,
-      isOverrideActive: resolved.isOverrideActive,
-      plan: resolved.plan,
-      status: resolved.status,
-      isLoading,
-      trialExpiredNeedsPlan: resolved.trialExpiredNeedsPlan,
-      trialEndsAt: resolved.trialEndsAt,
-      displayAccessEndIso: resolved.displayAccessEndIso,
-      isActivePaid: resolved.isActivePaid,
-      billingModeFromGate: subscriptionState?.billing_mode ?? null,
-      billingCycleFromGate: subscriptionState?.billing_cycle ?? null,
-      billingReferenceFromGate: subscriptionState?.billing_reference ?? null,
-    }),
+    () => {
+      const stk = stkConfirmed === true && !isDeveloper;
+      const rawMode = subscriptionState?.billing_mode ?? null;
+      const rawCycle = subscriptionState?.billing_cycle ?? null;
+      const cycleFromStk = !stk
+        ? rawCycle
+        : rawCycle && String(rawCycle).toLowerCase() !== 'trial'
+          ? rawCycle
+          : 'monthly';
+
+      return {
+        canWrite: resolved.canWrite,
+        isTrial: resolved.isTrial,
+        isExpired: resolved.isExpired,
+        daysRemaining: resolved.daysRemaining,
+        isOverrideActive: resolved.isOverrideActive,
+        plan: resolved.plan,
+        status: resolved.status,
+        isLoading: isLoading || (!!companyId && !isDeveloper && stkConfirmedLoading),
+        trialExpiredNeedsPlan: resolved.trialExpiredNeedsPlan,
+        trialEndsAt: resolved.trialEndsAt,
+        displayAccessEndIso: resolved.displayAccessEndIso,
+        isActivePaid: resolved.isActivePaid,
+        billingModeFromGate: stk ? 'mpesa_stk' : rawMode,
+        billingCycleFromGate: cycleFromStk,
+        billingReferenceFromGate: subscriptionState?.billing_reference ?? null,
+      };
+    },
     [
       resolved,
       isLoading,
+      stkConfirmedLoading,
+      isDeveloper,
+      stkConfirmed,
       subscriptionState?.billing_mode,
       subscriptionState?.billing_cycle,
       subscriptionState?.billing_reference,

@@ -8,7 +8,11 @@ import { Button } from "@/components/ui/button";
 import { SeoHead } from "@/seo/SeoHead";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getAmbassadorSignUpPath } from "@/lib/ambassador/clerkAuth";
-import { buildAmbassadorReferralScanUrl } from "@/lib/ambassador/referralLink";
+import {
+  buildAmbassadorReferralScanUrl,
+  buildAmbassadorReferralShortUrl,
+  buildFarmerSignupUrlWithRef,
+} from "@/lib/ambassador/referralLink";
 import {
   AmbassadorReferralQrBlock,
   type AmbassadorReferralQrBlockHandle,
@@ -31,6 +35,14 @@ export default function AmbassadorReferPage() {
   const referralCode = stats?.ok ? stats.referral_code : null;
   const referralUrl = useMemo(
     () => (referralCode ? buildAmbassadorReferralScanUrl(referralCode) : ""),
+    [referralCode],
+  );
+  const shortReferralUrl = useMemo(
+    () => (referralCode ? buildAmbassadorReferralShortUrl(referralCode) : ""),
+    [referralCode],
+  );
+  const signupWithRefUrl = useMemo(
+    () => (referralCode ? buildFarmerSignupUrlWithRef(referralCode) : ""),
     [referralCode],
   );
 
@@ -161,8 +173,12 @@ export default function AmbassadorReferPage() {
           </div>
 
           <div className={`${cardClass} p-5 sm:p-6`}>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2">Referral link</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2">Referral link (scan)</p>
             <p className="text-sm text-foreground/90 break-all leading-relaxed mb-4">{referralUrl}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2">Short link</p>
+            <p className="text-sm text-foreground/90 break-all leading-relaxed mb-4">{shortReferralUrl}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2">Sign-up with ref</p>
+            <p className="text-sm text-foreground/90 break-all leading-relaxed mb-4">{signupWithRefUrl}</p>
             <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
               <Button type="button" onClick={() => void copyLink()} className="rounded-lg font-semibold">
                 <Copy className="h-4 w-4 mr-2" />

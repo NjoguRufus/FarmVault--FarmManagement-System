@@ -217,7 +217,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
           {isActivePaid && !isOverrideActive && (
             <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
               <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
-              {subPlan === 'pro' ? 'Pro' : subPlan === 'basic' ? 'Basic' : 'Plan'} · Active
+              {subPlan === 'pro' ? 'Pro Active' : subPlan === 'basic' ? 'Basic Active' : 'Plan Active'}
             </div>
           )}
 
@@ -251,16 +251,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                 />
                 Pro trial · {daysRemaining}d
               </span>
-            </div>
-          )}
-          {Boolean(companyId) && workspacePending && !isTrial && !workspaceStatusLoading && (
-            <div
-              className="hidden sm:inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100"
-              role="status"
-              title="Workspace waiting for approval"
-            >
-              <span className="flex h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" aria-hidden />
-              Pending
             </div>
           )}
           {trialExpiredNeedsPlan && (

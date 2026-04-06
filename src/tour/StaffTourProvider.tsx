@@ -4,11 +4,13 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step } from 'react-joyride';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOnboardingModalPriorityOptional } from '@/contexts/OnboardingModalPriorityContext';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -189,7 +191,9 @@ function buildBaseStaffSteps(opts: {
 }
 
 export function StaffTourProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, authReady, isAuthenticated } = useAuth();
+  const modalGate = useOnboardingModalPriorityOptional();
+  const autoRunKeyRef = useRef<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -201,7 +205,7 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
   const [pendingStart, setPendingStart] = useState(false);
   const [activeSteps, setActiveSteps] = useState<StaffTourStep[]>([]);
 
-  const startTour = useCallback(() => {
+  const startTourRaw = useCallback(() => {
     setIsRunning(false);
     setActiveSteps([]);
     setStepIndex(0);
@@ -211,6 +215,12 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
       navigate('/staff');
     }
   }, [location.pathname, navigate]);
+
+  const startTour = useCallback(() => {
+    if (modalGate?.activeModal != null) return;
+    if (modalGate?.blockingNonTourModal) return;
+    startTourRaw();
+  }, [modalGate?.activeModal, modalGate?.blockingNonTourModal, startTourRaw]);
 
   const stopTour = useCallback(() => {
     setIsRunning(false);
@@ -314,6 +324,7 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
 
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
         setCompletedStaffTour(user?.id);
+        modalGate?.completeOnboardingModal('product_tour');
         stopTour();
         return;
       }
@@ -336,6 +347,7 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
 
         if (nextIndex >= mounted.length) {
           setCompletedStaffTour(user?.id);
+          modalGate?.completeOnboardingModal('product_tour');
           stopTour();
           return;
         }
@@ -343,17 +355,45 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
         setStepIndex(nextIndex);
       }
     },
-    [baseSteps, stopTour, user?.id],
+    [baseSteps, modalGate, stopTour, user?.id],
   );
 
   useEffect(() => {
-    if (!user?.id) return;
-    if (hasCompletedStaffTour(user.id)) return;
-    // Auto-run only once per user when they first land on /staff.
-    if (location.pathname.startsWith('/staff')) {
-      startTour();
+    if (!user?.id) {
+      autoRunKeyRef.current = null;
+      return;
     }
-  }, [location.pathname, startTour, user?.id]);
+
+    if (!authReady || !isAuthenticated) {
+      return;
+    }
+
+    if (hasCompletedStaffTour(user.id)) return;
+
+    if (modalGate == null) {
+      return;
+    }
+
+    if (modalGate.activeShell !== 'staff') return;
+    if (modalGate.resolvedModal !== 'product_tour') return;
+
+    if (!location.pathname.startsWith('/staff')) return;
+
+    const autoRunKey = `${user.id}:staff-tour`;
+    if (autoRunKeyRef.current === autoRunKey) {
+      return;
+    }
+
+    autoRunKeyRef.current = autoRunKey;
+    startTourRaw();
+  }, [
+    authReady,
+    isAuthenticated,
+    location.pathname,
+    modalGate,
+    startTourRaw,
+    user?.id,
+  ]);
 
   const contextValue = useMemo(
     () => ({

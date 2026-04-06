@@ -5,7 +5,6 @@ import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
-import { NotificationSetupPrompt } from '@/components/notifications/NotificationSetupPrompt';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -92,7 +91,6 @@ export function DeveloperLayout() {
 
       <BottomNav />
       <AIChatButton />
-      <NotificationSetupPrompt />
     </div>
   );
 }

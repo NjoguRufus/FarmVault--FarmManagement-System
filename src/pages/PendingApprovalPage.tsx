@@ -109,7 +109,7 @@ export default function PendingApprovalPage() {
   }
 
   if (!gateLoading && !gate && !companyId && !stored?.companyId && !navState?.companyId) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/onboarding/company" replace />;
   }
 
   if (!gateLoading && gate && gateStatus !== 'pending_approval') {

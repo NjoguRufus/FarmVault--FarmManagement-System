@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import {
   approveSubscriptionPayment,
+  fetchDeveloperCompanies,
   fetchMpesaStkPaymentsForDeveloper,
   fetchPendingPayments,
   fetchPayments,
@@ -22,7 +23,6 @@ import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchSubscriptionAnalytics } from '@/services/developerService';
 import { computeCompanySubscriptionState } from '@/features/billing/lib/computeCompanySubscriptionState';
-import { setCompanyPaidAccess } from '@/services/developerService';
 import { useAuth as useClerkAuth } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -39,6 +39,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { BillingReceiptsManager } from '@/components/subscription/billing/BillingReceiptsManager';
+import { issueBillingReceiptForPayment } from '@/services/receiptsService';
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -95,7 +97,9 @@ type PaymentTypeFilter = 'all' | 'manual' | 'sdk';
 
 export default function DeveloperBillingConfirmationPage() {
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'pending' | 'manual_confirmed' | 'rejected' | 'stk_confirmation'>('pending');
+  const [tab, setTab] = useState<
+    'pending' | 'manual_confirmed' | 'rejected' | 'stk_confirmation' | 'receipts'
+  >('pending');
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentTypeFilter>('all');
   const [confirmedPaymentsModalOpen, setConfirmedPaymentsModalOpen] = useState(false);
   const [confirmedRevenueModalOpen, setConfirmedRevenueModalOpen] = useState(false);
@@ -120,7 +124,7 @@ export default function DeveloperBillingConfirmationPage() {
   );
 
   useEffect(() => {
-    if (!isDeveloper && tab === 'stk_confirmation') {
+    if (!isDeveloper && (tab === 'stk_confirmation' || tab === 'receipts')) {
       setTab('pending');
     }
   }, [isDeveloper, tab]);
@@ -171,6 +175,24 @@ export default function DeveloperBillingConfirmationPage() {
     staleTime: 15_000,
   });
 
+  const { data: developerCompaniesResp } = useQuery({
+    queryKey: ['developer', 'companies', 'billing-stk-names'],
+    queryFn: () => fetchDeveloperCompanies({ limit: 500, offset: 0 }),
+    enabled: isDeveloper === true,
+    staleTime: 60_000,
+  });
+
+  const companyNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of developerCompaniesResp?.items ?? []) {
+      const id = String(c.company_id ?? c.id ?? '');
+      if (!id) continue;
+      const name = String(c.company_name ?? c.name ?? '').trim();
+      if (name) m.set(id, name);
+    }
+    return m;
+  }, [developerCompaniesResp]);
+
   const { data: analyticsResp } = useQuery({
     queryKey: ['developer', 'subscription-analytics'],
     queryFn: () => fetchSubscriptionAnalytics(),
@@ -201,6 +223,11 @@ export default function DeveloperBillingConfirmationPage() {
     void queryClient.invalidateQueries({ queryKey: ['developer', 'subscription-analytics'] });
     void queryClient.invalidateQueries({ queryKey: ['developer', 'approved-payments-this-month'] });
     void queryClient.invalidateQueries({ queryKey: ['developer', 'mpesa-stk-payments'] });
+    void queryClient.invalidateQueries({ queryKey: ['billing-receipts'] });
+    void queryClient.invalidateQueries({ queryKey: ['subscription-gate'] });
+    void queryClient.invalidateQueries({ queryKey: ['subscription-payments-supabase'] });
+    void queryClient.invalidateQueries({ queryKey: ['company-subscription-row'] });
+    void queryClient.invalidateQueries({ queryKey: ['company-billing'] });
   };
 
   const approveMutation = useMutation({
@@ -211,22 +238,13 @@ export default function DeveloperBillingConfirmationPage() {
         // eslint-disable-next-line no-console
         console.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
       }
-      await approveSubscriptionPayment(paymentId);
+      await approveSubscriptionPayment(paymentId, row ?? undefined);
 
-      // Enforce canonical company access window per submitted billing cycle.
-      const companyId = String(row?.company_id ?? '');
-      const rawPlan = String(row?.plan_id ?? 'basic').toLowerCase();
-      const plan = rawPlan.includes('pro') ? 'pro' : 'basic';
-      const cycle = String(row?.billing_cycle ?? 'monthly').toLowerCase();
-      const months =
-        cycle === 'seasonal'
-          ? 3
-          : cycle === 'annual'
-            ? 12
-            : 1;
-      if (companyId) {
-        await setCompanyPaidAccess({ companyId, plan, months });
-      }
+      void issueBillingReceiptForPayment(paymentId, clerkSupabaseToken).catch((err) => {
+        console.warn('[DevBilling] billing receipt issue skipped or failed', err);
+      });
+      // Paid window + trial end are applied in approve_subscription_payment (DB). Avoid
+      // set_company_paid_access here — it forced billing_cycle = monthly and overwrote the approve RPC.
     },
     onMutate: async (paymentId: string) => {
       await queryClient.cancelQueries({ queryKey: ['developer', 'pending-payments'] });
@@ -420,6 +438,9 @@ export default function DeveloperBillingConfirmationPage() {
       const phone = (r.phone ?? '').toLowerCase();
       const st = (r.status ?? '').toLowerCase();
       const cid = String(r.company_id ?? '').toLowerCase();
+      const cname = r.company_id
+        ? (companyNameById.get(r.company_id) ?? '').toLowerCase()
+        : '';
       const desc = (r.result_desc ?? '').toLowerCase();
       return (
         checkout.includes(term) ||
@@ -427,10 +448,11 @@ export default function DeveloperBillingConfirmationPage() {
         phone.includes(term) ||
         st.includes(term) ||
         cid.includes(term) ||
+        cname.includes(term) ||
         desc.includes(term)
       );
     });
-  }, [stkRows, search]);
+  }, [stkRows, search, companyNameById]);
 
   const sdkSuccessRows = useMemo(() => stkRows.filter((r) => mpesaRowIsSdkSuccess(r)), [stkRows]);
   const confirmedPaymentsTotal = manualApprovedRows.length + sdkSuccessRows.length;
@@ -742,8 +764,9 @@ export default function DeveloperBillingConfirmationPage() {
             <TabsTrigger value="manual_confirmed">Manual Confirmed ({manualTabRows.length})</TabsTrigger>
             <TabsTrigger value="rejected">Rejected ({rejectedTabRows.length})</TabsTrigger>
             {isDeveloper ? (
-              <TabsTrigger value="stk_confirmation">SDK Confirmation ({sdkTabRows.length})</TabsTrigger>
+              <TabsTrigger value="stk_confirmation">STK Confirmed ({sdkTabRows.length})</TabsTrigger>
             ) : null}
+            {isDeveloper ? <TabsTrigger value="receipts">Receipts</TabsTrigger> : null}
           </TabsList>
 
           <TabsContent value="pending" className="space-y-2">
@@ -1047,7 +1070,10 @@ export default function DeveloperBillingConfirmationPage() {
                             <td className="max-md:items-start py-3 pr-4 text-xs" data-label="Company">
                               {r.company_id ? (
                                 <>
-                                  <div className="font-mono text-[11px] text-foreground">{r.company_id}</div>
+                                  <div className="font-medium text-foreground">
+                                    {companyNameById.get(r.company_id) ?? 'Unknown company'}
+                                  </div>
+                                  <div className="font-mono text-[11px] text-muted-foreground">{r.company_id}</div>
                                 </>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
@@ -1085,6 +1111,12 @@ export default function DeveloperBillingConfirmationPage() {
                     </table>
                   </div>
               ) : null}
+            </TabsContent>
+          ) : null}
+
+          {isDeveloper ? (
+            <TabsContent value="receipts" className="space-y-2">
+              <BillingReceiptsManager mode="developer" getAccessToken={clerkSupabaseToken} />
             </TabsContent>
           ) : null}
         </Tabs>
@@ -1147,12 +1179,24 @@ export default function DeveloperBillingConfirmationPage() {
                     }
                     if (item.source === 'sdk' && item.mpesa) {
                       const r = item.mpesa;
+                      const cid = r.company_id;
                       return (
                         <tr key={`s-${r.id}-${idx}`} className="border-b border-border/40">
                           <td className="px-3 py-2">
                             <PaymentTypeBadge source="sdk" />
                           </td>
-                          <td className="px-3 py-2 font-mono text-[11px]">{r.company_id ?? '—'}</td>
+                          <td className="px-3 py-2">
+                            {cid ? (
+                              <>
+                                <div className="font-medium">
+                                  {companyNameById.get(cid) ?? 'Unknown company'}
+                                </div>
+                                <div className="font-mono text-[11px] text-muted-foreground">{cid}</div>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
                           <td className="px-3 py-2">{r.plan ?? '—'}</td>
                           <td className="px-3 py-2">{r.billing_cycle ?? '—'}</td>
                           <td className="px-3 py-2 tabular-nums">KES {Number(r.amount ?? 0).toLocaleString()}</td>
@@ -1228,13 +1272,25 @@ export default function DeveloperBillingConfirmationPage() {
                     }
                     if (item.source === 'sdk' && item.mpesa) {
                       const r = item.mpesa;
+                      const cid = r.company_id;
                       return (
                         <tr key={`sr-${r.id}-${idx}`} className="border-b border-border/40">
                           <td className="px-3 py-2">
                             <PaymentTypeBadge source="sdk" />
                           </td>
                           <td className="px-3 py-2 font-semibold tabular-nums">KES {Number(r.amount ?? 0).toLocaleString()}</td>
-                          <td className="px-3 py-2 font-mono text-[11px]">{r.company_id ?? '—'}</td>
+                          <td className="px-3 py-2">
+                            {cid ? (
+                              <>
+                                <div className="font-medium">
+                                  {companyNameById.get(cid) ?? 'Unknown company'}
+                                </div>
+                                <div className="font-mono text-[11px] text-muted-foreground">{cid}</div>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
                           <td className="px-3 py-2">{r.plan ?? '—'}</td>
                           <td className="px-3 py-2">{r.billing_cycle ?? '—'}</td>
                           <td className="px-3 py-2 text-xs">{r.paid_at ?? r.created_at ?? '—'}</td>

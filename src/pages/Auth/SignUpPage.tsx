@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SignUp } from '@clerk/react';
+import { SignUp, useAuth as useClerkAuth } from '@clerk/react';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
-import { useLocation } from 'react-router-dom';
-import { Link } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import {
   AMBASSADOR_POST_AUTH_PATH,
   getAmbassadorSignInPath,
@@ -10,27 +9,102 @@ import {
 } from '@/lib/ambassador/clerkAuth';
 import { readAmbassadorAccessIntent, setAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
 import { setSignupType } from '@/lib/ambassador/signupType';
+import {
+  hydrateReferralFromSharedCookieToLocalStorage,
+  persistReferralCodeIfEmpty,
+} from '@/lib/ambassador/referralPersistence';
+import { AUTH_CALLBACK_PATH, AUTH_CONTINUE_PATH } from '@/lib/routing/postAuthDestination';
+
+function initializeSignupFlow(search: string): boolean {
+  return isAmbassadorClerkFlow(search) || readAmbassadorAccessIntent();
+}
+
+function applyAmbassadorSignupIntent(ambassadorFlow: boolean): void {
+  if (ambassadorFlow) {
+    setAmbassadorAccessIntent(true);
+    setSignupType('ambassador');
+  }
+}
+
+function applyReferralFromUrl(search: string): void {
+  const params = new URLSearchParams(search || '');
+  const urlRef = params.get('ref')?.trim();
+  if (!urlRef) return;
+  try {
+    window.localStorage.setItem('ambassador_ref', urlRef);
+  } catch {
+    /* ignore */
+  }
+  persistReferralCodeIfEmpty(urlRef);
+}
+
+const SIGNUP_TERMS_SESSION_KEY = 'farmvault:signup_terms_ack:v1';
+
+function readTermsAckFromSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.sessionStorage.getItem(SIGNUP_TERMS_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeTermsAckToSession(ack: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (ack) window.sessionStorage.setItem(SIGNUP_TERMS_SESSION_KEY, '1');
+    else window.sessionStorage.removeItem(SIGNUP_TERMS_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export default function SignUpPage() {
   const location = useLocation();
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const { isLoaded: clerkLoaded, isSignedIn } = useClerkAuth();
+  /** OAuth / email verification use nested paths under `/sign-up/…`; remount must still render Clerk or the flow never completes. */
+  const isClerkSignUpContinuation = location.pathname.startsWith('/sign-up/');
+
+  const [agreedToTerms, setAgreedToTerms] = useState(() => readTermsAckFromSession());
   const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
 
   // Freeze on first render so Clerk's internal URL navigation (OAuth callbacks,
   // multi-step form pages like /sign-up/verify-email-address) cannot flip
-  // ambassadorFlow to false mid-flow and change afterSignUpUrl to /auth/continue.
+  // ambassadorFlow to false mid-flow and change afterSignUpUrl to /auth/callback.
   // Also accept a pre-set localStorage intent from AmbassadorSignupPage.
-  const [ambassadorFlow] = useState(
-    () => isAmbassadorClerkFlow(location.search) || readAmbassadorAccessIntent()
-  );
+  const [ambassadorFlow] = useState(() => {
+    try {
+      return initializeSignupFlow(location.search);
+    } catch (err) {
+      console.error('Signup init error:', err);
+      return false;
+    }
+  });
 
   useEffect(() => {
-    if (ambassadorFlow) {
-      setAmbassadorAccessIntent(true);
-      setSignupType('ambassador');
+    try {
+      applyAmbassadorSignupIntent(ambassadorFlow);
+    } catch (err) {
+      console.error('Signup init error:', err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    try {
+      hydrateReferralFromSharedCookieToLocalStorage();
+    } catch (err) {
+      console.error('Signup init error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      applyReferralFromUrl(location.search);
+    } catch (err) {
+      console.error('Signup init error:', err);
+    }
+  }, [location.search]);
 
   const showAccessRevoked = useMemo(() => {
     const params = new URLSearchParams(location.search || '');
@@ -52,6 +126,12 @@ export default function SignUpPage() {
       // ignore
     }
   }, [showAccessRevoked]);
+
+  const showClerkSignUp = agreedToTerms || isClerkSignUpContinuation;
+
+  if (clerkLoaded && isSignedIn && !isClerkSignUpContinuation) {
+    return <Navigate to={AUTH_CONTINUE_PATH} replace />;
+  }
 
   return (
     <PremiumAuthShell
@@ -87,7 +167,11 @@ export default function SignUpPage() {
             type="checkbox"
             id="signup-terms"
             checked={agreedToTerms}
-            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setAgreedToTerms(v);
+              writeTermsAckToSession(v);
+            }}
             className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-emerald-600"
           />
           <label htmlFor="signup-terms" className="text-sm text-white/85 cursor-pointer leading-relaxed">
@@ -102,19 +186,19 @@ export default function SignUpPage() {
           </label>
         </div>
 
-        {!agreedToTerms && (
+        {!showClerkSignUp && (
           <p className="text-center text-xs text-white/50">
             Please accept the Terms &amp; Conditions to create your account.
           </p>
         )}
 
-        {agreedToTerms && (
+        {showClerkSignUp && (
         <SignUp
           routing="path"
           path="/sign-up"
           signInUrl={ambassadorFlow ? getAmbassadorSignInPath() : '/sign-in'}
-          afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
-          afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
+          afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : AUTH_CALLBACK_PATH}
+          afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : AUTH_CALLBACK_PATH}
           appearance={{
             variables: {
               colorPrimary: '#1F3B2E',

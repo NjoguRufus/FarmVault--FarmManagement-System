@@ -1,14 +1,12 @@
 import React from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useClerk, useUser } from "@clerk/react";
 import {
   ChevronDown,
   Crown,
   HelpCircle,
-  LayoutDashboard,
   LogOut,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -20,20 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/UserAvatar";
 import { cn } from "@/lib/utils";
-import { useDashboardRoles } from "@/hooks/useDashboardRoles";
 import { useAuth } from "@/contexts/AuthContext";
-import { writeDashboardSurfacePreference } from "@/lib/dashboard/dashboardSurfacePreference";
-
-const COMPANY_HOME_PATH = "/company";
-const AMBASSADOR_PORTAL_PATH = "/ambassador/dashboard";
-
-function useOnAmbassadorSurface(): boolean {
-  const location = useLocation();
-  return (
-    location.pathname.startsWith("/ambassador/console") ||
-    location.pathname.startsWith("/ambassador/dashboard")
-  );
-}
 
 export type FarmVaultUserMenuProps = {
   /** Clerk redirect after sign-out */
@@ -69,8 +54,6 @@ export function FarmVaultUserMenu({
   const { signOut } = useClerk();
   const { user, isLoaded } = useUser();
   const { user: fvUser } = useAuth();
-  const onAmbassadorSurface = useOnAmbassadorSurface();
-  const { hasCompanyAndAmbassador, loading: rolesLoading } = useDashboardRoles();
 
   const displayName =
     (fvUser?.name && String(fvUser.name).trim()) ||
@@ -126,35 +109,6 @@ export function FarmVaultUserMenu({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-
-        {!rolesLoading && hasCompanyAndAmbassador ? (
-          <>
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground pt-1">
-              Switch dashboard
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              className={cn("cursor-pointer gap-2", !onAmbassadorSurface && "bg-muted/50")}
-              onClick={() => {
-                writeDashboardSurfacePreference("company");
-                navigate(COMPANY_HOME_PATH);
-              }}
-            >
-              <LayoutDashboard className="h-4 w-4 shrink-0 opacity-80" />
-              Company Dashboard
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={cn("cursor-pointer gap-2", onAmbassadorSurface && "bg-muted/50")}
-              onClick={() => {
-                writeDashboardSurfacePreference("ambassador");
-                navigate(AMBASSADOR_PORTAL_PATH);
-              }}
-            >
-              <Sparkles className="h-4 w-4 shrink-0 opacity-80" />
-              Ambassador Portal
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
 
         {showBilling ? (
           <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/billing")}>

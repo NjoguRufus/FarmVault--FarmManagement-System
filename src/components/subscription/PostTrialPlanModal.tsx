@@ -36,8 +36,8 @@ export function PostTrialPlanModal({ open }: PostTrialPlanModalProps) {
       await choosePostTrialPlan(plan);
       const cid = user?.companyId;
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['company-subscription', cid] }),
         queryClient.invalidateQueries({ queryKey: ['subscription-gate', cid] }),
+        queryClient.invalidateQueries({ queryKey: ['company-subscription-row', cid] }),
       ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save your plan. Try again.');

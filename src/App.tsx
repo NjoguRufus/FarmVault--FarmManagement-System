@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
@@ -98,6 +98,7 @@ import SignUpPage from "@/pages/Auth/SignUpPage";
 import ScanPage from "@/pages/ScanPage";
 import AcceptInvitationPage from "@/pages/Auth/AcceptInvitationPage";
 import PostAuthContinuePage from "@/pages/Auth/PostAuthContinuePage";
+import AuthCallbackPage from "@/pages/Auth/AuthCallbackPage";
 import AmbassadorAuthContinuePage from "@/pages/Auth/AmbassadorAuthContinuePage";
 import { SignInRedirect } from "@/components/auth/SignInRedirect";
 import EmergencyAccessPage from "@/pages/Auth/EmergencyAccessPage";
@@ -136,13 +137,12 @@ import ManagerOperationsPage from "@/pages/ManagerOperationsPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TourProvider } from "@/tour/TourProvider";
+import { OnboardingModalPriorityProvider } from "@/contexts/OnboardingModalPriorityContext";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { DomainGuard } from "@/components/routing/DomainGuard";
 import { AppLockGate } from "@/components/auth/AppLockGate";
-import { AppLockPrompt } from "@/components/auth/AppLockPrompt";
-import { useAppLock } from "@/hooks/useAppLock";
 import DevSignInPage from "@/pages/dev/DevSignIn";
 import DevSignUpPage from "@/pages/dev/DevSignUp";
 import DevBootstrapPage from "@/pages/dev/DevBootstrap";
@@ -170,8 +170,18 @@ import DeveloperSettingsPage from "@/pages/developer/DeveloperSettingsPage";
 import DeveloperDocumentsPage from "@/pages/developer/DeveloperDocumentsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
+import { ReferralAttributionCapture } from "@/components/referral/ReferralAttributionCapture";
+import { SignedInAuthEscape } from "@/components/auth/SignedInAuthEscape";
+import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
 
 const queryClient = new QueryClient();
+
+/** Preserves ?ref= (and other params) when /signup redirects to /sign-up. */
+function SignupQueryPreservingRedirect() {
+  const [searchParams] = useSearchParams();
+  const q = searchParams.toString();
+  return <Navigate to={q ? `/sign-up?${q}` : "/sign-up"} replace />;
+}
 
 // Permission-driven landing: use effectiveAccess.landingPage so role/permission changes apply immediately.
 const CompanyDashboardRoute = () => {
@@ -196,6 +206,10 @@ const CompanyDashboardRoute = () => {
     });
   }
 
+  if (landing === "/" || !landing.trim()) {
+    return <Navigate to="/" replace />;
+  }
+
   if (landing === "/admin") return <Navigate to="/developer" replace />;
   if (landing === "/dashboard") return <CompanyDashboard />;
   if (landing === "/manager" || landing === "/manager/operations") return <Navigate to="/manager" replace />;
@@ -206,33 +220,16 @@ const CompanyDashboardRoute = () => {
   return <Navigate to={landing} replace />;
 };
 
-const AppRoutesWithLock = () => {
-  const { user } = useAuth();
-  const { showPrompt, refresh } = useAppLock();
-
-  // Show first-time App Lock prompt if needed
-  // Only shows when: not loading, no PIN exists, prompt not dismissed
-  // Note: The actual lock screen is handled by AppLockGate at the root level
-  if (showPrompt && user) {
-    return (
-      <AppLockPrompt
-        onComplete={() => {
-          refresh();
-        }}
-        onSkip={() => {
-          refresh();
-        }}
-      />
-    );
-  }
-
-  return (
+const AppRoutesWithLock = () => (
+  <>
+    <ReferralAttributionCapture />
     <Routes>
       {/* Public routes – no RequireAuth or onboarding; Clerk handles auth UI */}
       <Route path="/" element={<RootRoute />} />
+      <Route path="/r/:code" element={<ReferralShortLinkPage />} />
       <Route path="/login" element={<Navigate to="/sign-in" replace />} />
       <Route path="/signin" element={<Navigate to="/sign-in" replace />} />
-      <Route path="/signup" element={<Navigate to="/sign-up" replace />} />
+      <Route path="/signup" element={<SignupQueryPreservingRedirect />} />
       <Route path="/sign-in" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
       <Route path="/sign-in/*" element={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? <SignInPage /> : <Navigate to="/emergency-access" replace />} />
       <Route path="/sign-up" element={<SignUpPage />} />
@@ -253,18 +250,19 @@ const AppRoutesWithLock = () => {
           </DevRoute>
         }
       />
-      <Route path="/auth/callback" element={<PostAuthContinuePage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/auth/continue" element={<PostAuthContinuePage />} />
       <Route path="/auth/ambassador-continue" element={<AmbassadorAuthContinuePage />} />
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
-      <Route path="/choose-plan" element={<Navigate to="/onboarding" replace />} />
+      <Route path="/choose-plan" element={<Navigate to="/onboarding/company" replace />} />
       <Route path="/company" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+      <Route path="/onboarding/company" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+      <Route path="/onboarding" element={<Navigate to="/onboarding/company" replace />} />
       <Route path="/pending-approval" element={<RequireAuth><PendingApprovalPage /></RequireAuth>} />
       <Route path="/awaiting-approval" element={<Navigate to="/pending-approval" replace />} />
       <Route path="/start-fresh" element={<RequireAuth><StartFreshPage /></RequireAuth>} />
-      <Route path="/setup-company" element={<Navigate to="/onboarding" replace />} />
-      <Route path="/setup" element={<Navigate to="/onboarding" replace />} />
+      <Route path="/setup-company" element={<Navigate to="/onboarding/company" replace />} />
+      <Route path="/setup" element={<Navigate to="/onboarding/company" replace />} />
 
       {/* Core public pages */}
       <Route path="/features" element={<FeaturesPage />} />
@@ -512,8 +510,8 @@ const AppRoutesWithLock = () => {
       {/* 404 route */}
       <Route path="*" element={<NotFound />} />
     </Routes>
-  );
-};
+  </>
+);
 
 /**
  * Root App component.
@@ -535,11 +533,14 @@ const App = () => (
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <HelmetProvider>
                     <DomainGuard />
+                    <SignedInAuthEscape />
                     <RoutePersistence />
                     <PosthogAnalytics />
-                    <TourProvider>
-                      <AppRoutesWithLock />
-                    </TourProvider>
+                    <OnboardingModalPriorityProvider>
+                      <TourProvider>
+                        <AppRoutesWithLock />
+                      </TourProvider>
+                    </OnboardingModalPriorityProvider>
                     {import.meta.env.DEV && <DevAuthDebugPanel />}
                   </HelmetProvider>
                 </BrowserRouter>

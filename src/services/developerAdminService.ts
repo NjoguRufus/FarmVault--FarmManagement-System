@@ -29,6 +29,10 @@ export type DeveloperCompanyRow = {
   pending_payments_count?: number | null;
   payment_confirmed?: boolean | null;
   subscription_status?: string | null;
+  company_subscription_status?: string | null;
+  access_level?: string | null;
+  onboarding_completed?: boolean | null;
+  company_trial_started_at?: string | null;
   plan_code?: string | null;
   billing_mode?: string | null;
   billing_cycle?: string | null;
@@ -670,7 +674,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
   let members: { clerk_user_id?: string | null; user_id?: string | null; role?: string | null }[] | null = null;
   const { data: memPub, error: mPubErr } = await supabase
     .from('company_members')
-    .select('clerk_user_id, user_id, role')
+    .select('clerk_user_id, role')
     .eq('company_id', cid)
     .order('created_at', { ascending: true });
 
@@ -681,7 +685,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     const { data: memCore, error: mCoreErr } = await supabase
       .schema('core')
       .from('company_members')
-      .select('clerk_user_id, user_id, role')
+      .select('clerk_user_id, role')
       .eq('company_id', cid)
       .order('created_at', { ascending: true });
     if (!mCoreErr && Array.isArray(memCore) && memCore.length > 0) {

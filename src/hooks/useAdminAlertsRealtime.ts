@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { playNotificationSound, preloadAllSounds } from '@/services/notificationSoundService';
@@ -15,6 +16,20 @@ import type { RealtimeChannel, RealtimePostgresInsertPayload } from '@supabase/s
 
 const NOTIFICATION_PREFS_KEY_PREFIX = 'farmvault:notification-prefs:v1:';
 const POLL_INTERVAL_MS = 10000; // Fallback polling every 10 seconds
+const POLL_ERROR_LOG_COOLDOWN_MS = 120_000; // Avoid spamming console on flaky networks
+
+function isLikelyNetworkFailure(err: unknown): boolean {
+  const msg =
+    err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string'
+      ? String((err as { message: string }).message).toLowerCase()
+      : String(err ?? '').toLowerCase();
+  return (
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('load failed') ||
+    msg.includes('network request failed')
+  );
+}
 const PROCESSED_IDS_STORAGE_KEY = 'farmvault:processed-alert-ids:v1';
 
 interface AdminAlertRow {
@@ -127,7 +142,23 @@ export function useAdminAlertsRealtime() {
   const processedIdsRef = useRef<Set<string>>(getProcessedIds());
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPollTimeRef = useRef<string | null>(null);
+  const lastPollErrorLogRef = useRef<number>(0);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [online, setOnline] = useState(
+    () => typeof navigator === 'undefined' || typeof navigator.onLine !== 'boolean' || navigator.onLine,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onUp = () => setOnline(true);
+    const onDown = () => setOnline(false);
+    window.addEventListener('online', onUp);
+    window.addEventListener('offline', onDown);
+    return () => {
+      window.removeEventListener('online', onUp);
+      window.removeEventListener('offline', onDown);
+    };
+  }, []);
   
   const isAdminOrDeveloper = user?.role === 'company-admin' || user?.role === 'company_admin' || user?.role === 'developer';
   const companyId = user?.companyId;
@@ -236,14 +267,15 @@ export function useAdminAlertsRealtime() {
 
   // Fallback polling for new alerts
   const pollForAlerts = useCallback(async () => {
-    if (!companyId) return;
+    if (!companyId || !online) return;
 
     try {
       const since = lastPollTimeRef.current || new Date(Date.now() - 60000).toISOString(); // Last minute on first poll
       
       console.log('[AdminAlertsRealtime] Polling for alerts since', since);
 
-      const { data, error } = await supabase
+      const { data, error } = await db
+        .public()
         .from('admin_alerts')
         .select('*')
         .eq('company_id', companyId)
@@ -251,7 +283,17 @@ export function useAdminAlertsRealtime() {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('[AdminAlertsRealtime] Poll error', error);
+        const now = Date.now();
+        const net = isLikelyNetworkFailure(error);
+        if (net && now - lastPollErrorLogRef.current < POLL_ERROR_LOG_COOLDOWN_MS) {
+          return;
+        }
+        lastPollErrorLogRef.current = now;
+        if (net) {
+          console.warn('[AdminAlertsRealtime] Poll unreachable (network); will retry when online', error.message);
+        } else {
+          console.error('[AdminAlertsRealtime] Poll error', error);
+        }
         return;
       }
 
@@ -265,9 +307,19 @@ export function useAdminAlertsRealtime() {
         lastPollTimeRef.current = new Date().toISOString();
       }
     } catch (err) {
-      console.error('[AdminAlertsRealtime] Poll exception', err);
+      const now = Date.now();
+      const net = isLikelyNetworkFailure(err);
+      if (net && now - lastPollErrorLogRef.current < POLL_ERROR_LOG_COOLDOWN_MS) {
+        return;
+      }
+      lastPollErrorLogRef.current = now;
+      if (net) {
+        console.warn('[AdminAlertsRealtime] Poll exception (network)', err);
+      } else {
+        console.error('[AdminAlertsRealtime] Poll exception', err);
+      }
     }
-  }, [companyId, processAlert]);
+  }, [companyId, processAlert, online]);
 
   // Set up real-time subscription
   useEffect(() => {

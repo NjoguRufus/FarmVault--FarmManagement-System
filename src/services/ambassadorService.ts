@@ -1,25 +1,20 @@
 import { supabase } from "@/lib/supabase";
 import {
-  AMBASSADOR_REF_STORAGE_KEY,
   AMBASSADOR_SESSION_STORAGE_KEY,
   type AmbassadorSession,
   type AmbassadorType,
 } from "@/lib/ambassador/constants";
+import {
+  clearAllPersistedReferralCodes,
+  getPersistedReferralCode,
+} from "@/lib/ambassador/referralPersistence";
 
 export function getStoredAmbassadorRef(): string | null {
-  try {
-    return localStorage.getItem(AMBASSADOR_REF_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+  return getPersistedReferralCode();
 }
 
 export function clearStoredAmbassadorRef(): void {
-  try {
-    localStorage.removeItem(AMBASSADOR_REF_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
+  clearAllPersistedReferralCodes();
 }
 
 export function getAmbassadorSession(): AmbassadorSession | null {
@@ -213,12 +208,35 @@ export async function hasAmbassadorRowForCurrentUser(): Promise<boolean> {
   }
 }
 
+/** Ensures a referrals row exists when the workspace has referred_by_ambassador_id (idempotent). */
+export async function syncMyFarmerReferralLink(): Promise<void> {
+  const { error } = await supabase.rpc("sync_my_farmer_referral_link");
+  if (error && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn("[referral] sync_my_farmer_referral_link", error.message);
+  }
+}
+
+/** After farmer onboarding trial step — moves referral lifecycle to active. */
+export async function markMyFarmerReferralOnboardingComplete(): Promise<void> {
+  const { data, error } = await supabase.rpc("mark_my_farmer_referral_onboarding_complete");
+  if (error) throw error;
+  const row = data as Record<string, unknown> | null;
+  if (row && row.ok === false && typeof row.error === "string" && row.error !== "no_company") {
+    throw new Error(row.error);
+  }
+}
+
 export type AmbassadorReferralRow = {
   referral_id: string;
   name: string;
   type: string;
   status: "active" | "inactive";
+  referral_status: string;
   date: string;
+  last_activity_at: string | null;
+  subscription_status: string | null;
+  commission_status: string;
   commission: number;
 };
 
@@ -245,7 +263,19 @@ function mapReferralRowsPayload(data: unknown): AmbassadorReferralRowsResult {
       name: String(o.name ?? ""),
       type: String(o.type ?? ""),
       status: o.status === "inactive" ? "inactive" : "active",
+      referral_status: typeof o.referral_status === "string" ? o.referral_status : "signed_up",
       date: typeof o.date === "string" ? o.date : String(o.date ?? ""),
+      last_activity_at:
+        typeof o.last_activity_at === "string" || o.last_activity_at === null
+          ? (o.last_activity_at as string | null)
+          : o.last_activity_at != null
+            ? String(o.last_activity_at)
+            : null,
+      subscription_status:
+        typeof o.subscription_status === "string" || o.subscription_status === null
+          ? (o.subscription_status as string | null)
+          : null,
+      commission_status: typeof o.commission_status === "string" ? o.commission_status : "none",
       commission: Number(o.commission ?? 0),
     };
   });
@@ -338,6 +368,7 @@ export async function registerAmbassadorForClerk(input: {
   email: string;
   type: AmbassadorType;
   referrerCode?: string | null;
+  deviceId?: string | null;
 }): Promise<RegisterAmbassadorClerkResult> {
   const { data, error } = await supabase.rpc("register_ambassador_for_clerk", {
     p_name: input.name.trim(),
@@ -345,6 +376,7 @@ export async function registerAmbassadorForClerk(input: {
     p_email: input.email.trim(),
     p_type: input.type,
     p_referrer_code: input.referrerCode?.trim() || null,
+    p_device_id: input.deviceId?.trim() || null,
   });
   if (error) throw error;
   const row = data as Record<string, unknown> | null;

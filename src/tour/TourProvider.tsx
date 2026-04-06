@@ -8,6 +8,7 @@ import Joyride, {
 } from "react-joyride";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOnboardingModalPriorityOptional } from "@/contexts/OnboardingModalPriorityContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 type DashboardTourStep = Step & {
@@ -140,6 +141,7 @@ function setCompletedTour(userId?: string | null) {
 
 export function TourProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, authReady } = useAuth();
+  const modalGate = useOnboardingModalPriorityOptional();
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -168,7 +170,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     setStepIndex(0);
   }, []);
 
-  const startTour = useCallback(() => {
+  const startTourRaw = useCallback(() => {
     const firstRoute = steps[0]?.route ?? "/dashboard";
     setIsRunning(false);
     setActiveSteps([]);
@@ -179,6 +181,12 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       navigate(firstRoute);
     }
   }, [location.pathname, navigate, steps]);
+
+  const startTour = useCallback(() => {
+    if (modalGate?.activeModal != null) return;
+    if (modalGate?.blockingNonTourModal) return;
+    startTourRaw();
+  }, [modalGate?.activeModal, modalGate?.blockingNonTourModal, startTourRaw]);
 
   useEffect(() => {
     if (!pendingStart) return;
@@ -249,12 +257,24 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     if (autoRunKeyRef.current === autoRunKey) {
       return;
     }
-    autoRunKeyRef.current = autoRunKey;
+
+    if (modalGate == null) {
+      return;
+    }
+
+    if (modalGate.activeShell !== "main") {
+      return;
+    }
+
+    if (modalGate.resolvedModal !== "product_tour") {
+      return;
+    }
 
     if (!hasCompletedTour(user.id)) {
-      startTour();
+      autoRunKeyRef.current = autoRunKey;
+      startTourRaw();
     }
-  }, [authReady, isAuthenticated, startTour, stopTour, user?.id]);
+  }, [authReady, isAuthenticated, modalGate, startTourRaw, stopTour, user?.id]);
 
   const handleJoyrideCallback = useCallback(
     (data: CallBackProps) => {
@@ -262,6 +282,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
 
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
         setCompletedTour(user?.id);
+        modalGate?.completeOnboardingModal("product_tour");
         stopTour();
         return;
       }
@@ -284,6 +305,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
 
         if (nextIndex >= mountedSteps.length) {
           setCompletedTour(user?.id);
+          modalGate?.completeOnboardingModal("product_tour");
           stopTour();
           return;
         }
@@ -291,7 +313,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
         setStepIndex(nextIndex);
       }
     },
-    [steps, stopTour, user?.id],
+    [modalGate, steps, stopTour, user?.id],
   );
 
   const contextValue = useMemo(

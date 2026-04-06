@@ -6,23 +6,34 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/react';
 import { supabase, getSupabaseAccessToken } from '@/lib/supabase';
-import { invokeNotifyCompanySubmissionReceived } from '@/lib/email';
+import {
+  invokeNotifyCompanyProTrialStarted,
+  invokeNotifyCompanySubmissionReceived,
+  invokeNotifyDeveloperCompanyRegistered,
+} from '@/lib/email';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardRoles } from '@/hooks/useDashboardRoles';
 import {
   clearOnboardingSessionProgress,
   readOnboardingSessionProgress,
   saveOnboardingSessionProgress,
 } from '@/lib/onboardingSessionProgress';
-import { writePendingApprovalSession, type PendingApprovalSessionPayload } from '@/lib/pendingApprovalSession';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
-import { setPostOnboardingFirstProjectWelcomeFlag } from '@/lib/postOnboardingProjectWelcome';
+import {
+  setPostOnboardingFirstProjectWelcomeFlag,
+  setPostOnboardingProTrialWelcome,
+} from '@/lib/postOnboardingProjectWelcome';
 import { PremiumOnboardingShell } from '@/components/onboarding/PremiumOnboardingShell';
+import {
+  clearFarmerReferralStorageAfterSuccess,
+  getPersistedReferralCode,
+  getReferralDeviceId,
+} from '@/lib/ambassador/referralPersistence';
+import { markMyFarmerReferralOnboardingComplete } from '@/services/ambassadorService';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,9 +47,22 @@ import {
 
 type EmailValidationResult = { ok: boolean; message?: string | null };
 
+const ONBOARDING_PROGRESS_STEPS = [
+  { label: 'Company' },
+  { label: 'Pro trial' },
+  { label: 'Project' },
+  { label: 'Finish' },
+] as const;
+
 export default function OnboardingPage() {
-  const { resetRequired, refreshAuthState, syncTenantCompanyFromServer, authReady, user: fvUser } = useAuth();
-  const { hasAmbassador, hasCompany, loading: rolesLoading } = useDashboardRoles();
+  const {
+    resetRequired,
+    refreshAuthState,
+    syncTenantCompanyFromServer,
+    authReady,
+    user: fvUser,
+    setupIncomplete,
+  } = useAuth();
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
@@ -68,9 +92,9 @@ export default function OnboardingPage() {
   }, [clerkUser, accountEmail]);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
       navigate('/sign-in', { replace: true });
-      return;
     }
   }, [isLoaded, isSignedIn, navigate]);
 
@@ -80,7 +104,7 @@ export default function OnboardingPage() {
     captureEvent(AnalyticsEvents.ONBOARDING_STARTED, {
       user_id: clerkId ?? undefined,
       module_name: 'onboarding',
-      route_path: '/onboarding',
+      route_path: '/onboarding/company',
     });
   }, [isLoaded, isSignedIn, clerkId]);
 
@@ -127,7 +151,7 @@ export default function OnboardingPage() {
     if (exitingOnboardingRef.current || !clerkId || !isSignedIn) return;
     saveOnboardingSessionProgress({
       clerkUserId: clerkId,
-      step: step as 1 | 2 | 3,
+      step: step as 1 | 2 | 3 | 4,
       companyId,
       companyName: companyName.trim(),
       companyEmail: companyEmail.trim(),
@@ -189,6 +213,8 @@ export default function OnboardingPage() {
 
       const { data: cid, error: rpcErr } = await supabase.rpc('create_company_with_admin', {
         _name: trimmedFarm,
+        _referral_code: getPersistedReferralCode(),
+        _referral_device_id: getReferralDeviceId(),
       });
 
       if (rpcErr || !cid) {
@@ -231,6 +257,11 @@ export default function OnboardingPage() {
         }
       }
       await syncTenantCompanyFromServer();
+      try {
+        clearFarmerReferralStorageAfterSuccess();
+      } catch {
+        /* ignore */
+      }
       setStep(2);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Something went wrong';
@@ -260,17 +291,20 @@ export default function OnboardingPage() {
           ? window.location.origin
           : 'https://app.farmvault.africa';
     const dashboardUrl = `${base}/dashboard`;
-    const approvalDashboardUrl = `${base}/developer/companies`;
     const submitterEmail = accountEmail.trim().toLowerCase() || recipient;
+
+    setPostOnboardingProTrialWelcome(companyName.trim());
 
     void (async () => {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return;
+      const approvalDashboardUrl = `${base}/developer/companies`;
       const result = await invokeNotifyCompanySubmissionReceived({
         to: recipient,
         companyName: companyName.trim(),
         dashboardUrl,
         userEmail: submitterEmail,
         approvalDashboardUrl,
+        onboardingCompleteDeveloperNotify: true,
       });
       if (!result.ok) {
         const msg = [result.detail, result.error].filter(Boolean).join(' — ') || 'Unknown error';
@@ -281,18 +315,9 @@ export default function OnboardingPage() {
       }
     })();
 
-    const payloadEmail =
-      companyEmail.trim().toLowerCase() || accountEmail.toLowerCase() || '';
-    const payload: PendingApprovalSessionPayload = {
-      companyName: companyName.trim(),
-      companyEmail: payloadEmail,
-      companyId,
-      startingPlanLabel: 'Pro Trial',
-    };
-    writePendingApprovalSession(payload);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Onboarding] handoff_to_dashboard', payload);
+      console.log('[Onboarding] handoff_to_dashboard', { companyId, companyName: companyName.trim() });
     }
     try {
       await syncTenantCompanyFromServer();
@@ -340,12 +365,7 @@ export default function OnboardingPage() {
         subscription_plan: 'pro',
         module_name: 'onboarding',
       });
-      captureEvent(AnalyticsEvents.ONBOARDING_COMPLETED, {
-        company_id: companyId,
-        module_name: 'onboarding',
-      });
 
-      await sendSubmissionEmailsAndSession();
       setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to continue');
@@ -366,10 +386,7 @@ export default function OnboardingPage() {
     return <Navigate to="/start-fresh" replace />;
   }
 
-  // Block rendering the company form until role resolution is complete.
-  // Without this, an ambassador-only user sees the company form momentarily
-  // before the hasAmbassador guard below fires.
-  if (!authReady || rolesLoading) {
+  if (!authReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -377,33 +394,126 @@ export default function OnboardingPage() {
     );
   }
 
-  // Ambassador-only users must not reach company onboarding.
-  if (hasAmbassador && !hasCompany) {
+  const isCompanyAdmin = fvUser?.role === 'company-admin';
+  if (fvUser?.companyId && !isCompanyAdmin && setupIncomplete) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+        <p className="text-lg font-semibold text-foreground">Workspace setup in progress</p>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Your company admin is finishing FarmVault onboarding (trial activation and first steps). You&apos;ll get full
+          access once they complete setup.
+        </p>
+      </div>
+    );
+  }
+
+  // Fully onboarded tenant — leave this flow.
+  if (fvUser?.companyId && !setupIncomplete) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Ambassador-only users must not reach company onboarding (no capabilities RPC wait).
+  const pt = fvUser?.profileUserType;
+  if (pt === 'ambassador' || (pt === 'both' && !fvUser?.companyId)) {
     return <Navigate to="/ambassador/console/dashboard" replace />;
   }
 
-  const goDashboard = () => {
-    exitingOnboardingRef.current = true;
-    clearOnboardingSessionProgress();
-    navigate('/dashboard', { replace: true });
+  const goToFinishStep = () => {
+    setStep(4);
   };
 
   const handleOnboardingProjectSuccess = () => {
     setPostOnboardingFirstProjectWelcomeFlag();
-    goDashboard();
+    goToFinishStep();
   };
+
+  const handleStep4Finish = async () => {
+    if (!companyId) {
+      setError('Missing company. Try creating your company again.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: finErr } = await supabase.rpc('complete_company_onboarding', {
+        _company_id: companyId,
+      });
+      if (finErr) {
+        setError(finErr.message);
+        toast({
+          title: 'Could not finish setup',
+          description: finErr.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      captureEvent(AnalyticsEvents.ONBOARDING_COMPLETED, {
+        company_id: companyId,
+        module_name: 'onboarding',
+      });
+
+      void invokeNotifyDeveloperCompanyRegistered(companyId).then((r) => {
+        if (import.meta.env.DEV && !r.ok && !r.skipped) {
+          // eslint-disable-next-line no-console
+          console.warn('[Onboarding] notify-developer-company-registered', r.error, r.detail);
+        }
+      });
+
+      void invokeNotifyCompanyProTrialStarted(companyId, getSupabaseAccessToken).catch(() => {
+        /* non-fatal: owner pro-trial email */
+      });
+
+      try {
+        await markMyFarmerReferralOnboardingComplete();
+      } catch {
+        /* non-fatal */
+      }
+
+      await sendSubmissionEmailsAndSession();
+      exitingOnboardingRef.current = true;
+      clearOnboardingSessionProgress();
+      clearFarmerReferralStorageAfterSuccess();
+      await syncTenantCompanyFromServer();
+      await refreshAuthState();
+      navigate('/dashboard', { replace: true });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to finish setup';
+      setError(message);
+      toast({
+        title: 'Finish setup failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const shellTitle =
+    step === 1
+      ? 'Create your farm workspace'
+      : step === 2
+        ? 'Activate Pro trial'
+        : step === 3
+          ? 'Create your first project'
+          : "You're ready";
+
+  const shellSubtitle =
+    step === 1
+      ? "Let’s name your workspace — this is how your farm appears across FarmVault."
+      : step === 2
+        ? 'Your workspace starts on Basic until you activate your 7-day Pro trial — unlock full tracking next.'
+        : step === 3
+          ? 'Add one project now so you can start tracking this season, or continue to the final step.'
+          : 'Confirm to open your dashboard. You can change plans anytime in billing.';
 
   return (
     <PremiumOnboardingShell
       step={step}
-      rightTitle={step === 1 ? 'Create your farm workspace' : step === 2 ? 'Confirm your trial' : 'Finish setup'}
-      rightSubtitle={
-        step === 1
-          ? "Let’s name your workspace — this is how your farm appears across FarmVault."
-          : step === 2
-            ? 'Your workspace is created. Continue to activate your Pro trial and unlock full tracking.'
-            : "Your farm is ready. Create your first project now, or jump straight into the dashboard."
-      }
+      progressSteps={[...ONBOARDING_PROGRESS_STEPS]}
+      rightTitle={shellTitle}
+      rightSubtitle={shellSubtitle}
       logo={
         <div className="flex items-center gap-3">
           <img
@@ -416,7 +526,7 @@ export default function OnboardingPage() {
       belowPanel={
         step === 3 ? (
           <div className="rounded-[18px] border border-white/22 bg-white/90 p-4 sm:p-6 shadow-[0_22px_60px_rgba(0,0,0,0.26)]">
-            <NewProjectForm onCancel={goDashboard} onSuccess={handleOnboardingProjectSuccess} />
+            <NewProjectForm onCancel={goToFinishStep} onSuccess={handleOnboardingProjectSuccess} />
           </div>
         ) : null
       }
@@ -432,7 +542,7 @@ export default function OnboardingPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-white">Skip project creation?</AlertDialogTitle>
             <AlertDialogDescription className="text-white/75">
-              Are you sure? It&apos;s recommended that you create your first project so you can start tracking immediately.
+              You can add a project anytime from the dashboard. Continue to the final step to finish workspace setup.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-0">
@@ -441,9 +551,12 @@ export default function OnboardingPage() {
             </AlertDialogCancel>
             <AlertDialogAction
               className="rounded-full bg-[#1F3D2B] text-white hover:bg-[#1B3526]"
-              onClick={goDashboard}
+              onClick={() => {
+                setSkipConfirmOpen(false);
+                goToFinishStep();
+              }}
             >
-              Yes, skip
+              Continue without project
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -533,9 +646,9 @@ export default function OnboardingPage() {
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white/95">Workspace created</p>
               <p className="text-xs leading-relaxed text-white/70">
-                <strong className="font-semibold text-white/95">{companyName}</strong> will start on{' '}
-                <strong className="font-semibold text-white/95">Pro</strong> with a{' '}
-                <strong className="font-semibold text-white/95">7-day trial</strong> after approval.
+                <strong className="font-semibold text-white/95">{companyName}</strong> is on{' '}
+                <strong className="font-semibold text-white/95">Basic</strong> until you activate your{' '}
+                <strong className="font-semibold text-white/95">7-day Pro trial</strong> below.
               </p>
             </div>
           </div>
@@ -545,12 +658,12 @@ export default function OnboardingPage() {
             onClick={() => void handleStep2Continue()}
             disabled={loading}
           >
-            {loading ? 'Preparing…' : 'Activate trial'}
+            {loading ? 'Activating…' : 'Activate Pro trial'}
             <ChevronRight className="ml-2 h-4 w-4" />
           </Button>
 
           <p className="mt-4 text-xs leading-relaxed text-white/65">
-            You can create your first project next, or skip and do it later from the dashboard.
+            Next you&apos;ll create your first project, then confirm to open your dashboard.
           </p>
         </div>
       )}
@@ -561,6 +674,7 @@ export default function OnboardingPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-white/95">Create your first project</h3>
+                <p className="mt-1 text-xs text-white/65">Use the form below, or skip to the final step.</p>
               </div>
               <Button
                 type="button"
@@ -569,10 +683,36 @@ export default function OnboardingPage() {
                 className="shrink-0 rounded-full border border-white/10 bg-white/10 px-2 py-1 text-[10px] font-medium text-white/55 shadow-none transition-all hover:bg-white/12 sm:border-white/14 sm:bg-white/16 sm:px-3 sm:py-1.5 sm:text-[11px] sm:text-white/75 sm:shadow-none sm:hover:bg-white/20"
                 onClick={() => setSkipConfirmOpen(true)}
               >
-                Skip for now
+                Skip to finish
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="animate-in fade-in-0 duration-300">
+          <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 px-4 py-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 text-white shadow-sm">
+              <CheckCircle2 className="h-7 w-7" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white/95">Setup complete</p>
+              <p className="text-xs leading-relaxed text-white/70">
+                <strong className="font-semibold text-white/95">{companyName}</strong> is on Pro trial. Open your
+                dashboard to start managing your farm.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            className="mt-6 h-12 w-full rounded-full bg-[#1F3D2B] text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#1B3526] active:translate-y-0"
+            onClick={() => void handleStep4Finish()}
+            disabled={loading}
+          >
+            {loading ? 'Finishing…' : 'Go to dashboard'}
+            <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
         </div>
       )}
     </PremiumOnboardingShell>

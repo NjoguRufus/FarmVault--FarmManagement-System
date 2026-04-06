@@ -160,6 +160,8 @@ export interface User {
   createdAt: Date;
   /** Raw user_type from core.profiles: 'ambassador' | 'company_admin' | 'both' | null */
   profileUserType?: string | null;
+  /** Raw core.company_members.role for the active company (not normalized to UserRole). */
+  companyMembershipRole?: string | null;
 }
 
 export interface Company {

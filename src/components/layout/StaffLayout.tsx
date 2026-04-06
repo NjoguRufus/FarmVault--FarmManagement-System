@@ -35,6 +35,11 @@ export function StaffLayout() {
     return <Navigate to="/ambassador/console/dashboard" replace />;
   }
 
+  const companyId = user.companyId != null ? String(user.companyId).trim() : '';
+  if (!companyId) {
+    return <Navigate to="/" replace />;
+  }
+
   if (import.meta.env.DEV) {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;

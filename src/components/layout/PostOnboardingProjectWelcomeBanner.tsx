@@ -1,34 +1,74 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Sprout } from 'lucide-react';
 import {
   clearPostOnboardingFirstProjectWelcomeFlag,
+  clearPostOnboardingProTrialWelcomeFlag,
   hasPostOnboardingFirstProjectWelcomeFlag,
+  hasPostOnboardingProTrialWelcomeFlag,
+  readPostOnboardingProTrialCompanyName,
 } from '@/lib/postOnboardingProjectWelcome';
 import { SetupNoticePopup } from '@/components/layout/SetupNoticePopup';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 
 /**
- * Shown once after saving the first project from onboarding (before dismiss).
- * Floating popup — auto-dismiss ~5s or manual close; does not use a full-width fixed bar.
+ * One-time welcome after Pro trial activation and/or first project save from onboarding.
  */
 export function PostOnboardingProjectWelcomeBanner() {
-  const [visible, setVisible] = useState(() =>
-    typeof window !== 'undefined' && hasPostOnboardingFirstProjectWelcomeFlag(),
+  const { daysRemaining, isTrial } = useSubscriptionStatus();
+  const [visible, setVisible] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      hasPostOnboardingProTrialWelcomeFlag() || hasPostOnboardingFirstProjectWelcomeFlag()
+    );
+  });
+
+  const trialFirst = useMemo(
+    () => typeof window !== 'undefined' && hasPostOnboardingProTrialWelcomeFlag(),
+    [],
   );
+  const companyLabel = useMemo(() => readPostOnboardingProTrialCompanyName(), []);
 
   const dismiss = useCallback(() => {
+    clearPostOnboardingProTrialWelcomeFlag();
     clearPostOnboardingFirstProjectWelcomeFlag();
     setVisible(false);
   }, []);
 
+  if (!visible) return null;
+
+  if (trialFirst) {
+    const days =
+      isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0
+        ? daysRemaining
+        : null;
+    return (
+      <SetupNoticePopup open tone="emerald" title="Pro trial active" icon={Sprout} onDismiss={dismiss}>
+        <p className="font-semibold">
+          {companyLabel
+            ? `Welcome, ${companyLabel} — registered`
+            : 'Welcome — your workspace is registered'}
+        </p>
+        <p className="mt-1 text-emerald-900/95 dark:text-emerald-100/90">
+          Your workspace is on an active Pro trial with full access to Pro analytics and features.
+          {days !== null ? (
+            <>
+              {' '}
+              <span className="font-medium">
+                {days} day{days === 1 ? '' : 's'} remaining.
+              </span>
+            </>
+          ) : null}
+        </p>
+      </SetupNoticePopup>
+    );
+  }
+
   return (
-    <SetupNoticePopup open={visible} onDismiss={dismiss} tone="emerald" title="Your farm is being prepared" icon={Sprout}>
-      <p className="font-semibold">Your farm is being prepared</p>
+    <SetupNoticePopup open tone="emerald" title="Project saved" icon={Sprout} onDismiss={dismiss}>
+      <p className="font-semibold">Your first project is saved</p>
       <p className="mt-1 text-emerald-900/95 dark:text-emerald-100/90">
-        Your first project is saved and ready. You can start using FarmVault as we finalize your setup. Our team will
-        review your farm shortly. In the meantime, feel free to continue exploring the system.
-      </p>
-      <p className="mt-1.5 text-xs text-emerald-800/80 dark:text-emerald-200/75">
-        Some features may be unlocked after approval.
+        You can keep building in FarmVault with your active Pro trial. Use the header countdown to see how many days
+        are left.
       </p>
     </SetupNoticePopup>
   );

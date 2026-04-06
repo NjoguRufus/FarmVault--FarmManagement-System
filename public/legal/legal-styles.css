@@ -1,185 +1,181 @@
 /* ================================================================
-   FarmVault Legal Documents — Corporate Print Stylesheet
-   Version: 1.2  |  www.farmvault.africa
+   FarmVault Legal Documents — A4 print / PDF–ready layout
+   Version: 3.0  |  www.farmvault.africa
    ================================================================ */
 
-/* ----------------------------------------------------------------
-   RESET
-   ---------------------------------------------------------------- */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* ----------------------------------------------------------------
-   FORCE BACKGROUND / COLOUR PRINTING — must be top-level
-   Browsers suppress backgrounds unless this is set.
-   ---------------------------------------------------------------- */
-html {
+:root {
   -webkit-print-color-adjust: exact !important;
   print-color-adjust: exact !important;
 }
 
-/* ----------------------------------------------------------------
-   @PAGE RULES
-   :first  → cover page   — zero margin, full-bleed gradient
-   default → content pages — 20 mm margins on all sides
-   ---------------------------------------------------------------- */
-@page {
+/* ── Global layout (screen + print base) ───────────────────────── */
+/* Inner body pages: margins + running footers */
+@page inner {
   size: A4;
-  margin: 20mm;
+  margin: 18mm 20mm 22mm 20mm;
+  @bottom-left {
+    content: "FarmVault™ – Smart Farm Management Platform  |  www.farmvault.africa";
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 7.5pt;
+    color: #999;
+    border-top: 0.5pt solid #ccc;
+    padding-top: 3pt;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 7.5pt;
+    color: #999;
+    border-top: 0.5pt solid #ccc;
+    padding-top: 3pt;
+  }
 }
 
-@page :first {
-  /* Cover page occupies the entire 210 × 297 mm sheet */
+/* Front + back covers: full bleed (no white frame from @page margins) */
+@page cover {
+  size: A4;
   margin: 0;
 }
 
-/* ----------------------------------------------------------------
-   BODY
-   ---------------------------------------------------------------- */
+/* Fallback when named pages are not supported — margin: 0 prevents white borders around cover */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+html,
 body {
-  font-family: Georgia, 'Times New Roman', Times, serif;
-  font-size: 10.5pt;
-  line-height: 1.75;
-  color: #1c1c1c;
+  font-family: Georgia, "Times New Roman", Times, serif;
+  color: #1a1a1a;
   background: #fff;
 }
 
-/* ================================================================
-   SCREEN STYLES
-   Simulates two stacked A4 sheets: cover card + content card
-   ================================================================ */
-@media screen {
-  html { background: #dde2da; min-height: 100vh; }
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  font-size: 12pt;
+  line-height: 1.6;
+}
 
-  /* Cover card */
-  .cover-page {
-    width: 210mm;
-    min-height: 297mm;
-    margin: 28px auto 0;
-    box-shadow: 0 4px 32px rgba(0,0,0,0.24);
-  }
+/* Kill narrow layout wrappers if present in future markup */
+.content-wrapper,
+.container,
+.content {
+  width: 100%;
+  max-width: none;
+}
 
-  /* Content card */
-  .doc-page {
-    background: #fff;
-    width: 210mm;
-    min-height: 297mm;
-    margin: 0 auto 28px;
-    padding: 22mm 20mm 28mm 20mm;
-    box-shadow: 0 4px 32px rgba(0,0,0,0.18);
-    position: relative;
-  }
+/* Full A4 sheet (alias + canonical class used in HTML) */
+.document-page,
+.doc-page {
+  page: inner;
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 20mm;
+  box-sizing: border-box;
+  background: #fff;
+  position: relative;
 }
 
 /* ================================================================
-   COVER PAGE
+   COVER PAGE — full bleed on first printed sheet
    ================================================================ */
 .cover-page {
-  background: linear-gradient(150deg, #0d2b1a 0%, #1a4a2e 40%, #2d6b42 72%, #3e8856 100%);
+  page: cover;
+  width: 210mm;
+  max-width: 100%;
+  height: 297mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: space-between;
-  padding: 44pt 36pt 32pt;
-  position: relative;
-  overflow: hidden;
+  align-items: stretch;
+  text-align: center;
+  /* Solid base = bottom stop of gradient so print never shows white slivers */
+  background-color: #0f5b3f;
+  background-image: linear-gradient(180deg, #0b3d2e 0%, #0c4a36 40%, #0f5b3f 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  color: #fff;
   page-break-after: always;
   break-after: page;
+  position: relative;
+  overflow: hidden;
 }
 
-/* Decorative ring — top right */
-.cover-page::before {
-  content: "";
-  position: absolute;
-  top: -90pt;
-  right: -90pt;
-  width: 360pt;
-  height: 360pt;
-  border-radius: 50%;
-  border: 44pt solid rgba(255,255,255,0.038);
-  pointer-events: none;
-}
-
-/* Decorative ring — bottom left */
-.cover-page::after {
-  content: "";
-  position: absolute;
-  bottom: -70pt;
-  left: -70pt;
-  width: 280pt;
-  height: 280pt;
-  border-radius: 50%;
-  border: 34pt solid rgba(255,255,255,0.028);
-  pointer-events: none;
-}
-
-/* ---- Large watermark text ---- */
-.cover-wm {
-  position: absolute;
-  bottom: 56pt;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 84pt;
-  font-weight: 900;
-  color: rgba(255,255,255,0.028);
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 0;
-  font-family: Georgia, serif;
-}
-
-/* ---- Centre content block ---- */
 .cover-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-align: center;
-  flex: 1;
   justify-content: center;
+  flex: 1 1 auto;
+  text-align: center;
   position: relative;
   z-index: 1;
-  padding: 16pt 0 24pt;
+  padding: 12mm 16mm;
+  min-height: 0;
 }
 
-.cover-logo-wrap { margin-bottom: 28pt; }
+.cover-logo-wrap {
+  margin-bottom: 20px;
+}
 
 .cover-logo {
-  height: 68pt;
-  width: auto;
-  /* invert dark logo to white for the green background */
-  filter: brightness(0) invert(1);
-  opacity: 0.92;
-  max-width: 100%;
-  image-rendering: crisp-edges;
+  width: 120px;
+  max-width: min(120px, 32mm);
+  height: auto;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  position: relative;
+  z-index: 2;
 }
 
-/* Decorative rule below logo */
 .cover-rule {
-  width: 56pt;
-  height: 1.5pt;
-  background: rgba(255,255,255,0.30);
-  margin: 0 auto 28pt;
+  width: 56px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.35);
+  margin: 0 auto 22px;
+  border-radius: 1px;
 }
 
 .cover-title {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 27pt;
-  font-weight: bold;
-  color: #ffffff;
-  letter-spacing: 0.09em;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  line-height: 1.2;
+  margin: 0 0 10px;
+  color: #fff;
   text-transform: uppercase;
-  line-height: 1.18;
-  margin-bottom: 11pt;
-  text-shadow: 0 2px 14px rgba(0,0,0,0.28);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
 }
 
 .cover-subtitle {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 10.5pt;
-  color: rgba(255,255,255,0.65);
-  letter-spacing: 0.12em;
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0.92;
+  margin: 0 0 24px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  margin-bottom: 30pt;
   font-style: italic;
 }
 
@@ -187,105 +183,163 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9pt;
   flex-wrap: wrap;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 8pt;
-  color: rgba(255,255,255,0.50);
-  letter-spacing: 0.05em;
+  gap: 8px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.06em;
 }
 
-.cover-sep { opacity: 0.38; }
+.cover-sep {
+  opacity: 0.4;
+}
 
-/* ---- Cover bottom footer ---- */
 .cover-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   width: 100%;
-  padding-top: 14pt;
-  border-top: 1pt solid rgba(255,255,255,0.14);
+  padding: 14mm 20mm 16mm;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
   position: relative;
   z-index: 1;
 }
 
 .cover-footer-brand {
-  font-family: Georgia, serif;
-  font-size: 9pt;
-  font-weight: bold;
-  color: rgba(255,255,255,0.78);
-  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .cover-footer-text {
-  font-family: Georgia, serif;
-  font-size: 8.5pt;
-  color: rgba(255,255,255,0.46);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .cover-footer-url {
-  font-family: Georgia, serif;
-  font-size: 8.5pt;
-  color: rgba(255,255,255,0.58);
-  letter-spacing: 0.02em;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.65);
 }
 
-/* ----------------------------------------------------------------
-   PRINT BUTTON (screen only)
-   ---------------------------------------------------------------- */
-.print-btn {
-  position: fixed;
-  top: 24px;
-  right: 24px;
-  background: #1a4a2e;
-  color: #fff;
-  border: none;
-  padding: 10px 22px;
-  font-size: 12px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  border-radius: 3px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.22);
-  z-index: 999;
-  transition: background 0.15s;
-}
-.print-btn:hover { background: #2d6b42; }
-
-/* ----------------------------------------------------------------
-   WATERMARK (content pages — fixed so it shows across all pages)
-   ---------------------------------------------------------------- */
-.doc-page::before {
-  content: "FARMVAULT";
-  position: fixed;
+/* Watermark */
+.cover-wm,
+.closing-wm {
+  position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%) rotate(-40deg);
-  font-size: 96pt;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-size: 80pt;
   font-weight: 900;
   letter-spacing: 0.12em;
-  color: rgba(26, 74, 46, 0.032);
+  color: rgba(255, 255, 255, 0.055);
   white-space: nowrap;
   pointer-events: none;
+  user-select: none;
   z-index: 0;
 }
 
-/* ----------------------------------------------------------------
-   DOCUMENT HEADER  (content pages)
-   ---------------------------------------------------------------- */
+.cover-page::before,
+.cover-page::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.cover-page::before {
+  width: 380pt;
+  height: 380pt;
+  top: -100pt;
+  right: -100pt;
+  border: 48pt solid rgba(255, 255, 255, 0.04);
+}
+
+.cover-page::after {
+  width: 280pt;
+  height: 280pt;
+  bottom: -70pt;
+  left: -70pt;
+  border: 36pt solid rgba(255, 255, 255, 0.03);
+}
+
+/* ================================================================
+   CONTENT PAGES — full width inside @page margins when printing
+   ================================================================ */
+@media screen {
+  html {
+    background: #c5cdc4;
+    min-height: 100vh;
+    padding-bottom: 48px;
+  }
+
+  .document-page,
+  .doc-page {
+    margin-top: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 6px 36px rgba(0, 0, 0, 0.18);
+  }
+
+  .cover-page {
+    margin-top: 24px;
+    margin-bottom: 0;
+    box-shadow: 0 6px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  .closing-page {
+    margin-bottom: 24px;
+    box-shadow: 0 6px 40px rgba(0, 0, 0, 0.28);
+  }
+}
+
+@media print {
+  .document-page,
+  .doc-page {
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    page-break-after: auto;
+  }
+}
+
+/* Optional hard page break between major blocks */
+.page-break {
+  page-break-after: always;
+  break-after: page;
+}
+
+/* Running footer area (repeat if you add markup inside each section) */
+.page-footer {
+  position: absolute;
+  bottom: 10mm;
+  left: 20mm;
+  right: 20mm;
+  font-size: 10px;
+  display: flex;
+  justify-content: space-between;
+  color: #666;
+}
+
+/* ── Document header (body pages) ───────────────────────────── */
 .doc-header {
-  margin-bottom: 24pt;
+  margin-bottom: 18pt;
   position: relative;
   z-index: 1;
+  width: 100%;
 }
 
 .doc-header__top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 16pt;
   gap: 16pt;
+  margin-bottom: 12pt;
+  width: 100%;
 }
 
 .doc-header__logo {
@@ -296,207 +350,486 @@ body {
 
 .doc-header__meta {
   text-align: right;
-  font-size: 8pt;
-  color: #777;
-  line-height: 1.6;
-  font-family: Georgia, serif;
+  font-size: 8.5pt;
+  color: #666;
+  line-height: 1.55;
 }
-.doc-header__meta strong { color: #444; }
+
+.doc-header__meta strong {
+  color: #444;
+  font-weight: 700;
+}
 
 .doc-header__title {
-  font-size: 20pt;
-  font-weight: bold;
-  color: #1a4a2e;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-  margin-bottom: 5pt;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0b3d2e;
+  line-height: 1.2;
+  margin: 0 0 6pt;
+  letter-spacing: -0.02em;
 }
 
 .doc-header__tagline {
-  font-size: 9.5pt;
+  font-size: 11pt;
   color: #555;
   font-style: italic;
-  margin-bottom: 2pt;
+  margin: 0 0 4pt;
 }
 
 .doc-header__divider {
-  height: 2.5pt;
-  background: linear-gradient(90deg, #1a4a2e 0%, #4a9460 55%, #d4e8da 100%);
+  height: 3px;
+  background: linear-gradient(90deg, #0b3d2e 0%, #2d6b42 45%, #c8dfc9 100%);
   margin-top: 10pt;
-  border-radius: 1pt;
+  border-radius: 1px;
 }
 
-/* ----------------------------------------------------------------
-   PREAMBLE / INTRO BOX
-   ---------------------------------------------------------------- */
-.preamble {
-  background: #f3f8f4;
-  border: 0.75pt solid #c8dfc9;
-  border-left: 3.5pt solid #1a4a2e;
-  padding: 12pt 14pt;
-  margin-bottom: 22pt;
-  font-size: 10pt;
-  color: #444;
-  line-height: 1.65;
-  position: relative;
-  z-index: 1;
+/* ── Typography (legal body) ─────────────────────────────────── */
+.doc-page h1,
+.doc-page h2,
+.doc-page h3 {
+  font-family: Georgia, "Times New Roman", serif;
 }
 
-/* ----------------------------------------------------------------
-   SECTION TITLES  (1.0, 2.0 …)
-   ---------------------------------------------------------------- */
 .section {
-  margin-bottom: 22pt;
+  margin-bottom: 14px;
   position: relative;
   z-index: 1;
+  width: 100%;
 }
 
 .section__title {
-  font-size: 12pt;
-  font-weight: bold;
-  color: #1a4a2e;
-  margin-bottom: 9pt;
-  padding-bottom: 4pt;
-  border-bottom: 0.75pt solid #c8dfc9;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0b3d2e;
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #c4ddc6;
   page-break-after: avoid;
+  break-after: avoid;
 }
 
 .section__title .num {
-  color: #4a9460;
-  margin-right: 5pt;
+  color: #2d6b42;
+  margin-right: 6px;
   font-variant-numeric: tabular-nums;
 }
 
-/* SUB-SECTION TITLES (1.1, 1.2 …) */
-.subsection { margin: 12pt 0; }
-
-.subsection__title {
-  font-size: 10.5pt;
-  font-weight: bold;
-  color: #2a5c38;
-  margin-bottom: 5pt;
-  page-break-after: avoid;
+.subsection {
+  margin: 12px 0;
 }
 
-/* ----------------------------------------------------------------
-   BODY TEXT
-   ---------------------------------------------------------------- */
-.section p, .subsection p {
-  margin-bottom: 7pt;
+.subsection__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a4a2e;
+  margin: 0 0 8px;
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+.section p,
+.subsection p,
+.preamble {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0 0 10px;
   text-align: justify;
   hyphens: auto;
 }
 
-.section ul, .section ol,
-.subsection ul, .subsection ol {
-  margin: 7pt 0 7pt 18pt;
-}
-
-.section li, .subsection li { margin-bottom: 4pt; }
-
-/* ----------------------------------------------------------------
-   DEFINITION LIST
-   ---------------------------------------------------------------- */
-.def-list { margin: 8pt 0; }
-.def-list dt {
-  font-weight: bold;
-  color: #1a4a2e;
-  margin-top: 7pt;
-}
-.def-list dd {
-  margin-left: 18pt;
-  color: #333;
-  margin-bottom: 3pt;
-}
-
-/* ----------------------------------------------------------------
-   CALLOUT BOX
-   ---------------------------------------------------------------- */
-.callout {
+.preamble {
   background: #f0f7f1;
-  border-left: 3pt solid #1a4a2e;
-  padding: 9pt 13pt;
-  margin: 11pt 0;
-  font-size: 10pt;
+  border: 1px solid #c4ddc6;
+  border-left: 4px solid #0b3d2e;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  color: #333;
 }
+
+.section ul,
+.section ol,
+.subsection ul,
+.subsection ol {
+  margin: 8px 0 8px 1.25em;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.section li,
+.subsection li {
+  margin-bottom: 6px;
+}
+
+.def-list {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.def-list dt {
+  font-weight: 700;
+  color: #0b3d2e;
+  margin-top: 8px;
+}
+
+.def-list dd {
+  margin: 4px 0 6px 1em;
+  color: #333;
+}
+
+.callout {
+  background: #eef6ef;
+  border-left: 3px solid #0b3d2e;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.55;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
 .callout--warn {
-  background: #fffaf0;
-  border-left-color: #b8860b;
+  background: #fffbeb;
+  border-left-color: #a07800;
 }
+
 .callout--red {
-  background: #fdf3f3;
+  background: #fdf2f2;
   border-left-color: #b83232;
 }
 
-/* ----------------------------------------------------------------
-   TABLE
-   ---------------------------------------------------------------- */
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 12pt 0;
-  font-size: 9.5pt;
+  margin: 12px 0;
+  font-size: 11px;
   page-break-inside: avoid;
+  break-inside: avoid;
 }
-thead th {
-  background: #1a4a2e;
-  color: #fff;
-  padding: 7pt 10pt;
-  text-align: left;
-  font-weight: bold;
-  font-size: 9pt;
-  letter-spacing: 0.03em;
-}
-tbody td {
-  padding: 6pt 10pt;
-  border-bottom: 0.5pt solid #dde8de;
-  vertical-align: top;
-  color: #2a2a2a;
-}
-tbody tr:nth-child(even) td { background: #f6faf6; }
 
-/* ----------------------------------------------------------------
-   SIGNATURE BLOCK
-   ---------------------------------------------------------------- */
+thead th {
+  background: #0b3d2e;
+  color: #fff;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+tbody td {
+  padding: 7px 10px;
+  border-bottom: 0.5pt solid #dce8dd;
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) td {
+  background: #f5faf5;
+}
+
 .sig-block {
-  margin-top: 28pt;
+  margin-top: 28px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 28pt;
+  gap: 24px;
   page-break-inside: avoid;
-}
-.sig-item { padding-top: 36pt; }
-.sig-item__line {
-  border-top: 1pt solid #555;
-  padding-top: 5pt;
-  font-size: 8.5pt;
-  color: #555;
-  line-height: 1.5;
+  break-inside: avoid;
 }
 
-/* ----------------------------------------------------------------
-   SCREEN FOOTER (visible on screen; hidden in print via rule below)
-   ---------------------------------------------------------------- */
+.sig-item {
+  padding-top: 32px;
+}
+
+.sig-item__line {
+  border-top: 1px solid #666;
+  padding-top: 6px;
+  font-size: 9px;
+  color: #555;
+}
+
 .doc-footer {
-  margin-top: 36pt;
-  padding-top: 9pt;
-  border-top: 1pt solid #c8dfc9;
+  margin-top: 28px;
+  padding-top: 10px;
+  border-top: 1px solid #c4ddc6;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 8pt;
+  font-size: 9px;
   color: #888;
+  width: 100%;
+}
+
+.doc-footer__brand {
+  font-weight: 700;
+  color: #0b3d2e;
+}
+
+.doc-end-legal-line {
+  margin-top: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  color: #444;
   position: relative;
   z-index: 1;
 }
-.doc-footer__brand { font-weight: bold; color: #1a4a2e; }
+
+/* Founder attestation — wet ink or scanned; certifies official FarmVault document */
+.manual-signature-section {
+  margin-top: 36px;
+  margin-bottom: 12px;
+  padding: 20px 18px 22px;
+  border: 1px solid #c4ddc6;
+  border-radius: 6px;
+  background: #fafcfb;
+  position: relative;
+  z-index: 1;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.manual-signature-section__title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14pt;
+  font-weight: 700;
+  color: #0b3d2e;
+  margin: 0 0 8px;
+}
+
+.manual-signature-section__intro {
+  font-size: 10pt;
+  color: #444;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.manual-signature-section__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+@media (min-width: 520px) {
+  .manual-signature-section__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.manual-signature-section__label {
+  display: block;
+  font-size: 9pt;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.manual-signature-section__line {
+  min-height: 44px;
+  border-bottom: 1px solid #333;
+  width: 100%;
+}
+
+/* Subtle watermark on content (fixed can look odd multi-page; keep light) */
+.doc-page::before {
+  content: "FARMVAULT";
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-size: 72pt;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: rgba(11, 61, 46, 0.028);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media print {
+  .doc-page::before {
+    position: absolute;
+    z-index: 0;
+  }
+}
 
 /* ================================================================
-   PRINT — consolidated single block
+   CLOSING PAGE
+   ================================================================ */
+.closing-page {
+  page: cover;
+  width: 210mm;
+  max-width: 100%;
+  height: 297mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  background-color: #0f5b3f;
+  background-image: linear-gradient(180deg, #0b3d2e 0%, #0c4a36 40%, #0f5b3f 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  color: #fff;
+  page-break-before: always;
+  break-before: page;
+  page-break-after: auto;
+  position: relative;
+  overflow: hidden;
+}
+
+.closing-page::before {
+  content: "";
+  position: absolute;
+  width: 380pt;
+  height: 380pt;
+  top: -100pt;
+  right: -100pt;
+  border-radius: 50%;
+  border: 48pt solid rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+
+.closing-page::after {
+  content: "";
+  position: absolute;
+  width: 280pt;
+  height: 280pt;
+  bottom: -70pt;
+  left: -70pt;
+  border-radius: 50%;
+  border: 36pt solid rgba(255, 255, 255, 0.03);
+  pointer-events: none;
+}
+
+.closing-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  padding: 12mm 16mm;
+}
+
+.closing-logo-wrap {
+  margin-bottom: 18px;
+}
+
+.closing-logo {
+  width: 120px;
+  max-width: min(120px, 32mm);
+  height: auto;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  position: relative;
+  z-index: 2;
+}
+
+.closing-rule {
+  width: 48px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 0 auto 18px;
+}
+
+.closing-brand {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.closing-tagline {
+  font-size: 11px;
+  opacity: 0.88;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-style: italic;
+  margin-bottom: 20px;
+}
+
+.closing-contact {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 16px;
+}
+
+.closing-sep {
+  opacity: 0.35;
+}
+
+.closing-copy {
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 6px;
+}
+
+.closing-note {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.32);
+  font-style: italic;
+}
+
+.closing-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  padding: 14mm 20mm 16mm;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  position: relative;
+  z-index: 1;
+}
+
+.closing-footer-doc {
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.closing-footer-conf {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+}
+
+/* Print button */
+.print-btn {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #0b3d2e;
+  color: #fff;
+  border: none;
+  padding: 10px 22px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.26);
+  z-index: 9999;
+}
+
+.print-btn:hover {
+  background: #0f5b3f;
+}
+
+/* ================================================================
+   PRINT
    ================================================================ */
 @media print {
-
-  /* 1. Force every element to print its background & colour exactly */
   *,
   *::before,
   *::after {
@@ -504,64 +837,124 @@ tbody tr:nth-child(even) td { background: #f6faf6; }
     print-color-adjust: exact !important;
   }
 
-  /* 2. Page root — transparent so cover gradient shows through */
-  html, body {
-    width: 210mm;
-    background: none !important;
+  html,
+  body {
+    width: 100%;
+    max-width: none;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
   }
 
-  /* 3. Cover page — full-bleed A4 sheet (margin:0 via @page :first) */
-  .cover-page {
-    width: 210mm;
-    height: 297mm;
-    padding: 44pt 36pt 32pt;
-    margin: 0;
-    box-shadow: none !important;
-    page-break-after: always;
-    break-after: page;
-  }
-
-  /* 4. Content pages — margin-free div; @page margin provides white space */
-  .doc-page {
-    width: 210mm;
+  .cover-page,
+  .closing-page {
+    /* Fill sheet: mm rounding vs page box can leave a white strip; vh ≈ one page in Chromium print */
+    width: 100%;
+    max-width: none;
     min-height: 297mm;
-    margin: 0;
+    height: 100vh;
+    max-height: none;
+    margin: 0 !important;
     padding: 0;
     box-shadow: none !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    box-sizing: border-box;
+    overflow: hidden;
+    background-color: #0f5b3f !important;
+    background-image: linear-gradient(
+      180deg,
+      #0b3d2e 0%,
+      #0c4a36 40%,
+      #0f5b3f 100%
+    ) !important;
+    background-repeat: no-repeat !important;
+    background-size: 100% 100% !important;
   }
 
-  /* 5. Keep logos crisp at any resolution */
+  .document-page,
+  .doc-page {
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  thead th {
+    background: #0b3d2e !important;
+    color: #fff !important;
+  }
+
+  tbody tr:nth-child(even) td {
+    background: #f5faf5 !important;
+  }
+
+  .preamble {
+    background: #f0f7f1 !important;
+  }
+
+  .callout {
+    background: #eef6ef !important;
+  }
+
+  .callout--warn {
+    background: #fffbeb !important;
+  }
+
+  .callout--red {
+    background: #fdf2f2 !important;
+  }
+
+  .doc-header__divider {
+    background: linear-gradient(90deg, #0b3d2e 0%, #2d6b42 45%, #c8dfc9 100%) !important;
+  }
+
   img {
     max-width: 100%;
+    image-rendering: -webkit-optimize-contrast;
     image-rendering: crisp-edges;
   }
 
-  /* 6. Hide all interactive / screen-only UI */
+  .cover-logo,
+  .closing-logo {
+    image-rendering: auto;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   .no-print,
   .print-btn,
   button,
-  .back-button {
+  .back-button,
+  .doc-footer {
     display: none !important;
   }
 
-  /* 7. Hide screen footer (print footer lives in @page bottom margin) */
-  .doc-footer { display: none; }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 
-  /* 8. Plain links */
-  a { color: inherit; text-decoration: none; }
+  p {
+    widows: 3;
+    orphans: 3;
+  }
 
-  /* 9. Prevent orphaned section headings */
-  h1, h2, h3,
+  h1,
+  h2,
+  h3,
   .section__title,
   .subsection__title {
     page-break-after: avoid;
     break-after: avoid;
   }
 
-  /* 10. Keep tables and callouts together */
-  table,
   .callout,
-  .sig-block {
+  .sig-block,
+  .manual-signature-section,
+  table,
+  .preamble {
     page-break-inside: avoid;
     break-inside: avoid;
   }

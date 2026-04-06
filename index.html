@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- DevTools / Chromium: avoid crash when __chromium_devtools_metrics_reporter is non-callable -->
+    <script>
+      (function () {
+        if (typeof window === "undefined") return;
+        if (typeof window.__chromium_devtools_metrics_reporter !== "function") {
+          window.__chromium_devtools_metrics_reporter = function () {};
+        }
+      })();
+    </script>
     <!-- Domain Canonicalization: Block indexing on non-canonical domains -->
     <script>
       (function() {

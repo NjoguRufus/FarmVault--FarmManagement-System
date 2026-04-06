@@ -37,6 +37,7 @@ export interface EffectivePlanAccess {
 function normalizePlan(plan?: string | null): EffectivePlan {
   const v = (plan ?? '').toLowerCase();
   if (v === 'pro' || v === 'professional') return 'pro';
+  if (v === 'trial' || v === 'trialing') return 'pro';
   if (v === 'enterprise') return 'enterprise';
   return 'basic';
 }

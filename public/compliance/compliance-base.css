@@ -1,0 +1,267 @@
+/* FarmVault compliance HTML — A4 screen + print */
+:root {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+@page {
+  size: A4 portrait;
+  margin: 16mm 18mm;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #f4f4f5;
+  color: #000;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11pt;
+  line-height: 1.45;
+}
+
+.doc-sheet {
+  max-width: 210mm;
+  min-height: 297mm;
+  margin: 12px auto;
+  padding: 18mm 20mm;
+  background: #fff;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .doc-sheet {
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    max-width: none;
+    min-height: auto;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+.doc-meta {
+  font-size: 9pt;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+h1.doc-title {
+  font-size: 14pt;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+h2.section-title {
+  font-size: 11pt;
+  margin: 16px 0 8px;
+  font-weight: 700;
+  border-bottom: 1px solid #cfcfcf;
+  padding-bottom: 4px;
+}
+
+table.form-grid {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 10pt;
+}
+
+table.form-grid th,
+table.form-grid td {
+  border: 1px solid #cfcfcf;
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+
+table.form-grid th {
+  background: #f3f4f6;
+  font-weight: 600;
+  width: 32%;
+}
+
+.safaricom-header {
+  background: #e5e5e5;
+  padding: 12px 14px;
+  margin: -18mm -20mm 16px -20mm;
+  border-bottom: 2px solid #cfcfcf;
+  font-weight: 700;
+  font-size: 12pt;
+  letter-spacing: 0.02em;
+}
+
+.ncba-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 3px solid #003a8f;
+}
+
+.ncba-wordmark {
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 800;
+  font-size: 22pt;
+  color: #003a8f;
+  letter-spacing: -0.02em;
+}
+
+.cert-body {
+  font-family: "Times New Roman", Times, serif;
+}
+
+.cert-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.emblem-placeholder {
+  width: 72px;
+  height: 88px;
+  border: 2px solid #000;
+  font-size: 7pt;
+  padding: 6px;
+  text-align: center;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.barcode-fake {
+  height: 44px;
+  width: min(220px, 100%);
+  margin: 20px auto 8px;
+  background: repeating-linear-gradient(
+    90deg,
+    #000 0 1.5px,
+    transparent 1.5px 3px
+  );
+}
+
+.barcode-label {
+  text-align: center;
+  font-size: 8pt;
+  letter-spacing: 0.2em;
+  font-family: "Courier New", monospace;
+}
+
+.signature-block {
+  margin-top: 36px;
+  padding-top: 12px;
+  border-top: 1px solid #000;
+  font-size: 10pt;
+}
+
+.profile-hero {
+  background: linear-gradient(135deg, #071a12 0%, #0b3d2e 100%);
+  color: #fff;
+  margin: 0 0 0 0;
+  padding: 20mm 20mm 16mm;
+}
+
+.profile-hero h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 22pt;
+  font-weight: 700;
+  margin: 0 0 6px;
+  color: #fff;
+}
+
+.profile-hero .tagline {
+  font-size: 11pt;
+  opacity: 0.92;
+  margin: 0;
+}
+
+.profile-hero .gold {
+  color: #d4af37;
+}
+
+ul.services {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+}
+
+ul.services li {
+  margin: 4px 0;
+}
+
+.actions-screen {
+  text-align: center;
+  margin: 12px 0 24px;
+}
+
+.actions-screen a {
+  color: #0b3d2e;
+  font-size: 10pt;
+}
+
+/* Founder attestation — wet ink or scanned; official FarmVault document */
+.manual-signature-section {
+  margin-top: 28px;
+  padding: 16px 14px 18px;
+  border: 1px solid #cfcfcf;
+  border-radius: 4px;
+  background: #fafafa;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.manual-signature-section__title {
+  font-size: 11pt;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: #111;
+}
+
+.manual-signature-section__intro {
+  font-size: 9pt;
+  color: #444;
+  margin: 0 0 14px;
+  line-height: 1.45;
+}
+
+.manual-signature-section__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 480px) {
+  .manual-signature-section__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.manual-signature-section__label {
+  display: block;
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 5px;
+}
+
+.manual-signature-section__line {
+  min-height: 40px;
+  border-bottom: 1px solid #000;
+  width: 100%;
+}

@@ -1,15 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   Check,
   Crown,
   CreditCard,
+  Download,
+  Loader2,
   Shield,
-  Sparkles,
   Zap,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
@@ -28,7 +30,6 @@ import type { BillingSubmissionCycle, BillingSubmissionPlan } from '@/lib/billin
 import {
   billingCycleDurationMonths,
   billingCycleLabel,
-  billingPlanLabel,
   computeBundleSavingsKes,
   getBillingAmountKes,
   parseBillingCycle,
@@ -36,6 +37,19 @@ import {
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import {
+  createReceiptPdfSignedUrl,
+  issueBillingReceiptForPayment,
+  listReceiptsForCompany,
+  type BillingReceiptRow,
+} from '@/services/receiptsService';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 
 const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '5334350';
 const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
@@ -52,6 +66,9 @@ function paymentStatusMeta(status: string): { label: string; className: string }
   if (s === 'approved') {
     return { label: 'Approved', className: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' };
   }
+  if (s === 'failed') {
+    return { label: 'Failed', className: 'bg-destructive/15 text-destructive' };
+  }
   if (s === 'rejected') {
     return { label: 'Rejected', className: 'bg-destructive/15 text-destructive' };
   }
@@ -59,6 +76,26 @@ function paymentStatusMeta(status: string): { label: string; className: string }
     return { label: 'Pending review', className: 'bg-amber-500/15 text-amber-950 dark:text-amber-200' };
   }
   return { label: 'Pending', className: 'bg-sky-500/10 text-sky-900 dark:text-sky-200' };
+}
+
+function paymentRowKind(p: PaymentSubmissionRow): 'manual' | 'stk' {
+  const pm = String(p.payment_method ?? '').toLowerCase();
+  const bm = String(p.billing_mode ?? '').toLowerCase();
+  if (p.ledger_source === 'mpesa_stk' || pm === 'mpesa_stk' || bm === 'mpesa_stk') return 'stk';
+  return 'manual';
+}
+
+/** Prefer approval / paid time; matches developer payment history ordering. */
+function paymentHistoryDisplayIso(p: PaymentSubmissionRow): string | null {
+  return p.approved_at ?? p.submitted_at ?? p.created_at ?? null;
+}
+
+/** Status label for tenant table: STK mirrors show “Paid” like developer “STK Confirmed”. */
+function tenantPaymentStatusMeta(p: PaymentSubmissionRow): { label: string; className: string } {
+  if (paymentRowKind(p) === 'stk' && String(p.status).toLowerCase() === 'approved') {
+    return { label: 'Paid', className: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300' };
+  }
+  return paymentStatusMeta(String(p.status));
 }
 
 function cycleLabelFromRow(mode: string | null, cycle: string | null): string {
@@ -73,10 +110,24 @@ function cycleLabelFromRow(mode: string | null, cycle: string | null): string {
   return '—';
 }
 
+/** Match `subscription_payments.id` to `receipts.subscription_payment_id` (handles UUID string quirks). */
+function billingPaymentLookupKey(id: string | null | undefined): string {
+  return String(id ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '');
+}
+
 export default function BillingPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const receiptFromQuery = searchParams.get('receipt');
+  const receiptHandledRef = useRef(false);
+  const receiptBackfillRunKeyRef = useRef<string | null>(null);
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<BillingSubmissionPlan>('pro');
@@ -119,6 +170,191 @@ export default function BillingPage() {
     enabled: !!companyId && !isDeveloper,
     queryFn: () => listCompanySubscriptionPayments(companyId!),
   });
+
+  const {
+    data: billingReceipts = [],
+    isFetched: receiptsFetched,
+    isError: receiptsIsError,
+    error: receiptsFetchErr,
+  } = useQuery({
+    queryKey: ['billing-receipts', 'company', companyId],
+    enabled: !!companyId && !isDeveloper,
+    queryFn: () => listReceiptsForCompany(companyId!),
+  });
+
+  const receiptByPaymentId = useMemo(() => {
+    const m = new Map<string, BillingReceiptRow>();
+    for (const r of billingReceipts) {
+      const k = billingPaymentLookupKey(r.subscription_payment_id);
+      if (k) m.set(k, r);
+    }
+    return m;
+  }, [billingReceipts]);
+
+  const [receiptIssuingPaymentId, setReceiptIssuingPaymentId] = useState<string | null>(null);
+  const [receiptDialogRow, setReceiptDialogRow] = useState<BillingReceiptRow | null>(null);
+  const [receiptPdfUrl, setReceiptPdfUrl] = useState<string | null>(null);
+  const [receiptPdfLoading, setReceiptPdfLoading] = useState(false);
+
+  const openReceiptForRow = useCallback(
+    async (row: BillingReceiptRow) => {
+      setReceiptDialogRow(row);
+      setReceiptPdfUrl(null);
+      setReceiptPdfLoading(true);
+      try {
+        const url = await createReceiptPdfSignedUrl(row.pdf_storage_path, 600);
+        setReceiptPdfUrl(url);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not load receipt';
+        toast({ variant: 'destructive', title: 'Receipt', description: msg });
+        setReceiptDialogRow(null);
+      } finally {
+        setReceiptPdfLoading(false);
+      }
+    },
+    [toast],
+  );
+
+  const requestReceiptForPayment = useCallback(
+    async (paymentId: string, options?: { openAfter?: boolean }) => {
+      if (!companyId) return;
+      setReceiptIssuingPaymentId(paymentId);
+      try {
+        await issueBillingReceiptForPayment(paymentId, undefined, { sendEmail: false });
+        const rows = await listReceiptsForCompany(companyId);
+        await queryClient.invalidateQueries({ queryKey: ['billing-receipts', 'company', companyId] });
+        const key = billingPaymentLookupKey(paymentId);
+        const row = rows.find((r) => billingPaymentLookupKey(r.subscription_payment_id) === key) ?? null;
+        if (options?.openAfter && row) {
+          await openReceiptForRow(row);
+        } else if (row) {
+          toast({
+            title: 'Receipt ready',
+            description: 'Use View receipt to open or download your PDF.',
+          });
+        } else {
+          toast({
+            title: 'Receipt created',
+            description: 'Refresh the page if the View receipt button does not appear yet.',
+          });
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not create receipt';
+        toast({
+          variant: 'destructive',
+          title: 'Receipt',
+          description: msg,
+        });
+      } finally {
+        setReceiptIssuingPaymentId(null);
+      }
+    },
+    [companyId, openReceiptForRow, queryClient, toast],
+  );
+
+  useEffect(() => {
+    receiptHandledRef.current = false;
+  }, [receiptFromQuery]);
+
+  useEffect(() => {
+    receiptBackfillRunKeyRef.current = null;
+  }, [companyId]);
+
+  // Issue PDF receipts for approved payments that pre-date receipt issuance (no duplicate email).
+  useEffect(() => {
+    if (isDeveloper || !companyId || !receiptsFetched || receiptsIsError || paymentsLoading) return;
+
+    const paidIds = new Set(
+      billingReceipts.map((r) => billingPaymentLookupKey(r.subscription_payment_id)).filter(Boolean),
+    );
+    const missing = payments.filter(
+      (p) =>
+        String(p.status).toLowerCase() === 'approved' &&
+        p.ledger_source !== 'mpesa_stk' &&
+        !paidIds.has(billingPaymentLookupKey(p.id)),
+    );
+    if (missing.length === 0) return;
+
+    const runKey = `${companyId}:${missing
+      .map((m) => m.id)
+      .sort()
+      .join(',')}`;
+    if (receiptBackfillRunKeyRef.current === runKey) return;
+    receiptBackfillRunKeyRef.current = runKey;
+
+    void (async () => {
+      for (const p of missing) {
+        try {
+          await issueBillingReceiptForPayment(p.id, undefined, { sendEmail: false });
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[BillingPage] receipt backfill failed for payment', p.id, e);
+          }
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ['billing-receipts', 'company', companyId] });
+    })();
+  }, [
+    isDeveloper,
+    companyId,
+    receiptsFetched,
+    receiptsIsError,
+    paymentsLoading,
+    payments,
+    billingReceipts,
+    queryClient,
+  ]);
+
+  // Deep link ?receipt=<receipt id> from email
+  useEffect(() => {
+    if (!receiptFromQuery || receiptHandledRef.current || isDeveloper || !companyId) return;
+    if (!receiptsFetched) return;
+
+    receiptHandledRef.current = true;
+
+    const clearReceiptParam = () =>
+      setSearchParams(
+        (p) => {
+          p.delete('receipt');
+          return p;
+        },
+        { replace: true },
+      );
+
+    if (receiptsIsError) {
+      toast({
+        variant: 'destructive',
+        title: 'Receipt',
+        description:
+          receiptsFetchErr instanceof Error ? receiptsFetchErr.message : 'Could not load receipts',
+      });
+      clearReceiptParam();
+      return;
+    }
+
+    const hit = billingReceipts.find((r) => r.id === receiptFromQuery);
+    if (hit) {
+      void openReceiptForRow(hit);
+    } else {
+      toast({
+        title: 'Receipt not found',
+        description: 'This link may be invalid or the receipt may belong to another workspace.',
+      });
+    }
+    clearReceiptParam();
+  }, [
+    receiptFromQuery,
+    receiptsFetched,
+    receiptsIsError,
+    receiptsFetchErr,
+    billingReceipts,
+    isDeveloper,
+    companyId,
+    openReceiptForRow,
+    setSearchParams,
+    toast,
+  ]);
 
   const workspacePlan = useMemo(() => gatePlanToWorkspacePlan(gatePlan), [gatePlan]);
 
@@ -209,24 +445,28 @@ export default function BillingPage() {
   const statusHeadline = useMemo(() => {
     if (isDeveloper) return 'Full platform access';
     if (isOverrideActive) return 'Developer override active';
+    if (isTrial) return 'Pro trial active';
     if (gateStatus === 'pending_approval') return 'Awaiting approval';
     if (gateStatus === 'pending_payment') return 'Payment under review';
-    if (isActivePaid) return 'Active';
-    if (isTrial) return 'Pro trial active';
+    if (isActivePaid) {
+      if (gatePlan === 'basic') return 'Basic Active';
+      if (gatePlan === 'pro') return 'Pro Active';
+      return 'Active';
+    }
     if (isExpired || trialExpiredNeedsPlan) return 'Subscription inactive';
     if (gateStatus === 'active') return 'Active';
     return 'Subscription';
-  }, [isDeveloper, isOverrideActive, gateStatus, isActivePaid, isTrial, isExpired, trialExpiredNeedsPlan]);
+  }, [isDeveloper, isOverrideActive, gateStatus, isActivePaid, isTrial, isExpired, trialExpiredNeedsPlan, gatePlan]);
 
   const statusDetail = useMemo(() => {
     if (isDeveloper) return 'Your account is not billed through this workspace.';
     if (isOverrideActive) return 'Billing and limits are managed by the FarmVault team.';
+    if (isTrial) return 'Enjoy full Pro features during your trial window.';
     if (gateStatus === 'pending_approval') return 'Complete activation to start your trial or paid plan.';
     if (gateStatus === 'pending_payment') return 'We will activate your plan after M-Pesa verification.';
     if (isActivePaid) return 'Your paid subscription is active. Renew before the end date to avoid interruption.';
     if (trialExpiredNeedsPlan) return 'Choose Basic or Pro to continue with full access.';
     if (isExpired) return 'Renew to restore full write access to your farm data.';
-    if (isTrial) return 'Enjoy full Pro features during your trial window.';
     return 'Thank you for being a FarmVault customer.';
   }, [isDeveloper, isOverrideActive, gateStatus, isActivePaid, trialExpiredNeedsPlan, isExpired, isTrial]);
 
@@ -257,18 +497,14 @@ export default function BillingPage() {
 
   const primaryCtaLabel = useMemo(() => {
     if (isDeveloper) return null;
-    if (isOverrideActive || gateStatus === 'pending_approval' || gateStatus === 'pending_payment') return null;
+    if (isOverrideActive || gateStatus === 'pending_payment') return null;
     if (isExpired || trialExpiredNeedsPlan) return 'Activate subscription';
     if (isTrial) return 'Upgrade';
     if (gatePlan === 'basic' && gateStatus === 'active') return 'Upgrade';
     return 'Renew & pay';
   }, [isDeveloper, isOverrideActive, gateStatus, isExpired, trialExpiredNeedsPlan, isTrial, gatePlan]);
 
-  const showPaySection =
-    !isDeveloper &&
-    !isOverrideActive &&
-    gateStatus !== 'pending_approval' &&
-    gateStatus !== 'pending_payment';
+  const showPaySection = !isDeveloper && !isOverrideActive && gateStatus !== 'pending_payment';
 
   const trialBannerText = useMemo(() => {
     if (!isTrial || isExpired || typeof daysRemaining !== 'number' || daysRemaining < 0) return null;
@@ -306,18 +542,6 @@ export default function BillingPage() {
               {trialExpiredNeedsPlan
                 ? 'Your Pro trial has ended. Pick a plan and submit payment to restore full access, or use the plan picker in the app header if you are a company admin.'
                 : 'Your subscription has expired. Submit a payment to continue without interruption.'}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {gateStatus === 'pending_approval' && !isDeveloper && (
-        <div className="flex gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-sm text-amber-950 shadow-sm dark:text-amber-100/90">
-          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-          <div>
-            <p className="font-semibold">Awaiting approval</p>
-            <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
-              Your workspace is not active yet. You will receive Pro trial access once approved.
             </p>
           </div>
         </div>
@@ -514,38 +738,79 @@ export default function BillingPage() {
           {/* SECTION 5 — Payment history */}
           <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight text-foreground">Payment history</h2>
-            <p className="mt-1 text-sm text-muted-foreground">M-Pesa subscription submissions for this workspace.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              M-Pesa STK checkouts and manual PayBill submissions for this workspace (same sources as the developer
+              dashboard). For subscription payments, use{' '}
+              <span className="font-medium text-foreground">Get receipt</span> until a PDF exists, then{' '}
+              <span className="font-medium text-foreground">View receipt</span>. STK-only rows show the M-Pesa receipt
+              code.
+            </p>
             <div className="mt-4 overflow-x-auto rounded-xl border border-border/50">
               {paymentsLoading ? (
                 <p className="p-6 text-sm text-muted-foreground">Loading payments…</p>
               ) : payments.length === 0 ? (
                 <p className="p-6 text-sm text-muted-foreground">No payments yet.</p>
               ) : (
-                <table className="w-full min-w-[640px] text-left text-sm">
+                <table className="fv-table-mobile w-full min-w-0 text-left text-sm md:min-w-[960px]">
                   <thead>
                     <tr className="border-b border-border/60 bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                       <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Type</th>
                       <th className="px-4 py-3">Plan</th>
                       <th className="px-4 py-3">Cycle</th>
                       <th className="px-4 py-3 text-right">Amount</th>
                       <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 font-mono text-[10px]">Reference</th>
+                      <th className="px-4 py-3 text-right">Receipt</th>
                     </tr>
                   </thead>
                   <tbody>
                     {payments.map((p: PaymentSubmissionRow) => {
-                      const meta = paymentStatusMeta(String(p.status));
+                      const meta = tenantPaymentStatusMeta(p);
+                      const kind = paymentRowKind(p);
                       const c = parseBillingCycle(p.billing_cycle ?? p.billing_mode);
+                      const receiptRow =
+                        receiptByPaymentId.get(billingPaymentLookupKey(p.id)) ?? null;
+                      const approved = String(p.status).toLowerCase() === 'approved';
+                      const issuingThis = receiptIssuingPaymentId === p.id;
+                      const displayIso = paymentHistoryDisplayIso(p);
+                      const refCode = p.transaction_code?.trim() || '—';
+                      const isStkOnlyMirror = p.ledger_source === 'mpesa_stk';
                       return (
-                        <tr key={p.id} className="border-b border-border/40 last:border-0">
-                          <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                            {p.created_at ? format(parseISO(p.created_at), 'PPp') : '—'}
+                        <tr
+                          key={`${p.ledger_source ?? 'sub'}-${p.id}`}
+                          className="border-b border-border/40 last:border-0 hover:bg-muted/30 md:border-b md:border-border/40"
+                        >
+                          <td
+                            className="whitespace-nowrap px-4 py-3 text-muted-foreground max-md:px-0"
+                            data-label="Date"
+                          >
+                            {displayIso ? format(parseISO(displayIso), 'PPp') : '—'}
                           </td>
-                          <td className="px-4 py-3 capitalize">{p.plan_id}</td>
-                          <td className="px-4 py-3">{c ? billingCycleLabel(c) : '—'}</td>
-                          <td className="px-4 py-3 text-right font-medium tabular-nums">
+                          <td className="px-4 py-3 max-md:px-0" data-label="Type">
+                            {kind === 'stk' ? (
+                              <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-400">
+                                STK
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                Manual
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 capitalize max-md:px-0" data-label="Plan">
+                            {p.plan_id}
+                          </td>
+                          <td className="px-4 py-3 max-md:px-0" data-label="Cycle">
+                            {c ? billingCycleLabel(c) : '—'}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-right font-medium tabular-nums max-md:px-0"
+                            data-label="Amount"
+                          >
                             {p.currency ?? 'KES'} {Number(p.amount).toLocaleString()}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 max-md:px-0" data-label="Status">
                             <span
                               className={cn(
                                 'inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize',
@@ -554,6 +819,56 @@ export default function BillingPage() {
                             >
                               {meta.label}
                             </span>
+                          </td>
+                          <td
+                            className="max-w-[140px] truncate px-4 py-3 font-mono text-[11px] text-muted-foreground max-md:px-0"
+                            data-label="Reference"
+                            title={refCode !== '—' ? refCode : undefined}
+                          >
+                            {refCode}
+                          </td>
+                          <td className="px-4 py-3 text-right max-md:px-0 max-md:pt-0" data-label="Receipt">
+                            <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 md:inline-flex md:flex-none md:flex-row md:justify-end">
+                              {receiptRow ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-9 w-full rounded-lg text-xs font-semibold md:h-8 md:w-auto"
+                                  onClick={() => void openReceiptForRow(receiptRow)}
+                                >
+                                  View receipt
+                                </Button>
+                              ) : approved && !isStkOnlyMirror ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled={issuingThis}
+                                  className="h-9 w-full rounded-lg text-xs font-semibold md:h-8 md:w-auto"
+                                  onClick={() => void requestReceiptForPayment(p.id, { openAfter: true })}
+                                >
+                                  {issuingThis ? (
+                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                                  ) : null}
+                                  Get receipt
+                                </Button>
+                              ) : approved && isStkOnlyMirror ? (
+                                <span
+                                  className="py-1 text-left text-xs text-muted-foreground md:text-right"
+                                  title="PDF receipts are issued from subscription payment records. After sync, use Get receipt on the matching subscription row if shown."
+                                >
+                                  —
+                                </span>
+                              ) : (
+                                <span
+                                  className="py-1 text-left text-xs text-muted-foreground md:text-right"
+                                  title="Receipts are available after payment is approved"
+                                >
+                                  —
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -650,6 +965,47 @@ export default function BillingPage() {
           workspaceCompanyId={companyId}
         />
       ) : null}
+
+      <Dialog
+        open={!!receiptDialogRow}
+        onOpenChange={(o) => {
+          if (!o) {
+            setReceiptDialogRow(null);
+            setReceiptPdfUrl(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
+          <DialogHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-border/60 px-6 py-4">
+            <DialogTitle className="font-mono text-base">
+              {receiptDialogRow?.receipt_number ?? 'Receipt'}
+            </DialogTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={!receiptPdfUrl}
+              onClick={() => {
+                if (receiptPdfUrl) window.open(receiptPdfUrl, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Open / download PDF
+            </Button>
+          </DialogHeader>
+          <div className="h-[min(72vh,720px)] w-full bg-muted/30">
+            {receiptPdfLoading ? (
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Loading PDF…
+              </div>
+            ) : receiptPdfUrl ? (
+              <iframe title="Receipt PDF" src={receiptPdfUrl} className="h-full w-full border-0" />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

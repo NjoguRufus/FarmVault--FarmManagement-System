@@ -72,7 +72,8 @@ export default function DeveloperHomePage() {
       activePaid: 0,
       activeTrial: 0,
       pendingConfirmation: 0,
-      paymentDue: 0,
+      trialsExpired: 0,
+      subscriptionExpired: 0,
     };
     for (const row of companyRows as any[]) {
       const st = computeCompanyStatus({
@@ -86,7 +87,8 @@ export default function DeveloperHomePage() {
       if (st === 'pro_active' || st === 'basic_active') out.activePaid += 1;
       if (st === 'trial_active') out.activeTrial += 1;
       if (st === 'pending_confirmation') out.pendingConfirmation += 1;
-      if (st === 'trial_expired' || st === 'subscription_expired') out.paymentDue += 1;
+      if (st === 'trial_expired') out.trialsExpired += 1;
+      if (st === 'subscription_expired') out.subscriptionExpired += 1;
     }
     return out;
   }, [companyRows, now]);
@@ -138,16 +140,16 @@ export default function DeveloperHomePage() {
         <DeveloperStatGrid cols="5">
           <StatCard
             title="Active Trials"
-            value={Number(paymentLifecycleCounters.activeTrials ?? 0).toLocaleString()}
+            value={Number(paymentLifecycleCounters.activeTrial ?? 0).toLocaleString()}
             icon={<Users className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant={Number(paymentLifecycleCounters.activeTrials ?? 0) > 0 ? 'warning' : 'default'}
+            variant={Number(paymentLifecycleCounters.activeTrial ?? 0) > 0 ? 'warning' : 'default'}
             compact
           />
           <StatCard
             title="Paid Active Companies"
-            value={Number(paymentLifecycleCounters.paidActiveCompanies ?? 0).toLocaleString()}
+            value={Number(paymentLifecycleCounters.activePaid ?? 0).toLocaleString()}
             icon={<DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant={Number(paymentLifecycleCounters.paidActiveCompanies ?? 0) > 0 ? 'primary' : 'default'}
+            variant={Number(paymentLifecycleCounters.activePaid ?? 0) > 0 ? 'primary' : 'default'}
             compact
           />
           <StatCard
@@ -159,9 +161,9 @@ export default function DeveloperHomePage() {
           />
           <StatCard
             title="Pending Confirmations"
-            value={Number(paymentLifecycleCounters.pendingConfirmations ?? 0).toLocaleString()}
+            value={Number(paymentLifecycleCounters.pendingConfirmation ?? 0).toLocaleString()}
             icon={<AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5" />}
-            variant={Number(paymentLifecycleCounters.pendingConfirmations ?? 0) > 0 ? 'warning' : 'default'}
+            variant={Number(paymentLifecycleCounters.pendingConfirmation ?? 0) > 0 ? 'warning' : 'default'}
             compact
           />
           <StatCard

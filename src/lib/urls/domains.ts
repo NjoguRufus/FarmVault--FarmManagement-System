@@ -93,6 +93,14 @@ export function isAppProductionHost(hostname = getHostname()): boolean {
   return hostname === 'app.farmvault.africa';
 }
 
+/**
+ * Marketing host (farmvault.africa): signup links must use absolute app URL so ?ref= survives
+ * (localStorage does not cross subdomains).
+ */
+export function isMarketingProductionHost(hostname = getHostname()): boolean {
+  return isPublicProductionHost(hostname);
+}
+
 export function buildUrl(base: string, path: string): string {
   const b = stripTrailingSlash(base);
   const p = String(path || '').startsWith('/') ? String(path) : `/${path || ''}`;
@@ -109,11 +117,26 @@ export function getAppAuthUrl(kind: 'sign-in' | 'sign-up'): string {
   return buildUrl(getAppBaseUrl(), path);
 }
 
-export function getAppEntryUrl(path = '/auth/continue'): string {
+export function getAppEntryUrl(path = '/auth/callback'): string {
   if (typeof window !== 'undefined') {
     const hostname = getHostname();
     if (!isProdLike() || isLocalhostHost(hostname) || isAppProductionHost(hostname)) return path;
   }
   return buildUrl(getAppBaseUrl(), path);
+}
+
+/**
+ * Farmer sign-up URL: relative on app/localhost; absolute https://app.farmvault.africa/sign-up?... from marketing.
+ * `queryString` should not include a leading "?".
+ */
+export function resolveFarmerSignUpUrl(queryString: string): string {
+  const path = queryString ? `/sign-up?${queryString}` : '/sign-up';
+  if (typeof window !== 'undefined') {
+    const hostname = getHostname();
+    if (isProdLike() && !isLocalhostHost(hostname) && isMarketingProductionHost(hostname)) {
+      return buildUrl(getAppBaseUrl(), path);
+    }
+  }
+  return path;
 }
 

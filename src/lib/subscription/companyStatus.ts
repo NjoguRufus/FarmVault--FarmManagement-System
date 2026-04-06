@@ -15,6 +15,11 @@ export type CompanyStatusCompanyLike = {
   payment_confirmed?: boolean | null | undefined;
   active_until?: string | null | undefined;
   plan?: string | null | undefined;
+  /** From list_companies / company_subscriptions (trialing tenant). */
+  is_trial?: boolean | null | undefined;
+  subscription_status?: string | null | undefined;
+  /** True when public.mpesa_payments has a confirmed STK row (result_code 0 and/or SUCCESS|COMPLETED). */
+  has_confirmed_stk_payment?: boolean | null | undefined;
 };
 
 function parseDateOrNull(v: string | null | undefined): Date | null {
@@ -27,11 +32,20 @@ function normPlan(v: string | null | undefined): 'basic' | 'pro' | string {
   const s = String(v ?? '').trim().toLowerCase();
   if (s === 'professional') return 'pro';
   if (!s) return '';
+  // pro_trial, pro_monthly, pro_trial_7d, etc. → pro for active/paid tier logic
+  if (s.startsWith('pro')) return 'pro';
+  if (s.startsWith('basic')) return 'basic';
   return s;
 }
 
 export function computeCompanyStatus(company: CompanyStatusCompanyLike, now: Date = new Date()): CompanyStatus {
   if (company.suspended) return 'suspended';
+
+  if (company.has_confirmed_stk_payment === true) {
+    const plan = normPlan(company.plan);
+    if (plan === 'basic') return 'basic_active';
+    return 'pro_active';
+  }
 
   if (company.pending_confirmation) return 'pending_confirmation';
 
@@ -39,8 +53,29 @@ export function computeCompanyStatus(company: CompanyStatusCompanyLike, now: Dat
   const activeUntil = parseDateOrNull(company.active_until);
   const paymentConfirmed = company.payment_confirmed === true;
   const plan = normPlan(company.plan);
+  const subStatus = String(company.subscription_status ?? '').trim().toLowerCase();
 
-  if (trialEnd && trialEnd > now && !paymentConfirmed) return 'trial_active';
+  // PRIORITY 1: Confirmed paid subscription — always wins over any trial flag.
+  // subscription_status = 'active' is the canonical signal; fall back to payment_confirmed +
+  // active_until when the status column hasn't been synced yet.
+  const subscriptionIsActive = subStatus === 'active';
+  const hasActivePaid =
+    subscriptionIsActive ||
+    (paymentConfirmed && activeUntil != null && activeUntil > now);
+
+  if (hasActivePaid) {
+    if (activeUntil && activeUntil <= now) return 'subscription_expired';
+    if (plan === 'pro' || subStatus === 'active') return 'pro_active';
+    return 'basic_active';
+  }
+
+  // PRIORITY 2: Trial window open (only when no confirmed paid subscription).
+  const subscriptionSaysTrialing = subStatus === 'trialing' || subStatus === 'trial';
+  const flagSaysTrial = company.is_trial === true;
+
+  if (trialEnd && trialEnd > now && (flagSaysTrial || subscriptionSaysTrialing)) {
+    return 'trial_active';
+  }
   if (trialEnd && trialEnd <= now && !paymentConfirmed) return 'trial_expired';
 
   if (activeUntil && activeUntil <= now) return 'subscription_expired';

@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Search, ChevronDown, Menu, HelpCircle, CheckCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import {
+  Bell,
+  Search,
+  ChevronDown,
+  Menu,
+  HelpCircle,
+  CheckCheck,
+  AlertTriangle,
+  CheckCircle2,
+  Crown,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useTour } from '@/tour/TourProvider';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { cn } from '@/lib/utils';
 import {
@@ -32,7 +41,6 @@ interface TopNavbarProps {
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
   const { user } = useAuth();
-  const { startTour } = useTour();
   const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
   const { notifications, markAsRead, markAllRead, unreadCount } = useNotifications();
@@ -256,16 +264,16 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             <>
               <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
-                {subPlan === 'pro' ? 'Pro' : subPlan === 'basic' ? 'Basic' : 'Plan'} · Active
+                {subPlan === 'pro' ? 'Pro Active' : subPlan === 'basic' ? 'Basic Active' : 'Plan Active'}
               </div>
               <div className="sm:hidden inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
                 <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
-                Active
+                {subPlan === 'pro' ? 'Pro Active' : subPlan === 'basic' ? 'Basic Active' : 'Paid'}
               </div>
             </>
           )}
 
-          {/* Pro trial countdown — rose while workspace pending approval, emerald when approved, amber if status unknown */}
+          {/* Pro trial countdown — emerald when trial active, amber if status unknown */}
           {isTrial && typeof daysRemaining === 'number' && daysRemaining >= 0 && !trialExpiredNeedsPlan && (
             <div className="hidden md:flex flex-col items-end gap-0.5 max-w-[220px]">
               <button
@@ -289,7 +297,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                     trialWorkspaceAccent === 'amber' && 'text-amber-700 dark:text-amber-300',
                   )}
                 />
-                Pro trial · {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
+                Pro Trial Active · {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left
               </button>
               <span
                 className={cn(
@@ -327,24 +335,9 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
                   trialWorkspaceAccent === 'amber' && 'text-amber-700 dark:text-amber-300',
                 )}
               />
-              {daysRemaining}d Pro trial
+              Pro Trial · {daysRemaining}d
             </button>
           )}
-
-          {!isDeveloperNav &&
-            Boolean(user?.companyId) &&
-            workspacePending &&
-            !isTrial &&
-            !workspaceStatusLoading && (
-              <div
-                className="hidden sm:inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-900 dark:border-rose-800 dark:bg-rose-950/45 dark:text-rose-100"
-                role="status"
-                title="Your workspace is waiting for team approval"
-              >
-                <span className="flex h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-hidden />
-                Approval pending
-              </div>
-            )}
 
           {trialExpiredNeedsPlan && (
             <div

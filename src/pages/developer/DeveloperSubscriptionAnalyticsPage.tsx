@@ -10,6 +10,7 @@ import {
   fetchMpesaStkPaymentsForDeveloper,
   fetchPayments,
   fetchSubscriptionAnalytics,
+  type MpesaStkPaymentRow,
 } from '@/services/developerService';
 import {
   buildLatestSdkMpesaByCompany,
@@ -17,6 +18,7 @@ import {
   isManualApprovedSubscriptionRow,
   mpesaRowIsSdkSuccess,
   resolveLatestCompanyPayment,
+  type ResolvedLatestCompanyPayment,
 } from '@/features/developer/subscriptionPaymentSource';
 import {
   computeCompanyStatus,
@@ -26,13 +28,18 @@ import {
 } from '@/lib/subscription/companyStatus';
 import { useNow } from '@/hooks/useNow';
 
-function computeResolvedStatus(row: any, now: Date): CompanyStatus {
+function computeResolvedStatus(
+  row: any,
+  now: Date,
+  latestSdk?: MpesaStkPaymentRow | undefined,
+): CompanyStatus {
   const suspended =
-    String(row?.subscription_status ?? '').trim().toLowerCase() === 'suspended' ||
+    String(row?.subscription_status ?? row?.status ?? '').trim().toLowerCase() === 'suspended' ||
     String(row?.company_status ?? '').trim().toLowerCase() === 'suspended';
   const plan =
     (row?.plan as string | null | undefined) ??
     (row?.plan_code as string | null | undefined) ??
+    (row?.selected_plan as string | null | undefined) ??
     (row?.subscription?.plan as string | null | undefined) ??
     null;
   const trialEndsAt =
@@ -43,14 +50,49 @@ function computeResolvedStatus(row: any, now: Date): CompanyStatus {
     (row?.active_until as string | null | undefined) ??
     (row?.subscription?.period_end as string | null | undefined) ??
     null;
-  return computeCompanyStatus({
-    suspended,
-    pending_confirmation: (row?.pending_confirmation as boolean | null | undefined) ?? null,
-    plan,
-    payment_confirmed: (row?.payment_confirmed as boolean | null | undefined) ?? null,
-    trial_ends_at: trialEndsAt,
-    active_until: activeUntil,
-  }, now);
+  const subscriptionStatus =
+    (row?.subscription_status as string | null | undefined) ??
+    (row?.status as string | null | undefined) ??
+    null;
+  const isTrial = row?.is_trial === true || row?.subscription?.is_trial === true;
+  const stkOk = latestSdk != null && mpesaRowIsSdkSuccess(latestSdk);
+  return computeCompanyStatus(
+    {
+      suspended,
+      has_confirmed_stk_payment: stkOk,
+      pending_confirmation: (row?.pending_confirmation as boolean | null | undefined) ?? null,
+      plan,
+      payment_confirmed: (row?.payment_confirmed as boolean | null | undefined) === true || stkOk,
+      trial_ends_at: trialEndsAt,
+      active_until: activeUntil,
+      is_trial: isTrial,
+      subscription_status: subscriptionStatus,
+    },
+    now,
+  );
+}
+
+/** Analytics table: avoid showing billing_mode/cycle as "trial" when STK paid or status is paid. */
+function billingModeCycleDisplay(
+  row: { billing_mode?: string | null; billing_cycle?: string | null },
+  latestPay: ResolvedLatestCompanyPayment | null,
+  statusResolved: CompanyStatus,
+): { mode: string; cycle: string } {
+  if (latestPay?.kind === 'sdk') {
+    const c = latestPay.billing_cycle;
+    const cycle = c && String(c).toLowerCase() !== 'trial' ? String(c) : 'monthly';
+    return { mode: 'mpesa_stk', cycle };
+  }
+  const paidish = statusResolved === 'pro_active' || statusResolved === 'basic_active';
+  let mode = row.billing_mode ?? '—';
+  let cycle = row.billing_cycle ?? '—';
+  if (paidish && String(mode).toLowerCase() === 'trial') {
+    mode = 'mpesa_stk';
+  }
+  if (paidish && String(cycle).toLowerCase() === 'trial') {
+    cycle = 'monthly';
+  }
+  return { mode, cycle };
 }
 
 type StatusFilter = 'all' | 'active' | 'trialing' | 'expired' | 'rejected';
@@ -327,12 +369,15 @@ export default function DeveloperSubscriptionAnalyticsPage() {
 
   const pay = data?.payment_stats;
 
+  const sdkByCompany = useMemo(() => buildLatestSdkMpesaByCompany(mpesaStkRows), [mpesaStkRows]);
+
   const counters = useMemo(() => {
     const items = companiesQuery.data?.items ?? [];
     const computedRows = (items as any[]).map((row) => {
-      const computed = computeResolvedStatus(row, now);
+      const cid = String(row.company_id ?? row.id ?? '');
+      const computed = computeResolvedStatus(row, now, sdkByCompany.get(cid));
       return {
-        companyId: String(row.company_id ?? row.id ?? ''),
+        companyId: cid,
         companyName: String(row.company_name ?? row.name ?? '—'),
         computed,
       };
@@ -358,7 +403,7 @@ export default function DeveloperSubscriptionAnalyticsPage() {
     };
 
     return out;
-  }, [companiesQuery.data, now, pay?.pending_total_count]);
+  }, [companiesQuery.data, now, pay?.pending_total_count, sdkByCompany]);
 
   const conversionRate = useMemo(() => {
     const denom = counters.paidActive + counters.trialActive + counters.trialExpired;
@@ -391,8 +436,6 @@ export default function DeveloperSubscriptionAnalyticsPage() {
 
   const avgPerCompanyKes =
     chartTotals.active > 0 ? totalRevenueKes / chartTotals.active : 0;
-
-  const sdkByCompany = useMemo(() => buildLatestSdkMpesaByCompany(mpesaStkRows), [mpesaStkRows]);
 
   const companyById = useMemo(() => {
     const items = (companiesQuery.data?.items ?? []) as any[];
@@ -831,15 +874,17 @@ export default function DeveloperSubscriptionAnalyticsPage() {
               </thead>
               <tbody>
                 {filteredAnalyticsRows.map((row) => {
-                  const statusResolved = computeResolvedStatus(row, now);
-                  const planLabel = String(row.plan_code ?? row.plan ?? row.selected_plan ?? '—');
-                  const endIso = String(row.active_until ?? row.current_period_end ?? row.trial_ends_at ?? '');
                   const cid = String(row.company_id ?? '');
                   const c = companyById.get(cid);
+                  const latestSdk = sdkByCompany.get(cid);
+                  const statusResolved = computeResolvedStatus(row, now, latestSdk);
+                  const planLabel = String(row.plan_code ?? row.plan ?? row.selected_plan ?? '—');
+                  const endIso = String(row.active_until ?? row.current_period_end ?? row.trial_ends_at ?? '');
                   const latestPay = resolveLatestCompanyPayment(
                     c?.latest_subscription_payment ?? null,
-                    sdkByCompany.get(cid),
+                    latestSdk,
                   );
+                  const billingDisplay = billingModeCycleDisplay(row, latestPay, statusResolved);
 
                   return (
                     <tr key={row.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
@@ -859,8 +904,8 @@ export default function DeveloperSubscriptionAnalyticsPage() {
                         </div>
                       </td>
                       <td className="py-3 pr-4 text-xs" data-label="Billing">
-                        <div className="text-foreground">{row.billing_mode ?? '—'}</div>
-                        <div className="text-[11px] text-muted-foreground">{row.billing_cycle ?? '—'}</div>
+                        <div className="text-foreground">{billingDisplay.mode}</div>
+                        <div className="text-[11px] text-muted-foreground">{billingDisplay.cycle}</div>
                       </td>
                       <td className="py-3 pr-4 text-xs align-top" data-label="Payment">
                         {latestPay ? (

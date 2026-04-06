@@ -33,7 +33,7 @@ export function AmbassadorLayout() {
       const pt = fvUser.profileUserType;
       const isAmbassador = pt === "ambassador" || pt === "both";
       if (!isAmbassador) {
-        navigate("/auth/continue", { replace: true });
+        navigate("/auth/callback", { replace: true });
         return;
       }
     }

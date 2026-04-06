@@ -3,10 +3,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
-import { fetchDeveloperCompanies, fetchMpesaStkPaymentsForDeveloper } from '@/services/developerService';
+import { fetchDeveloperCompanies, fetchMpesaStkPaymentsForDeveloper, type MpesaStkPaymentRow } from '@/services/developerService';
 import {
   buildLatestSdkMpesaByCompany,
   formatPaymentRelativeDay,
+  mpesaRowIsSdkSuccess,
   resolveLatestCompanyPayment,
 } from '@/features/developer/subscriptionPaymentSource';
 import {
@@ -91,6 +92,11 @@ type CompanyRow = {
   created_at?: string | null;
   users_count?: number | null;
   employees_count?: number | null;
+  /** Snapshot on core.companies (e.g. pending, trialing). */
+  company_subscription_status?: string | null;
+  access_level?: string | null;
+  onboarding_completed?: boolean | null;
+  company_trial_started_at?: string | null;
   subscription_status?: string | null;
   plan?: string | null;
   plan_code?: string | null; // legacy field still present in RPC payloads
@@ -113,10 +119,37 @@ type CompanyRow = {
     status?: string | null;
     trial_end?: string | null;
     period_end?: string | null;
+    is_trial?: boolean | null;
   } | null;
 };
 
-function computeResolvedStatus(c: CompanyRow, now: Date): CompanyStatus {
+/**
+ * Subscription status line in "Plan & trial" — must match resolved access, not stale DB snapshot
+ * (e.g. company_subscriptions can still say trialing after STK pay until backfill).
+ */
+function developerVisibleSubscriptionStatus(c: CompanyRow, computedStatus: CompanyStatus): string {
+  switch (computedStatus) {
+    case 'pro_active':
+    case 'basic_active':
+      return 'active';
+    case 'suspended':
+      return (c.company_subscription_status ?? c.subscription_status ?? 'suspended').toString();
+    case 'trial_active':
+      return 'trialing';
+    case 'trial_expired':
+      return 'trial expired';
+    case 'subscription_expired':
+      return 'expired';
+    case 'payment_pending':
+      return 'payment pending';
+    case 'pending_confirmation':
+      return 'pending approval';
+    default:
+      return (c.company_subscription_status ?? c.subscription_status ?? '—').toString() || '—';
+  }
+}
+
+function computeResolvedStatus(c: CompanyRow, now: Date, latestSdk?: MpesaStkPaymentRow | undefined): CompanyStatus {
   const suspended =
     String(c.subscription_status ?? '').trim().toLowerCase() === 'suspended' ||
     String(c.company_status ?? '').trim().toLowerCase() === 'suspended';
@@ -124,13 +157,21 @@ function computeResolvedStatus(c: CompanyRow, now: Date): CompanyStatus {
     (c.plan ?? null) ??
     (c.plan_code ?? null) ??
     (c.subscription?.plan ?? null);
+  const isTrial = c.is_trial === true || c.subscription?.is_trial === true;
+  const subscriptionStatus =
+    (c.subscription_status as string | null | undefined) ??
+    (c.subscription?.status as string | null | undefined);
+  const stkOk = latestSdk != null && mpesaRowIsSdkSuccess(latestSdk);
   return computeCompanyStatus({
     suspended,
+    has_confirmed_stk_payment: stkOk,
     pending_confirmation: (c as any).pending_confirmation ?? null,
     plan,
-    payment_confirmed: c.payment_confirmed ?? null,
+    payment_confirmed: c.payment_confirmed === true || stkOk,
     active_until: (c.active_until as string | null | undefined) ?? (c.subscription?.period_end as string | null | undefined),
     trial_ends_at: (c.trial_ends_at as string | null | undefined) ?? (c.subscription?.trial_end as string | null | undefined),
+    is_trial: isTrial,
+    subscription_status: subscriptionStatus,
   }, now);
 }
 
@@ -240,7 +281,7 @@ export default function DeveloperCompaniesPage() {
       const companyId = String(c.company_id ?? c.id ?? '');
       const mode = (c.override?.mode ?? '').toLowerCase();
       const hasOverride = Boolean(c.override?.enabled);
-      const computedStatus = computeResolvedStatus(c, now);
+      const computedStatus = computeResolvedStatus(c, now, sdkByCompany.get(companyId));
 
       if (statusFilter !== 'all') {
         if (statusFilter === 'approved') {
@@ -780,6 +821,7 @@ export default function DeveloperCompaniesPage() {
               <tr>
                 <th className="py-2 text-left font-medium">Company</th>
                 <th className="py-2 text-left font-medium">Access</th>
+                <th className="py-2 text-left font-medium">Plan & trial</th>
                 <th className="py-2 text-left font-medium">Payment</th>
                 <th className="py-2 text-left font-medium">Users</th>
                 <th className="py-2 text-left font-medium">Trial ends</th>
@@ -793,7 +835,7 @@ export default function DeveloperCompaniesPage() {
                 const hasOverride = c.override?.enabled;
                 const displayName = c.company_name ?? c.name ?? '—';
                 const lowerName = displayName.trim().toLowerCase();
-                const computedStatus = computeResolvedStatus(c, now);
+                const computedStatus = computeResolvedStatus(c, now, sdkByCompany.get(id));
                 const isProtectedCompany =
                   lowerName === 'keyfarm' ||
                   // Any company that is currently active in this session
@@ -836,6 +878,28 @@ export default function DeveloperCompaniesPage() {
                         </Badge>
                       </div>
                     </td>
+                    <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Plan & trial">
+                      <div className="space-y-0.5 text-[11px] leading-snug">
+                        <div>
+                          <span className="text-muted-foreground">Plan: </span>
+                          <span className="font-medium text-foreground">
+                            {(c.plan ?? '—').toString().toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Status: </span>
+                          <span className="font-medium text-foreground">
+                            {developerVisibleSubscriptionStatus(c, computedStatus)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Access: </span>
+                          <span className="font-medium text-foreground">
+                            {companyStatusAccessLabel(computedStatus)}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
                     <td className="max-md:items-start py-3 pr-4 text-xs align-top" data-label="Payment">
                       {latestPay ? (
                         <div className="max-w-[220px] space-y-1 md:max-w-[220px]">
@@ -870,7 +934,9 @@ export default function DeveloperCompaniesPage() {
                       {c.users_count ?? 0} / {c.employees_count ?? 0}
                     </td>
                     <td className="py-3 pr-4 text-xs" data-label="Trial ends">
-                      {formatDate(c.trial_ends_at ?? c.subscription?.trial_end)}
+                      {computedStatus === 'pro_active' || computedStatus === 'basic_active'
+                        ? '—'
+                        : formatDate(c.trial_ends_at ?? c.subscription?.trial_end)}
                     </td>
                     <td className="py-3 pr-4 text-xs" data-label="Active until">
                       {formatDate(c.active_until ?? c.subscription?.period_end)}

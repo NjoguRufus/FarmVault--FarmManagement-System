@@ -25,6 +25,7 @@ import {
 import { getCompany, type CompanyDoc } from '@/services/companyService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { useToast } from '@/hooks/use-toast';
+import { getSupabaseAccessToken } from '@/lib/supabase';
 import { useCompanyScope, TENANT_SYNC_REQUIRED } from '@/hooks/useCompanyScope';
 import { useCompanyContext } from '@/hooks/useCompanyContext';
 import { useActiveCompany } from '@/hooks/useActiveCompany';
@@ -161,6 +162,10 @@ export function BillingModal({
   const [stkLoading, setStkLoading] = useState(false);
   const [stkCheckoutRequestId, setStkCheckoutRequestId] = useState<string | null>(null);
   const [stkPhone, setStkPhone] = useState('');
+  const [stkActivating, setStkActivating] = useState(false);
+  const activationFallbackRef = useRef<number | null>(null);
+  /** Rapid refetch while STK callback activates subscription (realtime can lag a few hundred ms). */
+  const stkGatePollRef = useRef<number | null>(null);
   const upgradeOpenTrackedRef = useRef(false);
   const planRef = useRef(plan);
   planRef.current = plan;
@@ -178,7 +183,7 @@ export function BillingModal({
   const mutation = useMutation({
     mutationFn: async (input: Parameters<typeof createPaymentSubmission>[0]) => {
       const client = await getAuthedSupabase(clerkSupabaseToken);
-      return createPaymentSubmission(input, client);
+      return createPaymentSubmission(input, client, getSupabaseAccessToken);
     },
     onSuccess: async () => {
       setSuccess(true);
@@ -192,11 +197,12 @@ export function BillingModal({
       const cid = companyId;
       if (cid) {
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['company-subscription', cid] }),
-          queryClient.invalidateQueries({ queryKey: ['subscription-gate', cid] }),
-          queryClient.invalidateQueries({ queryKey: ['subscription-payment-pending', cid] }),
-          queryClient.invalidateQueries({ queryKey: ['subscription-payments-supabase', cid] }),
-          queryClient.invalidateQueries({ queryKey: ['company-subscription-row', cid] }),
+          queryClient.refetchQueries({ queryKey: ['subscription-gate', cid], type: 'active' }),
+          queryClient.refetchQueries({ queryKey: ['subscription-payment-pending', cid], type: 'active' }),
+          queryClient.refetchQueries({ queryKey: ['subscription-payments-supabase', cid], type: 'active' }),
+          queryClient.refetchQueries({ queryKey: ['company-subscription-row', cid], type: 'active' }),
+          queryClient.refetchQueries({ queryKey: ['company-billing', cid], type: 'active' }),
+          queryClient.refetchQueries({ queryKey: ['billing-receipts', 'company', cid], type: 'active' }),
         ]);
       }
     },
@@ -216,6 +222,15 @@ export function BillingModal({
       setStkLoading(false);
       setStkCheckoutRequestId(null);
       setStkPhone('');
+      setStkActivating(false);
+      if (activationFallbackRef.current) {
+        window.clearTimeout(activationFallbackRef.current);
+        activationFallbackRef.current = null;
+      }
+      if (stkGatePollRef.current) {
+        window.clearInterval(stkGatePollRef.current);
+        stkGatePollRef.current = null;
+      }
     }
   }, [open]);
 
@@ -247,9 +262,9 @@ export function BillingModal({
 
   const subtitle = useMemo(() => {
     if (isExpired) {
-      return 'Your trial has ended. Choose a plan, then pay via PayBill and submit your confirmation for manual verification.';
+      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or use PayBill and submit details for manual verification.';
     }
-    return 'Choose a plan and cycle. Pay via PayBill and submit your M-Pesa confirmation for manual review.';
+    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or use PayBill and submit your confirmation for manual review.';
   }, [isExpired]);
 
   const selectedPlan = useMemo(() => {
@@ -316,19 +331,14 @@ export function BillingModal({
     });
   };
 
-  // STK push is reserved for future use — show coming soon toast instead of initiating.
-  const handleStkComingSoon = () => {
-    toast({
-      title: 'Coming soon',
-      description: 'M-Pesa STK Push will be available soon. For now, please pay manually using PayBill and submit your confirmation.',
-    });
-  };
-
-  // Backend STK logic preserved for future re-enable.
   const handleStkPush = async () => {
     setFormError(null);
     if (!clerkAuthLoaded || !clerkSignedIn) {
-      toast({ variant: 'destructive', title: 'Sign in required', description: 'Wait for sign-in to finish, then try STK again.' });
+      toast({
+        variant: 'destructive',
+        title: 'Sign in required',
+        description: 'Wait for sign-in to finish, then try STK again.',
+      });
       return;
     }
     if (!scope.isDeveloper && scope.error) {
@@ -354,17 +364,38 @@ export function BillingModal({
     if (!phoneTrim || phoneTrim.length < 9) missing.push('phone');
     if (!Number.isFinite(safeAmount) || safeAmount <= 0) missing.push('amount');
 
+    // eslint-disable-next-line no-console
+    console.log('STK preflight (BillingModal):', {
+      company_id: companyId,
+      billing_reference: billingRefTrim || '(omitted — server uses DB)',
+      plan,
+      billing_cycle: cycle,
+      phone: phoneTrim || null,
+      amount_raw: amount,
+      amount_rounded: safeAmount,
+      companyDocLoaded: companyDoc != null,
+      missing_fields: missing,
+    });
+
     if (missing.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn('[BillingModal] STK blocked — missing or invalid:', missing.join(', '));
       const label =
-        missing[0] === 'company_id' ? 'Workspace not found'
-          : missing[0] === 'phone' ? 'Phone required for STK'
-          : missing[0] === 'amount' ? 'Invalid amount'
-          : 'Cannot start STK';
+        missing[0] === 'company_id'
+          ? 'Workspace not found'
+          : missing[0] === 'phone'
+            ? 'Phone required for STK'
+            : missing[0] === 'amount'
+              ? 'Invalid amount'
+              : 'Cannot start STK';
       const description =
-        missing[0] === 'company_id' ? 'Sign in again or pick your workspace, then retry.'
-          : missing[0] === 'phone' ? 'Enter the M-Pesa number that should receive the prompt (e.g. 07… or +254…).'
-          : missing[0] === 'amount' ? 'Choose Basic or Pro and a billing cycle so the price is set.'
-          : `Fix: ${missing.join(', ')}`;
+        missing[0] === 'company_id'
+          ? 'Sign in again or pick your workspace, then retry.'
+          : missing[0] === 'phone'
+            ? 'Enter the M-Pesa number that should receive the prompt (e.g. 07… or +254…).'
+            : missing[0] === 'amount'
+              ? 'Choose Basic or Pro and a billing cycle so the price is set.'
+              : `Fix: ${missing.join(', ')}`;
       toast({ variant: 'destructive', title: label, description });
       setFormError(`${label}. ${description}`);
       return;
@@ -372,6 +403,13 @@ export function BillingModal({
 
     setStkLoading(true);
     try {
+      // eslint-disable-next-line no-console
+      console.log('STK company context:', {
+        company_id: companyId,
+        billing_reference: billingRefTrim || undefined,
+        plan,
+        billing_cycle: cycle,
+      });
       const res = await initiateMpesaStkPush(
         {
           companyId: companyId!,
@@ -384,7 +422,10 @@ export function BillingModal({
         { getAccessToken: clerkSupabaseToken },
       );
       setStkCheckoutRequestId(res.checkoutRequestId);
-      toast({ title: 'Check your phone', description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.' });
+      toast({
+        title: 'Check your phone',
+        description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.',
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'STK request failed.';
       setFormError(msg);
@@ -394,21 +435,71 @@ export function BillingModal({
     }
   };
 
+  const refetchSubscriptionQueries = useCallback(async (cid: string) => {
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['subscription-gate', cid], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['subscription-payment-pending', cid], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['subscription-payments-supabase', cid], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['company-subscription-row', cid], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['company-billing', cid], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['billing-receipts', 'company', cid], type: 'active' }),
+    ]);
+  }, [queryClient]);
+
+  const stopStkGatePoll = useCallback(() => {
+    if (stkGatePollRef.current != null) {
+      window.clearInterval(stkGatePollRef.current);
+      stkGatePollRef.current = null;
+    }
+  }, []);
+
+  const startStkGatePoll = useCallback(
+    (cid: string) => {
+      stopStkGatePoll();
+      void refetchSubscriptionQueries(cid);
+      stkGatePollRef.current = window.setInterval(() => {
+        void refetchSubscriptionQueries(cid);
+      }, 280);
+      window.setTimeout(() => stopStkGatePoll(), 12_000);
+    },
+    [refetchSubscriptionQueries, stopStkGatePoll],
+  );
+
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+
   const handleStkPaymentSuccess = useCallback(() => {
-    window.setTimeout(() => onOpenChange(false), 800);
-  }, [onOpenChange]);
+    // Don't close immediately — wait for subscription_activated event so queries get refreshed.
+    // Show activating state instead.
+    setStkActivating(true);
+    const cid = companyIdRef.current;
+    if (cid) startStkGatePoll(cid);
+    // Fallback: if subscription_activated never arrives within 10s (e.g. edge function delay),
+    // force refetch and close so the user isn't stuck.
+    activationFallbackRef.current = window.setTimeout(async () => {
+      activationFallbackRef.current = null;
+      const id = companyIdRef.current;
+      stopStkGatePoll();
+      if (id) await refetchSubscriptionQueries(id);
+      onOpenChangeRef.current(false);
+    }, 10_000);
+  }, [refetchSubscriptionQueries, startStkGatePoll, stopStkGatePoll]);
 
   const handleSubscriptionActivatedFromStk = async () => {
-    if (companyId) {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['company-subscription', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['subscription-gate', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['subscription-payment-pending', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['subscription-payments-supabase', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['company-subscription-row', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['company-billing', companyId] }),
-      ]);
+    // Clear fallback timer — the real activation event arrived in time.
+    if (activationFallbackRef.current) {
+      window.clearTimeout(activationFallbackRef.current);
+      activationFallbackRef.current = null;
     }
+    stopStkGatePoll();
+    const cid = companyIdRef.current;
+    if (cid) await refetchSubscriptionQueries(cid);
+    // Let one paint cycle show updated plan in navbar before unmounting checkout.
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => onOpenChange(false), 120);
+    });
   };
 
   const handleTransactionCodePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -497,6 +588,10 @@ export function BillingModal({
                   </div>
                 ) : null}
 
+                {/*
+                  Mobile: plan → cycle → summary → STK → manual PayBill.
+                  Desktop: summary (left col) + STK + manual (right col).
+                */}
                 <div
                   className={cn(
                     'flex flex-col gap-3.5 sm:gap-4',
@@ -531,8 +626,83 @@ export function BillingModal({
                   />
 
                   <div className="order-4 flex flex-col gap-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0">
-                    {/* ── Manual PayBill — primary payment path ── */}
                     <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Pay via M-Pesa STK push
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Amount due matches your selected plan (KES{' '}
+                          {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
+                          phone; your subscription activates automatically.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
+                          Phone number
+                        </label>
+                        <Input
+                          id="billing-stk-phone"
+                          className="h-9 rounded-md bg-background lg:h-10 lg:rounded-lg"
+                          value={stkPhone}
+                          disabled={busy}
+                          onChange={(e) => setStkPhone(e.target.value)}
+                          placeholder="07… or +254…"
+                          inputMode="tel"
+                          autoComplete="tel"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || stkLoading}
+                        className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
+                        onClick={() => void handleStkPush()}
+                      >
+                        <Smartphone className="h-3.5 w-3.5" />
+                        {stkLoading ? 'Sending STK prompt…' : 'Send STK prompt'}
+                      </Button>
+                      {stkActivating && (
+                        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-100/90">
+                          <span aria-hidden>✅</span> Payment confirmed — activating your subscription…
+                        </div>
+                      )}
+                      {/* Always keep StkPushConfirmation mounted while checkoutRequestId is set.
+                          When stkActivating=true the component internally returns null (status=SUCCESS)
+                          so it's invisible, but its Realtime subscription stays alive to catch the
+                          subscription_activated event and fire onSubscriptionActivated. */}
+                      {stkCheckoutRequestId ? (
+                        <StkPushConfirmation
+                          checkoutRequestId={stkCheckoutRequestId}
+                          confirmationContext="billing"
+                          onPaymentSuccess={stkActivating ? undefined : handleStkPaymentSuccess}
+                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
+                        />
+                      ) : null}
+                    </section>
+
+                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Pay via PayBill (manual)
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Pay the amount shown in the summary to our PayBill. Use this account number so we can match your
+                          payment.
+                        </p>
+                      </div>
+                      <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">PayBill number</dt>
+                          <dd className="font-mono font-medium text-foreground">{TILL}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Account number</dt>
+                          <dd className="font-mono font-medium text-foreground">
+                            {billingReference || '—'}
+                          </dd>
+                        </div>
+                      </dl>
                       <MpesaPaymentForm
                         mpesaName={mpesaName}
                         mpesaPhone={mpesaPhone}
@@ -557,63 +727,6 @@ export function BillingModal({
                         submitLoading={mutation.isPending}
                         className="space-y-3 lg:space-y-4"
                       />
-                    </section>
-
-                    {/* ── Divider ── */}
-                    <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-border/50" />
-                      <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">or</span>
-                      <div className="h-px flex-1 bg-border/50" />
-                    </div>
-
-                    {/* ── STK Push — coming soon, UI disabled ── */}
-                    <section className="space-y-3 rounded-xl border border-border/40 bg-muted/5 p-3 opacity-60 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
-                        <div className="mb-1.5 flex items-center gap-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            Pay via M-Pesa STK push
-                          </p>
-                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                            Coming soon
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          STK Push will be available soon. For now, please pay manually using PayBill and submit your
-                          confirmation above.
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground/60">
-                          Phone number
-                        </label>
-                        <Input
-                          id="billing-stk-phone"
-                          className="h-9 cursor-not-allowed rounded-md bg-background opacity-50 lg:h-10 lg:rounded-lg"
-                          value={stkPhone}
-                          disabled
-                          onChange={(e) => setStkPhone(e.target.value)}
-                          placeholder="07… or +254…"
-                          inputMode="tel"
-                          autoComplete="tel"
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-9 w-full gap-2 rounded-md text-xs opacity-70 lg:h-10 lg:rounded-lg lg:text-sm"
-                        onClick={handleStkComingSoon}
-                      >
-                        <Smartphone className="h-3.5 w-3.5" />
-                        Send STK prompt
-                      </Button>
-                      {stkCheckoutRequestId ? (
-                        <StkPushConfirmation
-                          checkoutRequestId={stkCheckoutRequestId}
-                          confirmationContext="billing"
-                          onPaymentSuccess={handleStkPaymentSuccess}
-                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
-                        />
-                      ) : null}
                     </section>
                   </div>
                 </div>

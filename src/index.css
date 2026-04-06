@@ -703,3 +703,44 @@
     }
   }
 }
+
+/* ─── Billing receipt: browser print (one page, colours preserved) ─── */
+@media print {
+  @page {
+    margin: 8mm;
+    size: auto;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #fv-receipt-template-preview,
+  #fv-receipt-template-preview * {
+    visibility: visible;
+  }
+
+  #fv-receipt-template-preview {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-shadow: none !important;
+    /* Keep entire receipt on a single sheet when possible */
+    break-inside: avoid;
+    page-break-inside: avoid;
+    page-break-after: avoid;
+    page-break-before: avoid;
+  }
+}

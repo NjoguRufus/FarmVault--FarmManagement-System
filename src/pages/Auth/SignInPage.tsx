@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { SignIn } from '@clerk/react';
 import { ClerkLoadErrorBoundary } from '@/components/auth/ClerkLoadErrorBoundary';
@@ -9,6 +9,10 @@ import {
   getAmbassadorSignUpPath,
   isAmbassadorClerkFlow,
 } from '@/lib/ambassador/clerkAuth';
+import { AUTH_CALLBACK_PATH } from '@/lib/routing/postAuthDestination';
+import { setAmbassadorAccessIntent } from '@/lib/ambassador/accessIntent';
+
+const ACCESS_REVOKED_SESSION_KEY = 'farmvault:access-revoked:v1';
 
 /**
  * Sign-in UI depends only on Clerk. No AuthContext or employee/company lookup runs here;
@@ -18,6 +22,27 @@ export default function SignInPage() {
   const location = useLocation();
   const ambassadorFlow = isAmbassadorClerkFlow(location.search);
   const afterAmbassadorAuthUrl = AMBASSADOR_POST_AUTH_PATH;
+
+  const showAccessRevoked = useMemo(() => {
+    const params = new URLSearchParams(location.search || '');
+    const byQuery = params.get('reason') === 'access-revoked';
+    let byStorage = false;
+    try {
+      byStorage = window.sessionStorage.getItem(ACCESS_REVOKED_SESSION_KEY) === '1';
+    } catch {
+      byStorage = false;
+    }
+    return byQuery || byStorage;
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!showAccessRevoked) return;
+    try {
+      window.sessionStorage.removeItem(ACCESS_REVOKED_SESSION_KEY);
+    } catch {
+      // ignore
+    }
+  }, [showAccessRevoked]);
 
   useEffect(() => {
     if (ambassadorFlow) {
@@ -44,13 +69,23 @@ export default function SignInPage() {
           </div>
         </div>
 
+        {showAccessRevoked && (
+          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white/90 backdrop-blur">
+            <p className="font-medium">Your previous access is no longer available.</p>
+            <p className="mt-1 text-white/75">
+              Create a new FarmVault account using <span className="font-medium">Sign up</span> below, or sign in if you
+              already have one.
+            </p>
+          </div>
+        )}
+
         <ClerkLoadErrorBoundary>
           <SignIn
             routing="path"
             path="/sign-in"
             signUpUrl={ambassadorFlow ? getAmbassadorSignUpPath() : '/sign-up'}
-            afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
-            afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : '/auth/continue'}
+            afterSignInUrl={ambassadorFlow ? afterAmbassadorAuthUrl : AUTH_CALLBACK_PATH}
+            afterSignUpUrl={ambassadorFlow ? afterAmbassadorAuthUrl : AUTH_CALLBACK_PATH}
             appearance={{
               variables: {
                 colorPrimary: '#1F3B2E',

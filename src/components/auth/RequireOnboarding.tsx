@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
-import { useDashboardRoles } from '@/hooks/useDashboardRoles';
+import { COMPANY_ONBOARDING_PATH } from '@/lib/routing/postAuthDestination';
 interface RequireOnboardingProps {
   children: React.ReactElement;
 }
@@ -14,11 +14,10 @@ interface RequireOnboardingProps {
  *
  * - Waits for authReady; shows loading until then.
  * - Developers bypass onboarding entirely (render children or redirect to /developer as configured).
- * - Redirect to /onboarding ONLY when setupIncomplete === true (never based on subscription/trial).
+ * - Redirect to /onboarding/company when setupIncomplete === true (no company/role or company onboarding_completed is false).
  */
 export function RequireOnboarding({ children }: RequireOnboardingProps) {
   const { user, authReady, isDeveloper, setupIncomplete, employeeProfile, resetRequired } = useAuth();
-  const { hasAmbassador, hasCompany, loading: rolesLoading } = useDashboardRoles();
   const location = useLocation();
 
   if (!authReady) {
@@ -33,7 +32,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
     return <SignInRedirect />;
   }
 
-  // Developers bypass onboarding; never redirect them to /onboarding.
+  // Developers bypass onboarding; never redirect them to company onboarding.
   if (isDeveloper || user.role === 'developer') {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -42,43 +41,29 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
     return <Navigate to="/developer" replace />;
   }
 
-  // Wait for ambassador role resolution before rendering company-scoped content.
-  // Without this, an ambassador-only user could briefly see company onboarding before redirect.
-  if (rolesLoading) {
-    return <AuthLoadingScreen message="Preparing your FarmVault workspace..." />;
-  }
-
-  // Ambassador-only users have no company — bypass all company onboarding guards.
-  if (hasAmbassador && !hasCompany) {
+  // Ambassador-only (from core.profiles.user_type): no RPC wait — avoids freeze if capabilities call hangs.
+  const pt = user.profileUserType;
+  if (pt === 'ambassador' || (pt === 'both' && !user.companyId)) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Ambassador-only bypass → /ambassador/console/dashboard', {
-        hasAmbassador,
-        hasCompany,
+      console.log('[RequireOnboarding] Ambassador profile bypass → /ambassador/console/dashboard', {
+        profileUserType: pt,
+        companyId: user.companyId,
       });
     }
     return <Navigate to="/ambassador/console/dashboard" replace />;
   }
 
-  // If this session has an employee profile (from RPC activation or existing membership),
-  // skip owner onboarding and go straight to app. No client-side employees lookup here.
-  if (employeeProfile) {
+  // Workspace onboarding (company created but onboarding_completed is false) applies to all roles
+  // until the company admin finishes the wizard — do not let employeeProfile bypass this.
+  if (setupIncomplete) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Auth] Redirecting employee to /dashboard');
-    }
-    return children;
-  }
-
-  // Redirect ONLY when setupIncomplete is true AND there is no employee profile
-  // (no invite match). Re-signup blocked (allow_resignup=false) still uses /start-fresh.
-  if (setupIncomplete && !employeeProfile) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Owner onboarding path → /onboarding', {
+      console.log('[RequireOnboarding] Onboarding required → /onboarding/company', {
         companyId: user.companyId,
         role: user.role,
         setupIncomplete,
+        hasEmployeeProfile: !!employeeProfile,
       });
     }
     if (resetRequired) {
@@ -86,7 +71,16 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
       console.warn('[AuthReset] Auto-onboarding skipped; routing reset user to Start Fresh gate');
       return <Navigate to="/start-fresh" replace state={{ from: location }} />;
     }
-    return <Navigate to="/onboarding" replace state={{ from: location }} />;
+    return <Navigate to={COMPANY_ONBOARDING_PATH} replace state={{ from: location }} />;
+  }
+
+  // Invited employee with a completed workspace: skip further onboarding gates.
+  if (employeeProfile) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[Auth] Redirecting employee to /dashboard');
+    }
+    return children;
   }
 
   if (import.meta.env.DEV) {

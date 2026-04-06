@@ -71,11 +71,17 @@ export function normalizeGateStatus(raw: string | null | undefined): WorkspaceSu
  * Single source of truth for workspace subscription presentation (billing, navbar, gates).
  * Call with the current `get_subscription_gate_state` row; pass `isDeveloper` for platform devs.
  */
+export type ResolveWorkspaceSubscriptionOptions = {
+  /** True when public.mpesa_payments has a confirmed STK row for this company (tenant read). */
+  hasConfirmedStkPayment?: boolean;
+};
+
 export function resolveWorkspaceSubscriptionState(
   subscriptionState: CompanySubscriptionGateState | null,
   companyId: string | null,
   isDeveloper: boolean,
   now: Date = new Date(),
+  options?: ResolveWorkspaceSubscriptionOptions,
 ): ResolvedWorkspaceSubscriptionState {
   if (isDeveloper) {
     return {
@@ -130,8 +136,22 @@ export function resolveWorkspaceSubscriptionState(
     };
   }
 
-  const subPlan = mapGatePlanToWorkspacePlan(subscriptionState.selected_plan);
-  const subStatus = normalizeGateStatus(subscriptionState.status);
+  const rawGateStatus = normalizeGateStatus(subscriptionState.status);
+  const stkPaid =
+    options?.hasConfirmedStkPayment === true &&
+    rawGateStatus !== 'suspended' &&
+    rawGateStatus !== 'rejected';
+
+  const planSource = stkPaid
+    ? String(subscriptionState.selected_plan ?? '')
+        .toLowerCase()
+        .includes('basic')
+      ? 'basic'
+      : 'pro'
+    : subscriptionState.selected_plan;
+
+  const subPlan = mapGatePlanToWorkspacePlan(planSource);
+  const subStatus: WorkspaceSubscriptionStatus = stkPaid ? 'active' : rawGateStatus;
 
   // Gate RPC normalizes is_trial / trial_ends_at when status is active; treat active as paid regardless of legacy columns.
   const trialEnd = parseIsoDate(subscriptionState.trial_ends_at ?? undefined);
@@ -143,11 +163,14 @@ export function resolveWorkspaceSubscriptionState(
   // Paid active always wins over stale is_trial / trial_ends_at in DB.
   const isActivePaidRow = subStatus === 'active';
 
+  // Count as Pro trial whenever the trial window is open and the row is not paid-active.
+  // Include legacy pending_approval rows that already have trial end dates (pre–auto-activate migrations).
   const inProTrialWindow =
     !isActivePaidRow &&
-    dbIsTrial &&
     trialRunning &&
-    (subStatus === 'trial' || subStatus === 'trialing');
+    (subStatus === 'trial' ||
+      subStatus === 'trialing' ||
+      (subStatus === 'pending_approval' && (dbIsTrial || subPlan === 'pro')));
 
   const trialExpiredNeedsPlan =
     !isActivePaidRow &&

@@ -91,7 +91,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'more' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },
-  { label: 'Legal Documents', path: '/developer/documents', icon: Scale, group: 'more' },
+  { label: 'Compliance & Documents', path: '/developer/documents', icon: Scale, group: 'more' },
 ];
 
 /** Manager nav. */

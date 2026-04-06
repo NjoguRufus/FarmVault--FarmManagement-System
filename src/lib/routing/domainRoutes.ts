@@ -43,6 +43,8 @@ export function isAppRoutePath(pathname: string): boolean {
 
 export function isPublicRoutePath(pathname: string): boolean {
   const p = pathname || '/';
+  // Referral short links: /r/CODE (must not use prefix "/r" — would match /register, etc.)
+  if (p === '/r' || p.startsWith('/r/')) return true;
   const prefixes = [
     '/',
     '/features',

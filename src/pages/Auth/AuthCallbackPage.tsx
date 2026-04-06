@@ -1,5 +1,17 @@
+import { useLayoutEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
+
 /**
- * @deprecated Use PostAuthContinuePage via `/auth/callback` or `/auth/continue`.
- * Kept as a re-export for any deep imports or docs that reference this module.
+ * OAuth / SSO return URL for Clerk. Hands off to `/auth/continue` so role, staff landing, and onboarding
+ * resolve in one place (`resolvePostAuthDestination`).
  */
-export { default } from './PostAuthContinuePage';
+export default function AuthCallbackPage() {
+  const navigate = useNavigate();
+
+  useLayoutEffect(() => {
+    navigate("/auth/continue", { replace: true });
+  }, [navigate]);
+
+  return <AuthLoadingScreen message="Signing you in…" />;
+}

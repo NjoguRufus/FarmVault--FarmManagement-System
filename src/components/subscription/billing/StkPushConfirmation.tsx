@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/sonner';
+import { Button } from '@/components/ui/button';
 import type { MpesaPaymentRow } from '@/types/mpesa';
 
 export type { MpesaPaymentRow };
@@ -10,6 +12,34 @@ export type StkConfirmationContext = 'billing' | 'developer';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object';
+}
+
+function isLikelyNetworkFailure(err: unknown): boolean {
+  const msg =
+    err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string'
+      ? String((err as { message: string }).message).toLowerCase()
+      : String(err ?? '').toLowerCase();
+  return (
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('load failed') ||
+    msg.includes('network request failed')
+  );
+}
+
+async function fetchMpesaPaymentRow(checkoutId: string): Promise<{
+  data: MpesaPaymentRow | null;
+  error: { message: string } | null;
+}> {
+  const { data, error } = await supabase
+    .from('mpesa_payments')
+    .select('*')
+    .eq('checkout_request_id', checkoutId)
+    .maybeSingle();
+  return {
+    data: data ? (data as MpesaPaymentRow) : null,
+    error: error ? { message: error.message ?? 'Request failed' } : null,
+  };
 }
 
 export function StkPushConfirmation({
@@ -25,8 +55,11 @@ export function StkPushConfirmation({
   onPaymentSuccess?: () => void;
   confirmationContext?: StkConfirmationContext;
 }) {
+  const { isLoaded: clerkLoaded } = useClerkAuth();
   const [payment, setPayment] = useState<MpesaPaymentRow | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const activatedFiredRef = useRef(false);
   const successFiredRef = useRef(false);
   const failedFiredRef = useRef(false);
@@ -37,9 +70,11 @@ export function StkPushConfirmation({
 
   useEffect(() => {
     const id = checkoutRequestId.trim();
-    if (!id) return;
+    if (!id || !clerkLoaded) return;
 
     let cancelled = false;
+    setLoading(true);
+    setFetchFailed(false);
     loadingToastIdRef.current = toast.loading('Waiting for confirmation...');
 
     const channel = supabase
@@ -56,25 +91,44 @@ export function StkPushConfirmation({
           const row = payload.new;
           if (isRecord(row) && typeof row.id === 'string') {
             setPayment(row as unknown as MpesaPaymentRow);
+            setFetchFailed(false);
           }
         },
       )
       .subscribe();
 
-    void supabase
-      .from('mpesa_payments')
-      .select('*')
-      .eq('checkout_request_id', id)
-      .maybeSingle()
-      .then(({ data, error }) => {
+    const load = async () => {
+      setFetchFailed(false);
+      let lastErr: { message: string } | null = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
         if (cancelled) return;
-        if (error) {
+        const { data, error } = await fetchMpesaPaymentRow(id);
+        if (cancelled) return;
+        if (!error) {
+          setPayment(data);
+          setLoading(false);
+          setFetchFailed(false);
+          return;
+        }
+        lastErr = error;
+        if (!isLikelyNetworkFailure(error)) {
           // eslint-disable-next-line no-console
           console.warn('[StkPushConfirmation] initial fetch', error.message);
+          break;
         }
-        setPayment(data ? (data as MpesaPaymentRow) : null);
-        setLoading(false);
-      });
+      }
+      setLoading(false);
+      setFetchFailed(true);
+      if (lastErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[StkPushConfirmation] initial fetch exhausted retries', lastErr.message);
+      }
+    };
+
+    void load();
 
     return () => {
       cancelled = true;
@@ -85,7 +139,7 @@ export function StkPushConfirmation({
         loadingToastIdRef.current = undefined;
       }
     };
-  }, [checkoutRequestId]);
+  }, [checkoutRequestId, clerkLoaded, retryCount]);
 
   const firePaymentSuccess = useCallback(() => {
     if (successFiredRef.current) return;
@@ -136,10 +190,31 @@ export function StkPushConfirmation({
 
   if (!checkoutRequestId.trim()) return null;
 
+  if (!clerkLoaded) {
+    return (
+      <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        Preparing session…
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
         Waiting for payment…
+      </div>
+    );
+  }
+
+  if (fetchFailed) {
+    return (
+      <div className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm space-y-2">
+        <p className="text-destructive">
+          Could not reach FarmVault to load payment status ({confirmationContext === 'billing' ? 'check your connection' : 'check network'}). Realtime updates may still arrive.
+        </p>
+        <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setRetryCount((c) => c + 1)}>
+          Retry
+        </Button>
       </div>
     );
   }
