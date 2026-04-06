@@ -2,7 +2,8 @@
 // No user JWT required — called with Supabase anon/publishable key only.
 //
 // Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs), SUPABASE_ANON_KEY (caller check).
-// Optional: FARMVAULT_EMAIL_FROM; developer copy uses FARMVAULT_DEVELOPER_INBOX_EMAIL (default farmvaultke@gmail.com)
+// Optional: FARMVAULT_EMAIL_FROM_ONBOARDING / FARMVAULT_EMAIL_FROM_ALERTS;
+//   developer copy uses FARMVAULT_DEVELOPER_INBOX_EMAIL
 //
 // Body:
 //   to             — ambassador email (required)
@@ -14,12 +15,12 @@
 import { getServiceRoleClientForEmailLogs, insertEmailLogRow } from "../_shared/emailLogs.ts";
 import { buildAmbassadorAdminNotifyEmail } from "../_shared/farmvault-email/ambassadorAdminNotifyTemplate.ts";
 import { buildAmbassadorWelcomeEmail } from "../_shared/farmvault-email/ambassadorWelcomeTemplate.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const EMAIL_LOG_TYPE_WELCOME = "ambassador_onboarding";
 const EMAIL_LOG_TYPE_ADMIN = "ambassador_onboarding_admin_notify";
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const corsHeaders = {
@@ -135,7 +136,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const admin = getServiceRoleClientForEmailLogs();
-    const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+    const fromOnboarding = getFarmVaultEmailFrom("onboarding");
+    const fromDeveloper = getFarmVaultEmailFrom("developer");
     const registeredAt = new Date().toISOString();
 
     // Build ambassador welcome email
@@ -171,7 +173,7 @@ Deno.serve(async (req: Request) => {
     const welcomeSend = await sendResendWithEmailLog({
       admin,
       resendKey,
-      from,
+      from: fromOnboarding,
       to,
       subject: welcomeSubject,
       html: welcomeHtml,
@@ -203,7 +205,7 @@ Deno.serve(async (req: Request) => {
     const adminSend = await sendResendWithEmailLog({
       admin,
       resendKey,
-      from,
+      from: fromDeveloper,
       to: adminRecipient,
       subject: adminBuilt.subject,
       html: adminBuilt.html,

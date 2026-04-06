@@ -7,7 +7,7 @@
 //   SUPABASE_ANON_KEY           — auto-provided; used to verify caller JWT
 //   SUPABASE_SERVICE_ROLE_KEY   — required for email_logs audit rows
 //   FARMVAULT_EMAIL_INTERNAL_SECRET — optional; allows trusted server-to-server sends (any `to`)
-//   FARMVAULT_EMAIL_FROM        — optional override, default "FarmVault <noreply@farmvault.africa>"
+//   FARMVAULT_EMAIL_FROM_*      — optional per-role overrides (see _shared/farmvaultEmailFrom.ts)
 //
 // Auth (user identity for getUser / RLS-backed RPCs):
 //   - Preferred when gateway JWT verify is ON: `Authorization: Bearer <anon JWT>` (gateway) +
@@ -31,6 +31,7 @@ import type {
   SendFarmVaultEmailPayload,
 } from "../_shared/farmvault-email/types.ts";
 import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/validatePayload.ts";
+import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,7 +39,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-farmvault-email-secret, x-farmvault-clerk-authorization",
 };
 
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
+function farmVaultFromForEmailType(emailType: FarmVaultEmailType): string {
+  return getFarmVaultEmailFromForEmailType(emailType);
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -245,7 +248,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Email service not configured" }, 500);
   }
 
-  const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+  const from = farmVaultFromForEmailType(payload.emailType);
 
   const meta = buildEmailMetadataSummary(payload.metadata ?? null, payloadDataAsRecord(payload));
   meta.source = "send-farmvault-email";

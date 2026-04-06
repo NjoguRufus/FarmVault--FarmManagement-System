@@ -1,3 +1,4 @@
+/** Resend API wrapper + email_logs. Pass `from` from `getFarmVaultEmailFrom` / `EMAIL_SENDERS` (farmvaultEmailFrom.ts). */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { insertEmailLogRow, updateEmailLogRow } from "./emailLogs.ts";
 
@@ -13,6 +14,8 @@ export type SendResendWithEmailLogInput = {
   company_id?: string | null;
   company_name: string | null;
   metadata: Record<string, unknown>;
+  /** Resend attachment payloads (base64 content), e.g. billing receipt PDF. */
+  attachments?: { filename: string; content: string }[];
 };
 
 async function readResendBody(res: Response): Promise<Record<string, unknown>> {
@@ -33,7 +36,7 @@ export async function sendResendWithEmailLog(
 ): Promise<
   { ok: true; resendId?: string; logId: string | null } | { ok: false; error: string }
 > {
-  const { admin, resendKey, from, to, subject, html, email_type, company_id, company_name, metadata } =
+  const { admin, resendKey, from, to, subject, html, email_type, company_id, company_name, metadata, attachments } =
     input;
   const recipientLower = to.trim().toLowerCase();
   const logCompanyId = company_id ?? null;
@@ -52,6 +55,16 @@ export async function sendResendWithEmailLog(
     });
   }
 
+  const bodyPayload: Record<string, unknown> = {
+    from,
+    to: [to.trim()],
+    subject,
+    html,
+  };
+  if (attachments && attachments.length > 0) {
+    bodyPayload.attachments = attachments;
+  }
+
   let res: Response;
   try {
     res = await fetch("https://api.resend.com/emails", {
@@ -60,12 +73,7 @@ export async function sendResendWithEmailLog(
         Authorization: `Bearer ${resendKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        from,
-        to: [to.trim()],
-        subject,
-        html,
-      }),
+      body: JSON.stringify(bodyPayload),
     });
   } catch (fetchErr) {
     const detail = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);

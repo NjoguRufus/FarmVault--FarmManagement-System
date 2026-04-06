@@ -2,9 +2,9 @@
 //
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY,
 //   RESEND_API_KEY (for email), BILLING_RECEIPT_ISSUE_SECRET (server-to-server, e.g. STK callback),
-//   optional FARMVAULT_EMAIL_FROM (same default as notify-developer / notify-company-transactional),
-//   optional FARMVAULT_BILLING_EMAIL_FROM (override for receipts only),
+//   optional FARMVAULT_EMAIL_FROM_BILLING or FARMVAULT_BILLING_EMAIL_FROM,
 //   optional FARMVAULT_RECEIPT_LOGO_URL, FARMVAULT_PUBLIC_APP_URL
+//   optional FARMVAULT_PAYMENT_EMAIL_DIAGNOSTIC=1 — sends "FORCE PAYMENT TEST" to farmvaultke@gmail.com (verify Resend billing@)
 //
 // Auth:
 //   - x-farmvault-receipt-secret: BILLING_RECEIPT_ISSUE_SECRET → issue/regenerate/resend/update (full)
@@ -17,7 +17,51 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildBillingReceiptPdf, type BillingReceiptPdfModel, type ReceiptLineItem } from "../_shared/billingReceiptPdf.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
-import { getServiceRoleClientForEmailLogs, insertEmailLogRow, updateEmailLogRow } from "../_shared/emailLogs.ts";
+import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
+import { getCompanyEmailAndName } from "../_shared/companyEmailPipeline.ts";
+import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
+import { sendCompanyPaymentEmail } from "../_shared/companyTenantEmailOnboarding.ts";
+
+async function tryGetCompanyInbox(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<{ email: string; name: string } | null> {
+  try {
+    return await getCompanyEmailAndName(admin, companyId);
+  } catch {
+    return null;
+  }
+}
+
+/** Set FARMVAULT_PAYMENT_EMAIL_DIAGNOSTIC=1 on the function to verify Resend from the payment path (billing@). */
+async function maybeSendPaymentFlowDiagnosticTest(resendKey: string): Promise<void> {
+  const on = Deno.env.get("FARMVAULT_PAYMENT_EMAIL_DIAGNOSTIC")?.trim() === "1";
+  if (!on) return;
+  try {
+    const from = getFarmVaultEmailFromForEmailType("billing_receipt");
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resendKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: ["farmvaultke@gmail.com"],
+        subject: "FORCE PAYMENT TEST",
+        html: "<p>Payment flow test</p>",
+      }),
+    });
+    const t = await r.text().catch(() => "");
+    if (!r.ok) {
+      console.error("PAYMENT EMAIL ERROR (diagnostic test):", r.status, t.slice(0, 400));
+    } else {
+      console.log("FORCE PAYMENT TEST sent (diagnostic)");
+    }
+  } catch (e) {
+    console.error("PAYMENT EMAIL ERROR (diagnostic test):", e);
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,8 +69,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-farmvault-receipt-secret",
 };
 
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
-const EMAIL_TYPE = "billing_receipt";
+/** Customer-facing receipt email subject (company billing contact). */
+const RECEIPT_EMAIL_SUBJECT = "Payment Received — FarmVault";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -91,16 +135,6 @@ function formatPaymentDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso).trim();
   return `${d.toISOString().slice(0, 19).replace("T", " ")} UTC`;
-}
-
-async function readResendBody(res: Response): Promise<Record<string, unknown>> {
-  const text = await res.text().catch(() => "");
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return { message: text.slice(0, 500) };
-  }
 }
 
 /** Customer payment receipt email (STK / billing-receipt-issue). Brand: primary #0F6D4D, accent #D4AF37, light #F8FAF9. */
@@ -695,73 +729,6 @@ function receiptEmailFromReceiptRow(
   });
 }
 
-async function sendReceiptEmail(input: {
-  admin: SupabaseClient | null;
-  resendKey: string;
-  from: string;
-  to: string;
-  subject: string;
-  html: string;
-  pdfBase64: string;
-  filename: string;
-  companyId: string;
-  companyName: string;
-  metadata: Record<string, unknown>;
-}): Promise<{ ok: true; resendId?: string } | { ok: false; error: string }> {
-  let logId: string | null = null;
-  if (input.admin) {
-    logId = await insertEmailLogRow(input.admin, {
-      company_id: input.companyId,
-      company_name: input.companyName,
-      recipient_email: input.to.trim().toLowerCase(),
-      email_type: EMAIL_TYPE,
-      subject: input.subject,
-      status: "pending",
-      provider: "resend",
-      metadata: input.metadata,
-    });
-  }
-
-  let res: Response;
-  try {
-    res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.resendKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: input.from,
-        to: [input.to.trim()],
-        subject: input.subject,
-        html: input.html,
-        attachments: [{ filename: input.filename, content: input.pdfBase64 }],
-      }),
-    });
-  } catch (e) {
-    const detail = e instanceof Error ? e.message : String(e);
-    if (input.admin && logId) await updateEmailLogRow(input.admin, logId, { status: "failed", error_message: detail });
-    return { ok: false, error: detail };
-  }
-
-  const body = await readResendBody(res);
-  if (!res.ok) {
-    const detail = typeof body.message === "string" ? body.message : `HTTP ${res.status}`;
-    if (input.admin && logId) await updateEmailLogRow(input.admin, logId, { status: "failed", error_message: detail });
-    return { ok: false, error: detail };
-  }
-
-  const resendId = typeof body.id === "string" ? body.id : undefined;
-  if (input.admin && logId) {
-    await updateEmailLogRow(input.admin, logId, {
-      status: "sent",
-      provider_message_id: resendId ?? null,
-      sent_at: new Date().toISOString(),
-    });
-  }
-  return { ok: true, resendId };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -795,11 +762,8 @@ Deno.serve(async (req) => {
   const receiptLogoUrl =
     Deno.env.get("FARMVAULT_RECEIPT_LOGO_URL")?.trim() ??
     "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
-  const from =
-    Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() ||
-    Deno.env.get("FARMVAULT_BILLING_EMAIL_FROM")?.trim() ||
-    DEFAULT_FROM;
   const logsClient = getServiceRoleClientForEmailLogs();
+  const logClient = logsClient ?? admin;
 
   try {
     if (action === "resend_email") {
@@ -829,28 +793,26 @@ Deno.serve(async (req) => {
       const buf = new Uint8Array(await file.arrayBuffer());
       const b64 = bytesToBase64(buf);
 
-      const email = String((rec as { customer_email?: string }).customer_email ?? "").trim();
-      if (!email) return jsonResponse({ error: "No customer email on receipt" }, 400);
+      const companyIdResend = String((rec as { company_id?: string }).company_id ?? "").trim();
+      if (!companyIdResend) {
+        return jsonResponse({ error: "Receipt missing company_id" }, 400);
+      }
 
       const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
       if (!resendKey) return jsonResponse({ error: "Email not configured" }, 500);
 
       const receiptNumber = String((rec as { receipt_number?: string }).receipt_number ?? "");
-      const subject = `FarmVault Payment Receipt — ${receiptNumber}`;
       const html = receiptEmailFromReceiptRow(rec as Record<string, unknown>, receiptId, appUrl, receiptLogoUrl);
 
-      const send = await sendReceiptEmail({
-        admin: logsClient,
+      const send = await sendCompanyPaymentEmail({
+        admin: logClient,
         resendKey,
-        from,
-        to: email,
-        subject,
+        companyId: companyIdResend,
+        subject: RECEIPT_EMAIL_SUBJECT,
         html,
-        pdfBase64: b64,
-        filename: `${receiptNumber}.pdf`,
-        companyId: String((rec as { company_id?: string }).company_id ?? ""),
-        companyName: String((rec as { company_name_snapshot?: string }).company_name_snapshot ?? "FarmVault"),
+        email_type: "billing_receipt",
         metadata: { receipt_id: receiptId, action: "resend_email" },
+        attachments: [{ filename: `${receiptNumber}.pdf`, content: b64 }],
       });
 
       if (!send.ok) {
@@ -883,6 +845,8 @@ Deno.serve(async (req) => {
       const issuedAt = new Date().toISOString();
       const { model, lineItems } = buildModel(ctx, receiptNumber, issuedAt);
       const pdfBytes = await buildBillingReceiptPdf(model);
+      const inbox = await tryGetCompanyInbox(admin, ctx.companyId);
+      const billingTo = inbox?.email ?? "";
       const path = String((rec as { pdf_storage_path?: string }).pdf_storage_path ?? "");
 
       const { error: upErr } = await admin.storage.from("billing-receipts").upload(path, pdfBytes, {
@@ -906,7 +870,7 @@ Deno.serve(async (req) => {
           company_name_snapshot: ctx.companyName,
           workspace_name_snapshot: ctx.companyName,
           admin_name_snapshot: ctx.adminName,
-          customer_email: ctx.adminEmail || null,
+          customer_email: billingTo || ctx.adminEmail || null,
           customer_phone: ctx.adminPhone || null,
           customer_since: ctx.companyCreatedAt,
           payment_cycle: model.paymentCycle,
@@ -915,9 +879,10 @@ Deno.serve(async (req) => {
         .eq("id", receiptId);
 
       const sendEmail = body.send_email === true;
-      if (sendEmail && ctx.adminEmail) {
+      if (sendEmail) {
         const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
         if (resendKey) {
+          await maybeSendPaymentFlowDiagnosticTest(resendKey);
           const b64 = bytesToBase64(pdfBytes);
           const html = await receiptEmailFromPaymentContext(admin, {
             ctx,
@@ -927,24 +892,23 @@ Deno.serve(async (req) => {
             appUrl,
             logoUrl: receiptLogoUrl,
           });
-          const send = await sendReceiptEmail({
-            admin: logsClient,
+          const send = await sendCompanyPaymentEmail({
+            admin: logClient,
             resendKey,
-            from,
-            to: ctx.adminEmail,
-            subject: `FarmVault Payment Receipt — ${receiptNumber}`,
-            html,
-            pdfBase64: b64,
-            filename: `${receiptNumber}.pdf`,
             companyId: ctx.companyId,
-            companyName: ctx.companyName,
+            subject: RECEIPT_EMAIL_SUBJECT,
+            html,
+            email_type: "billing_receipt",
             metadata: { receipt_id: receiptId, action: "regenerate" },
+            attachments: [{ filename: `${receiptNumber}.pdf`, content: b64 }],
           });
           if (send.ok) {
             await admin
               .from("receipts")
               .update({ email_sent_at: new Date().toISOString() })
               .eq("id", receiptId);
+          } else {
+            console.error("[billing-receipt-issue] regenerate receipt email failed", send.error);
           }
         }
       }
@@ -993,32 +957,29 @@ Deno.serve(async (req) => {
         const { data: recRow } = await admin.from("receipts").select("*").eq("id", existingId).maybeSingle();
         const r = recRow as Record<string, unknown> | null;
         const sentAt = r?.email_sent_at;
-        const cust = String(r?.customer_email ?? "").trim();
         const pdfPath = String(r?.pdf_storage_path ?? "");
-        if (r && !sentAt && cust && pdfPath) {
+        if (r && !sentAt && pdfPath) {
           const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
           if (resendKey) {
+            await maybeSendPaymentFlowDiagnosticTest(resendKey);
             const { data: file, error: dlErr } = await admin.storage.from("billing-receipts").download(pdfPath);
             if (!dlErr && file) {
               const buf = new Uint8Array(await file.arrayBuffer());
               const b64 = bytesToBase64(buf);
               const html = receiptEmailFromReceiptRow(r, existingId, appUrl, receiptLogoUrl);
-              const send = await sendReceiptEmail({
-                admin: logsClient,
+              const send = await sendCompanyPaymentEmail({
+                admin: logClient,
                 resendKey,
-                from,
-                to: cust,
-                subject: `FarmVault Payment Receipt — ${receiptNumberDedup}`,
-                html,
-                pdfBase64: b64,
-                filename: `${receiptNumberDedup || "receipt"}.pdf`,
                 companyId: String(r.company_id ?? ""),
-                companyName: String(r.company_name_snapshot ?? "FarmVault"),
+                subject: RECEIPT_EMAIL_SUBJECT,
+                html,
+                email_type: "billing_receipt",
                 metadata: {
                   receipt_id: existingId,
                   subscription_payment_id: subscriptionPaymentId,
                   deduped_resend: true,
                 },
+                attachments: [{ filename: `${receiptNumberDedup || "receipt"}.pdf`, content: b64 }],
               });
               emailedDedup = send.ok;
               if (send.ok) {
@@ -1026,6 +987,8 @@ Deno.serve(async (req) => {
                   .from("receipts")
                   .update({ email_sent_at: new Date().toISOString() })
                   .eq("id", existingId);
+              } else {
+                console.error("[billing-receipt-issue] deduped receipt email failed", send.error);
               }
             }
           }
@@ -1044,6 +1007,9 @@ Deno.serve(async (req) => {
     if (!ctx) {
       return jsonResponse({ error: "Payment not found or not approved" }, 400);
     }
+
+    const issueInbox = await tryGetCompanyInbox(admin, ctx.companyId);
+    const billingContactEmail = issueInbox?.email ?? "";
 
     const { data: num, error: numErr } = await admin.rpc("alloc_billing_receipt_number");
     if (numErr || num == null || String(num).trim() === "") {
@@ -1092,7 +1058,7 @@ Deno.serve(async (req) => {
       company_name_snapshot: ctx.companyName,
       workspace_name_snapshot: ctx.companyName,
       admin_name_snapshot: ctx.adminName,
-      customer_email: ctx.adminEmail || null,
+      customer_email: billingContactEmail || ctx.adminEmail || null,
       customer_phone: ctx.adminPhone || null,
       customer_since: ctx.companyCreatedAt,
       payment_cycle: model.paymentCycle,
@@ -1106,9 +1072,13 @@ Deno.serve(async (req) => {
     }
 
     let emailed = false;
-    if (sendEmail && ctx.adminEmail) {
+    if (sendEmail) {
       const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
-      if (resendKey) {
+      if (!resendKey) {
+        console.error("[billing-receipt-issue] send_email requested but RESEND_API_KEY is not set");
+      } else {
+        console.log("PAYMENT EMAIL TRIGGERED", ctx.companyId, subscriptionPaymentId);
+        await maybeSendPaymentFlowDiagnosticTest(resendKey);
         const b64 = bytesToBase64(pdfBytes);
         const html = await receiptEmailFromPaymentContext(admin, {
           ctx,
@@ -1118,18 +1088,15 @@ Deno.serve(async (req) => {
           appUrl,
           logoUrl: receiptLogoUrl,
         });
-        const send = await sendReceiptEmail({
-          admin: logsClient,
+        const send = await sendCompanyPaymentEmail({
+          admin: logClient,
           resendKey,
-          from,
-          to: ctx.adminEmail,
-          subject: `FarmVault Payment Receipt — ${receiptNumber}`,
-          html,
-          pdfBase64: b64,
-          filename: `${receiptNumber}.pdf`,
           companyId: ctx.companyId,
-          companyName: ctx.companyName,
+          subject: RECEIPT_EMAIL_SUBJECT,
+          html,
+          email_type: "billing_receipt",
           metadata: { receipt_id: receiptId, subscription_payment_id: subscriptionPaymentId },
+          attachments: [{ filename: `${receiptNumber}.pdf`, content: b64 }],
         });
         emailed = send.ok;
         if (send.ok) {
@@ -1137,14 +1104,10 @@ Deno.serve(async (req) => {
             .from("receipts")
             .update({ email_sent_at: new Date().toISOString() })
             .eq("id", receiptId);
+        } else {
+          console.error("[billing-receipt-issue] payment receipt email failed", send.error);
         }
       }
-    } else if (sendEmail && !ctx.adminEmail) {
-      console.warn(
-        "[billing-receipt-issue] send_email requested but no customer email for company",
-        ctx.companyId,
-        subscriptionPaymentId,
-      );
     }
 
     return successResponse({

@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { readMpesaEnvMode } from "../_shared/mpesaConfig.ts";
+import { sendCompanyPaymentReceipt } from "../_shared/sendCompanyPaymentReceipt.ts";
 
 function metadataItem(metadata: unknown, name: string): string | null {
   if (!metadata || typeof metadata !== "object") return null;
@@ -126,7 +127,7 @@ Deno.serve(async (req) => {
         const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
         const postDeveloperNotify = (jsonBody: Record<string, unknown>) => {
           const base = (supabaseUrl ?? "").replace(/\/$/, "");
-          if (!base || !serviceKey) return Promise.resolve();
+          if (!base || !serviceKey) return Promise.resolve(new Response("", { status: 204 }));
           return fetch(`${base}/functions/v1/notify-developer-transactional`, {
             method: "POST",
             headers: {
@@ -138,24 +139,11 @@ Deno.serve(async (req) => {
           });
         };
 
-        if (success) {
-          postDeveloperNotify({
-            event: "stk_payment_received",
-            checkout_request_id: checkoutId,
-          })
-            .then((r) => {
-              if (!r.ok) {
-                return r.text().then((t) => {
-                  console.error("[mpesa-stk-callback] notify stk_payment_received failed", r.status, t.slice(0, 400));
-                });
-              }
-            })
-            .catch((e) => console.error("[mpesa-stk-callback] notify stk_payment_received", e));
-        }
+        const logDevNotifyFailure = (label: string, r: Response, t: string) => {
+          console.error(`[mpesa-stk-callback] ${label} failed`, r.status, t.slice(0, 400));
+        };
 
-        // Activate + receipt email whenever the STK row is tied to a company. Do not require `plan` on the row:
-        // `activate_subscription_from_mpesa_stk` defaults plan/cycle; gating on plan skipped customer receipt emails
-        // when `plan` was null (legacy rows, partial writes, or env quirks) while the developer notify still fired.
+        // Activate + company receipt (sendCompanyPaymentReceipt → billing-receipt-issue) before developer alerts.
         const stkCompanyId =
           payBefore != null && payBefore.company_id != null && String(payBefore.company_id).trim() !== ""
             ? String(payBefore.company_id).trim()
@@ -168,23 +156,6 @@ Deno.serve(async (req) => {
             console.error("[mpesa-stk-callback] activate_subscription_from_mpesa_stk", actErr.message);
           } else {
             console.log("[mpesa-stk-callback] subscription activated for checkout", checkoutId);
-            postDeveloperNotify({
-              event: "subscription_activated",
-              source: "mpesa_stk",
-              checkout_request_id: checkoutId,
-            })
-              .then((r) => {
-                if (!r.ok) {
-                  return r.text().then((t) => {
-                    console.error(
-                      "[mpesa-stk-callback] notify subscription_activated failed",
-                      r.status,
-                      t.slice(0, 400),
-                    );
-                  });
-                }
-              })
-              .catch((e) => console.error("[mpesa-stk-callback] notify subscription_activated", e));
           }
 
           const payId =
@@ -197,33 +168,72 @@ Deno.serve(async (req) => {
           }
 
           if (payId && supabaseUrl && serviceKey) {
-            const fnUrl = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/billing-receipt-issue`;
-            try {
-              const r = await fetch(fnUrl, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${serviceKey}`,
-                  apikey: anonKey ?? serviceKey,
-                },
-                body: JSON.stringify({
-                  action: "issue",
-                  subscription_payment_id: payId,
-                  send_email: true,
-                }),
-              });
-              if (!r.ok) {
-                const t = await r.text().catch(() => "");
-                console.error("[mpesa-stk-callback] billing-receipt-issue failed", r.status, t.slice(0, 500));
-              }
-            } catch (e) {
-              console.error("[mpesa-stk-callback] billing-receipt-issue invoke", e);
+            await sendCompanyPaymentReceipt({
+              supabaseUrl,
+              serviceRoleKey: serviceKey,
+              anonKey: anonKey ?? undefined,
+              subscriptionPaymentId: payId,
+              sendEmail: false,
+            });
+            const base = supabaseUrl.replace(/\/$/, "");
+            const payNotify = await fetch(`${base}/functions/v1/notify-company-transactional`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+                apikey: anonKey ?? serviceKey,
+              },
+              body: JSON.stringify({
+                company_id: stkCompanyId,
+                kind: "payment_received",
+                subscription_payment_id: payId,
+              }),
+            });
+            if (!payNotify.ok) {
+              const t = await payNotify.text().catch(() => "");
+              console.error("[mpesa-stk-callback] notify-company-transactional payment_received", payNotify.status, t.slice(0, 400));
             }
+          }
+
+          // One developer email per callback: STK-only if activation failed; otherwise subscription activated (includes renewals).
+          if (actErr) {
+            postDeveloperNotify({
+              event: "stk_payment_received",
+              checkout_request_id: checkoutId,
+            })
+              .then((r) => {
+                if (!r.ok) {
+                  return r.text().then((t) => logDevNotifyFailure("notify stk_payment_received", r, t));
+                }
+              })
+              .catch((e) => console.error("[mpesa-stk-callback] notify stk_payment_received", e));
+          } else {
+            postDeveloperNotify({
+              event: "subscription_activated",
+              source: "mpesa_stk",
+              checkout_request_id: checkoutId,
+            })
+              .then((r) => {
+                if (!r.ok) {
+                  return r.text().then((t) => logDevNotifyFailure("notify subscription_activated", r, t));
+                }
+              })
+              .catch((e) => console.error("[mpesa-stk-callback] notify subscription_activated", e));
           }
         } else if (success && !stkCompanyId) {
           console.log("[mpesa-stk-callback] STK success without company_id on mpesa_payments — skip activate/receipt", {
             checkoutId,
           });
+          postDeveloperNotify({
+            event: "stk_payment_received",
+            checkout_request_id: checkoutId,
+          })
+            .then((r) => {
+              if (!r.ok) {
+                return r.text().then((t) => logDevNotifyFailure("notify stk_payment_received", r, t));
+              }
+            })
+            .catch((e) => console.error("[mpesa-stk-callback] notify stk_payment_received", e));
         }
       }
     } else {

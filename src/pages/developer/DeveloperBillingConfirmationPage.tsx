@@ -40,7 +40,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { BillingReceiptsManager } from '@/components/subscription/billing/BillingReceiptsManager';
-import { issueBillingReceiptForPayment } from '@/services/receiptsService';
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -239,10 +238,6 @@ export default function DeveloperBillingConfirmationPage() {
         console.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
       }
       await approveSubscriptionPayment(paymentId, row ?? undefined);
-
-      void issueBillingReceiptForPayment(paymentId, clerkSupabaseToken).catch((err) => {
-        console.warn('[DevBilling] billing receipt issue skipped or failed', err);
-      });
       // Paid window + trial end are applied in approve_subscription_payment (DB). Avoid
       // set_company_paid_access here — it forced billing_cycle = monthly and overwrote the approve RPC.
     },

@@ -93,7 +93,8 @@ function resolveTokenProvider(explicit?: TokenProvider): TokenProvider {
   return explicit ?? getSupabaseAccessToken;
 }
 
-export async function issueBillingReceiptForPayment(
+/** After payment approval: issue PDF receipt and optionally email company (billing-receipt-issue). */
+export async function sendCompanyPaymentReceipt(
   subscriptionPaymentId: string,
   getToken?: TokenProvider,
   options?: { sendEmail?: boolean },

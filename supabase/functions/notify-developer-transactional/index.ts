@@ -1,4 +1,5 @@
 // Developer inbox alerts (Resend + email_logs). Auth: service role OR Clerk JWT (role-checked per event).
+// From: FarmVault System <alerts@farmvault.africa> for developer inbox; billing@ for manual-submit company copy only.
 //
 // Events:
 //   manual_payment_submitted — body: { event, payment_id } — tenant (company member)
@@ -10,12 +11,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
-import {
-  buildCompanyManualPaymentSubmittedEmail,
-  buildCompanyPaymentApprovedEmail,
-  buildCompanyStkPaymentReceivedEmail,
-  buildCompanySubscriptionActivatedEmail,
-} from "../_shared/farmvault-email/companyTransactionalTemplates.ts";
+import { buildCompanyManualPaymentSubmittedEmail } from "../_shared/farmvault-email/companyTransactionalTemplates.ts";
 import {
   buildDeveloperManualPaymentSubmittedEmail,
   buildDeveloperPaymentApprovedEmail,
@@ -23,10 +19,9 @@ import {
   buildDeveloperSubscriptionActivatedEmail,
 } from "../_shared/farmvault-email/developerTransactionalTemplates.ts";
 import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
+import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
-
-const DEFAULT_FROM = "FarmVault <noreply@farmvault.africa>";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -37,9 +32,6 @@ const TYPE_PAYMENT_APPROVED = "developer_payment_approved";
 const TYPE_SUB_ACTIVATED = "developer_subscription_activated";
 
 const TYPE_COMPANY_MANUAL_SUBMITTED = "company_manual_payment_submitted";
-const TYPE_COMPANY_STK_RECEIVED = "company_stk_payment_received";
-const TYPE_COMPANY_PAYMENT_APPROVED = "company_payment_approved";
-const TYPE_COMPANY_SUB_ACTIVATED = "company_subscription_activated";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -97,6 +89,30 @@ async function assertCompanyMember(
     .maybeSingle();
   if (error) return false;
   return !!(data as { company_id?: string } | null)?.company_id;
+}
+
+/** Core membership → public.company_members (sync gaps) → `public.is_company_member` RPC. */
+async function assertTenantMayNotifyManualSubmit(
+  userClient: SupabaseClient,
+  admin: SupabaseClient,
+  companyId: string,
+  clerkUserId: string,
+): Promise<boolean> {
+  if (await assertCompanyMember(admin, companyId, clerkUserId)) return true;
+
+  const { data: pubMem, error: pubErr } = await admin
+    .from("company_members")
+    .select("company_id")
+    .eq("company_id", companyId)
+    .eq("clerk_user_id", clerkUserId)
+    .maybeSingle();
+  if (!pubErr && (pubMem as { company_id?: string } | null)?.company_id) return true;
+
+  const { data: rpcOk, error: rpcErr } = await userClient.rpc("is_company_member", {
+    check_company_id: companyId,
+  });
+  if (!rpcErr && rpcOk === true) return true;
+  return false;
 }
 
 function fmtMoney(n: number, currency: string): string {
@@ -182,7 +198,8 @@ Deno.serve(async (req: Request) => {
 
   const admin = createServiceRoleSupabaseClient(supabaseUrl, serviceKey);
   const logAdmin = getServiceRoleClientForEmailLogs();
-  const from = Deno.env.get("FARMVAULT_EMAIL_FROM")?.trim() || DEFAULT_FROM;
+  const fromBilling = getFarmVaultEmailFrom("billing");
+  const fromDeveloper = getFarmVaultEmailFrom("developer");
   const developerTo = getFarmvaultDeveloperInboxEmail();
 
   let raw: unknown;
@@ -222,8 +239,11 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Invalid company on payment" }, 400);
       }
 
-      const okMember = await assertCompanyMember(admin, companyUuid, sub);
-      if (!okMember) return jsonResponse({ error: "Forbidden" }, 403);
+      const okMember = await assertTenantMayNotifyManualSubmit(userClient, admin, companyUuid, sub);
+      if (!okMember) {
+        console.warn("[notify-developer-transactional] manual_payment_submitted forbidden — not a member", companyUuid);
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
 
       const dedupeKey = `manual_submitted:${paymentId}`;
       const devDeduped = await dedupeSent(admin, TYPE_MANUAL_SUBMITTED, dedupeKey);
@@ -250,7 +270,7 @@ Deno.serve(async (req: Request) => {
         const send = await sendResendWithEmailLog({
           admin: logAdmin,
           resendKey,
-          from,
+          from: fromDeveloper,
           to: developerTo,
           subject: built.subject,
           html: built.html,
@@ -277,7 +297,7 @@ Deno.serve(async (req: Request) => {
         admin,
         logAdmin,
         resendKey,
-        from,
+        from: fromBilling,
         companyId: companyUuid,
         companyName,
         companyDedupeKey: `company_manual_submitted:${paymentId}`,
@@ -325,7 +345,7 @@ Deno.serve(async (req: Request) => {
         const send = await sendResendWithEmailLog({
           admin: logAdmin,
           resendKey,
-          from,
+          from: fromDeveloper,
           to: developerTo,
           subject: built.subject,
           html: built.html,
@@ -337,29 +357,6 @@ Deno.serve(async (req: Request) => {
         if (!send.ok) return jsonResponse({ error: send.error }, 500);
         devResendId = send.resendId;
       }
-
-      const billingUrl = publicAppBillingUrl();
-      const companyBuilt = buildCompanyStkPaymentReceivedEmail({
-        companyName,
-        mpesaReceipt: String(m.mpesa_receipt ?? "—"),
-        amount: amt,
-        phone: String(m.phone ?? "—"),
-        plan: String(m.plan ?? "—"),
-        billingCycle: String(m.billing_cycle ?? "—"),
-        billingUrl,
-      });
-      await trySendCompanyCopy({
-        admin,
-        logAdmin,
-        resendKey,
-        from,
-        companyId,
-        companyName,
-        companyDedupeKey: `company_copy_stk:${checkoutRequestId}`,
-        emailType: TYPE_COMPANY_STK_RECEIVED,
-        subject: companyBuilt.subject,
-        html: companyBuilt.html,
-      });
 
       if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
       return jsonResponse({ ok: true, id: devResendId });
@@ -407,7 +404,7 @@ Deno.serve(async (req: Request) => {
         const send = await sendResendWithEmailLog({
           admin: logAdmin,
           resendKey,
-          from,
+          from: fromDeveloper,
           to: developerTo,
           subject: built.subject,
           html: built.html,
@@ -419,29 +416,6 @@ Deno.serve(async (req: Request) => {
         if (!send.ok) return jsonResponse({ error: send.error }, 500);
         devResendId = send.resendId;
       }
-
-      const billingUrl = publicAppBillingUrl();
-      const companyBuilt = buildCompanyPaymentApprovedEmail({
-        companyName,
-        plan: String(p.plan_id ?? "—"),
-        amount: fmtMoney(Number(p.amount ?? 0), String(p.currency ?? "KES")),
-        currency: String(p.currency ?? "KES"),
-        billingCycle: String(p.billing_cycle ?? "—"),
-        transactionCode: String(p.transaction_code ?? "—"),
-        billingUrl,
-      });
-      await trySendCompanyCopy({
-        admin,
-        logAdmin,
-        resendKey,
-        from,
-        companyId: companyUuid,
-        companyName,
-        companyDedupeKey: `company_payment_approved:${paymentId}`,
-        emailType: TYPE_COMPANY_PAYMENT_APPROVED,
-        subject: companyBuilt.subject,
-        html: companyBuilt.html,
-      });
 
       if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
       return jsonResponse({ ok: true, id: devResendId });
@@ -505,7 +479,7 @@ Deno.serve(async (req: Request) => {
           const send = await sendResendWithEmailLog({
             admin: logAdmin,
             resendKey,
-            from,
+            from: fromDeveloper,
             to: developerTo,
             subject: built.subject,
             html: built.html,
@@ -517,27 +491,6 @@ Deno.serve(async (req: Request) => {
           if (!send.ok) return jsonResponse({ error: send.error }, 500);
           devResendId = send.resendId;
         }
-
-        const billingUrl = publicAppBillingUrl();
-        const companyBuilt = buildCompanySubscriptionActivatedEmail({
-          companyName,
-          plan,
-          billingCycle,
-          activeUntil,
-          billingUrl,
-        });
-        await trySendCompanyCopy({
-          admin,
-          logAdmin,
-          resendKey,
-          from,
-          companyId: companyUuid,
-          companyName,
-          companyDedupeKey: `company_sub_act_stk:${checkoutRequestId}`,
-          emailType: TYPE_COMPANY_SUB_ACTIVATED,
-          subject: companyBuilt.subject,
-          html: companyBuilt.html,
-        });
 
         if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
         return jsonResponse({ ok: true, id: devResendId });
@@ -580,7 +533,7 @@ Deno.serve(async (req: Request) => {
         const send = await sendResendWithEmailLog({
           admin: logAdmin,
           resendKey,
-          from,
+          from: fromDeveloper,
           to: developerTo,
           subject: built.subject,
           html: built.html,
@@ -592,27 +545,6 @@ Deno.serve(async (req: Request) => {
         if (!send.ok) return jsonResponse({ error: send.error }, 500);
         devResendId = send.resendId;
       }
-
-      const billingUrl = publicAppBillingUrl();
-      const companyBuilt = buildCompanySubscriptionActivatedEmail({
-        companyName,
-        plan,
-        billingCycle,
-        activeUntil,
-        billingUrl,
-      });
-      await trySendCompanyCopy({
-        admin,
-        logAdmin,
-        resendKey,
-        from,
-        companyId: companyUuid,
-        companyName,
-        companyDedupeKey: `company_sub_act_manual:${pid}`,
-        emailType: TYPE_COMPANY_SUB_ACTIVATED,
-        subject: companyBuilt.subject,
-        html: companyBuilt.html,
-      });
 
       if (devDeduped) return jsonResponse({ ok: true, skipped: true, reason: "deduped" });
       return jsonResponse({ ok: true, id: devResendId });

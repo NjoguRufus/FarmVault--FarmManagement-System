@@ -15,9 +15,22 @@ export async function invokeNotifyDeveloperTransactional(
   getToken?: TokenProvider,
 ): Promise<void> {
   const getter = getToken;
-  if (!getter) return;
+  if (!getter) {
+    // eslint-disable-next-line no-console
+    console.warn('[invokeNotifyDeveloperTransactional] skipped — no getToken (manual payment alert not sent)');
+    return;
+  }
   const token = await getter();
-  if (!token?.trim() || !supabaseUrl || !supabaseApiKey) return;
+  if (!token?.trim()) {
+    // eslint-disable-next-line no-console
+    console.warn('[invokeNotifyDeveloperTransactional] skipped — empty JWT (sign in / Clerk Supabase template)');
+    return;
+  }
+  if (!supabaseUrl || !supabaseApiKey) {
+    // eslint-disable-next-line no-console
+    console.warn('[invokeNotifyDeveloperTransactional] skipped — missing VITE_SUPABASE_URL or key');
+    return;
+  }
 
   const res = await fetch(
     `${supabaseUrl.replace(/\/$/, '')}/functions/v1/notify-developer-transactional`,

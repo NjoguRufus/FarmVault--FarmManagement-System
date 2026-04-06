@@ -6,7 +6,7 @@ const supabaseApiKey =
 
 type TokenProvider = () => Promise<string | null>;
 
-/** After onboarding completes: Pro trial started email to `core.companies.owner_email`. */
+/** After onboarding completes: Pro trial started email to `core.companies.email` (same pipeline as billing). */
 export async function invokeNotifyCompanyProTrialStarted(
   companyId: string,
   getToken: TokenProvider,
