@@ -1,5 +1,7 @@
-import { invokeNotifyCompanyTransactional, invokeNotifyDeveloperTransactional } from '@/lib/email';
+import { invokeNotifyCompanyTransactional } from '@/lib/email';
 import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
+
+type ClerkJwtProvider = () => Promise<string | null>;
 import { sendCompanyPaymentReceipt } from '@/services/receiptsService';
 import {
   getDevDashboardKpis,
@@ -239,9 +241,30 @@ export async function fetchPendingPayments(): Promise<PendingPayment[]> {
 export async function approveSubscriptionPayment(
   id: string,
   payment?: { company_id?: string | null; plan_id?: string | null; billing_cycle?: string | null },
+  /** Prefer `useAuth().getToken({ template: 'supabase' })` so it matches the session used for dev RPCs. */
+  getAccessToken: ClerkJwtProvider = getSupabaseAccessToken,
 ): Promise<void> {
   // eslint-disable-next-line no-console
   console.log('[Payment] Payment confirmed — ID:', id, '| company:', payment?.company_id ?? '(unknown)');
+
+  const { data: beforeRow, error: beforeErr } = await supabase
+    .from('subscription_payments')
+    .select('status,company_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeErr) {
+    throw new Error(beforeErr.message ?? 'Failed to load payment');
+  }
+  if (!beforeRow) {
+    throw new Error('Payment not found');
+  }
+  const previousStatus = String(beforeRow.status ?? '').toLowerCase();
+  if (previousStatus === 'approved') {
+    // eslint-disable-next-line no-console
+    console.log('[DevService] approve_subscription_payment skipped — already approved', { paymentId: id });
+    return;
+  }
+
   // eslint-disable-next-line no-console
   console.log('[DevService] approve_subscription_payment RPC (syncs company_subscriptions)', { paymentId: id });
   const { error } = await supabase.rpc('approve_subscription_payment', { _payment_id: id });
@@ -252,9 +275,9 @@ export async function approveSubscriptionPayment(
   console.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
 
   // eslint-disable-next-line no-console
-  console.log('PAYMENT EMAIL TRIGGERED', payment?.company_id ?? '(unknown)');
+  console.log('PAYMENT APPROVED EMAIL (notify)', payment?.company_id ?? beforeRow?.company_id ?? '(unknown)');
   try {
-    await sendCompanyPaymentReceipt(id, getSupabaseAccessToken, { sendEmail: false });
+    await sendCompanyPaymentReceipt(id, getAccessToken, { sendEmail: false });
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('PAYMENT RECEIPT PDF ERROR (billing-receipt-issue):', e);
@@ -264,6 +287,12 @@ export async function approveSubscriptionPayment(
     payment?.company_id != null && String(payment.company_id).trim() !== ''
       ? String(payment.company_id).trim()
       : '';
+  if (!companyIdForNotify) {
+    companyIdForNotify =
+      beforeRow?.company_id != null && String(beforeRow.company_id).trim() !== ''
+        ? String(beforeRow.company_id).trim()
+        : '';
+  }
   if (!companyIdForNotify) {
     const { data: payRow } = await supabase
       .from('subscription_payments')
@@ -279,23 +308,15 @@ export async function approveSubscriptionPayment(
     void invokeNotifyCompanyTransactional(
       {
         companyId: companyIdForNotify,
-        kind: 'payment_received',
+        kind: 'payment_approved',
         subscriptionPaymentId: id,
       },
-      getSupabaseAccessToken,
+      getAccessToken,
     ).catch((e) => {
       // eslint-disable-next-line no-console
-      console.error('PAYMENT EMAIL ERROR (notify-company-transactional):', e);
+      console.error('PAYMENT APPROVED EMAIL ERROR (notify-company-transactional):', e);
     });
   }
-
-  // Single developer alert after receipt (notifyDeveloperTransaction / alerts@).
-  void invokeNotifyDeveloperTransactional(
-    { event: 'payment_approved', payment_id: id },
-    getSupabaseAccessToken,
-  ).catch(() => {
-    /* non-fatal */
-  });
 }
 
 export async function rejectSubscriptionPayment(id: string): Promise<void> {

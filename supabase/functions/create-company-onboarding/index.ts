@@ -7,6 +7,7 @@ import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import { farmVaultEmailShell } from "../_shared/farmvault-email/farmVaultEmailShell.ts";
 import { escapeHtml } from "../_shared/farmvault-email/escapeHtml.ts";
+import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -226,18 +227,17 @@ Deno.serve(async (req: Request) => {
 </table>
 <p style="margin:0;font-family:${font};font-size:15px;line-height:1.7;color:#1f2937;">Please review and approve from <strong>Developer Dashboard</strong> → <strong>Companies</strong>.</p>`,
       });
-      await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: getFarmVaultEmailFrom("developer"),
-          to: [adminEmailTarget],
-          subject: `New company pending approval: ${trimmedCompanyName}`,
-          html: adminHtml,
-        }),
+      await sendResendWithEmailLog({
+        admin: adminClient,
+        resendKey: resendApiKey,
+        from: getFarmVaultEmailFrom("developer"),
+        to: adminEmailTarget,
+        subject: `New company pending approval: ${trimmedCompanyName}`,
+        html: adminHtml,
+        email_type: "company_registration_developer_notify",
+        company_id: companyId,
+        company_name: trimmedCompanyName,
+        metadata: { source: "create-company-onboarding", owner_email: normalizedAdminEmail },
       });
     }
 

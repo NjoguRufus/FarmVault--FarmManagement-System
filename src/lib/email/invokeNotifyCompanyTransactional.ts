@@ -6,22 +6,30 @@ const supabaseApiKey =
 
 type TokenProvider = () => Promise<string | null>;
 
-/** After approved payment: same Resend path as onboarding (notify-company-transactional + billing@). */
-export type NotifyCompanyPaymentReceivedInput = {
-  companyId: string;
-  kind: 'payment_received';
-  subscriptionPaymentId: string;
-};
+/** Company billing emails via notify-company-transactional (developer/admin JWT). */
+export type NotifyCompanyTransactionalInput =
+  | { companyId: string; kind: 'payment_received'; subscriptionPaymentId: string }
+  | { companyId: string; kind: 'payment_approved'; subscriptionPaymentId: string };
 
 export async function invokeNotifyCompanyTransactional(
-  input: NotifyCompanyPaymentReceivedInput,
+  input: NotifyCompanyTransactionalInput,
   getToken: TokenProvider,
 ): Promise<void> {
   const cid = typeof input.companyId === 'string' ? input.companyId.trim() : '';
   const pid = typeof input.subscriptionPaymentId === 'string' ? input.subscriptionPaymentId.trim() : '';
-  if (!cid || !pid || input.kind !== 'payment_received') return;
+  if (!cid || !pid) return;
+  if (input.kind !== 'payment_received' && input.kind !== 'payment_approved') return;
   const token = await getToken();
-  if (!token?.trim() || !supabaseUrl || !supabaseApiKey) return;
+  if (!token?.trim()) {
+    console.warn(
+      `[invokeNotifyCompanyTransactional] skipped (${input.kind}) — no Clerk JWT (template \`supabase\`).`,
+    );
+    return;
+  }
+  if (!supabaseUrl || !supabaseApiKey) {
+    console.warn(`[invokeNotifyCompanyTransactional] skipped (${input.kind}) — missing VITE_SUPABASE_URL or key`);
+    return;
+  }
 
   const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/notify-company-transactional`, {
     method: 'POST',
@@ -32,7 +40,7 @@ export async function invokeNotifyCompanyTransactional(
     },
     body: JSON.stringify({
       company_id: cid,
-      kind: 'payment_received',
+      kind: input.kind,
       subscription_payment_id: pid,
     }),
   });

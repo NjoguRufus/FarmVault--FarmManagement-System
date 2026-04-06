@@ -237,7 +237,7 @@ export default function DeveloperBillingConfirmationPage() {
         // eslint-disable-next-line no-console
         console.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
       }
-      await approveSubscriptionPayment(paymentId, row ?? undefined);
+      await approveSubscriptionPayment(paymentId, row ?? undefined, clerkSupabaseToken);
       // Paid window + trial end are applied in approve_subscription_payment (DB). Avoid
       // set_company_paid_access here — it forced billing_cycle = monthly and overwrote the approve RPC.
     },

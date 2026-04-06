@@ -15,7 +15,16 @@ export async function invokeNotifyCompanyManualPaymentSubmitted(
   const pid = typeof input.paymentId === 'string' ? input.paymentId.trim() : '';
   if (!cid || !pid) return;
   const token = await getToken();
-  if (!token?.trim() || !supabaseUrl || !supabaseApiKey) return;
+  if (!token?.trim()) {
+    console.warn(
+      '[invokeNotifyCompanyManualPaymentSubmitted] skipped — no Clerk JWT (template `supabase`). Payment was saved; confirmation email not sent.',
+    );
+    return;
+  }
+  if (!supabaseUrl || !supabaseApiKey) {
+    console.warn('[invokeNotifyCompanyManualPaymentSubmitted] skipped — missing VITE_SUPABASE_URL or publishable/anon key');
+    return;
+  }
 
   const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/notify-company-transactional`, {
     method: 'POST',

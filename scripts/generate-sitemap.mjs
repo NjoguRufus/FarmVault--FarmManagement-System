@@ -18,7 +18,34 @@ const PATHS = [
   "/features",
   "/pricing",
   "/about",
+  "/faq",
   "/blog",
+  "/learn",
+  "/learn/farm-management",
+  "/what-is-farmvault",
+  "/agriculture-software-kenya",
+  // Learn – topical authority
+  "/learn/crop-management",
+  "/learn/farm-worker-management",
+  "/learn/harvest-tracking",
+  "/learn/farm-expense-management",
+  "/learn/farm-inventory-management",
+  "/learn/multi-farm-management",
+  "/learn/agriculture-analytics",
+  "/learn/farm-record-keeping",
+  "/learn/farm-planning",
+  "/learn/irrigation-management",
+  "/learn/maize-farming-management",
+  "/learn/avocado-farming-management",
+  "/learn/vegetable-farming-management",
+  "/learn/poultry-farming-management",
+  "/learn/dairy-farming-management",
+  "/learn/greenhouse-farming-management",
+  "/learn/how-to-track-farm-workers",
+  "/learn/how-to-manage-farm-expenses",
+  "/learn/how-to-track-harvest-yield",
+  "/learn/how-to-manage-multiple-farms",
+  "/learn/how-to-manage-crop-stages",
   // SEO landing pages
   "/farm-management-software-kenya",
   "/crop-monitoring-software",
@@ -72,11 +99,16 @@ const PATHS = [
   "/blog/pest-management-tomatoes-kenya",
   "/blog/farm-finance-tracking-app",
   "/blog/climate-smart-agriculture-kenya",
+  "/blog/best-farm-management-software-kenya",
+  "/blog/agriculture-software-africa",
+  "/blog/how-to-manage-farm-workers-kenya",
+  "/blog/farm-record-keeping-system-kenya",
 ];
 
 function getPriority(path) {
   if (path === "/") return "1.0";
-  if (["/features", "/pricing", "/about"].includes(path)) return "0.9";
+  if (["/features", "/pricing", "/about", "/learn", "/faq"].includes(path)) return "0.9";
+  if (path.startsWith("/learn/")) return "0.85";
   if (path === "/blog") return "0.9";
   if (path.startsWith("/blog/")) return "0.8";
   return "0.9";
@@ -84,7 +116,8 @@ function getPriority(path) {
 
 function getChangeFreq(path) {
   if (path === "/") return "weekly";
-  if (["/features", "/pricing", "/about"].includes(path)) return "monthly";
+  if (["/features", "/pricing", "/about", "/faq"].includes(path)) return "monthly";
+  if (path === "/learn" || path.startsWith("/learn/")) return "weekly";
   if (path === "/blog") return "daily";
   if (path.startsWith("/blog/")) return "weekly";
   return "weekly";

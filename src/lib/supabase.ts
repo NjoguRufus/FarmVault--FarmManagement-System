@@ -90,10 +90,29 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 
 type ClerkSupabaseTokenProvider = () => Promise<string | null>;
 
+/** Avoid sharing the default GoTrue storage key with {@link supabase} (prevents "Multiple GoTrueClient instances" warnings). */
+function clerkJwtFetchAuthStorageKey(): string {
+  try {
+    const host = new URL(supabaseUrl).hostname.split('.')[0];
+    return `sb-${host}-clerk-jwt-fetch`;
+  } catch {
+    return 'sb-clerk-jwt-fetch';
+  }
+}
+
 /**
- * Short-lived Supabase client: every HTTP request attaches a fresh `Authorization: Bearer <Clerk JWT>`.
+ * Single client for Clerk-JWT-per-request flows. Updated token source on each {@link getAuthedSupabase} call.
+ * Concurrent calls should use the same logical session (typical); last-set provider wins only for overlapping fetch timing.
+ */
+let authedSupabaseSingleton: SupabaseClient | null = null;
+let authedSupabaseFetchToken: ClerkSupabaseTokenProvider = getSupabaseAccessToken;
+
+/**
+ * Supabase client whose HTTP layer sends a fresh `Authorization: Bearer <Clerk JWT>` per request.
  * Use for billing / STK when you want the same token source as {@link CLERK_JWT_TEMPLATE_SUPABASE}
  * (e.g. pass `() => getToken({ template: 'supabase' })` from `useAuth()` in `@clerk/react`).
+ *
+ * Reuses one underlying client so we do not stack GoTrue clients on the default auth storage key.
  */
 export async function getAuthedSupabase(
   tokenProvider: ClerkSupabaseTokenProvider = getSupabaseAccessToken,
@@ -104,23 +123,29 @@ export async function getAuthedSupabase(
       `Not signed in: missing Clerk JWT for template "${CLERK_JWT_TEMPLATE_SUPABASE}".`,
     );
   }
-  return createClient(supabaseUrl, supabaseKey, {
-    auth: {
-      detectSessionInUrl: false,
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-    global: {
-      fetch: async (url, options = {}) => {
-        const token = await tokenProvider();
-        const headers = new Headers(options.headers);
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`);
-        }
-        return fetch(url, { ...options, headers });
+  authedSupabaseFetchToken = tokenProvider;
+
+  if (!authedSupabaseSingleton) {
+    authedSupabaseSingleton = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        storageKey: clerkJwtFetchAuthStorageKey(),
+        detectSessionInUrl: false,
+        persistSession: false,
+        autoRefreshToken: false,
       },
-    },
-  });
+      global: {
+        fetch: async (url, options = {}) => {
+          const token = await authedSupabaseFetchToken();
+          const headers = new Headers(options.headers);
+          if (token) {
+            headers.set('Authorization', `Bearer ${token}`);
+          }
+          return fetch(url, { ...options, headers });
+        },
+      },
+    });
+  }
+  return authedSupabaseSingleton;
 }
 
 /**

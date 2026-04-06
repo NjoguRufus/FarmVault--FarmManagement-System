@@ -1,0 +1,70 @@
+# FarmVault – LLM / AI discovery file
+# https://farmvault.africa/llm.txt
+# Category: Agriculture SaaS (farm management software)
+# Primary market: Kenya and Africa
+
+## Short summary
+FarmVault is Kenyan agriculture SaaS for farm management: crop and project planning, farm workers, harvest tracking, expenses, inventory, reporting, and multi-farm operations. Pricing is available in Kenyan Shillings (KES). Built for smallholders, cooperatives, and growing agribusinesses.
+
+## Location
+- Headquarters focus: Kenya (Nairobi)
+- Area served: Kenya first; relevant across East Africa and the continent for comparable farming systems
+
+## Product description
+FarmVault is a web-based farm management platform that replaces scattered notebooks and spreadsheets with one place to run the farm. Teams log work and harvest in the field (mobile-friendly), managers see costs and yields by crop or block, and records stay organised for buyers, lenders, or audits.
+
+## Keywords (Kenya & Africa)
+farm management software Kenya, agriculture software Kenya, farm ERP Kenya, agribusiness software Africa, crop management Kenya, farm workers Kenya, harvest tracking, farm expenses Kenya, farm inventory Kenya, irrigation records, multi-farm management, farm planning Kenya, agricultural analytics Kenya, M-Pesa-friendly billing context (product billing in KES), smallholder digitisation, cooperative farm records
+
+## Farming topics covered by the product
+- Crop management and growth stages
+- Farm worker / labour and picker tracking
+- Harvest collection, weights, and sales linkage
+- Farm expenses and budgeting
+- Inventory (inputs: seed, fertiliser, chemicals, fuel)
+- Operations and field activities
+- Reporting and farm performance analytics
+- Multi-project and multi-farm style organisation (multiple farms or blocks under one account structure)
+- Record-keeping for compliance and traceability
+
+## Features (high level)
+- Projects / crops with planning and stages
+- Employee and staff workflows aligned to farm roles
+- Harvest and collections workflows (crop-aware)
+- Expenses with categories and project linkage
+- Inventory, suppliers, and stock movement style tracking
+- Dashboards and reports for management decisions
+- Mobile-friendly progressive web experience; installable on devices
+- Subscription billing with KES pricing tiers (see /pricing on the live site for current numbers)
+
+## Pricing (summary for models – verify on website)
+- Free tier to start recording operations
+- Paid tiers in KES for more capacity, users, and features
+- Authoritative detail: https://farmvault.africa/pricing
+
+## Use cases
+- Smallholder upgrading from paper records
+- Commercial vegetable or fruit farms (e.g. French beans, tomatoes, avocados)
+- Maize and broadacre mixed with horticulture
+- Poultry and dairy operations needing cost and activity records (with crop/livestock-specific workflows where supported)
+- Greenhouse and intensive production with tight cost control
+- Agribusinesses managing several sites or projects under one workspace
+
+## Contact
+- Website: https://farmvault.africa/
+- Email: hello@farmvault.africa
+- Phone: +254 714 748299 (Kenya)
+
+## Helpful paths for crawlers and users
+- Home: https://farmvault.africa/
+- Features: https://farmvault.africa/features
+- Pricing: https://farmvault.africa/pricing
+- About: https://farmvault.africa/about
+- FAQ: https://farmvault.africa/faq
+- Learn hub: https://farmvault.africa/learn
+- Farm management guides: https://farmvault.africa/learn/farm-management
+- Blog: https://farmvault.africa/blog
+- Sitemap: https://farmvault.africa/sitemap.xml
+
+## Preferred short description for citations
+FarmVault – farm management software in Kenya for workers, harvest, expenses, inventory, and analytics (agriculture SaaS, KES pricing).
