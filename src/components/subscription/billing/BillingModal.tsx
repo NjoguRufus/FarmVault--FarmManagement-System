@@ -54,6 +54,9 @@ export interface BillingModalProps {
 const TILL = '5334350';
 const BUSINESS = 'FarmVault';
 
+/** Set to `true` when M-Pesa STK push is ready to ship. */
+const STK_PUSH_ENABLED = false;
+
 export function BillingModal({
   open,
   onOpenChange,
@@ -261,10 +264,16 @@ export function BillingModal({
       : null;
 
   const subtitle = useMemo(() => {
-    if (isExpired) {
-      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or use PayBill and submit details for manual verification.';
+    if (!STK_PUSH_ENABLED) {
+      if (isExpired) {
+        return 'Your trial has ended. Choose a plan, then pay at our Till and submit details for manual verification.';
+      }
+      return 'Choose a plan and cycle. Pay at our Till and submit your confirmation for manual review.';
     }
-    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or use PayBill and submit your confirmation for manual review.';
+    if (isExpired) {
+      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or pay at our Till and submit details for manual verification.';
+    }
+    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or pay at our Till and submit your confirmation for manual review.';
   }, [isExpired]);
 
   const selectedPlan = useMemo(() => {
@@ -522,7 +531,7 @@ export function BillingModal({
     }
   };
 
-  const busy = mutation.isPending || stkLoading;
+  const busy = mutation.isPending || (STK_PUSH_ENABLED && stkLoading);
   const showPendingBanner = !success && (pendingStatus?.hasPending ?? false);
 
   return (
@@ -589,8 +598,8 @@ export function BillingModal({
                 ) : null}
 
                 {/*
-                  Mobile: plan → cycle → summary → STK → manual PayBill.
-                  Desktop: summary (left col) + STK + manual (right col).
+                  Mobile: plan → cycle → summary → Till/manual → STK (bottom).
+                  Desktop: summary (left col) + Till/manual + STK (right col, STK last).
                 */}
                 <div
                   className={cn(
@@ -629,78 +638,21 @@ export function BillingModal({
                     <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
                       <div className="border-b border-border/40 pb-2">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Pay via M-Pesa STK push
+                          Till number
                         </p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          Amount due matches your selected plan (KES{' '}
-                          {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
-                          phone; your subscription activates automatically.
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
-                          Phone number
-                        </label>
-                        <Input
-                          id="billing-stk-phone"
-                          className="h-9 rounded-md bg-background lg:h-10 lg:rounded-lg"
-                          value={stkPhone}
-                          disabled={busy}
-                          onChange={(e) => setStkPhone(e.target.value)}
-                          placeholder="07… or +254…"
-                          inputMode="tel"
-                          autoComplete="tel"
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={busy || stkLoading}
-                        className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
-                        onClick={() => void handleStkPush()}
-                      >
-                        <Smartphone className="h-3.5 w-3.5" />
-                        {stkLoading ? 'Sending STK prompt…' : 'Send STK prompt'}
-                      </Button>
-                      {stkActivating && (
-                        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-100/90">
-                          <span aria-hidden>✅</span> Payment confirmed — activating your subscription…
-                        </div>
-                      )}
-                      {/* Always keep StkPushConfirmation mounted while checkoutRequestId is set.
-                          When stkActivating=true the component internally returns null (status=SUCCESS)
-                          so it's invisible, but its Realtime subscription stays alive to catch the
-                          subscription_activated event and fire onSubscriptionActivated. */}
-                      {stkCheckoutRequestId ? (
-                        <StkPushConfirmation
-                          checkoutRequestId={stkCheckoutRequestId}
-                          confirmationContext="billing"
-                          onPaymentSuccess={stkActivating ? undefined : handleStkPaymentSuccess}
-                          onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
-                        />
-                      ) : null}
-                    </section>
-
-                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Pay via PayBill (manual)
-                        </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Pay the amount shown in the summary to our PayBill. Use this account number so we can match your
-                          payment.
+                          Pay the amount shown in the summary to our Till. Use the account name below when M-Pesa asks for
+                          it, then submit your details here for verification.
                         </p>
                       </div>
                       <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
                         <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">PayBill number</dt>
+                          <dt className="text-muted-foreground">Till number</dt>
                           <dd className="font-mono font-medium text-foreground">{TILL}</dd>
                         </div>
                         <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">Account number</dt>
-                          <dd className="font-mono font-medium text-foreground">
-                            {billingReference || '—'}
-                          </dd>
+                          <dt className="text-muted-foreground">Account name</dt>
+                          <dd className="text-right font-medium text-foreground">FarmVault Technologies</dd>
                         </div>
                       </dl>
                       <MpesaPaymentForm
@@ -727,6 +679,71 @@ export function BillingModal({
                         submitLoading={mutation.isPending}
                         className="space-y-3 lg:space-y-4"
                       />
+                    </section>
+
+                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
+                      <div className="border-b border-border/40 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Pay via M-Pesa STK push
+                        </p>
+                        {STK_PUSH_ENABLED ? (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Amount due matches your selected plan (KES{' '}
+                            {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
+                            phone; your subscription activates automatically.
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-xs font-medium text-muted-foreground">
+                            STK push prompt coming soon. Use Till payment above to complete your subscription.
+                          </p>
+                        )}
+                      </div>
+                      {STK_PUSH_ENABLED ? (
+                        <>
+                          <div className="space-y-1.5">
+                            <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
+                              Phone number
+                            </label>
+                            <Input
+                              id="billing-stk-phone"
+                              className="h-9 rounded-md bg-background lg:h-10 lg:rounded-lg"
+                              value={stkPhone}
+                              disabled={busy}
+                              onChange={(e) => setStkPhone(e.target.value)}
+                              placeholder="07… or +254…"
+                              inputMode="tel"
+                              autoComplete="tel"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy || stkLoading}
+                            className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
+                            onClick={() => void handleStkPush()}
+                          >
+                            <Smartphone className="h-3.5 w-3.5" />
+                            {stkLoading ? 'Sending STK prompt…' : 'Send STK prompt'}
+                          </Button>
+                          {stkActivating && (
+                            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-100/90">
+                              <span aria-hidden>✅</span> Payment confirmed — activating your subscription…
+                            </div>
+                          )}
+                          {/* Always keep StkPushConfirmation mounted while checkoutRequestId is set.
+                              When stkActivating=true the component internally returns null (status=SUCCESS)
+                              so it's invisible, but its Realtime subscription stays alive to catch the
+                              subscription_activated event and fire onSubscriptionActivated. */}
+                          {stkCheckoutRequestId ? (
+                            <StkPushConfirmation
+                              checkoutRequestId={stkCheckoutRequestId}
+                              confirmationContext="billing"
+                              onPaymentSuccess={stkActivating ? undefined : handleStkPaymentSuccess}
+                              onSubscriptionActivated={() => void handleSubscriptionActivatedFromStk()}
+                            />
+                          ) : null}
+                        </>
+                      ) : null}
                     </section>
                   </div>
                 </div>

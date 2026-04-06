@@ -7,7 +7,6 @@ import { formatDevDate, formatDevDateShort, formatMoney } from './utils';
 import { computeCompanyStatus, companyStatusAccessLabel } from '@/lib/subscription/companyStatus';
 import { extendCompanyTrial, updateCompanySubscriptionState } from '@/services/developerAdminService';
 import { useNow } from '@/hooks/useNow';
-
 type Row = Record<string, unknown>;
 
 type Props = {

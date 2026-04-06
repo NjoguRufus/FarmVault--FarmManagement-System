@@ -117,12 +117,21 @@ function receiptEmailHtml(input: {
   viewUrl: string;
   dashboardUrl: string;
   logoUrl: string;
+  /** Subscription access end after payment (optional). */
+  newExpiryLabel?: string | null;
 }): string {
   const safeLogo = input.logoUrl.replace(/"/g, "&quot;");
   const safeView = input.viewUrl.replace(/"/g, "&quot;");
   const safeDash = input.dashboardUrl.replace(/"/g, "&quot;");
   const e = escapeReceiptHtml;
   const planUpper = e(input.plan.toUpperCase());
+  const expiryRow =
+    input.newExpiryLabel != null && String(input.newExpiryLabel).trim() !== ""
+      ? `<tr>
+            <td style="padding:8px 0;color:#666666;vertical-align:top;">New access end date</td>
+            <td style="padding:8px 0;font-weight:600;text-align:right;">${e(String(input.newExpiryLabel))}</td>
+          </tr>`
+      : "";
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
 <body style="margin:0;padding:0;">
 <div style="font-family:Inter,system-ui,Arial,sans-serif;background:#F8FAF9;padding:40px 16px;">
@@ -168,6 +177,7 @@ function receiptEmailHtml(input: {
             <td style="padding:8px 0;color:#666666;vertical-align:top;">Payment date</td>
             <td style="padding:8px 0;text-align:right;">${e(input.paymentDate)}</td>
           </tr>
+          ${expiryRow}
         </table>
       </div>
       <div style="margin-top:20px;text-align:center;">
@@ -606,19 +616,43 @@ function buildModel(ctx: LoadedContext, receiptNumber: string, issuedAt: string)
   return { model, lineItems };
 }
 
-function receiptEmailFromPaymentContext(input: {
-  ctx: LoadedContext;
-  model: BillingReceiptPdfModel;
-  receiptNumber: string;
-  receiptId: string;
-  appUrl: string;
-  logoUrl: string;
-}): string {
+async function receiptEmailFromPaymentContext(
+  admin: SupabaseClient,
+  input: {
+    ctx: LoadedContext;
+    model: BillingReceiptPdfModel;
+    receiptNumber: string;
+    receiptId: string;
+    appUrl: string;
+    logoUrl: string;
+  },
+): Promise<string> {
   const { ctx, model } = input;
   const pay = ctx.pay;
   const tx = String(pay.transaction_code ?? "").trim() || "—";
   const paidIso = String(pay.approved_at ?? pay.submitted_at ?? pay.created_at ?? "");
   const baseUrl = input.appUrl.replace(/\/$/, "");
+
+  let newExpiryLabel: string | null = null;
+
+  try {
+    const { data: comp } = await admin
+      .schema("core")
+      .from("companies")
+      .select("active_until")
+      .eq("id", ctx.companyId)
+      .maybeSingle();
+    const row = comp as { active_until?: string | null } | null;
+    if (row?.active_until) {
+      const d = new Date(String(row.active_until));
+      if (!Number.isNaN(d.getTime())) {
+        newExpiryLabel = d.toISOString().slice(0, 10);
+      }
+    }
+  } catch {
+    /* optional enrichment — receipt still sends */
+  }
+
   return receiptEmailHtml({
     name: ctx.adminName,
     companyName: ctx.companyName,
@@ -632,6 +666,7 @@ function receiptEmailFromPaymentContext(input: {
     viewUrl: `${baseUrl}/billing?receipt=${input.receiptId}`,
     dashboardUrl: `${baseUrl}/dashboard`,
     logoUrl: input.logoUrl,
+    newExpiryLabel,
   });
 }
 
@@ -884,7 +919,7 @@ Deno.serve(async (req) => {
         const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
         if (resendKey) {
           const b64 = bytesToBase64(pdfBytes);
-          const html = receiptEmailFromPaymentContext({
+          const html = await receiptEmailFromPaymentContext(admin, {
             ctx,
             model,
             receiptNumber,
@@ -1075,7 +1110,7 @@ Deno.serve(async (req) => {
       const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
       if (resendKey) {
         const b64 = bytesToBase64(pdfBytes);
-        const html = receiptEmailFromPaymentContext({
+        const html = await receiptEmailFromPaymentContext(admin, {
           ctx,
           model,
           receiptNumber,
