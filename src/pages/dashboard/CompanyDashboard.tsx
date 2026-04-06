@@ -59,7 +59,6 @@ import { cn } from '@/lib/utils';
 import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince } from '@/utils/cropStages';
-import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
 import { listAdminAlerts, type StoredAdminAlert } from '@/services/adminAlertService';
@@ -921,18 +920,6 @@ export function CompanyDashboard() {
 
   const firstName = user?.name?.trim().split(/\s+/)[0] || null;
 
-  const { isExpired: subscriptionExpired, isTrial } = useSubscriptionStatus();
-
-  const harvestValueTracked = useMemo(() => {
-    return filteredHarvests.reduce((sum, h) => {
-      // Use farmTotalPrice when available; otherwise ignore.
-      const anyHarvest = h as Harvest & { farmTotalPrice?: number };
-      return sum + (anyHarvest.farmTotalPrice ?? 0);
-    }, 0);
-  }, [filteredHarvests]);
-
-  const totalFarmValue = totalSales + harvestValueTracked;
-
   const handleProjectChange = useCallback(
     (value: string) => {
       if (value === 'all') {
@@ -1080,7 +1067,6 @@ export function CompanyDashboard() {
   const showExpensesCard = canSee('dashboard', 'cards.expenses');
   const showProfitLossCard = canSee('dashboard', 'cards.profitLoss');
   const showBudgetCard = canSee('dashboard', 'cards.budget');
-  const showInsightCard = isTrial;
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
@@ -1414,30 +1400,6 @@ export function CompanyDashboard() {
           </div>
         ) : null}
       </div>
-
-      {showInsightCard && (
-        <div className="fv-card border-fv-gold-soft/80 bg-fv-gold-soft/30">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-                FarmVault Insight
-              </h3>
-              <p className="mt-1 text-sm text-foreground">
-                This season you have tracked{' '}
-                <span className="font-semibold">
-                  KES {totalFarmValue.toLocaleString()}
-                </span>{' '}
-                in farm value.
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {subscriptionExpired
-                  ? 'Your farm data is worth protecting. Upgrade to continue.'
-                  : 'Proper tracking prevents losses and improves profit.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Charts */}
       <FeatureGate
