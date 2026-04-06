@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/react";
 import { CheckCircle, Clock, ListOrdered, TrendingUp, UserCheck, UserMinus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -35,11 +36,29 @@ function formatEarningType(type: string): string {
 
 export default function AmbassadorDashboardPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const { user, isLoaded: clerkLoaded } = useUser();
+  const [statsPrepTimeout, setStatsPrepTimeout] = useState(false);
+  const onboardingBootstrapRef = useRef(false);
 
   useEffect(() => {
     document.title = "Ambassador | FarmVault";
   }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setStatsPrepTimeout(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (searchParams.get("amb_refresh") !== "1") return;
+    void queryClient.invalidateQueries({ queryKey: ["ambassador", "console", "stats"] });
+    const next = new URLSearchParams(searchParams);
+    next.delete("amb_refresh");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, queryClient]);
 
   const statsQ = useAmbassadorConsoleStatsQuery(clerkLoaded);
   const stats = statsQ.data;
@@ -47,27 +66,44 @@ export default function AmbassadorDashboardPage() {
   const refQ = useAmbassadorConsoleReferralsQuery(clerkLoaded && statsReady);
   const earningsTxQ = useAmbassadorEarningsTransactionsQuery(clerkLoaded && statsReady);
 
+  /** Single bootstrap: only this page auto-sends incomplete ambassadors to onboarding (once per cycle). */
   useEffect(() => {
-    if (!statsQ.isFetched || !stats) return;
+    if (location.pathname.startsWith("/ambassador/onboarding")) {
+      return;
+    }
 
-    if (stats.ok && !stats.onboarding_complete) {
+    if (!statsQ.isFetched || statsQ.isFetching) {
+      return;
+    }
+
+    const s = statsQ.data;
+    if (!s) return;
+
+    if (s.ok && s.onboarding_complete) {
+      onboardingBootstrapRef.current = false;
+      return;
+    }
+
+    if (s.ok && !s.onboarding_complete) {
+      if (onboardingBootstrapRef.current) return;
+      onboardingBootstrapRef.current = true;
       navigate("/ambassador/onboarding", { replace: true });
       return;
     }
 
-    if (!stats.ok) {
-      if (stats.error === "not_found" && user) {
-        navigate("/ambassador/onboarding", { replace: true });
-        return;
-      }
-      if (stats.error === "not_found" && !user) {
-        const s = getAmbassadorSession();
-        if (!s?.id) return;
-        clearAmbassadorSession();
-        return;
-      }
+    if (!s.ok && s.error === "not_found" && user) {
+      if (onboardingBootstrapRef.current) return;
+      onboardingBootstrapRef.current = true;
+      navigate("/ambassador/onboarding", { replace: true });
+      return;
     }
-  }, [statsQ.isFetched, stats, user, navigate]);
+
+    if (!s.ok && s.error === "not_found" && !user) {
+      const sess = getAmbassadorSession();
+      if (!sess?.id) return;
+      clearAmbassadorSession();
+    }
+  }, [location.pathname, statsQ.isFetched, statsQ.isFetching, statsQ.data, user, navigate]);
 
   if (statsQ.isError) {
     return (
@@ -82,7 +118,7 @@ export default function AmbassadorDashboardPage() {
     );
   }
 
-  if (!clerkLoaded || statsQ.isLoading) {
+  if (!clerkLoaded || (statsQ.isLoading && !statsPrepTimeout)) {
     return (
       <>
         <SeoHead title="Ambassador dashboard" description="FarmVault ambassador dashboard" canonical={SEO_ROUTES.ambassadorDashboard} />
@@ -99,6 +135,27 @@ export default function AmbassadorDashboardPage() {
     );
   }
 
+  if (statsQ.isLoading && statsPrepTimeout) {
+    return (
+      <>
+        <SeoHead title="Ambassador dashboard" description="FarmVault ambassador dashboard" canonical={SEO_ROUTES.ambassadorDashboard} />
+        <DeveloperPageShell title="Ambassador Dashboard">
+          <div className="fv-card p-6 max-w-md space-y-4 text-sm text-muted-foreground">
+            <p>Stats are taking longer than usual. You can retry or continue ambassador onboarding.</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button type="button" onClick={() => void statsQ.refetch()}>
+                Retry
+              </Button>
+              <Button asChild variant="secondary">
+                <Link to="/ambassador/onboarding">Ambassador onboarding</Link>
+              </Button>
+            </div>
+          </div>
+        </DeveloperPageShell>
+      </>
+    );
+  }
+
   if (stats && !stats.ok) {
     const errMsg =
       stats.error === "not_found" && user
@@ -108,7 +165,14 @@ export default function AmbassadorDashboardPage() {
           : "Could not load dashboard.";
 
     if (stats.error === "not_found" && user) {
-      return null;
+      return (
+        <>
+          <SeoHead title="Ambassador dashboard" description="FarmVault ambassador dashboard" canonical={SEO_ROUTES.ambassadorDashboard} />
+          <DeveloperPageShell title="Ambassador Dashboard" isLoading>
+            <p className="text-sm text-muted-foreground">Loading your ambassador workspace…</p>
+          </DeveloperPageShell>
+        </>
+      );
     }
 
     return (

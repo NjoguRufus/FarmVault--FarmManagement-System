@@ -1,4 +1,5 @@
-import { supabase } from '@/lib/supabase';
+import { invokeNotifyDeveloperTransactional } from '@/lib/email';
+import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
 import {
   getDevDashboardKpis,
   listCompanies,
@@ -234,7 +235,41 @@ export async function fetchPendingPayments(): Promise<PendingPayment[]> {
   return rows;
 }
 
-export async function approveSubscriptionPayment(id: string): Promise<void> {
+/** Belt-and-suspenders: call activate_company_subscription directly after approve RPC. */
+async function activateCompanyPro(
+  companyId: string,
+  plan: string,
+  cycle: string,
+): Promise<void> {
+  // eslint-disable-next-line no-console
+  console.log('[Payment] Promoting company to PRO — calling activate_company_subscription directly', {
+    companyId,
+    plan,
+    cycle,
+  });
+  const { error } = await supabase.rpc('activate_company_subscription', {
+    p_company_id: companyId,
+    p_plan: plan || 'basic',
+    p_cycle: cycle || 'monthly',
+    p_billing_mode: 'mpesa_stk',
+    p_actor: 'frontend_belt_and_suspenders',
+  });
+  if (error) {
+    // Non-fatal — approve RPC already ran the activation. Log and continue.
+    // eslint-disable-next-line no-console
+    console.warn('[Payment] activate_company_subscription (belt-and-suspenders) failed (non-fatal)', error.message);
+  } else {
+    // eslint-disable-next-line no-console
+    console.log('[Payment] Setting access =', plan, '| status = active | trial = false');
+  }
+}
+
+export async function approveSubscriptionPayment(
+  id: string,
+  payment?: { company_id?: string | null; plan_id?: string | null; billing_cycle?: string | null },
+): Promise<void> {
+  // eslint-disable-next-line no-console
+  console.log('[Payment] Payment confirmed — ID:', id, '| company:', payment?.company_id ?? '(unknown)');
   // eslint-disable-next-line no-console
   console.log('[DevService] approve_subscription_payment RPC (syncs company_subscriptions)', { paymentId: id });
   const { error } = await supabase.rpc('approve_subscription_payment', { _payment_id: id });
@@ -243,6 +278,29 @@ export async function approveSubscriptionPayment(id: string): Promise<void> {
   }
   // eslint-disable-next-line no-console
   console.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
+
+  // Belt-and-suspenders: if we have company details, call activate_company_subscription directly
+  // to ensure all DB columns are set even if the RPC had a partial failure on some rows.
+  if (payment?.company_id) {
+    void activateCompanyPro(
+      payment.company_id,
+      payment.plan_id ?? 'basic',
+      payment.billing_cycle ?? 'monthly',
+    ).catch(() => {/* already logged inside */});
+  }
+
+  void invokeNotifyDeveloperTransactional(
+    { event: 'payment_approved', payment_id: id },
+    getSupabaseAccessToken,
+  ).catch(() => {
+    /* non-fatal */
+  });
+  void invokeNotifyDeveloperTransactional(
+    { event: 'subscription_activated', source: 'manual_approval', payment_id: id },
+    getSupabaseAccessToken,
+  ).catch(() => {
+    /* non-fatal */
+  });
 }
 
 export async function rejectSubscriptionPayment(id: string): Promise<void> {

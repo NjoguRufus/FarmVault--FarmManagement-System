@@ -23,7 +23,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     setLoading(false);
-    navigate('/auth/continue', { replace: true, state: location.state });
+    navigate('/auth/callback', { replace: true, state: location.state });
   }, [isAuthenticated, user, navigate, location.state]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,7 +54,7 @@ export default function LoginPage() {
 
 
   if (clerkLoaded && clerkSignedIn) {
-    return <Navigate to="/auth/continue" replace state={location.state} />;
+    return <Navigate to="/auth/callback" replace state={location.state} />;
   }
 
   return (

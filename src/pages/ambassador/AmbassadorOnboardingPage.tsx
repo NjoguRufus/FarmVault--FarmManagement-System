@@ -31,8 +31,9 @@ import {
   AmbassadorReferralQrBlock,
   type AmbassadorReferralQrBlockHandle,
 } from "@/components/ambassador/AmbassadorReferralQrBlock";
+import { getReferralDeviceId } from "@/lib/ambassador/referralPersistence";
 
-type Screen = "check" | "profile" | "welcome" | "earn" | "link" | "next";
+type Screen = "check" | "profile" | "welcome" | "earn" | "link" | "next" | "no_intent";
 
 const cardClass =
   "rounded-lg border border-white/15 bg-white/[0.08] backdrop-blur-xl " +
@@ -50,7 +51,13 @@ export default function AmbassadorOnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [prepTimeoutReached, setPrepTimeoutReached] = useState(false);
   const qrRef = useRef<AmbassadorReferralQrBlockHandle>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setPrepTimeoutReached(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const clerkEmail = user?.primaryEmailAddress?.emailAddress?.trim() ?? "";
   const storedRef = getStoredAmbassadorRef();
@@ -83,11 +90,8 @@ export default function AmbassadorOnboardingPage() {
     if (!clerkLoaded) return;
 
     if (!readAmbassadorAccessIntent()) {
-      if (user) {
-        navigate("/dashboard", { replace: true });
-      } else {
-        navigate("/ambassador", { replace: true });
-      }
+      // No auto-redirect — avoids fighting dashboard / auth guards (flicker loop).
+      setScreen("no_intent");
       return;
     }
 
@@ -110,7 +114,7 @@ export default function AmbassadorOnboardingPage() {
         if (r.ok) {
           if (r.onboarding_complete) {
             clearAmbassadorAccessIntent();
-            navigate("/ambassador/console/dashboard", { replace: true });
+            navigate("/ambassador/console/dashboard?amb_refresh=1", { replace: true });
             return;
           }
           setReferralCode(r.referral_code);
@@ -144,6 +148,7 @@ export default function AmbassadorOnboardingPage() {
 
   async function onProfileSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     if (!clerkEmail) {
       toast.error("Add an email address to your account in Clerk before continuing.");
       return;
@@ -159,11 +164,20 @@ export default function AmbassadorOnboardingPage() {
         phone: phone.trim() || undefined,
         email: clerkEmail,
         type,
-        referrerCode: storedRef,
+        referrerCode: storedRef ?? undefined,
+        deviceId: getReferralDeviceId(),
       });
       clearStoredAmbassadorRef();
       setAmbassadorSession({ id: result.id, referral_code: result.referral_code });
       setReferralCode(result.referral_code);
+      if (result.already_registered) {
+        const check = await fetchMyAmbassadorDashboardStats();
+        if (check.ok && check.onboarding_complete) {
+          clearAmbassadorAccessIntent();
+          navigate("/ambassador/console/dashboard?amb_refresh=1", { replace: true });
+          return;
+        }
+      }
       toast.success(result.already_registered ? "Welcome back!" : "Welcome to the ambassador program!");
       setScreen("welcome");
     } catch (err) {
@@ -175,6 +189,7 @@ export default function AmbassadorOnboardingPage() {
   }
 
   async function goToReferPage() {
+    if (finishing) return;
     setFinishing(true);
     try {
       await completeMyAmbassadorOnboarding();
@@ -193,7 +208,7 @@ export default function AmbassadorOnboardingPage() {
       }
 
       clearAmbassadorAccessIntent();
-      navigate("/ambassador/console/refer", { replace: true });
+      navigate("/ambassador/console/dashboard?amb_refresh=1", { replace: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not finish onboarding.";
       toast.error(msg);
@@ -202,11 +217,62 @@ export default function AmbassadorOnboardingPage() {
     }
   }
 
-  if (!clerkLoaded || screen === "check") {
+  if (!clerkLoaded || (screen === "check" && !prepTimeoutReached)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-emerald-950 via-green-900 to-stone-900 text-emerald-50">
         <Loader2 className="h-10 w-10 animate-spin text-lime-300" />
         <p className="text-sm text-emerald-200/70">Preparing onboarding…</p>
+      </div>
+    );
+  }
+
+  if (screen === "check" && prepTimeoutReached) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-emerald-950 via-green-900 to-stone-900 text-emerald-50 px-6">
+        <p className="text-sm text-emerald-200/85 text-center max-w-md">
+          This is taking longer than usual. You can continue to your dashboard or try again.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Button asChild className="rounded-lg bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950">
+            <Link to="/ambassador/console/dashboard">Open ambassador dashboard</Link>
+          </Button>
+          <Button type="button" variant="secondary" className="rounded-lg" onClick={() => window.location.reload()}>
+            Reload
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "no_intent") {
+    return (
+      <div className="min-h-screen font-body bg-gradient-to-b from-emerald-950 via-green-900 to-stone-900 text-emerald-50 px-4 pt-28 pb-20">
+        <LandingNavbar />
+        <div className={`${cardClass} max-w-md mx-auto p-8 text-center space-y-4`}>
+          <p className="text-sm text-emerald-100/85">
+            This page is for FarmVault ambassadors. Continue to the ambassador console or learn about the program.
+          </p>
+          <div className="flex flex-col gap-2">
+            {user ? (
+              <Button
+                type="button"
+                className="rounded-lg bg-gradient-to-r from-lime-500 to-emerald-500 text-emerald-950"
+                onClick={() => navigate("/ambassador/console/dashboard?amb_refresh=1", { replace: true })}
+              >
+                Open ambassador dashboard
+              </Button>
+            ) : null}
+            <Button asChild variant="secondary" className="rounded-lg">
+              <Link to="/ambassador">Ambassador program</Link>
+            </Button>
+            {!user ? (
+              <Button asChild variant="outline" className="rounded-lg border-white/20 bg-white/5 text-emerald-50">
+                <Link to="/sign-in">Sign in</Link>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <Footer />
       </div>
     );
   }
@@ -458,13 +524,13 @@ export default function AmbassadorOnboardingPage() {
                   </>
                 ) : (
                   <>
-                    Go to referral page
+                    Finish and open dashboard
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </Button>
               <p className="text-[11px] text-emerald-200/50 mt-4">
-                After this step you can open your full dashboard anytime from the menu.
+                You&apos;ll land on your ambassador dashboard. Referrals and your link are available there too.
               </p>
             </motion.div>
           )}

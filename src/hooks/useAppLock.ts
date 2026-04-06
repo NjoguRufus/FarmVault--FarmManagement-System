@@ -5,7 +5,7 @@
  * IMPORTANT: The actual lock enforcement is now handled by AppLockGate at the root level.
  * This hook is used for:
  * 1. Syncing PIN exists flag with server
- * 2. Showing the first-time App Lock prompt
+ * 2. Driving the first-time App Lock prompt (mounted only from dashboard layouts after onboarding)
  * 3. Providing lock/unlock functions for UI components
  *
  * The AppLockGate reads localStorage synchronously on boot to enforce lock

@@ -42,10 +42,31 @@ verify_jwt = false
 [functions.notify-company-submission-received]
 verify_jwt = false
 
+# Developer notify when a workspace finishes onboarding (anon + service role inside).
+[functions.notify-developer-company-registered]
+verify_jwt = false
+
 # Clerk Bearer verified inside function (RS256); gateway JWT verify would fail.
 [functions.mpesa-stk-push]
 verify_jwt = false
 
 # Safaricom Daraja STK callback — no Authorization header.
 [functions.mpesa-stk-callback]
+verify_jwt = false
+
+# Clerk / secret verified inside function (same pattern as send-farmvault-email).
+[functions.billing-receipt-issue]
+verify_jwt = false
+
+# pg_cron invokes with Bearer ENGAGEMENT_EMAIL_CRON_SECRET (stored in Vault); no Supabase JWT.
+[functions.engagement-email-cron]
+verify_jwt = false
+
+[functions.notify-developer-transactional]
+verify_jwt = false
+
+[functions.notify-company-transactional]
+verify_jwt = false
+
+[functions.notify-ambassador-onboarding]
 verify_jwt = false

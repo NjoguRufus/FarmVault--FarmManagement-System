@@ -44,8 +44,11 @@ export function isSdkApprovedSubscriptionRow(row: PaymentRow): boolean {
   return String(row.status ?? '').toLowerCase() === 'approved' && subscriptionRowPaymentSource(row) === 'sdk';
 }
 
-export function mpesaRowIsSdkSuccess(row: Pick<MpesaStkPaymentRow, 'status'>): boolean {
-  return String(row.status ?? '').toUpperCase() === 'SUCCESS';
+/** Matches DB + gate: result_code 0 and/or Daraja SUCCESS|COMPLETED status. */
+export function mpesaRowIsSdkSuccess(row: Pick<MpesaStkPaymentRow, 'status' | 'result_code'>): boolean {
+  if (row.result_code != null && row.result_code === 0) return true;
+  const u = String(row.status ?? '').toUpperCase();
+  return u === 'SUCCESS' || u === 'COMPLETED';
 }
 
 export function sumAmounts(rows: Array<{ amount?: number | string | null }>): number {

@@ -1217,13 +1217,25 @@ async function verifyNotebookMembershipForCompany(
     return true;
   }
 
-  const { data: pubRow, error: pubErr } = await supabase
+  let { data: pubRow, error: pubErr } = await supabase
     .from('company_members')
     .select('company_id')
-    .eq('user_id', uid)
+    .eq('clerk_user_id', uid)
     .eq('company_id', cid)
     .limit(1)
     .maybeSingle();
+
+  if (pubErr || pubRow?.company_id == null) {
+    const legacy = await supabase
+      .from('company_members')
+      .select('company_id')
+      .eq('user_id', uid)
+      .eq('company_id', cid)
+      .limit(1)
+      .maybeSingle();
+    pubRow = legacy.data;
+    pubErr = legacy.error;
+  }
 
   return !pubErr && pubRow?.company_id != null;
 }
@@ -1245,7 +1257,7 @@ async function resolveCompanyIdFromCurrentContextRpc(): Promise<string | null> {
 
 /**
  * RPCs such as create_company_crop_record need the tenant UUID (company_id), not Clerk user.id.
- * Resolve from membership: core.company_members (clerk_user_id), then public.company_members (user_id).
+ * Resolve from membership: core.company_members (clerk_user_id), then public.company_members (clerk_user_id, then user_id).
  * When preferredCompanyId is a UUID (active workspace), require a row for that company.
  */
 async function resolveNotebookCompanyIdFromMembership(
@@ -1282,14 +1294,21 @@ async function resolveNotebookCompanyIdFromMembership(
     return String(coreRow.company_id);
   }
 
-  let qPub = supabase.from('company_members').select('company_id').eq('user_id', uid);
-  if (pref) {
-    qPub = qPub.eq('company_id', pref);
+  async function pubMembership(useUserId: boolean) {
+    let q = supabase.from('company_members').select('company_id');
+    q = useUserId ? q.eq('user_id', uid) : q.eq('clerk_user_id', uid);
+    if (pref) {
+      q = q.eq('company_id', pref);
+    }
+    return q.order('created_at', { ascending: false }).limit(1).maybeSingle();
   }
-  const { data: membership, error } = await qPub
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+
+  let { data: membership, error } = await pubMembership(false);
+  if (error || membership?.company_id == null) {
+    const second = await pubMembership(true);
+    membership = second.data;
+    error = second.error;
+  }
 
   if (error) {
     if (import.meta.env.DEV) {

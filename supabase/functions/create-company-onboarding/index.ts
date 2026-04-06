@@ -3,6 +3,7 @@
 // Idempotent: if the caller already has a profile with company_id, returns that company_id.
 // Requires env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, optional TRIAL_DAYS.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import { farmVaultEmailShell } from "../_shared/farmvault-email/farmVaultEmailShell.ts";
 import { escapeHtml } from "../_shared/farmvault-email/escapeHtml.ts";
 
@@ -202,7 +203,7 @@ Deno.serve(async (req: Request) => {
       read: false,
     });
 
-    const adminEmailTarget = Deno.env.get("DEVELOPER_ADMIN_EMAIL") || Deno.env.get("ADMIN_EMAIL");
+    const adminEmailTarget = getFarmvaultDeveloperInboxEmail();
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (adminEmailTarget && resendApiKey) {
       const font = "Arial, Helvetica, sans-serif";

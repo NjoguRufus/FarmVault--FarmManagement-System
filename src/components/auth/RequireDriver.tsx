@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { resolveStaffShellEntryOrHome } from '@/lib/access/effectiveAccess';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee } from '@/types';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
@@ -10,7 +11,7 @@ interface RequireDriverProps {
 }
 
 export function RequireDriver({ children }: RequireDriverProps) {
-  const { user, isAuthenticated, authReady } = useAuth();
+  const { user, isAuthenticated, authReady, effectiveAccess } = useAuth();
   const location = useLocation();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
@@ -36,5 +37,5 @@ export function RequireDriver({ children }: RequireDriverProps) {
     }
   }
 
-  return <Navigate to="/staff/staff-dashboard" replace />;
+  return <Navigate to={resolveStaffShellEntryOrHome(effectiveAccess.landingPage)} replace />;
 }

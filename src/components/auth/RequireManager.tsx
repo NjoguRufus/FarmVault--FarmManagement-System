@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { resolveStaffShellEntryOrHome } from '@/lib/access/effectiveAccess';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 
 interface RequireManagerProps {
@@ -8,7 +9,7 @@ interface RequireManagerProps {
 }
 
 export function RequireManager({ children }: RequireManagerProps) {
-  const { user, isAuthenticated, authReady } = useAuth();
+  const { user, isAuthenticated, authReady, effectiveAccess } = useAuth();
   const location = useLocation();
 
   if (!authReady) {
@@ -24,7 +25,7 @@ export function RequireManager({ children }: RequireManagerProps) {
     user?.employeeRole === 'manager' || user?.employeeRole === 'operations-manager';
 
   if (!isManagerPlatformRole && !isManagerEmployeeRole) {
-    return <Navigate to="/staff/staff-dashboard" replace />;
+    return <Navigate to={resolveStaffShellEntryOrHome(effectiveAccess.landingPage)} replace />;
   }
 
   return children;

@@ -1,23 +1,29 @@
 // Public (anon-key) invoke: user confirmation + optional admin notify. No Supabase user JWT.
 //
 // Secrets: RESEND_API_KEY (required), SUPABASE_SERVICE_ROLE_KEY (required for email_logs), SUPABASE_ANON_KEY (caller check).
-// Optional: FARMVAULT_EMAIL_FROM, FARMVAULT_ONBOARDING_ADMIN_EMAIL (default farmvaultke@gmail.com)
+// Optional: FARMVAULT_EMAIL_FROM; developer copy uses FARMVAULT_DEVELOPER_INBOX_EMAIL (see farmvaultDeveloperInbox.ts)
 //
 // Body:
 //   to, companyName, dashboardUrl (user confirmation — unchanged)
 //   userEmail (optional; defaults to to) — shown on admin email
-//   approvalDashboardUrl (required https) — developer approvals link for admin email
+//   approvalDashboardUrl (optional https) — developer-console link for admin notify
+//   onboardingCompleteDeveloperNotify (optional bool) — when true, send “onboarding complete” developer copy;
+//     uses approvalDashboardUrl or FARMVAULT_PUBLIC_APP_URL + /developer/companies
 //
 // Deploy: npx supabase functions deploy notify-company-submission-received --no-verify-jwt
 //
 import { getServiceRoleClientForEmailLogs, insertEmailLogRow } from "../_shared/emailLogs.ts";
-import { buildOnboardingAdminNotifyEmail } from "../_shared/farmvault-email/onboardingAdminNotifyTemplate.ts";
+import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
+import {
+  buildOnboardingAdminNotifyEmail,
+  buildOnboardingCompleteDeveloperNotifyEmail,
+} from "../_shared/farmvault-email/onboardingAdminNotifyTemplate.ts";
 import { buildSubmissionReceivedEmail } from "../_shared/farmvault-email/submissionReceivedTemplate.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 
 const EMAIL_LOG_TYPE_USER = "submission_received";
 const EMAIL_LOG_TYPE_ADMIN = "submission_admin_notify";
-const DEFAULT_ADMIN_EMAIL = "farmvaultke@gmail.com";
+const EMAIL_LOG_TYPE_ADMIN_ONBOARDING_DONE = "submission_onboarding_complete_developer_notify";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -109,6 +115,7 @@ Deno.serve(async (req: Request) => {
     const userEmail = userEmailRaw || to;
     const approvalDashboardUrl =
       typeof payload.approvalDashboardUrl === "string" ? payload.approvalDashboardUrl.trim() : "";
+    const onboardingCompleteDeveloperNotify = payload.onboardingCompleteDeveloperNotify === true;
 
     if (!to) {
       return jsonResponse(
@@ -138,7 +145,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Invalid payload", detail: urlErr }, 400);
     }
 
-    const apprErr = requireHttpsUrl(approvalDashboardUrl, "approvalDashboardUrl");
+    const appBase = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");
+    const defaultDevConsole = `${appBase}/developer/companies`;
+    const resolvedDeveloperUrl =
+      approvalDashboardUrl ||
+      (onboardingCompleteDeveloperNotify ? defaultDevConsole : "");
+    const skipAdminNotify = !resolvedDeveloperUrl;
+    const apprErr = skipAdminNotify ? null : requireHttpsUrl(resolvedDeveloperUrl, "approvalDashboardUrl");
     if (apprErr) {
       return jsonResponse({ error: "Invalid payload", detail: apprErr }, 400);
     }
@@ -218,15 +231,35 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Failed to send email", detail: userSend.error }, 500);
     }
 
-    const adminRecipient =
-      Deno.env.get("FARMVAULT_ONBOARDING_ADMIN_EMAIL")?.trim() || DEFAULT_ADMIN_EMAIL;
+    if (skipAdminNotify) {
+      return jsonResponse(
+        {
+          ok: true,
+          id: userSend.resendId,
+          to,
+          logId: userSend.logId ?? undefined,
+          adminNotifyOk: true,
+          adminNotifySkipped: true,
+        },
+        200,
+      );
+    }
+
+    const adminRecipient = getFarmvaultDeveloperInboxEmail();
     const submittedAt = new Date().toISOString();
-    const adminBuilt = buildOnboardingAdminNotifyEmail({
-      companyName,
-      userEmail,
-      submittedAtIso: submittedAt,
-      approvalDashboardUrl,
-    });
+    const adminBuilt = onboardingCompleteDeveloperNotify
+      ? buildOnboardingCompleteDeveloperNotifyEmail({
+          companyName,
+          userEmail,
+          completedAtIso: submittedAt,
+          developerDashboardUrl: resolvedDeveloperUrl,
+        })
+      : buildOnboardingAdminNotifyEmail({
+          companyName,
+          userEmail,
+          submittedAtIso: submittedAt,
+          approvalDashboardUrl: resolvedDeveloperUrl,
+        });
 
     const adminSend = await sendResendWithEmailLog({
       admin,
@@ -235,14 +268,14 @@ Deno.serve(async (req: Request) => {
       to: adminRecipient,
       subject: adminBuilt.subject,
       html: adminBuilt.html,
-      email_type: EMAIL_LOG_TYPE_ADMIN,
+      email_type: onboardingCompleteDeveloperNotify ? EMAIL_LOG_TYPE_ADMIN_ONBOARDING_DONE : EMAIL_LOG_TYPE_ADMIN,
       company_name: companyName,
       metadata: {
         source: "notify-company-submission-received",
-        branch: "admin_notify",
+        branch: onboardingCompleteDeveloperNotify ? "onboarding_complete_developer" : "admin_notify",
         userEmail,
         confirmationRecipient: to,
-        approvalDashboardUrl,
+        approvalDashboardUrl: resolvedDeveloperUrl,
         submittedAt,
       },
     });

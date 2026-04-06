@@ -146,24 +146,9 @@ export function DeveloperBillingPricingControl({
     (plan: BillingPricePlan, cycle: BillingPriceCycle, amount: number) => {
       const prev = amountByKey.current.get(cellKey(plan, cycle));
       if (prev === amount) return;
-
-      if (prev !== undefined && prev > 0) {
-        const pct = Math.abs(amount - prev) / prev;
-        if (pct > 0.5) {
-          const dir = amount > prev ? 'increase' : 'decrease';
-          const planLabel = plan === 'basic' ? 'Basic' : 'Pro';
-          const cycleLabel = cycle === 'monthly' ? 'monthly' : cycle === 'seasonal' ? 'seasonal' : 'annual';
-          toast({
-            variant: 'destructive',
-            title: `Large price ${dir} — ${planLabel} ${cycleLabel}`,
-            description: `KES ${prev.toLocaleString()} → KES ${amount.toLocaleString()} (${Math.round(pct * 100)}%). Saved. Verify this is intentional.`,
-          });
-        }
-      }
-
       mutation.mutate({ plan, cycle, amount });
     },
-    [mutation, toast],
+    [mutation],
   );
 
   const plans: BillingPricePlan[] = ['basic', 'pro'];

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { resolveStaffShellEntryOrHome } from '@/lib/access/effectiveAccess';
 import { useCollection } from '@/hooks/useCollection';
 import { Employee } from '@/types';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
@@ -10,7 +11,7 @@ interface RequireBrokerProps {
 }
 
 export function RequireBroker({ children }: RequireBrokerProps) {
-  const { user, isAuthenticated, authReady } = useAuth();
+  const { user, isAuthenticated, authReady, effectiveAccess } = useAuth();
   const location = useLocation();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
@@ -51,6 +52,5 @@ export function RequireBroker({ children }: RequireBrokerProps) {
     }
   }
 
-  // Redirect non-brokers to staff dashboard (staff are isolated under /staff/*)
-  return <Navigate to="/staff/staff-dashboard" replace />;
+  return <Navigate to={resolveStaffShellEntryOrHome(effectiveAccess.landingPage)} replace />;
 }

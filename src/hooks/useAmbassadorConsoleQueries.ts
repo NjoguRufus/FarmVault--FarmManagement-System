@@ -37,6 +37,8 @@ export function useAmbassadorConsoleReferralsQuery(enabled: boolean) {
   return useQuery({
     queryKey: ["ambassador", "console", "referrals", user?.id ?? sessionIdKey()],
     enabled: isLoaded && enabled,
+    refetchInterval: enabled ? 12_000 : false,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       if (user) {
         return fetchMyAmbassadorReferralRows();

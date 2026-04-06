@@ -64,19 +64,41 @@ export function getAllowedModules(permissions: PermissionMap): string[] {
   return MODULE_ORDER.filter((mod) => hasModuleView(permissions, mod));
 }
 
+/** Canonical staff home; only valid when the session has a company tenant (see getLandingPageFromPermissions). */
+export const STAFF_DASHBOARD_PATH = '/staff/staff-dashboard';
+
+/**
+ * Guards that deny a role-specific route should send users to their real home, never invent /staff without a tenant.
+ */
+export function resolveStaffShellEntryOrHome(landingPage: string | null | undefined): string {
+  const p = (landingPage ?? '').trim();
+  if (p === STAFF_DASHBOARD_PATH || p === '/staff' || p.startsWith('/staff/')) return p;
+  return '/';
+}
+
 /**
  * Resolve default landing page from permissions (and optional legacy role for broker/driver).
+ * Never defaults to the staff shell without a company id — unlinked/deleted sessions must not get a staff dashboard.
  */
 export function getLandingPageFromPermissions(
   permissions: PermissionMap,
-  options?: { legacyRole?: string | null; isCompanyAdmin?: boolean; isDeveloper?: boolean }
+  options?: {
+    legacyRole?: string | null;
+    isCompanyAdmin?: boolean;
+    isDeveloper?: boolean;
+    employeeId?: string | null;
+    companyId?: string | null;
+  },
 ): string {
   if (options?.isDeveloper) return '/developer';
   if (options?.isCompanyAdmin) return '/dashboard';
 
-  // All employees live under the /staff namespace. Default landing is always staff dashboard.
-  // Module cards inside staff dashboard handle the rest (permission-aware).
-  return '/staff/staff-dashboard';
+  const companyId = options?.companyId != null ? String(options.companyId).trim() : '';
+  if (!companyId) {
+    return '/';
+  }
+
+  return STAFF_DASHBOARD_PATH;
 }
 
 /**
@@ -107,6 +129,8 @@ export function resolveEffectiveAccess(params: {
     legacyRole,
     isCompanyAdmin,
     isDeveloper,
+    employeeId,
+    companyId,
   });
 
   const role = (legacyRole ?? '').toLowerCase();

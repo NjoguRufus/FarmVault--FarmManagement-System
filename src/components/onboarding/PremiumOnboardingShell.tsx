@@ -1,17 +1,25 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-type StepDef = {
+export type OnboardingProgressStepDef = {
   label: string;
 };
 
-const DEFAULT_STEPS: StepDef[] = [
+const DEFAULT_STEPS: OnboardingProgressStepDef[] = [
   { label: 'Your Farm' },
   { label: 'Your Crop' },
   { label: "You're Ready" },
 ];
 
-function StepIndicator({ step, className, steps = DEFAULT_STEPS }: { step: number; className?: string; steps?: StepDef[] }) {
+function StepIndicator({
+  step,
+  className,
+  steps = DEFAULT_STEPS,
+}: {
+  step: number;
+  className?: string;
+  steps?: OnboardingProgressStepDef[];
+}) {
   const total = steps.length;
   const active = Math.min(Math.max(step, 1), total);
   const progressPct = total <= 1 ? 100 : ((active - 1) / (total - 1)) * 100;
@@ -61,6 +69,7 @@ export function PremiumOnboardingShell({
   children,
   belowPanel,
   className,
+  progressSteps,
 }: {
   step: number;
   rightTitle: string;
@@ -69,6 +78,8 @@ export function PremiumOnboardingShell({
   children: React.ReactNode;
   belowPanel?: React.ReactNode;
   className?: string;
+  /** When set, step indicator uses these labels (length = total steps). */
+  progressSteps?: OnboardingProgressStepDef[];
 }) {
   // High-quality farm hero (remote) to avoid adding binary assets + keep repo light.
   // If you later add a local image, replace with: '/images/onboarding-farm.jpg'
@@ -115,7 +126,7 @@ export function PremiumOnboardingShell({
           <h1 className="mt-4 text-3xl font-semibold leading-[1.08] tracking-tight text-white sm:text-5xl">
             You&apos;re about to farm smarter
           </h1>
-          {step !== 3 && (
+          {step <= 2 && (
             <div className="mt-4 max-w-xl">
               <p className="inline-block rounded-xl bg-black/30 px-3 py-2 text-sm leading-relaxed text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] sm:text-base">
                 FarmVault helps you track crops, workers, harvest and profit in one place.
@@ -152,7 +163,7 @@ export function PremiumOnboardingShell({
                   <p className="mt-4 text-sm leading-relaxed text-white/70">{rightSubtitle}</p>
                 )}
 
-                <StepIndicator step={step} className="mt-6" />
+                <StepIndicator step={step} className="mt-6" steps={progressSteps} />
 
                 <div className="mt-7">{children}</div>
               </div>

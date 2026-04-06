@@ -4,11 +4,9 @@ import { AppSidebar } from './AppSidebar';
 import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
-import { PendingCompanyApprovalBanner } from './PendingCompanyApprovalBanner';
 import { PostOnboardingProjectWelcomeBanner } from './PostOnboardingProjectWelcomeBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
-import { NotificationSetupPrompt } from '@/components/notifications/NotificationSetupPrompt';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
@@ -59,6 +57,11 @@ export function MainLayout() {
       (user.profileUserType === 'both' && !user.companyId);
 
     if (isStaffUser && !isAmbassadorUser && !path.startsWith('/staff')) {
+      const staffTarget = effectiveAccess.landingPage;
+      const isStaffLanding =
+        staffTarget === '/staff/staff-dashboard' ||
+        staffTarget === '/staff' ||
+        staffTarget.startsWith('/staff/');
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.log('[Shell] staff user → /staff redirect', {
@@ -66,10 +69,13 @@ export function MainLayout() {
           role: user.role,
           employeeRole: (user as any).employeeRole,
           from: path,
-          to: effectiveAccess.landingPage,
+          to: staffTarget,
         });
       }
-      return effectiveAccess.landingPage || '/staff/staff-dashboard';
+      if (!isStaffLanding) {
+        return '/';
+      }
+      return staffTarget;
     }
 
     if (import.meta.env.DEV) {
@@ -133,7 +139,6 @@ export function MainLayout() {
         onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
       <PostOnboardingProjectWelcomeBanner />
-      <PendingCompanyApprovalBanner />
       <OfflineSyncBanner />
 
       <PaymentReminderBanner />
@@ -154,8 +159,6 @@ export function MainLayout() {
 
       <BottomNav />
       <AIChatButton />
-      <NotificationSetupPrompt />
-
       {!subscriptionLoading && trialExpiredNeedsPlan && isCompanyAdmin && <PostTrialPlanModal open />}
     </div>
   );

@@ -10,8 +10,13 @@ export type NotifyCompanySubmissionReceivedPayload = {
   dashboardUrl: string;
   /** Account / submitter email for the admin notification (defaults to `to` on the server if omitted). */
   userEmail: string;
-  /** Developer console URL to review signups (https). */
-  approvalDashboardUrl: string;
+  /** Optional developer console URL; when omitted, internal admin notify email is skipped (unless onboardingCompleteDeveloperNotify). */
+  approvalDashboardUrl?: string;
+  /**
+   * When true, always send the developer inbox a “onboarding complete” email (uses approvalDashboardUrl or server default).
+   * Use after self-serve onboarding finish so operators are notified (legacy flows used approvalDashboardUrl alone).
+   */
+  onboardingCompleteDeveloperNotify?: boolean;
 };
 
 type EdgeJson = {
@@ -46,16 +51,17 @@ export async function invokeNotifyCompanySubmissionReceived(
   adminNotifyOk?: boolean;
   adminNotifyError?: string;
 }> {
-  const { to, companyName, dashboardUrl, userEmail, approvalDashboardUrl } = payload;
+  const { to, companyName, dashboardUrl, userEmail, approvalDashboardUrl, onboardingCompleteDeveloperNotify } =
+    payload;
 
   if (!to?.trim() || !companyName?.trim() || !dashboardUrl?.trim()) {
     return { ok: false, error: 'Invalid payload', detail: 'to, companyName, and dashboardUrl are required' };
   }
-  if (!userEmail?.trim() || !approvalDashboardUrl?.trim()) {
+  if (!userEmail?.trim()) {
     return {
       ok: false,
       error: 'Invalid payload',
-      detail: 'userEmail and approvalDashboardUrl are required',
+      detail: 'userEmail is required',
     };
   }
 
@@ -67,18 +73,24 @@ export async function invokeNotifyCompanySubmissionReceived(
     };
   }
 
-  const body = {
+  const body: Record<string, string | boolean> = {
     to: to.trim(),
     companyName: companyName.trim(),
     dashboardUrl: dashboardUrl.trim(),
     userEmail: userEmail.trim(),
-    approvalDashboardUrl: approvalDashboardUrl.trim(),
   };
+  if (approvalDashboardUrl?.trim()) {
+    body.approvalDashboardUrl = approvalDashboardUrl.trim();
+  }
+  if (onboardingCompleteDeveloperNotify === true) {
+    body.onboardingCompleteDeveloperNotify = true;
+  }
 
   const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/functions/v1/notify-company-submission-received`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${supabaseApiKey}`,
       apikey: supabaseApiKey,
     },
     body: JSON.stringify(body),

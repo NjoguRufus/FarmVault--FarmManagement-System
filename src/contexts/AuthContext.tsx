@@ -21,13 +21,18 @@ import {
   computeCompanyDataQueriesEnabled,
   type TenantSessionTrust,
 } from '@/lib/companyTenantGate';
-import { assignMyAmbassadorProfileRole, hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
+import {
+  assignMyAmbassadorProfileRole,
+  hasAmbassadorRowForCurrentUser,
+  syncMyFarmerReferralLink,
+} from '@/services/ambassadorService';
 import { clearSignupType, isAmbassadorSignupType } from '@/lib/ambassador/signupType';
 import {
   mirrorPublicProfileForClerkUser,
   pickFirstExistingMembershipCompany,
   repairProfileActiveCompany,
 } from '@/lib/auth/tenantMembershipRecovery';
+import { fetchPlatformUserProfile } from '@/lib/auth/fetchPlatformUserProfile';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -111,7 +116,9 @@ function isExplicitOnboardingRoute(): boolean {
     return (
       p.startsWith('/auth/continue') ||
       p.startsWith('/auth/callback') ||
+      p.startsWith('/auth/ambassador-continue') ||
       p.startsWith('/sign-in') ||
+      p.startsWith('/sign-up') ||
       p.startsWith('/onboarding') ||
       p.startsWith('/accept-invitation') ||
       p.startsWith('/dev/bootstrap')
@@ -121,14 +128,32 @@ function isExplicitOnboardingRoute(): boolean {
   }
 }
 
-function redirectToSignUpAccessRevoked() {
+/** Routes where allow-resignup reset tombstones may continue bootstrap (consume_reset + profile), not `/sign-in`. */
+function isResetAllowResignupRecoveryRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const p = window.location.pathname || '/';
+    return (
+      p.startsWith('/onboarding') ||
+      p.startsWith('/auth/continue') ||
+      p.startsWith('/auth/callback') ||
+      p.startsWith('/auth/ambassador-continue') ||
+      p.startsWith('/accept-invitation')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function redirectToSignInAccessRevoked() {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.setItem(ACCESS_REVOKED_REDIRECT_KEY, '1');
   } catch {
     // ignore
   }
-  window.location.assign('/sign-up?reason=access-revoked');
+  // Signed-out users start account recovery from sign-in (never /sign-up while a session may still exist).
+  window.location.assign('/sign-in?reason=access-revoked');
 }
 
 function isEmergencyAccessEnabled(): boolean {
@@ -399,7 +424,7 @@ const DEFAULT_EFFECTIVE_ACCESS: EffectiveAccess = {
   rolePreset: 'custom',
   permissions: {},
   allowedModules: [],
-  landingPage: '/staff',
+  landingPage: '/',
   canSeeDashboard: false,
   isBroker: false,
   isDriver: false,
@@ -845,8 +870,8 @@ export function AuthProvider({
         }
 
         // 3) Developer delete (user or company) inserts admin.reset_users so we do not resurrect stale sessions.
-        // IMPORTANT: When a reset tombstone exists, we must NOT auto-recreate user/company rows on reload.
-        // Instead, force a clean sign-out and send the user to sign-up (or public landing) to start fresh.
+        // When re-signup is blocked: sign out + home. When allowed: keep Clerk session and send users to onboarding
+        // (or continue on auth handoff routes) so consume_reset_user_for_signup can run — never /sign-in?account-reset (loop).
         const { data: resetState, error: resetError } = await supabase.rpc('get_reset_user_state');
         const resetPayload = (resetState ?? {}) as {
           has_reset_row?: boolean;
@@ -862,41 +887,46 @@ export function AuthProvider({
         }
 
         if (hasActiveResetRow) {
-          clearPendingApprovalSession();
-          writeCachedUser(null);
-          setEmployeeProfile(null);
-          setPermissions(getDefaultPermissions());
-          setSetupIncomplete(false);
-          setResetRequired(true);
-          setActivationResolved(true);
-          setAuthReady(true);
-
-          // If re-signup is blocked, we still sign the user out and route them away from app bootstrap.
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.warn('[Auth] Reset tombstone detected; forcing sign-out to prevent auto-resurrection', {
+            console.warn('[Auth] Reset tombstone detected', {
               uid: userId,
               allow_resignup: resetAllowResignup,
             });
           }
 
-          // Prefer Clerk signOut so session is truly cleared.
-          try {
-            await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
-          } catch {
-            // ignore; fall back to local redirect below
+          if (!resetAllowResignup) {
+            clearPendingApprovalSession();
+            writeCachedUser(null);
+            setUser(null);
+            setEmployeeProfile(null);
+            setPermissions(getDefaultPermissions());
+            setSetupIncomplete(false);
+            setResetRequired(true);
+            setActivationResolved(true);
+            setAuthReady(true);
+            try {
+              await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
+            } catch {
+              // ignore
+            }
+            if (typeof window !== 'undefined') {
+              window.location.assign('/');
+            }
+            return;
           }
 
-          // Redirect to sign-up (resignup allowed) or landing (blocked) without recreating server rows.
-          if (typeof window !== 'undefined') {
-            const target = resetAllowResignup ? '/sign-up' : '/';
-            // Use assign so the router + Clerk fully reset.
-            window.location.assign(target);
+          if (!isResetAllowResignupRecoveryRoute()) {
+            if (typeof window !== 'undefined') {
+              window.location.assign('/onboarding/company');
+            }
+            return;
           }
-          return;
+
+          setResetRequired(true);
+        } else {
+          setResetRequired(false);
         }
-
-        setResetRequired(false);
 
         // 3a) Platform profile: resolve/create when missing. Tombstones are handled above (get_reset_user_state).
         // Revoke access only when there is still no profile AND no company membership AND no ambassador row.
@@ -910,17 +940,8 @@ export function AuthProvider({
 
         let hasCoreProfile = false;
         try {
-          const { data: coreProfileRow, error: coreProfileErr } = await db
-            .core()
-            .from('profiles')
-            .select('clerk_user_id')
-            .eq('clerk_user_id', userId)
-            .maybeSingle();
-          if (coreProfileErr && import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn('[Auth] core.profiles lookup warning:', coreProfileErr);
-          }
-          hasCoreProfile = !!coreProfileRow?.clerk_user_id;
+          const profile = await fetchPlatformUserProfile(userId);
+          hasCoreProfile = !!profile?.clerk_user_id;
         } catch {
           hasCoreProfile = false;
         }
@@ -1031,7 +1052,7 @@ export function AuthProvider({
               // ignore
             }
             if (typeof window !== 'undefined') {
-              redirectToSignUpAccessRevoked();
+              redirectToSignInAccessRevoked();
             }
             return;
           }
@@ -1100,6 +1121,12 @@ export function AuthProvider({
         const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
         let contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
         let contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+        const rawOnboardingCompleted = (contextRow as { onboarding_completed?: boolean } | undefined)
+          ?.onboarding_completed;
+        const companyOnboardingCompletedFromContext =
+          rawOnboardingCompleted === undefined || rawOnboardingCompleted === null
+            ? true
+            : Boolean(rawOnboardingCompleted);
 
         // Guard against orphaned sessions: membership/profile points to a deleted company.
         if (contextCompanyId) {
@@ -1161,7 +1188,7 @@ export function AuthProvider({
                   }
 
                   if (typeof window !== 'undefined') {
-                    redirectToSignUpAccessRevoked();
+                    redirectToSignInAccessRevoked();
                   }
                   return;
                 }
@@ -1208,7 +1235,10 @@ export function AuthProvider({
         const normalizedRole = normalizeRole(contextRole) as UserRole;
         const hasCompanyId = contextCompanyId != null && contextCompanyId !== '';
         const hasRole = contextRole != null && contextRole !== '';
-        const setupIncompleteFlag = !hasCompanyId || !hasRole;
+        const companyOnboardingIncomplete =
+          hasCompanyId && hasRole && !companyOnboardingCompletedFromContext;
+        const setupIncompleteFlag =
+          !hasCompanyId || !hasRole || companyOnboardingIncomplete;
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -1256,6 +1286,7 @@ export function AuthProvider({
           avatar: resolvedAvatar ? String(resolvedAvatar) : undefined,
           createdAt: new Date(),
           profileUserType: profileUserType ?? null,
+          companyMembershipRole: hasRole && contextRole ? contextRole : null,
         };
 
         // 5) CRITICAL FIX: Role priority for routing
@@ -1555,11 +1586,15 @@ export function AuthProvider({
         setEmployeeProfile(employee);
         setPermissions(effectivePermissions);
         writeCachedUser(userWithDisplayName);
-        setSetupIncomplete(false);
+        setSetupIncomplete(setupIncompleteFlag);
         setResetRequired(false);
         setActivationResolved(true);
         confirmedSignedInRef.current = true;
         setAuthReady(true);
+
+        if (hasEffectiveCompany && isContextCompanyAdmin) {
+          void syncMyFarmerReferralLink();
+        }
       } catch (error) {
         const cached = readCachedUser();
         if (cached && cached.id === userId && cached.companyId) {
@@ -1772,6 +1807,9 @@ export function AuthProvider({
       const contextRow = Array.isArray(contextRows) ? contextRows[0] : contextRows;
       const contextCompanyId = contextRow?.company_id != null ? String(contextRow.company_id) : null;
       const contextRole = contextRow?.role != null ? String(contextRow.role).trim() : null;
+      const rawOc = (contextRow as { onboarding_completed?: boolean } | undefined)?.onboarding_completed;
+      const companyOnboardingCompleted =
+        rawOc === undefined || rawOc === null ? true : Boolean(rawOc);
 
       if (!contextCompanyId || !contextRole) return false;
 
@@ -1788,6 +1826,7 @@ export function AuthProvider({
         companyId: contextCompanyId,
         role: normalizedRole,
         employeeRole: isContextCompanyAdmin ? undefined : (employee?.role ?? employee?.employeeRole ?? undefined),
+        companyMembershipRole: contextRole,
       };
 
       const effectivePermissions = buildEffectivePermissions(
@@ -1799,7 +1838,7 @@ export function AuthProvider({
       setUser(nextUser);
       setEmployeeProfile(isContextCompanyAdmin ? null : employee);
       setPermissions(effectivePermissions);
-      setSetupIncomplete(false);
+      setSetupIncomplete(!companyOnboardingCompleted);
       writeCachedUser(nextUser);
       setTenantSessionTrust('verified');
 
@@ -1809,6 +1848,9 @@ export function AuthProvider({
           companyId: contextCompanyId,
           role: normalizedRole,
         });
+      }
+      if (isContextCompanyAdmin && contextCompanyId) {
+        void syncMyFarmerReferralLink();
       }
       return true;
     } catch (e) {

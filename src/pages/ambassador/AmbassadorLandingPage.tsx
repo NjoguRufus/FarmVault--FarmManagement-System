@@ -8,7 +8,10 @@ import { SeoHead } from "@/seo/SeoHead";
 import { AmbassadorLandingNavbar } from "@/components/landing/AmbassadorLandingNavbar";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SEO_ROUTES } from "@/seo/routes";
-import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
+import {
+  persistReferralCodeIfEmpty,
+  recordReferralSessionOnServer,
+} from "@/lib/ambassador/referralPersistence";
 import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { setAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
@@ -46,9 +49,9 @@ export default function AmbassadorLandingPage() {
 
   useEffect(() => {
     const trimmed = refParam?.trim();
-    if (trimmed) {
-      localStorage.setItem(AMBASSADOR_REF_STORAGE_KEY, trimmed);
-    }
+    if (!trimmed) return;
+    const stored = persistReferralCodeIfEmpty(trimmed);
+    if (stored) recordReferralSessionOnServer(stored);
   }, [refParam]);
 
   // Signed-in users: never send to sign-up — route to dashboard or onboarding (access-revoked safe).

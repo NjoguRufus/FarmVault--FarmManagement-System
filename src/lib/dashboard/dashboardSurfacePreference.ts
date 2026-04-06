@@ -1,6 +1,6 @@
 /**
  * Persist only the user's last-chosen dashboard surface (not capability flags).
- * Capabilities come from `dashboard_switcher_capabilities` / `useDashboardRoles`.
+ * Optional UI preference for which dashboard surface to open (if you add a switcher later).
  */
 export type DashboardSurface = "company" | "ambassador";
 

@@ -36,6 +36,8 @@ const LAST_ACTIVE_KEY = 'fv_app_last_active';
 const UNLOCKED_AT_KEY = 'fv_app_unlocked_at';
 const PIN_SETUP_SKIPPED_KEY = 'fv_pin_setup_skipped';
 const PROMPT_DISMISSED_KEY = 'fv_app_lock_prompt_dismissed';
+/** Set when the user finishes or skips the first-run App Lock intro (persists across sessions). */
+export const APP_LOCK_CONFIGURED_STORAGE_KEY = 'app_lock_configured';
 // Version key to track migrations - increment when we need to reset state
 const STATE_VERSION_KEY = 'fv_quick_unlock_version';
 const CURRENT_STATE_VERSION = '4'; // Increment this to force reset of broken states
@@ -77,6 +79,7 @@ export function migrateQuickUnlockState(): void {
     window.localStorage.removeItem(UNLOCKED_AT_KEY);
     window.localStorage.removeItem(PIN_SETUP_SKIPPED_KEY);
     window.localStorage.removeItem(PROMPT_DISMISSED_KEY);
+    window.localStorage.removeItem(APP_LOCK_CONFIGURED_STORAGE_KEY);
     // Also remove old key name if it exists
     window.localStorage.removeItem('fv_app_locked');
     // Keep device ID and timeout preference
@@ -151,20 +154,30 @@ export function isPromptDismissed(): boolean {
 export function dismissPrompt(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(PROMPT_DISMISSED_KEY, 'true');
+  window.localStorage.setItem(APP_LOCK_CONFIGURED_STORAGE_KEY, '1');
   debugLog('App Lock prompt dismissed');
+}
+
+/**
+ * First-run App Lock intro is complete (explicit flag or legacy dismissed key).
+ */
+export function hasCompletedAppLockFirstRun(): boolean {
+  if (typeof window === 'undefined') return true;
+  if (window.localStorage.getItem(APP_LOCK_CONFIGURED_STORAGE_KEY) === '1') return true;
+  return isPromptDismissed();
 }
 
 /**
  * Check if we should show the first-time App Lock prompt.
  * Returns true if:
- * - The prompt hasn't been dismissed
- * - AND no PIN exists yet
+ * - The user has not completed the first-run flow (`app_lock_configured` / legacy dismissed)
+ * - AND no PIN exists yet (caller typically combines with server/local PIN state)
  */
 export function shouldShowAppLockPrompt(): boolean {
   if (typeof window === 'undefined') return false;
-  const dismissed = isPromptDismissed();
-  debugLog('shouldShowAppLockPrompt: dismissed =', dismissed);
-  return !dismissed;
+  const done = hasCompletedAppLockFirstRun();
+  debugLog('shouldShowAppLockPrompt: firstRunComplete =', done);
+  return !done;
 }
 
 /**

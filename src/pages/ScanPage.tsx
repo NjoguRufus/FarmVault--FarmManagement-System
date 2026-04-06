@@ -6,7 +6,11 @@ import { ArrowRight, CheckCircle2, Leaf, Users, ReceiptText, ShieldCheck } from 
 import { Button } from "@/components/ui/button";
 import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SeoHead } from "@/seo/SeoHead";
-import { AMBASSADOR_REF_STORAGE_KEY } from "@/lib/ambassador/constants";
+import {
+  persistReferralCodeIfEmpty,
+  recordReferralSessionOnServer,
+} from "@/lib/ambassador/referralPersistence";
+import { resolveFarmerSignUpUrl } from "@/lib/urls/domains";
 
 type CropId = "frenchbeans" | "tomatoes" | "capsicum" | "maize" | "rice";
 
@@ -141,9 +145,23 @@ function normalizeCropParam(raw: string | null): CropId | null {
   return aliasToId[normalized] ?? null;
 }
 
-function getSignupHref(cropId: CropId | null): string {
-  if (!cropId) return "/signup";
-  return `/signup?${new URLSearchParams({ [QUERY_KEY]: cropId }).toString()}`;
+function getSignupHref(cropId: CropId | null, refParam: string | null): string {
+  const params = new URLSearchParams();
+  if (cropId) params.set(QUERY_KEY, cropId);
+  if (refParam?.trim()) params.set("ref", refParam.trim().toUpperCase());
+  return resolveFarmerSignUpUrl(params.toString());
+}
+
+function isAbsoluteUrl(href: string): boolean {
+  return href.startsWith("http://") || href.startsWith("https://");
+}
+
+/** Full navigation to app host when href is absolute (marketing → app). */
+function ScanSignupLink({ href, children }: { href: string; children: React.ReactNode }) {
+  if (isAbsoluteUrl(href)) {
+    return <a href={href}>{children}</a>;
+  }
+  return <Link to={href}>{children}</Link>;
 }
 
 function CropSelector({
@@ -209,10 +227,10 @@ function CropSelector({
   );
 }
 
-function CropJourneySection({ cropId }: { cropId: CropId | null }) {
+function CropJourneySection({ cropId, refParam }: { cropId: CropId | null; refParam: string | null }) {
   const reducedMotion = useReducedMotion();
   const data = cropId ? CROPS.find((crop) => crop.id === cropId) : null;
-  const signupHref = getSignupHref(cropId);
+  const signupHref = getSignupHref(cropId, refParam);
 
   return (
     <section className="mt-9" aria-live="polite">
@@ -242,12 +260,12 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
                   asChild
                   className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
                 >
-                  <Link to={signupHref}>
+                  <ScanSignupLink href={signupHref}>
                     <span className="inline-flex items-center">
                       Get Started
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </span>
-                  </Link>
+                  </ScanSignupLink>
                 </Button>
                 <Button
                   size="lg"
@@ -282,12 +300,12 @@ function CropJourneySection({ cropId }: { cropId: CropId | null }) {
                   asChild
                   className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
                 >
-                  <Link to={signupHref}>
+                  <ScanSignupLink href={signupHref}>
                     <span className="inline-flex items-center">
                       {data.cta}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </span>
-                  </Link>
+                  </ScanSignupLink>
                 </Button>
               </div>
             </div>
@@ -305,16 +323,13 @@ export default function ScanPage() {
   const [hydrated, setHydrated] = useState(false);
   const dynamicSectionRef = useRef<HTMLElement | null>(null);
 
+  const refFromQuery = searchParams.get("ref")?.trim() ?? null;
+
   useEffect(() => {
-    const refParam = searchParams.get("ref")?.trim();
-    if (refParam) {
-      try {
-        window.localStorage.setItem(AMBASSADOR_REF_STORAGE_KEY, refParam);
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [searchParams]);
+    if (!refFromQuery) return;
+    const stored = persistReferralCodeIfEmpty(refFromQuery);
+    if (stored) recordReferralSessionOnServer(stored);
+  }, [refFromQuery]);
 
   useEffect(() => {
     if (hydrated) return;
@@ -435,7 +450,7 @@ export default function ScanPage() {
 
               <div className="container mx-auto px-4 lg:px-8">
                 <div ref={dynamicSectionRef}>
-                  <CropJourneySection cropId={selectedCrop} />
+                  <CropJourneySection cropId={selectedCrop} refParam={refFromQuery} />
                 </div>
 
                 <section className="mt-8">
@@ -471,7 +486,7 @@ export default function ScanPage() {
                           asChild
                           className="h-13 rounded-xl bg-[#D8B980] px-6 text-base font-semibold text-black hover:bg-[#D8B980]/90"
                         >
-                          <Link to={getSignupHref(selectedCrop)}>Get Started</Link>
+                          <ScanSignupLink href={getSignupHref(selectedCrop, refFromQuery)}>Get Started</ScanSignupLink>
                         </Button>
                         <Button
                           asChild

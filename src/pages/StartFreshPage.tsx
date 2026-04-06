@@ -31,7 +31,7 @@ export default function StartFreshPage() {
           setError('Your account is currently blocked from re-signup. Please contact support.');
           return;
         }
-        navigate('/onboarding', { replace: true, state: { fromStartFresh: true } });
+        navigate('/onboarding/company', { replace: true, state: { fromStartFresh: true } });
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Something went wrong');

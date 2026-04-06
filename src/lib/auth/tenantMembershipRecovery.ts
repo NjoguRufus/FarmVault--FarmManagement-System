@@ -36,12 +36,17 @@ export async function pickFirstExistingMembershipCompany(
   const fromCore = await firstMembershipWithExistingCompany(coreRows as MemRow[] | null);
   if (fromCore) return fromCore;
 
-  const { data: pubRows } = await db
-    .public()
-    .from('company_members')
-    .select('company_id, role, created_at')
-    .eq('user_id', clerkUserId)
-    .order('created_at', { ascending: false });
+  const pub = db.public().from('company_members').select('company_id, role, created_at');
+  let { data: pubRows } = await pub.eq('clerk_user_id', clerkUserId).order('created_at', { ascending: false });
+  if (!pubRows?.length) {
+    const legacy = await db
+      .public()
+      .from('company_members')
+      .select('company_id, role, created_at')
+      .eq('user_id', clerkUserId)
+      .order('created_at', { ascending: false });
+    pubRows = legacy.data;
+  }
 
   return firstMembershipWithExistingCompany(pubRows as MemRow[] | null);
 }

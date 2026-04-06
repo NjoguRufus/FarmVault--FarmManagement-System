@@ -4,7 +4,7 @@
  */
 const STORAGE_KEY = 'farmvault:onboarding-session:v1';
 
-export type OnboardingSessionStep = 1 | 2 | 3;
+export type OnboardingSessionStep = 1 | 2 | 3 | 4;
 
 export type OnboardingSessionPayload = {
   clerkUserId: string;
@@ -20,7 +20,7 @@ function safeParse(raw: string | null): OnboardingSessionPayload | null {
     const o = JSON.parse(raw) as Partial<OnboardingSessionPayload>;
     if (!o || typeof o.clerkUserId !== 'string') return null;
     const step = Number(o.step);
-    if (step !== 1 && step !== 2 && step !== 3) return null;
+    if (step !== 1 && step !== 2 && step !== 3 && step !== 4) return null;
     return {
       clerkUserId: o.clerkUserId,
       step: step as OnboardingSessionStep,

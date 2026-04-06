@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import "./chromium-metrics-shim";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { ClerkProvider } from "@clerk/react";
@@ -8,15 +9,14 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AmbassadorAccessProvider } from "@/contexts/AmbassadorAccessContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
-import { initPwaInstall } from "@/lib/pwa-install";
+import { schedulePwaInstallDeferred } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
 import { getAppEntryUrl } from "@/lib/urls/domains";
 import "./index.css";
 
-// Initialize PWA install prompt capture EARLY (before React mounts)
-// This ensures we don't miss the beforeinstallprompt event
-initPwaInstall();
+// Defer PWA install listeners until after load so sign-up / Clerk are not affected by the same early errors.
+schedulePwaInstallDeferred();
 
 // Migrate/reset Quick Unlock state to fix broken states from previous versions
 // This clears stale localStorage data that causes PIN screen to appear without proper setup
@@ -128,7 +128,12 @@ if (shouldRenderApp) {
 
   try {
     if (pk) {
-      const afterAuthUrl = getAppEntryUrl("/auth/continue");
+      // Clerk Dashboard → configure allowed redirect URLs for each deployment origin, e.g.:
+      //   https://app.example.com/auth/callback
+      //   https://app.example.com/auth/continue
+      // Dev: http://localhost:5173/auth/callback (and /auth/continue if used)
+      const afterSignInUrl = getAppEntryUrl("/auth/callback");
+      const afterSignUpUrl = getAppEntryUrl("/auth/callback");
       createRoot(root).render(
         wrapPostHog(
           <ClerkLoadErrorBoundary>
@@ -136,8 +141,8 @@ if (shouldRenderApp) {
               publishableKey={pk}
               signInUrl="/sign-in"
               signUpUrl="/sign-up"
-              afterSignInUrl={afterAuthUrl}
-              afterSignUpUrl={afterAuthUrl}
+              afterSignInUrl={afterSignInUrl}
+              afterSignUpUrl={afterSignUpUrl}
               afterSignOutUrl="/"
             >
               <ClerkAuthBridge />

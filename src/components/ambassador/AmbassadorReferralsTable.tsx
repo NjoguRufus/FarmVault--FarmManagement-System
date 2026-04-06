@@ -20,11 +20,52 @@ function formatKes(n: number): string {
   }).format(Number.isFinite(n) ? n : 0);
 }
 
-function formatReferralDate(iso: string): string {
+function formatReferralDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return format(d, "MMM d, yyyy");
+}
+
+function lifecycleLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "signed_up":
+      return "Signed up";
+    case "active":
+      return "Active";
+    case "subscribed":
+      return "Subscribed";
+    case "commissioned":
+      return "Commissioned";
+    default:
+      return status.replace(/_/g, " ");
+  }
+}
+
+function subscriptionBadge(sub: string | null | undefined): { label: string; className: string } {
+  const s = (sub ?? "none").toLowerCase();
+  if (s === "paid" || s === "active") {
+    return { label: s === "paid" ? "Paid" : "Active", className: "bg-emerald-600/15 text-emerald-800 dark:text-emerald-300" };
+  }
+  if (s === "trial") {
+    return { label: "Trial", className: "bg-amber-500/15 text-amber-900 dark:text-amber-200" };
+  }
+  if (s === "none" || !sub) {
+    return { label: "—", className: "bg-muted text-muted-foreground" };
+  }
+  return { label: sub, className: "bg-muted text-muted-foreground" };
+}
+
+function commissionBadge(status: string): { label: string; className: string } {
+  if (status === "paid") {
+    return { label: "Paid", className: "bg-emerald-600/15 text-emerald-800 dark:text-emerald-300" };
+  }
+  if (status === "owed") {
+    return { label: "Owed", className: "bg-sky-600/15 text-sky-900 dark:text-sky-200" };
+  }
+  return { label: "—", className: "bg-muted text-muted-foreground" };
 }
 
 export function AmbassadorReferralsTable({
@@ -48,47 +89,70 @@ export function AmbassadorReferralsTable({
             <TableRow className="hover:bg-transparent border-border/50">
               <TableHead className="text-xs uppercase text-muted-foreground">Name</TableHead>
               <TableHead className="text-xs uppercase text-muted-foreground">Type</TableHead>
-              <TableHead className="text-xs uppercase text-muted-foreground">Status</TableHead>
-              <TableHead className="text-xs uppercase text-muted-foreground">Date</TableHead>
-              <TableHead className="text-xs uppercase text-muted-foreground text-right">Commission</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground">Lifecycle</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground">Signed up</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground">Last activity</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground">Subscription</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground">Commission</TableHead>
+              <TableHead className="text-xs uppercase text-muted-foreground text-right">Earnings</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground text-sm">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground text-sm">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground text-sm">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground text-sm">
                   {emptyMessage}
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((r) => (
-                <TableRow key={r.referral_id} className="border-border/40">
-                  <TableCell className="font-medium text-foreground">{r.name}</TableCell>
-                  <TableCell className="capitalize text-muted-foreground">{r.type}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={r.status === "active" ? "default" : "secondary"}
-                      className={cn(
-                        r.status === "active"
-                          ? "bg-emerald-600/15 text-emerald-800 dark:text-emerald-300"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {r.status === "active" ? "Active" : "Inactive"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums text-sm">
-                    {formatReferralDate(r.date)}
-                  </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">{formatKes(r.commission)}</TableCell>
-                </TableRow>
-              ))
+              rows.map((r) => {
+                const sub = subscriptionBadge(r.subscription_status);
+                const comm = commissionBadge(r.commission_status);
+                return (
+                  <TableRow key={r.referral_id} className="border-border/40">
+                    <TableCell className="font-medium text-foreground">{r.name}</TableCell>
+                    <TableCell className="capitalize text-muted-foreground">{r.type}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          "font-normal",
+                          r.referral_status === "commissioned" || r.referral_status === "subscribed"
+                            ? "bg-emerald-600/12 text-emerald-900 dark:text-emerald-200"
+                            : r.referral_status === "active"
+                              ? "bg-lime-600/12 text-lime-900 dark:text-lime-200"
+                              : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {lifecycleLabel(r.referral_status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground tabular-nums text-sm">
+                      {formatReferralDate(r.date)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground tabular-nums text-sm">
+                      {formatReferralDate(r.last_activity_at)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className={cn("font-normal", sub.className)}>
+                        {sub.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className={cn("font-normal", comm.className)}>
+                        {comm.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">{formatKes(r.commission)}</TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

@@ -15,6 +15,7 @@ type RouteRule = {
  * First match wins (most specific routes should appear first).
  */
 const ROUTE_RULES: RouteRule[] = [
+  { pattern: '/onboarding/company', end: true, meta: { page_name: 'Onboarding', module_name: 'onboarding' } },
   { pattern: '/onboarding', end: true, meta: { page_name: 'Onboarding', module_name: 'onboarding' } },
   { pattern: '/pending-approval', end: true, meta: { page_name: 'Pending approval', module_name: 'onboarding' } },
   { pattern: '/start-fresh', end: true, meta: { page_name: 'Start fresh', module_name: 'onboarding' } },

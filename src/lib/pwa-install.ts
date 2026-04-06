@@ -149,11 +149,10 @@ export function getBrowserInfo(): BrowserInfo {
 
 /**
  * Initialize PWA install prompt capture.
- * Call this ONCE at app startup, before React mounts.
+ * Prefer {@link schedulePwaInstallDeferred} at app startup so auth/sign-up is not
+ * contending with PWA listeners; may miss a very early `beforeinstallprompt` in edge cases.
  */
-export function initPwaInstall(): void {
-  if (typeof window === "undefined") return;
-
+function initPwaInstallImpl(): void {
   log("=== Initializing PWA Install Prompt Capture ===");
   
   // Detect browser capabilities first
@@ -239,6 +238,37 @@ export function initPwaInstall(): void {
       log("Good: beforeinstallprompt was captured, native install available");
     }
   }, 3000);
+}
+
+export function initPwaInstall(): void {
+  if (typeof window === "undefined") return;
+  try {
+    initPwaInstallImpl();
+  } catch (error) {
+    console.warn("PWA init skipped:", error);
+  }
+}
+
+/**
+ * Run PWA install capture after `load` + delay so sign-up and Clerk are not blocked by
+ * the same turn as early PWA setup.
+ */
+export function schedulePwaInstallDeferred(): void {
+  if (typeof window === "undefined") return;
+  const run = () => {
+    setTimeout(() => {
+      try {
+        initPwaInstall();
+      } catch (error) {
+        console.warn("PWA init skipped:", error);
+      }
+    }, 1000);
+  };
+  if (document.readyState === "complete") {
+    run();
+  } else {
+    window.addEventListener("load", run);
+  }
 }
 
 /**

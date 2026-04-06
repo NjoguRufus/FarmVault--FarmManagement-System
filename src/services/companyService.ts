@@ -303,16 +303,52 @@ export async function setCompanyPaidPlan(
     .from('companies')
     .update({
       plan: legacyPlan,
+      // Clear trial fields explicitly so pro_trial / isTrial flags never survive a paid activation.
       subscription: {
         ...subscription,
         plan,
         status: 'active',
         billingMode: mode,
         paidUntil: paidUntil.toISOString(),
+        isTrial: false,
+        trialEndsAt: null,
+        trialStartAt: null,
       },
+      subscription_status: 'active',
+      access_level: plan,
+      payment_confirmed: true,
+      pending_confirmation: false,
+      active_until: paidUntil.toISOString(),
+      trial_ends_at: null,
+      trial_started_at: null,
       updated_at: now.toISOString(),
-    })
+    } as Record<string, unknown>)
     .eq('id', companyId);
+
+  // Mirror into public.company_subscriptions so the gate RPC sees is_trial=false immediately.
+  await db
+    .public()
+    .from('company_subscriptions')
+    .upsert(
+      {
+        company_id: companyId,
+        plan_id: plan,
+        plan_code: plan,
+        plan,
+        status: 'active',
+        billing_mode: 'manual',
+        billing_cycle: mode === 'seasonal' ? 'seasonal' : mode === 'annual' ? 'annual' : 'monthly',
+        is_trial: false,
+        trial_started_at: null,
+        trial_starts_at: null,
+        trial_ends_at: null,
+        current_period_start: now.toISOString(),
+        current_period_end: paidUntil.toISOString(),
+        active_until: paidUntil.toISOString(),
+        updated_at: now.toISOString(),
+      } as Record<string, unknown>,
+      { onConflict: 'company_id' },
+    );
 }
 
 /** Create or ensure profile exists in Supabase. Only upserts id so it works when profiles has no company column. */

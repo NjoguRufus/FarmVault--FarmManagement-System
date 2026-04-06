@@ -60,11 +60,8 @@ import { useProjectBlocks } from '@/hooks/useProjectBlocks';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince } from '@/utils/cropStages';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
-import { NewFeatureModal } from '@/components/modals/NewFeatureModal';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
-import { shouldShowAppLockAnnouncement, markAppLockAnnouncementSeen } from '@/lib/featureFlags/featureAnnouncements';
-import { useNavigate } from 'react-router-dom';
 import { listAdminAlerts, type StoredAdminAlert } from '@/services/adminAlertService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
@@ -924,7 +921,7 @@ export function CompanyDashboard() {
 
   const firstName = user?.name?.trim().split(/\s+/)[0] || null;
 
-  const { plan: subscriptionPlan, isExpired: subscriptionExpired, isTrial } = useSubscriptionStatus();
+  const { isExpired: subscriptionExpired, isTrial } = useSubscriptionStatus();
 
   const harvestValueTracked = useMemo(() => {
     return filteredHarvests.reduce((sum, h) => {
@@ -970,42 +967,6 @@ export function CompanyDashboard() {
     isHarvestActive,
     activeProjectEnvironment,
   ]);
-
-  const navigate = useNavigate();
-  const subscriptionStatus = useSubscriptionStatus();
-  const [showAppLockModal, setShowAppLockModal] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    if (subscriptionStatus.isLoading) return;
-    const should = shouldShowAppLockAnnouncement(user, { isDuringOnboarding: false });
-    if (should) {
-      setShowAppLockModal(true);
-    }
-  }, [subscriptionStatus.isLoading, user]);
-
-  const isProEligible =
-    subscriptionStatus.plan === 'pro' &&
-    (subscriptionStatus.status === 'active' ||
-      subscriptionStatus.status === 'grace' ||
-      subscriptionStatus.isOverrideActive);
-
-  const handleCloseAppLockModal = (open: boolean) => {
-    setShowAppLockModal(open);
-    if (!open) {
-      markAppLockAnnouncementSeen();
-    }
-  };
-
-  const handleAppLockPrimary = () => {
-    markAppLockAnnouncementSeen();
-    if (isProEligible) {
-      navigate('/settings', { state: { focusAppLock: true, feature: 'app-lock' } });
-    } else {
-      navigate('/billing?feature=app-lock');
-    }
-    setShowAppLockModal(false);
-  };
 
   if (projectsLoading) {
     return <DashboardSkeleton />;
@@ -1119,7 +1080,7 @@ export function CompanyDashboard() {
   const showExpensesCard = canSee('dashboard', 'cards.expenses');
   const showProfitLossCard = canSee('dashboard', 'cards.profitLoss');
   const showBudgetCard = canSee('dashboard', 'cards.budget');
-  const showInsightCard = subscriptionPlan === 'trial';
+  const showInsightCard = isTrial;
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
@@ -1577,13 +1538,6 @@ export function CompanyDashboard() {
 
       {/* Projects Table */}
       <ProjectsTable projects={filteredProjects} compact />
-
-      <NewFeatureModal
-        open={showAppLockModal}
-        onOpenChange={handleCloseAppLockModal}
-        isProEligible={isProEligible}
-        onPrimary={handleAppLockPrimary}
-      />
     </div>
   );
 }

@@ -44,6 +44,39 @@ export async function getSubscriptionGateState(): Promise<CompanySubscriptionGat
   return (row as CompanySubscriptionGateState | null) ?? null;
 }
 
+/** Member-visible STK rows — aligns tenant UI with developer when gate RPC lags behind mpesa_payments. */
+export function mpesaRowIndicatesConfirmedPayment(row: {
+  result_code?: number | null;
+  status?: string | null;
+}): boolean {
+  if (row.result_code != null && row.result_code === 0) return true;
+  const u = String(row.status ?? '').toUpperCase();
+  return u === 'SUCCESS' || u === 'COMPLETED';
+}
+
+/** Failed STK attempt (developer Payments tab includes these). */
+export function mpesaRowIndicatesFailedPayment(row: {
+  result_code?: number | null;
+  status?: string | null;
+}): boolean {
+  if (mpesaRowIndicatesConfirmedPayment(row)) return false;
+  if (row.result_code != null && row.result_code !== 0) return true;
+  const u = String(row.status ?? '').toUpperCase();
+  return u === 'FAILED' || u === 'FAILURE';
+}
+
+export async function hasConfirmedMpesaStkForCompany(companyId: string): Promise<boolean> {
+  const cid = companyId.trim();
+  if (!cid) return false;
+  const { data, error } = await supabase
+    .from('mpesa_payments')
+    .select('id,result_code,status')
+    .eq('company_id', cid)
+    .limit(80);
+  if (error || !data?.length) return false;
+  return data.some((r) => mpesaRowIndicatesConfirmedPayment(r as { result_code?: number | null; status?: string | null }));
+}
+
 export type DeveloperSubscriptionAction =
   | 'approve'
   | 'reject'

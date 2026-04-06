@@ -1,4 +1,7 @@
-/** localStorage key for ambassador referral code captured from ?ref= */
+/**
+ * Legacy localStorage key for referral capture. Canonical key is `fv_referral` (see referralPersistence).
+ * Still written when a code is captured so older paths keep working.
+ */
 export const AMBASSADOR_REF_STORAGE_KEY = "ambassador_ref";
 
 /** After signup, session JSON: { id, referral_code } — used for /ambassador/onboarding and /ambassador/console/dashboard */
