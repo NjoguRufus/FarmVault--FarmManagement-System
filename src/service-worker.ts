@@ -76,9 +76,9 @@ function vibratePatternForPushType(type: string | undefined): number[] {
       return [100, 50, 100];
     case "inventory_alert":
     case "system_alert":
-      return [300, 100, 300, 100, 500];
+      return [160, 80, 160];
     default:
-      return [200, 100, 200, 100, 400];
+      return [120, 70, 120];
   }
 }
 
@@ -93,6 +93,24 @@ async function postPushSoundToVisibleClients(): Promise<void> {
   }
 }
 
+/** If any FarmVault tab is visible on this path, skip the tray (Realtime keeps the bell in sync). */
+async function hasVisibleClientOnPath(path: string): Promise<boolean> {
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const origin = self.location.origin;
+  for (const c of clients) {
+    const wc = c as WindowClient;
+    if (wc.visibilityState !== "visible") continue;
+    if (!wc.url.startsWith(origin)) continue;
+    try {
+      const u = new URL(wc.url);
+      if (u.pathname === path) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
+
 type PushData = {
   title?: string;
   body?: string;
@@ -101,6 +119,9 @@ type PushData = {
   url?: string;
   tag?: string;
   type?: string;
+  notification_id?: string;
+  ts?: number;
+  notification_type?: string;
 };
 
 self.addEventListener("push", (event: PushEvent) => {
@@ -130,20 +151,38 @@ self.addEventListener("push", (event: PushEvent) => {
 
   event.waitUntil(
     (async () => {
-      await postPushSoundToVisibleClients();
       const title = (typeof data.title === "string" && data.title.trim()) || FARMVAULT_NOTIFY_TITLE;
       const body = data.body ?? fallback.body!;
       const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/dashboard";
       const tag = (typeof data.tag === "string" && data.tag.trim()) || FARMVAULT_NOTIFY_TAG;
-      const bellDedupe = tag.length > 0 ? tag : `${msgType}:${body.slice(0, 48)}`;
+      const rawNid = typeof data.notification_id === "string" ? data.notification_id.trim() : "";
+      const nid = rawNid.length >= 32 && rawNid.includes("-") ? rawNid : "";
+      const bellDedupe = nid
+        ? `db_notification:${nid}`
+        : tag.length > 0
+          ? `web_push:${tag}`
+          : `${msgType}:${body.slice(0, 48)}`;
       const icon = (typeof data.icon === "string" && data.icon.trim()) || FARMVAULT_NOTIFY_ICON;
       const badge = (typeof data.badge === "string" && data.badge.trim()) || FARMVAULT_NOTIFY_BADGE;
+      const tsSec = typeof data.ts === "number" && Number.isFinite(data.ts) ? data.ts : Math.floor(Date.now() / 1000);
+
+      if (await hasVisibleClientOnPath(url)) {
+        return;
+      }
+
+      await postPushSoundToVisibleClients();
 
       const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const c of clients) {
         (c as WindowClient).postMessage({
           type: "FARMVAULT_PUSH_BELL_SYNC",
-          payload: { title, body, url, bellDedupe },
+          payload: {
+            title,
+            body,
+            url,
+            bellDedupe,
+            notification_id: nid || undefined,
+          },
         });
       }
 
@@ -151,13 +190,17 @@ self.addEventListener("push", (event: PushEvent) => {
         body,
         icon,
         badge,
-        tag,
+        tag: nid ? `fv-${nid}` : tag,
         renotify: true,
         vibrate,
+        timestamp: tsSec * 1000,
         data: {
           url,
           type: msgType,
           bellDedupe,
+          notification_id: nid || undefined,
+          notification_type: data.notification_type,
+          ts: tsSec,
         },
       });
     })(),
@@ -167,17 +210,28 @@ self.addEventListener("push", (event: PushEvent) => {
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close();
   const n = event.notification;
-  const raw = n.data as { url?: string; bellDedupe?: string } | undefined;
+  const raw = n.data as {
+    url?: string;
+    bellDedupe?: string;
+    notification_id?: string;
+    notification_type?: string;
+    ts?: number;
+  } | undefined;
   const path = typeof raw?.url === "string" && raw.url.startsWith("/") ? raw.url : "/dashboard";
   const targetUrl = new URL(path, self.location.origin).href;
+  const nid = typeof raw?.notification_id === "string" ? raw.notification_id.trim() : "";
+  const bellDedupe =
+    nid.length > 0
+      ? `db_notification:${nid}`
+      : typeof raw?.bellDedupe === "string" && raw.bellDedupe.length > 0
+        ? raw.bellDedupe
+        : `click_${Date.now()}`;
   const bellPayload = {
     title: n.title || FARMVAULT_NOTIFY_TITLE,
     body: n.body || undefined,
     url: path,
-    bellDedupe:
-      typeof raw?.bellDedupe === "string" && raw.bellDedupe.length > 0
-        ? raw.bellDedupe
-        : `click_${Date.now()}`,
+    bellDedupe,
+    notification_id: nid || undefined,
   };
 
   event.waitUntil(

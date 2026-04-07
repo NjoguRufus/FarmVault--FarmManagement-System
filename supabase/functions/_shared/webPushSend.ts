@@ -10,6 +10,12 @@ export type WebPushPayload = {
   tag?: string;
   /** morning_message | evening_message | inventory_alert | weekly_summary | system_alert */
   type?: string;
+  /** DB row id — used for dedupe in the service worker + bell */
+  notification_id?: string;
+  /** Unix seconds — shown in payload for clients */
+  ts?: number;
+  /** company | ambassador | developer */
+  notification_type?: string;
 };
 
 let vapidConfigured = false;
@@ -59,6 +65,9 @@ export async function sendWebPushToSubscription(
     url: payload.url ?? "/dashboard",
     tag: payload.tag?.trim() || "farmvault",
     type: payload.type ?? "system_alert",
+    notification_id: payload.notification_id,
+    ts: payload.ts ?? Math.floor(Date.now() / 1000),
+    notification_type: payload.notification_type,
   });
   try {
     await webpush.sendNotification(subscription, body, {

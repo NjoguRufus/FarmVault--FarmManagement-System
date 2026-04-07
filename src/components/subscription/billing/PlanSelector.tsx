@@ -20,10 +20,12 @@ const OPTIONS: { id: BillingSubmissionPlan; hint: string }[] = [
 export function PlanSelector({ value, onChange, disabled, workspacePlan, className }: PlanSelectorProps) {
   return (
     <div className={cn('space-y-2', className)}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Plan</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Plan</p>
       <div
         className={cn(
-          'grid grid-cols-2 gap-1.5 rounded-xl bg-muted/50 p-1.5 ring-1 ring-border/60',
+          'grid grid-cols-2 gap-1.5 rounded-[10px] border border-border/30 bg-[hsl(88_12%_95%_/0.6)] p-1.5',
+          'shadow-[inset_2px_2px_5px_rgba(32,42,28,0.05),inset_-1px_-1px_4px_rgba(255,255,255,0.7)]',
+          'dark:border-white/[0.06] dark:bg-[hsl(145_8%_14%_/0.5)] dark:shadow-[inset_2px_2px_8px_rgba(0,0,0,0.2)]',
           disabled && 'pointer-events-none opacity-60',
         )}
         role="tablist"
@@ -40,16 +42,16 @@ export function PlanSelector({ value, onChange, disabled, workspacePlan, classNa
               disabled={disabled}
               onClick={() => onChange(opt.id)}
               className={cn(
-                'rounded-lg px-3 py-2.5 text-left transition-all duration-200',
+                'rounded-[8px] px-3 py-2.5 text-left transition-[box-shadow,color] duration-200',
                 active
-                  ? 'bg-background text-foreground shadow-sm ring-1 ring-primary/25'
+                  ? 'bg-background/95 text-foreground shadow-[3px_3px_8px_rgba(32,42,28,0.08),-2px_-2px_6px_rgba(255,255,255,0.85)] ring-1 ring-primary/22 dark:bg-[hsl(145_10%_17%)] dark:shadow-[4px_4px_12px_rgba(0,0,0,0.35)]'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <span className="flex items-center gap-2">
-                <span className="block text-sm font-semibold tracking-tight">{billingPlanLabel(opt.id)}</span>
+                <span className="block text-sm font-medium tracking-tight">{billingPlanLabel(opt.id)}</span>
                 {workspacePlan === opt.id ? (
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  <span className="rounded-md bg-primary/10 px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide text-primary">
                     Current
                   </span>
                 ) : null}

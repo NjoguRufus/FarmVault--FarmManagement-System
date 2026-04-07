@@ -58,7 +58,7 @@ export async function playPushNotificationUiSound(): Promise<void> {
   playWebAudioChime();
 }
 
-/** Listen for messages from src/sw.ts (foreground push + notification click). */
+/** Listen for messages from src/service-worker.ts (foreground push + notification click). */
 export function initServiceWorkerPushFeedback(): void {
   if (typeof window === "undefined" || !("serviceWorker" in navigator) || bridgeInstalled) return;
   bridgeInstalled = true;

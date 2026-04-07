@@ -26,7 +26,25 @@ export function isWebPushConfiguredInApp(): boolean {
   return !!vapidPublicKey() && !!functionsBaseUrl() && !!anonKey();
 }
 
-export async function syncWebPushSubscriptionToServer(): Promise<{ ok: boolean; error?: string }> {
+export function collectDeviceInfo(): Record<string, unknown> {
+  if (typeof navigator === 'undefined') return {};
+  return {
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+  };
+}
+
+export type SyncWebPushSubscriptionOpts = {
+  companyId?: string | null;
+  role?: string | null;
+  deviceInfo?: Record<string, unknown> | null;
+};
+
+export async function syncWebPushSubscriptionToServer(
+  opts?: SyncWebPushSubscriptionOpts,
+): Promise<{ ok: boolean; error?: string }> {
   if (!isWebPushConfiguredInApp()) {
     return { ok: false, error: 'Push is not configured (missing VITE_VAPID_PUBLIC_KEY or Supabase URL).' };
   }
@@ -66,6 +84,9 @@ export async function syncWebPushSubscriptionToServer(): Promise<{ ok: boolean; 
         endpoint: payload.endpoint,
         keys: payload.keys,
       },
+      company_id: opts?.companyId ?? undefined,
+      role: opts?.role ?? undefined,
+      device_info: opts?.deviceInfo ?? collectDeviceInfo(),
     }),
   });
 

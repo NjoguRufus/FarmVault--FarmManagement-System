@@ -9,9 +9,15 @@ import {
   testNotificationSound,
   type NotificationSoundFile 
 } from '@/services/notificationSoundService';
-import { isWebPushConfiguredInApp, syncWebPushSubscriptionToServer } from '@/services/webPushSubscriptionService';
+import { useAuth } from '@/contexts/AuthContext';
+import {
+  collectDeviceInfo,
+  isWebPushConfiguredInApp,
+  syncWebPushSubscriptionToServer,
+} from '@/services/webPushSubscriptionService';
 
 export function NotificationSettings() {
+  const { user } = useAuth();
   const {
     preferences,
     setNotificationsEnabled,
@@ -24,6 +30,10 @@ export function NotificationSettings() {
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushHint, setPushHint] = useState<string | null>(null);
+
+  const permissionStatus = preferences.browserPermission;
+  const isPermissionBlocked = permissionStatus === 'denied';
+  const isPermissionGranted = permissionStatus === 'granted';
 
   const canRegisterDevicePush =
     isWebPushConfiguredInApp() &&
@@ -58,10 +68,6 @@ export function NotificationSettings() {
       setNotificationsEnabled(enabled);
     }
   };
-
-  const permissionStatus = preferences.browserPermission;
-  const isPermissionBlocked = permissionStatus === 'denied';
-  const isPermissionGranted = permissionStatus === 'granted';
 
   return (
     <div className="fv-card">
@@ -153,7 +159,11 @@ export function NotificationSettings() {
                     setPushHint(null);
                     setPushBusy(true);
                     try {
-                      const r = await syncWebPushSubscriptionToServer();
+                      const r = await syncWebPushSubscriptionToServer({
+                        companyId: user?.companyId ?? null,
+                        role: user?.role ?? null,
+                        deviceInfo: collectDeviceInfo(),
+                      });
                       setPushHint(r.ok ? 'This device is registered for push.' : (r.error ?? 'Registration failed.'));
                     } finally {
                       setPushBusy(false);
