@@ -28,6 +28,7 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 import { NavbarNotificationBell } from '@/components/layout/NavbarNotificationBell';
+import { InstallFarmVault } from '@/components/pwa/InstallFarmVault';
 import { logger } from "@/lib/logger";
 
 interface TopNavbarProps {
@@ -360,6 +361,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               Subscription expired – Upgrade
             </button>
           )}
+
+          <InstallFarmVault compact className="inline-flex shrink-0 max-w-[min(100%,9rem)]" />
 
           <NavbarNotificationBell variant="main" />
 

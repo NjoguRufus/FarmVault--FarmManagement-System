@@ -12,15 +12,21 @@ import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary
 import { schedulePwaInstallDeferred } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
-import { getAppEntryUrl } from "@/lib/urls/domains";
+import { getAppEntryUrl, isMarketingProductionHost, isPwaEnabledHost } from "@/lib/urls/domains";
 import { initServiceWorkerPushFeedback } from "@/lib/pushNotificationFeedback";
 import "./index.css";
 import { logger } from "@/lib/logger";
 
-initServiceWorkerPushFeedback();
+const pwaHost = isPwaEnabledHost();
+
+if (pwaHost) {
+  initServiceWorkerPushFeedback();
+}
 
 // Defer PWA install listeners until after load so sign-up / Clerk are not affected by the same early errors.
-schedulePwaInstallDeferred();
+if (pwaHost) {
+  schedulePwaInstallDeferred();
+}
 
 // Migrate/reset Quick Unlock state to fix broken states from previous versions
 // This clears stale localStorage data that causes PIN screen to appear without proper setup
@@ -30,6 +36,14 @@ const DEV_SW_RESET_MARKER = "__farmvault_dev_sw_reset__";
 let shouldRenderApp = true;
 
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  if (import.meta.env.PROD && isMarketingProductionHost()) {
+    void navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((r) => r.unregister())));
+    if ("caches" in window) {
+      void caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))));
+    }
+  }
   if (import.meta.env.DEV) {
     // Flush stale SW and caches once in dev to avoid mixed old/new chunk execution.
     let alreadyReset = false;
@@ -72,7 +86,7 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         // No-op when sessionStorage is unavailable.
       }
     }
-  } else {
+  } else if (pwaHost) {
     registerSW({
       immediate: true,
       onRegisterError(error) {
