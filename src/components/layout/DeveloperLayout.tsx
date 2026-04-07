@@ -7,10 +7,14 @@ import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { AIChatButton } from '@/components/ai/AIChatButton';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
+import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
 
 export function DeveloperLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user, isDeveloper } = useAuth();
+  useAdminAlertsRealtime();
+  useFarmerInboxBellSync(user ?? null, user?.companyId ?? null, user?.id ?? null);
   const location = useLocation();
   const navigate = useNavigate();
   const hasRedirectedRef = useRef<string | null>(null);

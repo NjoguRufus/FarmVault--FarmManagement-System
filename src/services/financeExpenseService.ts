@@ -6,6 +6,9 @@
 
 import { db, requireCompanyId } from '@/lib/db';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
+
+const LARGE_EXPENSE_KES = 50_000;
 
 export type FinanceExpenseRow = {
   id: string;
@@ -142,6 +145,30 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
     expense_category: row.category,
     module_name: 'expenses',
   });
+
+  if (typeof window !== 'undefined') {
+    const amt = Number(row.amount ?? 0);
+    const desc = (row.note || row.category || 'Expense').trim() || 'Expense';
+    enqueueUnifiedNotification({
+      tier: 'activity',
+      kind: 'activity_expense_added',
+      title: 'Expense recorded',
+      body: `${desc} — KES ${Math.round(amt).toLocaleString('en-KE')}`,
+      path: '/expenses',
+      toastType: 'success',
+    });
+    if (amt >= LARGE_EXPENSE_KES) {
+      enqueueUnifiedNotification({
+        tier: 'insights',
+        kind: 'insight_expense',
+        title: 'Large expense logged',
+        body: `KES ${Math.round(amt).toLocaleString('en-KE')} — ${desc}. Review in Expenses.`,
+        path: '/expenses',
+        toastType: 'warning',
+      });
+    }
+  }
+
   return {
     id: row.id,
     companyId: row.company_id,

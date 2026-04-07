@@ -1,19 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Bell,
   Search,
   ChevronDown,
   Menu,
-  HelpCircle,
-  CheckCheck,
   AlertTriangle,
   CheckCircle2,
   Crown,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
-import { useNotifications } from '@/contexts/NotificationContext';
 import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { cn } from '@/lib/utils';
 import {
@@ -24,7 +19,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { formatDistanceToNow } from 'date-fns';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
@@ -33,6 +27,7 @@ import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
+import { NavbarNotificationBell } from '@/components/layout/NavbarNotificationBell';
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -41,9 +36,7 @@ interface TopNavbarProps {
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const { projects, activeProject, setActiveProject } = useProject();
-  const { notifications, markAsRead, markAllRead, unreadCount } = useNotifications();
   const {
     isTrial,
     isExpired,
@@ -367,57 +360,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </button>
           )}
 
-          {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="relative mr-1 md:mr-0 flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors">
-              <Bell className="h-4 w-4 md:h-5 md:w-5 text-muted-foreground" />
-              {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80 overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between px-2 py-1.5">
-                <DropdownMenuLabel className="p-0">Notifications</DropdownMenuLabel>
-                {notifications.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={markAllRead}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    <CheckCheck className="h-3.5 w-3.5 inline mr-0.5" />
-                    Mark all read
-                  </button>
-                )}
-              </div>
-              <DropdownMenuSeparator />
-              <div className="overflow-y-auto max-h-[280px]">
-                {notifications.length === 0 ? (
-                  <p className="px-2 py-4 text-sm text-muted-foreground text-center">No notifications yet.</p>
-                ) : (
-                  notifications.map((n) => (
-                    <DropdownMenuItem
-                      key={n.id}
-                      className={cn(
-                        'flex flex-col items-start gap-0.5 cursor-pointer py-3',
-                        !n.read && 'bg-muted/50'
-                      )}
-                      onClick={() => markAsRead(n.id)}
-                    >
-                      <span className="font-medium text-sm text-foreground">{n.title}</span>
-                      {n.message && (
-                        <span className="text-xs text-muted-foreground line-clamp-2">{n.message}</span>
-                      )}
-                      <span className="text-[10px] text-muted-foreground mt-0.5">
-                        {formatDistanceToNow(n.createdAt, { addSuffix: true })}
-                      </span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <NavbarNotificationBell variant="main" />
 
           <FarmVaultUserMenu
             accountLabel="My Account"

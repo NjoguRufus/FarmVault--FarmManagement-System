@@ -42,6 +42,7 @@ export default function AmbassadorDashboardPage() {
   const { user, isLoaded: clerkLoaded } = useUser();
   const [statsPrepTimeout, setStatsPrepTimeout] = useState(false);
   const onboardingBootstrapRef = useRef(false);
+  const [dashboardListTab, setDashboardListTab] = useState<"referrals" | "transactions">("referrals");
 
   useEffect(() => {
     document.title = "Ambassador | FarmVault";
@@ -353,84 +354,118 @@ export default function AmbassadorDashboardPage() {
         </DeveloperStatGrid>
 
         <div className="rounded-xl border border-border/60 bg-card/40 overflow-hidden mt-6">
-          <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3">
-            <ListOrdered className="h-4 w-4 text-emerald-600 shrink-0" />
-            <h2 className="text-sm font-semibold text-foreground">Transactions</h2>
+          <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex w-full max-w-md rounded-lg bg-muted/70 p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setDashboardListTab("referrals")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  dashboardListTab === "referrals"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Users className="h-4 w-4 shrink-0 text-emerald-600" />
+                Referrals
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardListTab("transactions")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  dashboardListTab === "transactions"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <ListOrdered className="h-4 w-4 shrink-0 text-emerald-600" />
+                Transactions
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground sm:max-w-[220px] sm:text-right">
+              {dashboardListTab === "referrals"
+                ? "People referred through your code."
+                : "Commission and payout history."}
+            </p>
           </div>
-          <div className="overflow-x-auto">
-            {earningsTxQ.isError ? (
-              <p className="text-sm text-destructive px-4 py-6">
-                {earningsTxQ.error instanceof Error ? earningsTxQ.error.message : "Could not load transactions."}
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border/50 hover:bg-transparent">
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                      Date
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                      Type
-                    </TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                      Amount
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                      Status
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {earningsTxQ.isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                        Loading…
-                      </TableCell>
+
+          {dashboardListTab === "referrals" ? (
+            <AmbassadorReferralsTable rows={referralRows} loading={refQ.isLoading} embedInPanel />
+          ) : (
+            <div className="overflow-x-auto">
+              {earningsTxQ.isError ? (
+                <p className="text-sm text-destructive px-4 py-6">
+                  {earningsTxQ.error instanceof Error ? earningsTxQ.error.message : "Could not load transactions."}
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border/50 hover:bg-transparent">
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                        Date
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                        Type
+                      </TableHead>
+                      <TableHead className="text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                        Amount
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                        Status
+                      </TableHead>
                     </TableRow>
-                  ) : !earningsTxQ.data?.ok ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                        Could not load transactions.
-                      </TableCell>
-                    </TableRow>
-                  ) : earningsRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                        No transactions yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    earningsRows.map((tx) => (
-                      <TableRow key={tx.id} className="border-border/40">
-                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
-                        </TableCell>
-                        <TableCell className="text-sm text-foreground max-w-[200px] truncate">{tx.description || "—"}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{formatEarningType(tx.type)}</TableCell>
-                        <TableCell className="text-right text-sm font-medium tabular-nums">{formatKes(tx.amount)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              tx.status === "paid"
-                                ? "border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
-                                : "border-amber-500/50 text-amber-800 dark:text-amber-300",
-                            )}
-                          >
-                            {tx.status}
-                          </Badge>
+                  </TableHeader>
+                  <TableBody>
+                    {earningsTxQ.isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                          Loading…
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            )}
-          </div>
+                    ) : !earningsTxQ.data?.ok ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                          Could not load transactions.
+                        </TableCell>
+                      </TableRow>
+                    ) : earningsRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                          No transactions yet.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      earningsRows.map((tx) => (
+                        <TableRow key={tx.id} className="border-border/40">
+                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                            {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
+                          </TableCell>
+                          <TableCell className="text-sm text-foreground max-w-[200px] truncate">{tx.description || "—"}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{formatEarningType(tx.type)}</TableCell>
+                          <TableCell className="text-right text-sm font-medium tabular-nums">{formatKes(tx.amount)}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                tx.status === "paid"
+                                  ? "border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
+                                  : "border-amber-500/50 text-amber-800 dark:text-amber-300",
+                              )}
+                            >
+                              {tx.status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          )}
         </div>
-
-        <AmbassadorReferralsTable rows={referralRows} loading={refQ.isLoading} />
       </DeveloperPageShell>
     </>
   );

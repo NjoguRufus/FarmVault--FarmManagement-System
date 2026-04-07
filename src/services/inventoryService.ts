@@ -9,6 +9,7 @@ import {
 import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { notifyInventoryChangeUnified } from '@/services/inventoryUnifiedNotify';
 import type {
   InventoryItem,
   InventoryCategory,
@@ -582,6 +583,7 @@ export async function restockInventory(
     inventory_item_id: input.itemId,
     module_name: 'inventory',
   });
+  notifyInventoryChangeUnified(item);
   return item;
 }
 
@@ -617,6 +619,7 @@ export async function deductInventoryManual(
     inventory_item_id: input.itemId,
     module_name: 'inventory',
   });
+  notifyInventoryChangeUnified(item);
   return item;
 }
 
@@ -648,6 +651,7 @@ export async function recordInventoryMovement(
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
   });
 
+  notifyInventoryChangeUnified(item);
   return { item, movement };
 }
 

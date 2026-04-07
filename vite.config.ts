@@ -27,8 +27,14 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
-      strategies: "generateSW",
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2,mp3,wav}"],
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+      },
       includeAssets: [
         "favicon.ico",
         "robots.txt",
@@ -38,6 +44,9 @@ export default defineConfig(({ mode }) => ({
         "icons/icon-192.png",
         "icons/icon-512.png",
         "icons/icon-512-maskable.png",
+        "icons/farmvault-192.png",
+        "icons/farmvault-512.png",
+        "icons/badge.png",
       ],
       manifest: {
         name: "FarmVault",
@@ -62,63 +71,6 @@ export default defineConfig(({ mode }) => ({
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
-          },
-        ],
-      },
-      workbox: {
-        clientsClaim: true,
-        skipWaiting: true,
-        cleanupOutdatedCaches: true,
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2}"],
-        navigateFallback: "/index.html",
-        navigateFallbackAllowlist: [/^\/.*/],
-        navigateFallbackDenylist: [/^\/api\//, /^\/__/],
-        runtimeCaching: [
-          // Clerk must never hit CacheFirst (opaque/CORS → workbox "no-response").
-          // NetworkOnly still intercepts; pairing with same-origin-only CacheFirst below avoids double-handling bugs.
-          {
-            urlPattern: ({ url }) => {
-              const h = url.hostname.toLowerCase();
-              return (
-                h === "clerk.app.farmvault.africa" ||
-                h.endsWith(".clerk.accounts.dev") ||
-                h === "clerk.com" ||
-                h.endsWith(".clerk.com") ||
-                h.endsWith(".clerk.app") ||
-                h.includes(".clerk.")
-              );
-            },
-            handler: "NetworkOnly",
-          },
-          {
-            urlPattern: ({ request, url }) => {
-              const h = url.hostname.toLowerCase();
-              if (
-                h === "clerk.app.farmvault.africa" ||
-                h.endsWith(".clerk.accounts.dev") ||
-                h === "clerk.com" ||
-                h.endsWith(".clerk.com") ||
-                h.endsWith(".clerk.app") ||
-                h.includes(".clerk.")
-              ) {
-                return false;
-              }
-              // Service worker scope: prefer self.location.origin (globalThis.location is not always defined).
-              const swOrigin =
-                typeof self !== "undefined" && self.location?.origin ? self.location.origin : "";
-              return (
-                !!swOrigin &&
-                url.origin === swOrigin &&
-                ["script", "style", "image", "font", "worker"].includes(request.destination)
-              );
-            },
-            handler: "CacheFirst",
-            options: {
-              cacheName: "app-assets",
-              expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
           },
         ],
       },

@@ -14,6 +14,7 @@ import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { PostTrialPlanModal } from '@/components/subscription/PostTrialPlanModal';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
+import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -21,6 +22,7 @@ export function MainLayout() {
   const { trialExpiredNeedsPlan, isLoading: subscriptionLoading } = useSubscriptionStatus();
   const isDeveloper = user?.role === 'developer';
   useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId && !isDeveloper));
+  useFarmerInboxBellSync(user ?? null, user?.companyId ?? null, user?.id ?? null);
   const isCompanyAdmin =
     user?.role === 'company-admin' || (user as { role?: string } | null)?.role === 'company_admin';
   const location = useLocation();

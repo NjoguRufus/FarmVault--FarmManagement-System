@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { getAmbassadorSession, clearAmbassadorSession } from "@/services/ambassadorService";
 import { toast } from "sonner";
 import { FarmVaultUserMenu } from "@/components/auth/FarmVaultUserMenu";
+import { NavbarNotificationBell } from "@/components/layout/NavbarNotificationBell";
 
 interface AmbassadorTopBarProps {
   sidebarCollapsed: boolean;
@@ -57,6 +58,7 @@ export function AmbassadorTopBar({ sidebarCollapsed, onMenuClick }: AmbassadorTo
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <NavbarNotificationBell variant="ambassador" />
           {isLoaded && user ? (
             <FarmVaultUserMenu
               accountLabel="Ambassador"

@@ -13,7 +13,10 @@ import { schedulePwaInstallDeferred } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
 import { getAppEntryUrl } from "@/lib/urls/domains";
+import { initServiceWorkerPushFeedback } from "@/lib/pushNotificationFeedback";
 import "./index.css";
+
+initServiceWorkerPushFeedback();
 
 // Defer PWA install listeners until after load so sign-up / Clerk are not affected by the same early errors.
 schedulePwaInstallDeferred();

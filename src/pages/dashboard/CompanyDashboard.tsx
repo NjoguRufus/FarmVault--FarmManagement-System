@@ -43,6 +43,7 @@ import { useWorkCardsForProject } from '@/hooks/useWorkCards';
 import type { OperationsWorkCard } from '@/types';
 import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 import { DashboardGreeting } from '@/components/dashboard/DashboardGreeting';
+import { FarmerSmartMessageBanner } from '@/components/dashboard/FarmerSmartMessageBanner';
 import { NewOperationMenu } from '@/components/dashboard/NewOperationMenu';
 import { Button } from '@/components/ui/button';
 import { useTour } from '@/tour/TourProvider';
@@ -1096,6 +1097,9 @@ export function CompanyDashboard() {
 
   return (
     <div className="space-y-2 animate-fade-in">
+      {companyId && user?.id && (
+        <FarmerSmartMessageBanner companyId={companyId} clerkUserId={user.id} />
+      )}
       {showTenantLoadIssueBanner && (
         <Alert variant="destructive" className="border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
           <AlertTriangle className="h-4 w-4 text-amber-600" />
