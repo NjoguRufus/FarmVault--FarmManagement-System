@@ -179,6 +179,7 @@ import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
 import { ReferralAttributionCapture } from "@/components/referral/ReferralAttributionCapture";
 import { SignedInAuthEscape } from "@/components/auth/SignedInAuthEscape";
 import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
+import { logger } from "@/lib/logger";
 
 const queryClient = new QueryClient();
 
@@ -194,23 +195,17 @@ const CompanyDashboardRoute = () => {
   const { user, effectiveAccess } = useAuth();
 
   if (!user) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log("[CompanyDashboardRoute] No user → /sign-in");
-    }
+    logger.log("[CompanyDashboardRoute] No user → /sign-in");
     return <SignInRedirect />;
   }
 
   const landing = effectiveAccess.landingPage;
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log("[CompanyDashboardRoute] landing", {
-      uid: user.id,
-      landingPage: landing,
-      canSeeDashboard: effectiveAccess.canSeeDashboard,
-      rolePreset: effectiveAccess.rolePreset,
-    });
-  }
+  logger.log("[CompanyDashboardRoute] landing", {
+    uid: user.id,
+    landingPage: landing,
+    canSeeDashboard: effectiveAccess.canSeeDashboard,
+    rolePreset: effectiveAccess.rolePreset,
+  });
 
   if (landing === "/" || !landing.trim()) {
     return <Navigate to="/" replace />;

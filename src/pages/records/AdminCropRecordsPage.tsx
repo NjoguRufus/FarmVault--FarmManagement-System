@@ -25,6 +25,7 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { logger } from "@/lib/logger";
 
 const PAGE_SIZE = 10;
 
@@ -91,7 +92,7 @@ export default function AdminCropRecordsPage() {
   if (import.meta.env.DEV) {
     // Temporary debugging for crop note inconsistency (e.g. "French Beans").
     // eslint-disable-next-line no-console
-    console.log('[AdminCropRecordsPage] crop identifier resolution', {
+    logger.log('[AdminCropRecordsPage] crop identifier resolution', {
       cropIdParam,
       effectiveCropId,
       resolvedCrop: resolvedCrop.data ? { crop_id: resolvedCrop.data.crop_id, crop_name: resolvedCrop.data.crop_name } : null,

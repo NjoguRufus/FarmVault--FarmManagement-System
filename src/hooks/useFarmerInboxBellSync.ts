@@ -79,11 +79,11 @@ export function useFarmerInboxBellSync(user: User | null, companyId: string | nu
         dedupeKey: `farmer_smart_inbox:${row.id}`,
         title: row.title?.trim() || 'Farm assistant',
         message: row.body,
-        type: 'info',
+        toastType: 'info',
+        type: 'company',
         navigatePath: farmerInboxNavigatePath(row.category),
         silent: true,
         skipSound: true,
-        bellSection: 'workspace',
       });
     }
     if (changed) persistSeenSet(storageKey, seen);

@@ -77,6 +77,7 @@ import {
 import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FeatureGate } from '@/components/subscription';
+import { logger } from "@/lib/logger";
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -809,7 +810,7 @@ export function CompanyDashboard() {
   useEffect(() => {
     if (!import.meta.env.DEV || !user?.id) return;
     // eslint-disable-next-line no-console
-    console.log('[Dashboard] aggregation scope', {
+    logger.log('[Dashboard] aggregation scope', {
       companyId,
       selectedProjectId: activeProject?.id ?? null,
       harvestCollectionsScopeProjectId: harvestFinancialsProjectIdGlobal,
@@ -848,7 +849,7 @@ export function CompanyDashboard() {
       import.meta.env.DEV &&
       (fbTotalsGlobal?.totalRevenue !== undefined || fbTotalsGlobal?.totalExpenses !== undefined)
     ) {
-      console.log('[Dashboard Financial Totals]', {
+      logger.log('[Dashboard Financial Totals]', {
         totalRevenue,
         totalExpenses,
         profitLoss,
@@ -987,7 +988,7 @@ export function CompanyDashboard() {
                       void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa'] });
                       if (import.meta.env.DEV) {
                         // eslint-disable-next-line no-console
-                        console.log('[Dashboard] tenant recovery', { syncOk: ok });
+                        logger.log('[Dashboard] tenant recovery', { syncOk: ok });
                       }
                     } finally {
                       setTenantRecoveryBusy(false);
@@ -1071,7 +1072,7 @@ export function CompanyDashboard() {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[Dashboard] visible cards', {
+    logger.log('[Dashboard] visible cards', {
       uid: user.id,
       cropStage: showCropStageCard,
       revenue: showRevenueCard,

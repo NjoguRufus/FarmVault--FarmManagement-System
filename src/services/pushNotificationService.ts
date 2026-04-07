@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Browser push notification scaffold for FarmVault.
  * Request permission, register service worker, and store subscription for selected admins.
@@ -55,7 +56,7 @@ export async function subscribeToPush(vapidPublicKey?: string): Promise<PushSubs
     });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Push] Subscription obtained', sub.endpoint?.slice(0, 50));
+      logger.log('[Push] Subscription obtained', sub.endpoint?.slice(0, 50));
     }
     return sub;
   } catch (e) {

@@ -9,6 +9,7 @@ import { StaffBottomNav } from './StaffBottomNav';
 import { cn } from '@/lib/utils';
 import { StaffTourProvider } from '@/tour/StaffTourProvider';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
+import { logger } from "@/lib/logger";
 
 export function StaffLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -44,14 +45,14 @@ export function StaffLayout() {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    console.log('[StaffShell] route using staff layout', {
+    logger.log('[StaffShell] route using staff layout', {
       uid: user.id,
       role: user.role,
       employeeRole: (user as any).employeeRole,
       path: location.pathname,
     });
     // eslint-disable-next-line no-console
-    console.log('[Responsive] staff layout breakpoint', {
+    logger.log('[Responsive] staff layout breakpoint', {
       width,
       isDesktop,
       path: location.pathname,

@@ -35,6 +35,7 @@ import {
   PlanningSummaryCard,
   PlanningHistoryCard,
 } from '@/components/planning';
+import { logger } from "@/lib/logger";
 
 export default function ProjectPlanningPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -68,11 +69,11 @@ export default function ProjectPlanningPage() {
     staleTime: 60_000,
   });
   if (import.meta.env?.DEV && companyId) {
-    console.log('[ProjectPlanningPage] suppliers load source', { source: 'supabase', count: suppliers.length });
+    logger.log('[ProjectPlanningPage] suppliers load source', { source: 'supabase', count: suppliers.length });
   }
   const { challenges: allSeasonChallenges } = useSeasonChallenges(companyId, projectId ?? null);
   if (import.meta.env?.DEV && projectId) {
-    console.log('[ProjectPlanningPage] season challenges fetch', { projectId, count: allSeasonChallenges.length });
+    logger.log('[ProjectPlanningPage] season challenges fetch', { projectId, count: allSeasonChallenges.length });
   }
   const companySuppliers = useMemo(
     () => (companyId ? suppliers.filter((s) => s.companyId === companyId) : suppliers),
@@ -91,7 +92,7 @@ export default function ProjectPlanningPage() {
     setAddingSupplier(true);
     try {
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] supplier create payload', {
+        logger.log('[ProjectPlanningPage] supplier create payload', {
           companyId,
           name,
           userId: user?.id,
@@ -102,7 +103,7 @@ export default function ProjectPlanningPage() {
         name,
       });
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] supplier create response', created);
+        logger.log('[ProjectPlanningPage] supplier create response', created);
       }
       await queryClient.invalidateQueries({ queryKey: ['suppliers', companyId] });
       setSeedSupplier(created.name);
@@ -222,7 +223,7 @@ export default function ProjectPlanningPage() {
   });
 
   if (import.meta.env?.DEV && companyId && projectCropTypeForTemplates) {
-    console.log('[ProjectPlanningPage] challenge templates fetch', {
+    logger.log('[ProjectPlanningPage] challenge templates fetch', {
       companyId,
       cropType: projectCropTypeForTemplates,
       count: suggestedTemplates.length,
@@ -496,7 +497,7 @@ export default function ProjectPlanningPage() {
       const title = newChallengeTitle.trim();
       const description = newChallengeDescription.trim();
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] challenge create', { projectId, title });
+        logger.log('[ProjectPlanningPage] challenge create', { projectId, title });
       }
       await createSeasonChallenge({
         companyId,
@@ -532,7 +533,7 @@ export default function ProjectPlanningPage() {
 
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] challenge create success, invalidated queries');
+        logger.log('[ProjectPlanningPage] challenge create success, invalidated queries');
       }
       setNewChallengeTitle('');
       setNewChallengeDescription('');
@@ -697,7 +698,7 @@ export default function ProjectPlanningPage() {
     const template = suggestedTemplates.find((t) => t.id === templateId);
     if (!template) return;
     if (import.meta.env?.DEV) {
-      console.log('[ProjectPlanningPage] apply template to challenge form', {
+      logger.log('[ProjectPlanningPage] apply template to challenge form', {
         templateId,
         title: template.title,
       });
@@ -734,7 +735,7 @@ export default function ProjectPlanningPage() {
     setSavingChallengeEdit(true);
     try {
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] challenge edit payload', {
+        logger.log('[ProjectPlanningPage] challenge edit payload', {
           id: editingChallengeId,
           title: editChallengeTitle.trim(),
           challengeType: editChallengeType,
@@ -763,7 +764,7 @@ export default function ProjectPlanningPage() {
     if (!ok) return;
     try {
       if (import.meta.env?.DEV) {
-        console.log('[ProjectPlanningPage] challenge delete', { id });
+        logger.log('[ProjectPlanningPage] challenge delete', { id });
       }
       await deleteSeasonChallenge(id);
       invalidateSeasonChallengesQuery(queryClient);

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * PostHog configuration for Vite (browser).
  *
@@ -51,7 +52,7 @@ export function getPosthogClientOptions(): Partial<PostHogConfig> {
       : undefined,
     loaded: () => {
       if (import.meta.env.DEV) {
-        console.log('[PostHog] client loaded');
+        logger.log('[PostHog] client loaded');
       }
     },
   };

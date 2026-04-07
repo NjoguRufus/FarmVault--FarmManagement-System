@@ -13,12 +13,13 @@ import {
   getFallbackInstructions,
   getBrowserInfo,
 } from "@/lib/pwa-install";
+import { logger } from "@/lib/logger";
 
 export type { BeforeInstallPromptEvent, InstallState, PromptInstallResult, BrowserInfo, FallbackInstructions } from "@/lib/pwa-install";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log("[PWA Install Hook]", ...args);
+  logger.log("[PWA Install Hook]", ...args);
 }
 
 /**

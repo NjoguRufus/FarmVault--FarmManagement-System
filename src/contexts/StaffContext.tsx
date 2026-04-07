@@ -6,6 +6,7 @@ import { getCompany } from '@/services/companyService';
 import { db } from '@/lib/db';
 import { EMPLOYEE_ROLE_LABELS, type EmployeeRoleKey } from '@/config/accessControl';
 import type { PermissionMap } from '@/types';
+import { logger } from "@/lib/logger";
 
 interface StaffContextValue {
   employeeId: string | null;
@@ -90,7 +91,7 @@ export function StaffProvider({ children }: { children: ReactNode }) {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[StaffProfile] staffEmployeeRow fetch', {
+        logger.log('[StaffProfile] staffEmployeeRow fetch', {
           table: 'public.employees',
           companyId,
           employeeId: employeeProfile.id,

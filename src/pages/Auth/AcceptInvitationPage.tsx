@@ -1,6 +1,7 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
 import { SignUp } from "@clerk/react";
+import { logger } from "@/lib/logger";
 
 export default function AcceptInvitationPage() {
   const location = useLocation();
@@ -20,7 +21,7 @@ export default function AcceptInvitationPage() {
 
   if (import.meta.env.DEV) {
     // Temporary debug log for invitation ticket handling and email/company hints
-    console.log("[AcceptInvitationPage] load", {
+    logger.log("[AcceptInvitationPage] load", {
       search,
       hasTicket: Boolean(ticket),
       clerkStatus,

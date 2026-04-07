@@ -11,6 +11,7 @@ import {
   type InventoryUsageRow,
   type InventoryCategoryRow,
 } from '@/services/inventoryReadModelService';
+import { logger } from "@/lib/logger";
 
 export const INVENTORY_STOCK_QUERY_KEY = 'inventoryStock:view';
 export const INVENTORY_ITEM_STOCK_QUERY_KEY = 'inventoryItemStock:view';
@@ -50,7 +51,7 @@ export function useInventoryStock(params: {
       // DEBUG: Log raw stock data from view
       if (import.meta.env.DEV && result.length > 0) {
         // eslint-disable-next-line no-console
-        console.log('[useInventoryStock] Raw data from inventory_stock_view:', {
+        logger.log('[useInventoryStock] Raw data from inventory_stock_view:', {
           itemCount: result.length,
           firstItem: result[0],
           stockFields: result.slice(0, 3).map(item => ({
@@ -73,7 +74,7 @@ export function useInventoryStock(params: {
   // DEBUG: Log when items change
   if (import.meta.env.DEV && data && data.length > 0) {
     // eslint-disable-next-line no-console
-    console.log('[useInventoryStock] Returning items:', {
+    logger.log('[useInventoryStock] Returning items:', {
       count: data.length,
       hasZeroStock: data.filter(i => i.current_stock === 0).length,
       hasOutStatus: data.filter(i => i.stock_status === 'out').length,

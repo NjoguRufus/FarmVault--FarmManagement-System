@@ -28,6 +28,7 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 import { NavbarNotificationBell } from '@/components/layout/NavbarNotificationBell';
+import { logger } from "@/lib/logger";
 
 interface TopNavbarProps {
   sidebarCollapsed: boolean;
@@ -75,7 +76,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   useEffect(() => {
     if (!import.meta.env.DEV || !user?.companyId) return;
     // eslint-disable-next-line no-console
-    console.log('[TopNavbar] subscription badge state', {
+    logger.log('[TopNavbar] subscription badge state', {
       companyId: user.companyId,
       isActivePaid,
       isTrial,
@@ -106,7 +107,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   useEffect(() => {
     if (import.meta.env.DEV && user) {
       // eslint-disable-next-line no-console
-      console.log('[Navbar Avatar]', {
+      logger.log('[Navbar Avatar]', {
         name: user?.name,
         email: user?.email,
         imageUrl: user?.avatar ?? null,

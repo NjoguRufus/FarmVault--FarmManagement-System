@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Single source of truth for season challenges per project.
  * Used by: Project Details, Plan Season, Season Challenges page.
@@ -199,7 +200,7 @@ export async function fetchDeveloperCompanySeasonChallenges(companyId: string): 
     if (!err) {
       const rows = parseJsonbRpcArray(data);
       if (import.meta.env.DEV) {
-        console.log('[devSeasonChallenges] RPC ok', { rpc: name, selectedCompanyId: id, rawLen: rows.length });
+        logger.log('[devSeasonChallenges] RPC ok', { rpc: name, selectedCompanyId: id, rawLen: rows.length });
       }
       return rows.map(developerRpcRowToRecord).filter((r) => r.id !== '');
     }
@@ -272,7 +273,7 @@ export async function fetchDeveloperCompanySeasonChallengesRaw(companyId: string
     if (!err) {
       const rows = parseJsonbRpcArray(data);
       if (import.meta.env.DEV) {
-        console.log('[devSeasonChallengesRaw] RPC ok', { rpc: name, selectedCompanyId: id, rawLen: rows.length });
+        logger.log('[devSeasonChallengesRaw] RPC ok', { rpc: name, selectedCompanyId: id, rawLen: rows.length });
       }
       return rows;
     }
@@ -386,7 +387,7 @@ export async function listSeasonChallenges(
   const normalizedProjectId = normalizeUuidParam(projectId);
 
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] listSeasonChallenges', {
+    logger.log('[seasonChallenges] listSeasonChallenges', {
       companyId: normalizedCompanyId,
       projectId: normalizedProjectId ?? 'all',
       schema: 'public',
@@ -425,7 +426,7 @@ export async function listSeasonChallenges(
     const { data, error } = await query;
 
     if (import.meta.env?.DEV) {
-      console.log('[seasonChallenges] listSeasonChallenges response', {
+      logger.log('[seasonChallenges] listSeasonChallenges response', {
         table: TABLE,
         schema: 'public',
         error,
@@ -446,7 +447,7 @@ export async function listSeasonChallenges(
 
     const list = (data ?? []).map((row) => toChallenge(row as DbRow));
     if (import.meta.env?.DEV) {
-      console.log('[seasonChallenges] listSeasonChallenges result', {
+      logger.log('[seasonChallenges] listSeasonChallenges result', {
         companyId,
         projectId: projectId ?? 'all',
         count: list.length,
@@ -483,7 +484,7 @@ export async function createSeasonChallenge(
   input: CreateSeasonChallengeInput
 ): Promise<SeasonChallenge | null> {
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] createSeasonChallenge', {
+    logger.log('[seasonChallenges] createSeasonChallenge', {
       projectId: input.projectId,
       title: input.title,
       schema: 'public',
@@ -532,7 +533,7 @@ export async function createSeasonChallenge(
       .single();
 
     if (import.meta.env?.DEV) {
-      console.log('[seasonChallenges] createSeasonChallenge response', {
+      logger.log('[seasonChallenges] createSeasonChallenge response', {
         table: TABLE,
         schema: 'public',
         error,
@@ -547,7 +548,7 @@ export async function createSeasonChallenge(
       throw error;
     }
     if (import.meta.env?.DEV) {
-      console.log('[seasonChallenges] createSeasonChallenge success', (data as DbRow)?.id);
+      logger.log('[seasonChallenges] createSeasonChallenge success', (data as DbRow)?.id);
     }
     return data ? toChallenge(data as DbRow) : null;
   } catch (err) {
@@ -574,7 +575,7 @@ export async function updateSeasonChallenge(
   }>
 ): Promise<void> {
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] updateSeasonChallenge', { id });
+    logger.log('[seasonChallenges] updateSeasonChallenge', { id });
   }
   const row: Record<string, unknown> = {};
   if (updates.title != null) row.title = updates.title;
@@ -591,7 +592,7 @@ export async function updateSeasonChallenge(
   if (Object.keys(row).length === 0) return;
   const { data, error } = await supabase.from(TABLE).update(row).eq('id', id).select('*');
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] updateSeasonChallenge response', {
+    logger.log('[seasonChallenges] updateSeasonChallenge response', {
       table: TABLE,
       schema: 'public',
       error,
@@ -605,17 +606,17 @@ export async function updateSeasonChallenge(
     throw error;
   }
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] updateSeasonChallenge success');
+    logger.log('[seasonChallenges] updateSeasonChallenge success');
   }
 }
 
 export async function deleteSeasonChallenge(id: string): Promise<void> {
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] deleteSeasonChallenge', { id });
+    logger.log('[seasonChallenges] deleteSeasonChallenge', { id });
   }
   const { data, error } = await supabase.from(TABLE).delete().eq('id', id).select('*');
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] deleteSeasonChallenge response', {
+    logger.log('[seasonChallenges] deleteSeasonChallenge response', {
       table: TABLE,
       schema: 'public',
       error,
@@ -629,6 +630,6 @@ export async function deleteSeasonChallenge(id: string): Promise<void> {
     throw error;
   }
   if (import.meta.env?.DEV) {
-    console.log('[seasonChallenges] deleteSeasonChallenge success');
+    logger.log('[seasonChallenges] deleteSeasonChallenge success');
   }
 }

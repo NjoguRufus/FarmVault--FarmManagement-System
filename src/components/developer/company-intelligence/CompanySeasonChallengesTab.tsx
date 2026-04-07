@@ -7,6 +7,7 @@ import { EmptyStateBlock } from './EmptyStateBlock';
 import { supabase } from '@/lib/supabase';
 import { DeveloperRecordDetailsSheet, type DevDetailSection } from './DeveloperRecordDetailsSheet';
 import { cn } from '@/lib/utils';
+import { logger } from "@/lib/logger";
 
 type Props = {
   companyId: string;
@@ -117,7 +118,7 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
         .limit(5);
 
       // eslint-disable-next-line no-console
-      console.log('[DeveloperSeasonChallengesTab] table sanity:', {
+      logger.log('[DeveloperSeasonChallengesTab] table sanity:', {
         totalCount,
         sample,
         sampleError,
@@ -147,7 +148,7 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
         ]);
 
       // eslint-disable-next-line no-console
-      console.log('[DeveloperSeasonChallengesTab] RLS context:', {
+      logger.log('[DeveloperSeasonChallengesTab] RLS context:', {
         current_company_id: currentCompanyId,
         current_company_id_error: currentCompanyErr,
         is_developer: isDev,
@@ -200,11 +201,11 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
 
       // Temporary logging (requested)
       // eslint-disable-next-line no-console
-      console.log('[DeveloperSeasonChallengesTab] companyId:', selectedCompanyId);
+      logger.log('[DeveloperSeasonChallengesTab] companyId:', selectedCompanyId);
       // eslint-disable-next-line no-console
-      console.log('[DeveloperSeasonChallengesTab] raw data:', data);
+      logger.log('[DeveloperSeasonChallengesTab] raw data:', data);
       // eslint-disable-next-line no-console
-      console.log('[DeveloperSeasonChallengesTab] raw error:', error);
+      logger.log('[DeveloperSeasonChallengesTab] raw error:', error);
 
       if (error) throw error;
       return (data ?? []) as SeasonChallengeRow[];

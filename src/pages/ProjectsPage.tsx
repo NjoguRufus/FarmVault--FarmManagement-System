@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
+import { logger } from "@/lib/logger";
 
 type ProjectCardProps = {
   project: Project;
@@ -253,7 +254,7 @@ export default function ProjectsPage() {
   const visibleProjects = user ? projects.filter((p) => p.companyId === user.companyId) : [];
 
   if (import.meta.env.DEV) {
-    console.log('[Projects] companyId', user?.companyId, 'total', projects.length, 'visible', visibleProjects.length);
+    logger.log('[Projects] companyId', user?.companyId, 'total', projects.length, 'visible', visibleProjects.length);
   }
 
   const { data: projectBlocks = [] } = useCollection<ProjectBlock>(

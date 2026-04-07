@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { ChallengeTemplate } from '@/types';
+import { logger } from "@/lib/logger";
 
 const TABLE = 'challenge_templates';
 
@@ -64,7 +65,7 @@ export async function upsertChallengeTemplate(
   };
 
   if (import.meta.env?.DEV) {
-    console.log('[challengeTemplates] upsertChallengeTemplate start', {
+    logger.log('[challengeTemplates] upsertChallengeTemplate start', {
       table: TABLE,
       schema: 'public',
       payload: basePayload,
@@ -81,7 +82,7 @@ export async function upsertChallengeTemplate(
     .maybeSingle();
 
   if (import.meta.env?.DEV) {
-    console.log('[challengeTemplates] upsertChallengeTemplate existing lookup', {
+    logger.log('[challengeTemplates] upsertChallengeTemplate existing lookup', {
       companyId: input.companyId,
       cropType: input.cropType,
       title: input.title.trim(),
@@ -108,7 +109,7 @@ export async function upsertChallengeTemplate(
       .single();
 
     if (import.meta.env?.DEV) {
-      console.log('[challengeTemplates] upsertChallengeTemplate update response', {
+      logger.log('[challengeTemplates] upsertChallengeTemplate update response', {
         table: TABLE,
         schema: 'public',
         id: existingRow.id,
@@ -135,7 +136,7 @@ export async function upsertChallengeTemplate(
     .single();
 
   if (import.meta.env?.DEV) {
-    console.log('[challengeTemplates] upsertChallengeTemplate insert response', {
+    logger.log('[challengeTemplates] upsertChallengeTemplate insert response', {
       table: TABLE,
       schema: 'public',
       data,
@@ -160,7 +161,7 @@ export async function getChallengeTemplates(
   cropType: string
 ): Promise<(ChallengeTemplate & { id: string })[]> {
   if (import.meta.env?.DEV) {
-    console.log('[challengeTemplates] getChallengeTemplates', {
+    logger.log('[challengeTemplates] getChallengeTemplates', {
       table: TABLE,
       schema: 'public',
       companyId,
@@ -176,7 +177,7 @@ export async function getChallengeTemplates(
     .order('created_at', { ascending: false });
 
   if (import.meta.env?.DEV) {
-    console.log('[challengeTemplates] getChallengeTemplates response', {
+    logger.log('[challengeTemplates] getChallengeTemplates response', {
       table: TABLE,
       schema: 'public',
       error,

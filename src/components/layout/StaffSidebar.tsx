@@ -13,6 +13,7 @@ import { ProBadge } from '@/components/subscription';
 import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
+import { logger } from "@/lib/logger";
 
 interface StaffSidebarProps {
   collapsed: boolean;
@@ -69,7 +70,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[StaffSidebar] visible nav items', {
+    logger.log('[StaffSidebar] visible nav items', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,

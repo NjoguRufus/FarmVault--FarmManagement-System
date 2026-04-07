@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * AppLockGate - Root-level lock enforcement component.
  * 
@@ -38,7 +39,7 @@ import {
 // Debug logging - always enabled for now to help diagnose issues
 function debugLog(...args: unknown[]): void {
   // eslint-disable-next-line no-console
-  console.log('[AppLockGate]', ...args);
+  logger.log('[AppLockGate]', ...args);
 }
 
 type BootState = 'booting' | 'locked' | 'unlocked';

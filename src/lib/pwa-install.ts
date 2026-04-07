@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Global PWA Install Prompt Manager
  * 
@@ -45,7 +46,7 @@ const listeners: Set<(state: InstallState) => void> = new Set();
 // Always log PWA install events for debugging (prefixed so users can filter)
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log("[PWA Install]", ...args);
+  logger.log("[PWA Install]", ...args);
 }
 
 function setState(newState: InstallState) {

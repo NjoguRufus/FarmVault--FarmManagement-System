@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Bridges Clerk authentication to Supabase.
  *
@@ -26,7 +27,7 @@ export function ClerkSupabaseTokenBridge() {
 
     if (!isSignedIn) {
       if (import.meta.env.DEV) {
-        console.log('[ClerkBridge] User not signed in, clearing token getter');
+        logger.log('[ClerkBridge] User not signed in, clearing token getter');
       }
       setClerkTokenGetter(null);
       return;
@@ -36,7 +37,7 @@ export function ClerkSupabaseTokenBridge() {
       try {
         const token = await getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE });
         if (import.meta.env.DEV) {
-          console.log('[ClerkBridge] Token request result:', token ? 'success (token exists)' : 'null (no token)');
+          logger.log('[ClerkBridge] Token request result:', token ? 'success (token exists)' : 'null (no token)');
         }
         if (!token && import.meta.env.DEV) {
           console.warn(
@@ -63,8 +64,8 @@ export function ClerkSupabaseTokenBridge() {
     const publishableKey = (clerk as unknown as { publishableKey?: string }).publishableKey;
     const keyPrefix = publishableKey?.substring(0, 7) || 'unknown';
     const isLive = publishableKey?.startsWith('pk_live_');
-    console.log('[ClerkBridge] Clerk loaded:', isLoaded, 'Signed in:', isSignedIn);
-    console.log(`[ClerkBridge] Frontend API: ${frontendApi || 'not exposed'}, Key: ${keyPrefix}, Live: ${isLive}`);
+    logger.log('[ClerkBridge] Clerk loaded:', isLoaded, 'Signed in:', isSignedIn);
+    logger.log(`[ClerkBridge] Frontend API: ${frontendApi || 'not exposed'}, Key: ${keyPrefix}, Live: ${isLive}`);
   }, [isLoaded, isSignedIn, clerk]);
 
   return null;

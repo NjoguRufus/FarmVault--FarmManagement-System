@@ -29,6 +29,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listEmployees } from '@/services/employeesSupabaseService';
 import { createWorkCard } from '@/services/operationsWorkCardService';
 import type { Employee } from '@/types';
+import { logger } from "@/lib/logger";
 
 interface PlanWorkModalProps {
   open: boolean;
@@ -75,7 +76,7 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
     
     // Debug: log what we found
     if (import.meta.env.DEV) {
-      console.log('[PlanWorkModal] employees filtering', {
+      logger.log('[PlanWorkModal] employees filtering', {
         total: employees.length,
         active: employees.filter(e => e.status === 'active').length,
         withPermissions: employees.filter(e => e.permissions && Object.keys(e.permissions as object).length > 0).length,

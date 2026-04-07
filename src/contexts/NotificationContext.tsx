@@ -9,9 +9,16 @@ import {
   unifiedNotificationWouldDeliverToUser,
 } from '@/services/unifiedNotificationPipeline';
 import { showFarmVaultLocalNotification } from '@/services/farmVaultLocalPush';
-import { bellSectionForUnifiedKind, bellSectionFromPath, type NotificationBellSection } from '@/lib/notificationBellSection';
+import {
+  notificationPortalForUnifiedKind,
+  notificationPortalFromPath,
+  type NotificationPortalType,
+} from '@/lib/notificationBellSection';
+import { logger } from "@/lib/logger";
 
-export type { NotificationBellSection };
+export type { NotificationPortalType };
+
+export type ToastNotificationType = 'info' | 'success' | 'warning' | 'error';
 
 export interface AppNotification {
   id: string;
@@ -19,28 +26,26 @@ export interface AppNotification {
   message?: string;
   read: boolean;
   createdAt: number;
-  type?: 'info' | 'success' | 'warning' | 'error';
+  /** Sonner / in-app toast severity */
+  toastType?: ToastNotificationType;
+  /** Portal bucket: company workspace, ambassador program, or developer console */
+  type: NotificationPortalType;
   /** In-app deep link when user opens the item in the bell menu */
   navigatePath?: string;
   /** Stable key to avoid duplicate bell rows (e.g. farmer_smart_inbox:uuid, web_push:tag). */
   dedupeKey?: string;
-  /**
-   * Navbar grouping: farm/company vs ambassador program.
-   * Omitted or `workspace` = main farm app bell; `ambassador` = ambassador console only.
-   */
-  bellSection?: NotificationBellSection;
 }
 
 interface AddNotificationOptions {
   title: string;
   message?: string;
-  type?: AppNotification['type'];
+  toastType?: ToastNotificationType;
+  type?: NotificationPortalType;
   skipSound?: boolean; // Skip sound playback (used when sound is handled elsewhere, e.g., real-time alerts)
   navigatePath?: string;
   dedupeKey?: string;
   /** When true, only append to the bell list (no toast, no sound). */
   silent?: boolean;
-  bellSection?: NotificationBellSection;
 }
 
 interface NotificationContextValue {
@@ -48,7 +53,7 @@ interface NotificationContextValue {
   addNotification: (n: AddNotificationOptions) => void;
   markAsRead: (id: string) => void;
   markAllRead: () => void;
-  markAllReadForSection: (section: NotificationBellSection) => void;
+  markAllReadForSection: (portal: NotificationPortalType) => void;
   unreadCount: number;
 }
 
@@ -58,37 +63,52 @@ const STORAGE_KEY_PREFIX = 'farmvault:notifications:v1:';
 
 function normalizeStoredNotification(value: unknown): AppNotification | null {
   if (!value || typeof value !== 'object') return null;
-  const raw = value as Partial<AppNotification> & { createdAt?: unknown };
+  const raw = value as Record<string, unknown> & { createdAt?: unknown };
   if (typeof raw.id !== 'string' || typeof raw.title !== 'string') return null;
   const createdAt =
     typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt)
       ? raw.createdAt
       : Date.now();
-  let type: AppNotification['type'] = 'info';
-  if (raw.type === 'info' || raw.type === 'success' || raw.type === 'warning' || raw.type === 'error') {
-    type = raw.type;
+
+  const navigatePath = typeof raw.navigatePath === 'string' ? raw.navigatePath : undefined;
+  const dedupeKey = typeof raw.dedupeKey === 'string' ? raw.dedupeKey : undefined;
+
+  const isToastSeverity = (v: unknown): v is ToastNotificationType =>
+    v === 'info' || v === 'success' || v === 'warning' || v === 'error';
+  const isPortal = (v: unknown): v is NotificationPortalType =>
+    v === 'company' || v === 'ambassador' || v === 'developer';
+
+  let toastType: ToastNotificationType = 'info';
+  let portalType: NotificationPortalType = 'company';
+
+  const legacyBell = raw.bellSection;
+  const legacyPortalFromBell: NotificationPortalType | undefined =
+    legacyBell === 'ambassador' ? 'ambassador' : legacyBell === 'workspace' ? 'company' : undefined;
+
+  if (isToastSeverity(raw.toastType)) {
+    toastType = raw.toastType;
   }
-  const navigatePath =
-    typeof (raw as { navigatePath?: unknown }).navigatePath === 'string'
-      ? (raw as { navigatePath: string }).navigatePath
-      : undefined;
-  const dedupeKey =
-    typeof (raw as { dedupeKey?: unknown }).dedupeKey === 'string'
-      ? (raw as { dedupeKey: string }).dedupeKey
-      : undefined;
-  let bellSection: NotificationBellSection | undefined;
-  const bs = (raw as { bellSection?: unknown }).bellSection;
-  if (bs === 'workspace' || bs === 'ambassador') bellSection = bs;
+
+  const rawType = raw.type;
+  if (isPortal(rawType)) {
+    portalType = rawType;
+  } else if (isToastSeverity(rawType)) {
+    toastType = rawType;
+    portalType = legacyPortalFromBell ?? 'company';
+  } else {
+    portalType = legacyPortalFromBell ?? 'company';
+  }
+
   return {
     id: raw.id,
     title: raw.title,
     message: typeof raw.message === 'string' ? raw.message : undefined,
     read: Boolean(raw.read),
     createdAt,
-    type,
+    toastType,
+    type: portalType,
     navigatePath,
     dedupeKey,
-    bellSection,
   };
 }
 
@@ -191,9 +211,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[NotificationContext] addNotification called', {
+        logger.log('[NotificationContext] addNotification called', {
           title: n.title,
           message: n.message,
+          toastType: n.toastType,
           type: n.type,
           skipSound: n.skipSound,
           silent: n.silent,
@@ -208,10 +229,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           message: n.message,
           read: false,
           createdAt,
-          type: n.type ?? 'info',
+          toastType: n.toastType ?? 'info',
+          type: n.type ?? 'company',
           navigatePath: n.navigatePath,
           dedupeKey: n.dedupeKey,
-          bellSection: n.bellSection ?? 'workspace',
         };
         return [next, ...prev].slice(0, MAX_NOTIFICATIONS);
       });
@@ -224,7 +245,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       if (n.skipSound) {
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[NotificationContext] Skipping sound (handled elsewhere)');
+          logger.log('[NotificationContext] Skipping sound (handled elsewhere)');
         }
         return;
       }
@@ -232,7 +253,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       const prefs = getNotificationPrefs(user.id);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[NotificationContext] Sound prefs', {
+        logger.log('[NotificationContext] Sound prefs', {
           enabled: prefs.enabled,
           soundEnabled: prefs.soundEnabled,
           soundFile: prefs.soundFile,
@@ -243,7 +264,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         playNotificationSound(prefs.soundFile).then((played) => {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[NotificationContext] Sound played:', played);
+            logger.log('[NotificationContext] Sound played:', played);
           }
         }).catch((err) => {
           if (import.meta.env.DEV) {
@@ -270,10 +291,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       addNotificationRef.current({
         title: payload.title,
         message: payload.body,
-        type: payload.toastType ?? 'info',
+        toastType: payload.toastType ?? 'info',
         skipSound: payload.skipSound,
         navigatePath: payload.path,
-        bellSection: bellSectionForUnifiedKind(payload.kind, payload.audiences),
+        type: notificationPortalForUnifiedKind(payload.kind, payload.audiences),
       });
       if (
         payload.showSystemNotification !== false &&
@@ -310,12 +331,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       addNotificationRef.current({
         title: p.title?.trim() || 'FarmVault',
         message: typeof p.body === 'string' ? p.body : undefined,
-        type: 'info',
+        toastType: 'info',
         navigatePath: url,
         silent: true,
         skipSound: true,
         dedupeKey: dedupe,
-        bellSection: bellSectionFromPath(url),
+        type: notificationPortalFromPath(url),
       });
     };
     navigator.serviceWorker.addEventListener('message', onMsg);
@@ -330,9 +351,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   }, []);
 
-  const markAllReadForSection = useCallback((section: NotificationBellSection) => {
+  const markAllReadForSection = useCallback((portal: NotificationPortalType) => {
     setNotifications((prev) =>
-      prev.map((n) => ((n.bellSection ?? 'workspace') === section ? { ...n, read: true } : n)),
+      prev.map((n) => (n.type === portal ? { ...n, read: true } : n)),
     );
   }, []);
 
@@ -358,7 +379,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 }
 
 const noop = () => {};
-const noopSection = (_section: NotificationBellSection) => {};
+const noopSection = (_portal: NotificationPortalType) => {};
 const emptyNotifications: AppNotification[] = [];
 const defaultContext: NotificationContextValue = {
   notifications: emptyNotifications,

@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { logger } from "@/lib/logger";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 // Prefer the new publishable key; fall back to anon for backwards compatibility.
@@ -39,7 +40,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
       const token = await clerkTokenGetter();
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Supabase] Token from bridge:', !!token ? 'exists' : 'null');
+        logger.log('[Supabase] Token from bridge:', !!token ? 'exists' : 'null');
         if (token) {
           logJwtClaims(token, 'bridge');
         }
@@ -69,7 +70,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Supabase] Token from window.Clerk:', !!token ? 'exists' : 'null');
+      logger.log('[Supabase] Token from window.Clerk:', !!token ? 'exists' : 'null');
       if (token) {
         logJwtClaims(token, 'window.Clerk');
       } else {
@@ -159,7 +160,7 @@ function logJwtClaims(token: string, source: string): void {
     if (parts.length === 3) {
       const payload = JSON.parse(atob(parts[1]));
       // eslint-disable-next-line no-console
-      console.log(`[Supabase] JWT claims (from ${source}):`, {
+      logger.log(`[Supabase] JWT claims (from ${source}):`, {
         aud: payload.aud,
         role: payload.role,
         sub: payload.sub,

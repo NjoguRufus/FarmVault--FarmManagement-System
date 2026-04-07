@@ -5,6 +5,7 @@ import {
   type DeveloperSubscriptionAction,
   type SetCompanySubscriptionStateResult,
 } from '@/services/subscriptionService';
+import { logger } from "@/lib/logger";
 
 export interface DevDashboardKpis {
   // Shape is defined by RPC; keep flexible and only read known fields in UI.
@@ -95,11 +96,11 @@ export interface OverrideSubscriptionInput {
 
 export async function getDevDashboardKpis(): Promise<DevDashboardKpis> {
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Calling dev_dashboard_kpis RPC...');
+  logger.log('[DevAdmin] Calling dev_dashboard_kpis RPC...');
   const { data, error, status, statusText } = await supabase.rpc('dev_dashboard_kpis');
   
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] dev_dashboard_kpis response:', { status, statusText, hasData: !!data, error });
+  logger.log('[DevAdmin] dev_dashboard_kpis response:', { status, statusText, hasData: !!data, error });
   
   if (error) {
     // eslint-disable-next-line no-console
@@ -126,7 +127,7 @@ export async function listCompanies(params?: {
   const { search = null, limit = 200, offset = 0 } = params ?? {};
 
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Calling list_companies_v2 RPC...');
+  logger.log('[DevAdmin] Calling list_companies_v2 RPC...');
   const { data, error, status, statusText } = await supabase.rpc('list_companies_v2', {
     p_limit: limit,
     p_offset: offset,
@@ -134,9 +135,9 @@ export async function listCompanies(params?: {
   });
 
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] list_companies response:', { status, statusText, hasData: !!data, error });
+  logger.log('[DevAdmin] list_companies response:', { status, statusText, hasData: !!data, error });
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] companies RPC raw:', data);
+  logger.log('[DevAdmin] companies RPC raw:', data);
 
   if (error) {
     // eslint-disable-next-line no-console
@@ -166,7 +167,7 @@ export async function listCompanies(params?: {
   const parsedOffset = Number(payload?.offset ?? offset);
 
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] list_companies parsed:', {
+  logger.log('[DevAdmin] list_companies parsed:', {
     parsedLength: parsedItems.length,
     parsedTotal,
     firstItem: parsedItems[0] ?? null,
@@ -294,11 +295,11 @@ export interface DeveloperSettings {
 
 export async function getDeveloperSettings(): Promise<DeveloperSettings | null> {
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Calling get_developer_settings RPC...');
+  logger.log('[DevAdmin] Calling get_developer_settings RPC...');
   const { data, error, status, statusText } = await supabase.rpc('get_developer_settings');
 
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] get_developer_settings response:', {
+  logger.log('[DevAdmin] get_developer_settings response:', {
     status,
     statusText,
     hasData: !!data,
@@ -332,14 +333,14 @@ export async function listCompaniesForDeveloperSettings(params?: {
   offset?: number;
 }): Promise<ListCompaniesRpcResponse> {
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] listCompaniesForDeveloperSettings()', params);
+  logger.log('[DevAdmin] listCompaniesForDeveloperSettings()', params);
   return listCompanies(params);
 }
 
 export async function linkDeveloperToCompany(companyId: string): Promise<void> {
   if (!companyId) throw new Error('companyId is required');
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Linking developer to company', { companyId });
+  logger.log('[DevAdmin] Linking developer to company', { companyId });
   const { error } = await supabase.rpc('link_developer_to_company', {
     p_company_id: companyId,
   });
@@ -362,7 +363,7 @@ export async function updateDeveloperCompanyLink(companyId: string): Promise<voi
 
 export async function removeDeveloperCompanyLink(): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Removing developer company link...');
+  logger.log('[DevAdmin] Removing developer company link...');
   const { error } = await supabase.rpc('remove_developer_company_link');
   if (error) {
     // eslint-disable-next-line no-console
@@ -378,7 +379,7 @@ export async function removeDeveloperCompanyLink(): Promise<void> {
 
 export async function setDeveloperRole(role: string): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Setting developer role...', { role });
+  logger.log('[DevAdmin] Setting developer role...', { role });
   const { error } = await supabase.rpc('set_developer_role', {
     p_role: role,
   });
@@ -402,7 +403,7 @@ export async function updateDeveloperRole(role: string): Promise<void> {
 export async function renameCompany(companyId: string, name: string): Promise<void> {
   if (!companyId) throw new Error('companyId is required');
   // eslint-disable-next-line no-console
-  console.log('[DevAdmin] Renaming company safely...', { companyId, name });
+  logger.log('[DevAdmin] Renaming company safely...', { companyId, name });
   const { error } = await supabase.rpc('rename_company_safely', {
     p_company_id: companyId,
     p_name: name,
@@ -552,7 +553,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
       const acctEmail = await resolveProfileEmailForUid(creatorClerkId);
       if (acctEmail) {
         // eslint-disable-next-line no-console
-        console.log('[FarmVault] workspace notify: recipient', {
+        logger.log('[FarmVault] workspace notify: recipient', {
           source: 'onboarding_account_profile',
           companyId: canonicalId,
         });
@@ -566,7 +567,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     // 2) Company row email (optional in UI; may be empty)
     if (rowEmail) {
       // eslint-disable-next-line no-console
-      console.log('[FarmVault] workspace notify: recipient', {
+      logger.log('[FarmVault] workspace notify: recipient', {
         source: 'company_row_email',
         companyId: canonicalId,
       });
@@ -579,7 +580,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
       const email = await resolveProfileEmailForUid(uid);
       if (email) {
         // eslint-disable-next-line no-console
-        console.log('[FarmVault] workspace notify: recipient', {
+        logger.log('[FarmVault] workspace notify: recipient', {
           source: 'company_admin_member_profile',
           companyId: canonicalId,
         });
@@ -594,7 +595,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
       const email = await resolveProfileEmailForUid(uid);
       if (email) {
         // eslint-disable-next-line no-console
-        console.log('[FarmVault] workspace notify: recipient', {
+        logger.log('[FarmVault] workspace notify: recipient', {
           source: 'company_member_profile',
           companyId: canonicalId,
         });
@@ -713,7 +714,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     const acctEmail = await resolveProfileEmailForUid(creatorClerkId);
     if (acctEmail) {
       // eslint-disable-next-line no-console
-      console.log('[FarmVault] workspace notify: recipient', { source: 'onboarding_account_profile', companyId: cid });
+      logger.log('[FarmVault] workspace notify: recipient', { source: 'onboarding_account_profile', companyId: cid });
       return { ok: true, to: acctEmail, companyName, source: 'onboarding_account_profile' };
     }
     triedSteps.push('onboarding_account_profile(no_email)');
@@ -724,7 +725,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
   // 2) Company row email
   if (rowEmail) {
     // eslint-disable-next-line no-console
-    console.log('[FarmVault] workspace notify: recipient', { source: 'company_row_email', companyId: cid });
+    logger.log('[FarmVault] workspace notify: recipient', { source: 'company_row_email', companyId: cid });
     return { ok: true, to: rowEmail, companyName, source: 'company_row_email' };
   }
   triedSteps.push('company_row_email(empty)');
@@ -737,7 +738,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     const email = await resolveProfileEmailForUid(uid);
     if (email) {
       // eslint-disable-next-line no-console
-      console.log('[FarmVault] workspace notify: recipient', {
+      logger.log('[FarmVault] workspace notify: recipient', {
         source: 'company_admin_member_profile',
         companyId: cid,
       });
@@ -753,7 +754,7 @@ export async function fetchCompanyWorkspaceNotifyPayload(companyId: string): Pro
     const email = await resolveProfileEmailForUid(uid);
     if (email) {
       // eslint-disable-next-line no-console
-      console.log('[FarmVault] workspace notify: recipient', { source: 'company_member_profile', companyId: cid });
+      logger.log('[FarmVault] workspace notify: recipient', { source: 'company_member_profile', companyId: cid });
       return { ok: true, to: email, companyName, source: 'company_member_profile' };
     }
   }

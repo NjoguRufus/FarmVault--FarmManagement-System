@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -12,9 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { resolveUserNotificationAudiences } from '@/lib/notificationAudience';
-import type { NotificationBellSection } from '@/lib/notificationBellSection';
+import { notificationPortalFromPathname, type NotificationPortalType } from '@/lib/notificationBellSection';
 
 type BellVariant = 'main' | 'ambassador';
 
@@ -24,55 +22,31 @@ export interface NavbarNotificationBellProps {
   triggerClassName?: string;
 }
 
+function emptyMessageForPortal(portal: NotificationPortalType): string {
+  switch (portal) {
+    case 'ambassador':
+      return 'No ambassador notifications yet.';
+    case 'developer':
+      return 'No developer notifications yet.';
+    default:
+      return 'No notifications yet.';
+  }
+}
+
 export function NavbarNotificationBell({ variant, triggerClassName }: NavbarNotificationBellProps) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const location = useLocation();
   const { notifications, markAsRead, markAllReadForSection } = useNotifications();
 
-  const dualWorkspaceAmbassador = useMemo(() => {
-    if (variant !== 'main' || !user) return false;
-    const aud = resolveUserNotificationAudiences(user);
-    return aud.has('ambassador') && aud.has('company');
-  }, [variant, user]);
+  const notificationType = notificationPortalFromPathname(location.pathname);
 
-  const [activeTab, setActiveTab] = useState<NotificationBellSection>('workspace');
-
-  const { visibleList, totalUnread, tabUnread } = useMemo(() => {
-    const secOf = (n: (typeof notifications)[0]) => n.bellSection ?? 'workspace';
-
-    if (variant === 'ambassador') {
-      const list = notifications.filter((n) => secOf(n) === 'ambassador');
-      return {
-        visibleList: list,
-        totalUnread: list.filter((n) => !n.read).length,
-        tabUnread: { workspace: 0, ambassador: list.filter((n) => !n.read).length },
-      };
-    }
-
-    const workspaceList = notifications.filter((n) => secOf(n) !== 'ambassador');
-    const ambassadorList = notifications.filter((n) => secOf(n) === 'ambassador');
-    const wUnread = workspaceList.filter((n) => !n.read).length;
-    const aUnread = ambassadorList.filter((n) => !n.read).length;
-
-    if (!dualWorkspaceAmbassador) {
-      return {
-        visibleList: workspaceList,
-        totalUnread: wUnread,
-        tabUnread: { workspace: wUnread, ambassador: aUnread },
-      };
-    }
-
-    const tab = activeTab;
-    const list = tab === 'workspace' ? workspaceList : ambassadorList;
+  const { visibleList, totalUnread } = useMemo(() => {
+    const list = notifications.filter((n) => n.type === notificationType);
     return {
       visibleList: list,
-      totalUnread: wUnread + aUnread,
-      tabUnread: { workspace: wUnread, ambassador: aUnread },
+      totalUnread: list.filter((n) => !n.read).length,
     };
-  }, [notifications, variant, dualWorkspaceAmbassador, activeTab]);
-
-  const sectionForMarkAll: NotificationBellSection =
-    variant === 'ambassador' ? 'ambassador' : dualWorkspaceAmbassador ? activeTab : 'workspace';
+  }, [notifications, notificationType]);
 
   return (
     <DropdownMenu>
@@ -99,7 +73,7 @@ export function NavbarNotificationBell({ variant, triggerClassName }: NavbarNoti
           {visibleList.length > 0 && (
             <button
               type="button"
-              onClick={() => markAllReadForSection(sectionForMarkAll)}
+              onClick={() => markAllReadForSection(notificationType)}
               className="text-xs text-primary hover:underline shrink-0"
             >
               <CheckCheck className="h-3.5 w-3.5 inline mr-0.5" />
@@ -108,50 +82,11 @@ export function NavbarNotificationBell({ variant, triggerClassName }: NavbarNoti
           )}
         </div>
 
-        {variant === 'main' && dualWorkspaceAmbassador && (
-          <div className="flex gap-1 px-2 pb-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab('workspace')}
-              className={cn(
-                'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
-                activeTab === 'workspace'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted/80 text-muted-foreground hover:bg-muted',
-              )}
-            >
-              Workspace
-              {tabUnread.workspace > 0 ? (
-                <span className="ml-1 tabular-nums opacity-90">({tabUnread.workspace})</span>
-              ) : null}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('ambassador')}
-              className={cn(
-                'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
-                activeTab === 'ambassador'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted/80 text-muted-foreground hover:bg-muted',
-              )}
-            >
-              Ambassador
-              {tabUnread.ambassador > 0 ? (
-                <span className="ml-1 tabular-nums opacity-90">({tabUnread.ambassador})</span>
-              ) : null}
-            </button>
-          </div>
-        )}
-
         <DropdownMenuSeparator />
         <div className="overflow-y-auto max-h-[280px]">
           {visibleList.length === 0 ? (
             <p className="px-2 py-4 text-sm text-muted-foreground text-center">
-              {variant === 'ambassador'
-                ? 'No ambassador notifications yet.'
-                : dualWorkspaceAmbassador && activeTab === 'ambassador'
-                  ? 'No ambassador notifications yet.'
-                  : 'No notifications yet.'}
+              {emptyMessageForPortal(notificationType)}
             </p>
           ) : (
             visibleList.map((n) => (

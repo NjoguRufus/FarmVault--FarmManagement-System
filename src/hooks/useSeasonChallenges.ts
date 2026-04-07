@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Single source of truth for season challenges per project.
  * Use this hook everywhere challenges are shown: Project Details, Plan Season, Season Challenges page.
@@ -39,7 +40,7 @@ export function useSeasonChallenges(
   });
 
   if (import.meta.env?.DEV && companyId && !isLoading) {
-    console.log('[useSeasonChallenges]', {
+    logger.log('[useSeasonChallenges]', {
       companyId,
       projectId: projectId ?? 'all',
       count: data?.length ?? 0,
@@ -52,7 +53,7 @@ export function useSeasonChallenges(
     error: error as Error | null,
     refetch: () => {
       if (import.meta.env?.DEV) {
-        console.log('[useSeasonChallenges] refetch', { companyId, projectId });
+        logger.log('[useSeasonChallenges] refetch', { companyId, projectId });
       }
       queryClient.invalidateQueries({ queryKey: [SEASON_CHALLENGES_QUERY_KEY] });
     },
@@ -64,7 +65,7 @@ export function useSeasonChallenges(
  */
 export function invalidateSeasonChallengesQuery(queryClient: ReturnType<typeof useQueryClient>) {
   if (import.meta.env?.DEV) {
-    console.log('[useSeasonChallenges] invalidateSeasonChallengesQuery (post-mutation refetch)');
+    logger.log('[useSeasonChallenges] invalidateSeasonChallengesQuery (post-mutation refetch)');
   }
   queryClient.invalidateQueries({ queryKey: [SEASON_CHALLENGES_QUERY_KEY] });
 }

@@ -142,7 +142,7 @@ export function useInventoryActions({ companyId, onSuccess }: UseInventoryAction
       addNotification({
         title: 'Stock Deducted',
         message: `${user?.name ?? 'User'} deducted ${params.quantity} units from ${params.itemName ?? 'item'}`,
-        type: 'warning',
+        toastType: 'warning',
       });
     },
     onSuccess: invalidateQueries,
@@ -174,7 +174,7 @@ export function useInventoryActions({ companyId, onSuccess }: UseInventoryAction
       addNotification({
         title: 'Item Archived',
         message: `${user?.name ?? 'User'} archived ${params.itemName ?? 'inventory item'}`,
-        type: 'error',
+        toastType: 'error',
       });
     },
     onSuccess: invalidateQueries,
@@ -206,7 +206,7 @@ export function useInventoryActions({ companyId, onSuccess }: UseInventoryAction
       addNotification({
         title: 'Item Restored',
         message: `${user?.name ?? 'User'} restored ${params.itemName ?? 'inventory item'}`,
-        type: 'success',
+        toastType: 'success',
       });
     },
     onSuccess: invalidateQueries,
@@ -232,7 +232,7 @@ export function useInventoryNotifications() {
     addNotification({
       title: 'Stock Added',
       message: `${user?.name ?? 'User'} added ${quantity} units to ${itemName}`,
-      type: 'success',
+      toastType: 'success',
     });
   };
 
@@ -240,7 +240,7 @@ export function useInventoryNotifications() {
     addNotification({
       title: 'Item Created',
       message: `${user?.name ?? 'User'} created new inventory item: ${itemName}`,
-      type: 'success',
+      toastType: 'success',
     });
   };
 
@@ -248,7 +248,7 @@ export function useInventoryNotifications() {
     addNotification({
       title: 'Item Updated',
       message: `${user?.name ?? 'User'} updated ${itemName}`,
-      type: 'info',
+      toastType: 'info',
     });
   };
 
@@ -256,7 +256,7 @@ export function useInventoryNotifications() {
     addNotification({
       title: 'Usage Recorded',
       message: `${user?.name ?? 'User'} recorded usage of ${quantity} units from ${itemName}`,
-      type: 'warning',
+      toastType: 'warning',
     });
   };
 

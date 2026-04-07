@@ -27,6 +27,7 @@ import type {
   CompanyRecordShare,
   RecordCategory,
 } from '@/types';
+import { logger } from "@/lib/logger";
 
 /** PostgREST: call record RPCs on `public` so resolution targets one schema (avoids uuid/text overload mix-ups). */
 function recordsPublicRpc() {
@@ -1157,7 +1158,7 @@ export async function getCropRecords(
     return { rows: [], total: 0 };
   }
 
-  console.log('[records] getCropRecords ->', { cid, cCrop });
+  logger.log('[records] getCropRecords ->', { cid, cCrop });
 
   const { data, error } = await recordsPublicRpc().rpc('list_crop_records', {
     p_company_id: cid,
@@ -1349,7 +1350,7 @@ export async function createCompanyCropRecord(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[records] create_company_crop_record RPC params', {
+    logger.log('[records] create_company_crop_record RPC params', {
       preferredCompanyId: prefRaw || null,
       p_company_id: companyIdForRpc,
     });

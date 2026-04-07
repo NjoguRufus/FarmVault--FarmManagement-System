@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Shown after onboarding submit while subscription status is pending_approval.
  * User is informed by email when the workspace is ready; gate polling + Realtime handle transition to dashboard.
@@ -71,7 +72,7 @@ export default function PendingApprovalPage() {
   useEffect(() => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[PendingApproval] Page mounted', { companyId, companyName, companyEmail });
+      logger.log('[PendingApproval] Page mounted', { companyId, companyName, companyEmail });
     }
   }, [companyId, companyName, companyEmail]);
 
@@ -115,7 +116,7 @@ export default function PendingApprovalPage() {
   if (!gateLoading && gate && gateStatus !== 'pending_approval') {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[PendingApproval] Gate status is not pending_approval → dashboard', { gateStatus });
+      logger.log('[PendingApproval] Gate status is not pending_approval → dashboard', { gateStatus });
     }
     return <Navigate to="/dashboard" replace />;
   }

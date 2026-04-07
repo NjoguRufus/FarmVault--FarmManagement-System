@@ -26,6 +26,7 @@ import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { computedTimelineStagesForProject } from '@/lib/farmProgressFromProject';
+import { logger } from "@/lib/logger";
 
 export function StaffDashboard() {
   const { user, employeeProfile } = useAuth();
@@ -264,7 +265,7 @@ export function StaffDashboard() {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[Dashboard] visible staff cards', {
+    logger.log('[Dashboard] visible staff cards', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,

@@ -1,6 +1,7 @@
 import { db, requireCompanyId } from '@/lib/db';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
+import { logger } from "@/lib/logger";
 
 // New simplified status model: no approval workflow
 export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
@@ -233,7 +234,7 @@ export async function logAuditEvent(params: {
   };
 
   if (import.meta.env.DEV) {
-    console.log('ops.audit_logs payload', auditPayload);
+    logger.log('ops.audit_logs payload', auditPayload);
   }
 
   const { error } = await db
@@ -425,7 +426,7 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
   }
 
   if (import.meta.env.DEV) {
-    console.log('[operationsWorkCardService] createWorkCard insert result', {
+    logger.log('[operationsWorkCardService] createWorkCard insert result', {
       id: data.id,
       project_id: data.project_id,
       status: data.status,
@@ -883,7 +884,7 @@ export async function getWorkCardsForCompany(params: {
 
   const cards = (data ?? []).map(mapRowToWorkCard);
   if (import.meta.env.DEV) {
-    console.log('[operationsWorkCardService] getWorkCardsForCompany', {
+    logger.log('[operationsWorkCardService] getWorkCardsForCompany', {
       companyId,
       projectId: params.projectId ?? 'all',
       status: params.status ?? 'all',

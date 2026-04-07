@@ -14,6 +14,7 @@ import { db } from '@/lib/db';
 import { useUser } from '@clerk/react';
 import { resolveUserDisplayNameFromSources } from '@/lib/userDisplayName';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { logger } from "@/lib/logger";
 
 const PLANS = [
   { value: 'starter', label: 'Starter' },
@@ -116,7 +117,7 @@ export default function SettingsPage() {
     try {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Settings/ProfileSave] Updating profile', {
+        logger.log('[Settings/ProfileSave] Updating profile', {
           schema: 'core',
           table: 'profiles',
           where: { clerk_user_id: user.id },
@@ -140,7 +141,7 @@ export default function SettingsPage() {
       
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Settings/ProfileSave] Supabase update response', {
+        logger.log('[Settings/ProfileSave] Supabase update response', {
           data: updatedRow,
           error,
         });
@@ -160,7 +161,7 @@ export default function SettingsPage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Settings/ProfileSave] Verification query', {
+        logger.log('[Settings/ProfileSave] Verification query', {
           data: verifyRow,
           error: verifyError,
         });
@@ -183,7 +184,7 @@ export default function SettingsPage() {
       addNotification({ 
         title: 'Profile updated', 
         message: 'Your name has been saved and updated everywhere.', 
-        type: 'success' 
+        toastType: 'success' 
       });
       captureEvent(AnalyticsEvents.SETTINGS_UPDATED, {
         user_id: user.id,
@@ -248,7 +249,7 @@ export default function SettingsPage() {
     try {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Settings/CompanySave] Updating company', {
+        logger.log('[Settings/CompanySave] Updating company', {
           schema: 'core',
           table: 'companies',
           companyId,
@@ -285,7 +286,7 @@ export default function SettingsPage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Settings/CompanySave] Verification query', {
+        logger.log('[Settings/CompanySave] Verification query', {
           data: verifiedCompany,
           error: verifyError,
         });
@@ -302,7 +303,7 @@ export default function SettingsPage() {
       // Also let React Query refetch to keep hooks in sync
       await refetchCompany();
       
-      addNotification({ title: 'Company updated', message: 'Your company details have been saved.', type: 'success' });
+      addNotification({ title: 'Company updated', message: 'Your company details have been saved.', toastType: 'success' });
       captureEvent(AnalyticsEvents.SETTINGS_UPDATED, {
         user_id: user?.id,
         company_id: companyId,
@@ -330,7 +331,7 @@ export default function SettingsPage() {
       await deleteAllCompanyData(companyId);
       setDeleteConfirm('');
       setDeletePassword('');
-      addNotification({ title: 'Company data deleted', message: 'All company data has been removed.', type: 'warning' });
+      addNotification({ title: 'Company data deleted', message: 'All company data has been removed.', toastType: 'warning' });
       alert('All company data has been deleted. You can continue using the app with a clean slate.');
       window.location.reload();
     } catch (e: any) {
@@ -408,7 +409,7 @@ export default function SettingsPage() {
                           companyId: user.companyId ?? null,
                         });
                         await refreshUserAvatar?.();
-                        addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', type: 'success' });
+                        addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', toastType: 'success' });
                       } catch (err: any) {
                         setAvatarError(err?.message ?? 'Upload failed');
                       } finally {
@@ -436,7 +437,7 @@ export default function SettingsPage() {
                         try {
                           await clearAvatar(user.id);
                           await refreshUserAvatar?.();
-                          addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', type: 'success' });
+                          addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', toastType: 'success' });
                         } catch (err: any) {
                           setAvatarError(err?.message ?? 'Failed to remove');
                         } finally {

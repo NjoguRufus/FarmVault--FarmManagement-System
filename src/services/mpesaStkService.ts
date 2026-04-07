@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * STK initiation: direct POST to `mpesa-stk-push` with the billing UI body.
  * Uses the signed-in user's Clerk JWT. No profile, company, or workspace lookups in this module.
@@ -108,7 +109,7 @@ export async function initiateMpesaStkPush(
 ): Promise<StkPushResult> {
   const token = await auth.getAccessToken();
   // eslint-disable-next-line no-console
-  console.log('Token attached:', !!token);
+  logger.log('Token attached:', !!token);
   if (!token) {
     throw new Error(
       `You must be signed in to pay with M-Pesa STK. If you are signed in, ensure a Clerk JWT template named "${CLERK_JWT_TEMPLATE_SUPABASE}" exists with claim "sub" set to the user id.`,
@@ -123,7 +124,7 @@ export async function initiateMpesaStkPush(
   const billingRefTrim = params.billingReference?.trim() ?? '';
 
   // eslint-disable-next-line no-console
-  console.log('Initiating STK with params:', {
+  logger.log('Initiating STK with params:', {
     phone: params.phoneNumber.trim(),
     amount: safeAmount,
     company_id: params.companyId,
@@ -153,7 +154,7 @@ export async function sendDeveloperStkTest(
   const getTok = auth?.getAccessToken ?? getSupabaseAccessToken;
   const token = await getTok();
   // eslint-disable-next-line no-console
-  console.log('Token attached:', !!token);
+  logger.log('Token attached:', !!token);
   if (!token) {
     throw new Error(
       `You must be signed in to run the STK test. Ensure Clerk JWT template "${CLERK_JWT_TEMPLATE_SUPABASE}" exists.`,

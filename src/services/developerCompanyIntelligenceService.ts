@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { seasonChallengesFromDeveloperRpcJson } from '@/services/seasonChallengesService';
 import type { SeasonChallenge } from '@/types';
+import { logger } from "@/lib/logger";
 
 /** Raw JSON from `public.get_developer_company_farm_intelligence`. */
 export type CompanyFarmIntelligencePayload = {
@@ -56,7 +57,7 @@ export async function fetchDeveloperCompanyAuditLogsPage(params: {
   const mod = params.module != null && String(params.module).trim() !== '' ? String(params.module).trim() : null;
 
   if (import.meta.env?.DEV) {
-    console.log('[developerCompanyIntelligence] fetchDeveloperCompanyAuditLogsPage', { companyId: id, limit, offset, module: mod });
+    logger.log('[developerCompanyIntelligence] fetchDeveloperCompanyAuditLogsPage', { companyId: id, limit, offset, module: mod });
   }
 
   const { data, error } = await supabase.rpc('developer_list_company_audit_logs', {
@@ -108,7 +109,7 @@ export async function fetchDeveloperCompanyFarmIntelligence(
   }
 
   if (import.meta.env?.DEV) {
-    console.log('[developerCompanyIntelligence] fetchDeveloperCompanyFarmIntelligence', { companyId: id });
+    logger.log('[developerCompanyIntelligence] fetchDeveloperCompanyFarmIntelligence', { companyId: id });
   }
 
   const { data, error } = await supabase.rpc('developer_get_company_farm_intelligence', {

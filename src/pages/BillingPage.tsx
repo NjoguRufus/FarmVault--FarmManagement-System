@@ -50,6 +50,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { logger } from "@/lib/logger";
 
 const TILL = (import.meta.env.VITE_MPESA_TILL_NUMBER as string | undefined)?.trim() || '5334350';
 const BUSINESS = (import.meta.env.VITE_MPESA_BUSINESS_NAME as string | undefined)?.trim() || 'FarmVault';
@@ -413,7 +414,7 @@ export default function BillingPage() {
   useEffect(() => {
     if (!import.meta.env.DEV || isDeveloper || !companyId) return;
     // eslint-disable-next-line no-console
-    console.log('[BillingPage] resolved subscription for UI', {
+    logger.log('[BillingPage] resolved subscription for UI', {
       companyId,
       isActivePaid,
       gateStatus,
@@ -756,30 +757,44 @@ export default function BillingPage() {
           <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold tracking-tight text-foreground">Payment history</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              M-Pesa STK checkouts and manual PayBill submissions for this workspace (same sources as the developer
-              dashboard). For subscription payments, use{' '}
-              <span className="font-medium text-foreground">Get receipt</span> until a PDF exists, then{' '}
-              <span className="font-medium text-foreground">View receipt</span>. STK-only rows show the M-Pesa receipt
-              code.
+              STK and manual PayBill.{' '}
+              <span className="font-medium text-foreground">Get receipt</span> until the PDF is ready, then{' '}
+              <span className="font-medium text-foreground">View receipt</span>. STK rows use the code in Reference.
             </p>
 
-            <div className="mt-4 overflow-x-auto rounded-xl border border-border/50">
+            <div className="mt-4 overflow-x-auto rounded-xl border border-border/50 scrollbar-thin">
               {paymentsLoading ? (
                 <p className="p-6 text-sm text-muted-foreground">Loading payments…</p>
               ) : payments.length === 0 ? (
                 <p className="p-6 text-sm text-muted-foreground">No payments yet.</p>
               ) : (
-                <table className="fv-table-mobile w-full min-w-0 text-left text-sm md:min-w-[960px]">
-                  <thead>
-                    <tr className="border-b border-border/60 bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">Paid at</th>
-                      <th className="px-4 py-3">Type</th>
-                      <th className="px-4 py-3">Plan</th>
-                      <th className="px-4 py-3">Cycle</th>
-                      <th className="px-4 py-3 text-right">Amount</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 font-mono text-[10px]">Reference</th>
-                      <th className="px-4 py-3 text-right">Receipt</th>
+                <table className="fv-table-scroll min-w-[960px] text-left text-sm">
+                  <thead className="border-b border-border/60 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Paid At
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Type
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Plan
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Cycle
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-right backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Amount
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Status
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-left font-mono text-[10px] normal-case backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Reference
+                      </th>
+                      <th className="sticky top-0 z-10 whitespace-nowrap bg-muted/95 px-3 py-2 text-right backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -797,15 +812,12 @@ export default function BillingPage() {
                       return (
                         <tr
                           key={`${p.ledger_source ?? 'sub'}-${p.id}`}
-                          className="border-b border-border/40 last:border-0 hover:bg-muted/30 md:border-b md:border-border/40"
+                          className="border-b border-border/40 last:border-0 hover:bg-muted/30"
                         >
-                          <td
-                            className="whitespace-nowrap px-4 py-3 text-muted-foreground max-md:px-0"
-                            data-label="Paid at"
-                          >
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-muted-foreground">
                             {displayIso ? format(parseISO(displayIso), 'PPp') : '—'}
                           </td>
-                          <td className="px-4 py-3 max-md:px-0" data-label="Type">
+                          <td className="px-3 py-2 align-middle">
                             {kind === 'stk' ? (
                               <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-400">
                                 STK
@@ -816,19 +828,14 @@ export default function BillingPage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 capitalize max-md:px-0" data-label="Plan">
-                            {p.plan_id}
-                          </td>
-                          <td className="px-4 py-3 max-md:px-0" data-label="Cycle">
+                          <td className="px-3 py-2 align-middle capitalize">{p.plan_id}</td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle">
                             {c ? billingCycleLabel(c) : '—'}
                           </td>
-                          <td
-                            className="px-4 py-3 text-right font-medium tabular-nums max-md:px-0"
-                            data-label="Amount"
-                          >
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-right font-medium tabular-nums">
                             {p.currency ?? 'KES'} {Number(p.amount).toLocaleString()}
                           </td>
-                          <td className="px-4 py-3 max-md:px-0" data-label="Status">
+                          <td className="px-3 py-2 align-middle">
                             <span
                               className={cn(
                                 'inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize',
@@ -839,20 +846,19 @@ export default function BillingPage() {
                             </span>
                           </td>
                           <td
-                            className="max-w-[140px] truncate px-4 py-3 font-mono text-[11px] text-muted-foreground max-md:px-0"
-                            data-label="Reference"
+                            className="max-w-[140px] truncate px-3 py-2 align-middle font-mono text-[11px] text-muted-foreground"
                             title={refCode !== '—' ? refCode : undefined}
                           >
                             {refCode}
                           </td>
-                          <td className="px-4 py-3 text-right max-md:px-0 max-md:pt-0" data-label="Receipt">
-                            <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 md:inline-flex md:flex-none md:flex-row md:justify-end">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-right">
+                            <div className="inline-flex justify-end">
                               {receiptRow ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="h-9 w-full rounded-lg text-xs font-semibold md:h-8 md:w-auto"
+                                  className="h-8 shrink-0 rounded-lg text-xs font-semibold"
                                   onClick={() => void openReceiptForRow(receiptRow)}
                                 >
                                   View receipt
@@ -863,7 +869,7 @@ export default function BillingPage() {
                                   variant="secondary"
                                   size="sm"
                                   disabled={issuingThis}
-                                  className="h-9 w-full rounded-lg text-xs font-semibold md:h-8 md:w-auto"
+                                  className="h-8 shrink-0 rounded-lg text-xs font-semibold"
                                   onClick={() => void requestReceiptForPayment(p.id, { openAfter: true })}
                                 >
                                   {issuingThis ? (
@@ -873,14 +879,14 @@ export default function BillingPage() {
                                 </Button>
                               ) : approved && isStkOnlyMirror ? (
                                 <span
-                                  className="py-1 text-left text-xs text-muted-foreground md:text-right"
-                                  title="PDF receipts are issued from subscription payment records. After sync, use Get receipt on the matching subscription row if shown."
+                                  className="inline-block py-1 text-xs text-muted-foreground"
+                                  title="Receipt code in Reference"
                                 >
                                   —
                                 </span>
                               ) : (
                                 <span
-                                  className="py-1 text-left text-xs text-muted-foreground md:text-right"
+                                  className="inline-block py-1 text-xs text-muted-foreground"
                                   title="Receipts are available after payment is approved"
                                 >
                                   —

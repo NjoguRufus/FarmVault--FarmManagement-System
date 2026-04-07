@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Admin alert service: create immediate alerts for high-risk actions.
  * In-app alerts are stored in context; persistence and push can be added via backend.
@@ -50,7 +51,7 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AdminAlert] created', {
+    logger.log('[AdminAlert] created', {
       severity: payload.severity,
       module: payload.module,
       action: payload.action,
@@ -75,7 +76,7 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
       read: false,
     };
 
-    console.log('[AdminAlert] Inserting to admin_alerts table', insertPayload);
+    logger.log('[AdminAlert] Inserting to admin_alerts table', insertPayload);
 
     const { error } = await db.public().from('admin_alerts').insert(insertPayload);
 
@@ -87,7 +88,7 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
       });
       appendToLocalFallback(record);
     } else {
-      console.log('[AdminAlert] Successfully inserted to admin_alerts', record.id);
+      logger.log('[AdminAlert] Successfully inserted to admin_alerts', record.id);
       void notifyAdminAlertPush(record.id);
     }
   } catch (e) {

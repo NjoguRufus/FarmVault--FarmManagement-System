@@ -123,7 +123,7 @@ export default function SupportPage() {
       setShowNewCodeRed(false);
       const list = await listCodeRedsForCompany(user.companyId);
       setCodeReds(list);
-      addNotification({ title: 'Code Red sent', message: 'The developer has been notified.', type: 'warning' });
+      addNotification({ title: 'Code Red sent', message: 'The developer has been notified.', toastType: 'warning' });
     } catch (e: any) {
       setCodeRedError(e?.message || 'Failed to send Code Red');
     } finally {

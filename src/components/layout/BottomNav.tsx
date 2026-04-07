@@ -9,6 +9,7 @@ import { getMainNavItems, getMoreNavItems, type NavItem as BottomNavItem } from 
 import { MobileMoreDrawer } from './MobileMoreDrawer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
+import { logger } from "@/lib/logger";
 
 const ACTIVE_TAB_SCALE = 1.04;
 const NAV_ITEM_TRANSITION = {
@@ -69,7 +70,7 @@ export function BottomNav() {
       setIsDesktop(width >= 1024);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Responsive] bottom nav viewport', { width, isDesktop: width >= 1024 });
+        logger.log('[Responsive] bottom nav viewport', { width, isDesktop: width >= 1024 });
       }
     };
     update();

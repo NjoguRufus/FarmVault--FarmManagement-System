@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * AppLockPrompt component.
  * Shows a first-time prompt introducing the App Lock feature.
@@ -31,7 +32,7 @@ interface AppLockPromptProps {
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log('[AppLockPrompt]', ...args);
+  logger.log('[AppLockPrompt]', ...args);
 }
 
 export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * App Lock Service
  * Handles per-device, per-user PIN-based quick unlock.
@@ -51,7 +52,7 @@ const DEBUG_LOCK = true;
 function debugLog(...args: unknown[]): void {
   if (DEBUG_LOCK) {
     // eslint-disable-next-line no-console
-    console.log('[AppLock]', ...args);
+    logger.log('[AppLock]', ...args);
   }
 }
 

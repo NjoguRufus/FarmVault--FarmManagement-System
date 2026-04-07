@@ -36,6 +36,7 @@ import { toast } from 'sonner';
 import { upsertChallengeTemplate } from '@/services/challengeTemplatesService';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
+import { logger } from "@/lib/logger";
 
 export default function SeasonChallengesPage() {
   const { activeProject, projects } = useProject();
@@ -51,7 +52,7 @@ export default function SeasonChallengesPage() {
   );
 
   if (import.meta.env?.DEV && companyId) {
-    console.log('[SeasonChallengesPage] season challenges fetch', {
+    logger.log('[SeasonChallengesPage] season challenges fetch', {
       scope: 'all-projects',
       count: challengesFromHook.length,
     });
@@ -160,7 +161,7 @@ export default function SeasonChallengesPage() {
     setAddOpen(false);
     try {
       if (import.meta.env?.DEV) {
-        console.log('[SeasonChallengesPage] challenge create', { projectId: activeProject.id, title });
+        logger.log('[SeasonChallengesPage] challenge create', { projectId: activeProject.id, title });
       }
       const created = await createSeasonChallenge({
         companyId: activeProject.companyId,
@@ -178,7 +179,7 @@ export default function SeasonChallengesPage() {
       });
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
-        console.log('[SeasonChallengesPage] challenge create success, invalidated queries');
+        logger.log('[SeasonChallengesPage] challenge create success, invalidated queries');
       }
       if (saveAsReusable && created?.id && activeProject?.companyId && user?.id) {
         try {
@@ -337,7 +338,7 @@ export default function SeasonChallengesPage() {
         .filter(item => Object.keys(item).length > 0);
 
       if (import.meta.env?.DEV) {
-        console.log('[SeasonChallengesPage] challenge update', { id: editingChallenge.id });
+        logger.log('[SeasonChallengesPage] challenge update', { id: editingChallenge.id });
       }
       await updateSeasonChallenge(editingChallenge.id, {
         title: editTitle,
@@ -357,7 +358,7 @@ export default function SeasonChallengesPage() {
       });
       invalidateSeasonChallengesQuery(queryClient);
       if (import.meta.env?.DEV) {
-        console.log('[SeasonChallengesPage] challenge update success, invalidated queries');
+        logger.log('[SeasonChallengesPage] challenge update success, invalidated queries');
       }
 
       if (saveAsReusableEdit && editingChallenge.companyId && user?.id) {

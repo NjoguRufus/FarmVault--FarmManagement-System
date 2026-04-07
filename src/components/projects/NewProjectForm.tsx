@@ -43,6 +43,7 @@ import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
 import { ProBadge } from '@/components/subscription';
+import { logger } from "@/lib/logger";
 
 interface NewProjectFormProps {
   onCancel: () => void;
@@ -412,7 +413,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Project Creation payload]', {
+        logger.log('[Project Creation payload]', {
           budgetType,
           separateBudget,
           budgetPoolId: poolId,
@@ -439,7 +440,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Project Created]', project);
+        logger.log('[Project Created]', project);
       }
 
       await queryClient.invalidateQueries({ queryKey: ['projects', user.companyId] });
@@ -938,7 +939,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
                         };
                         if (import.meta.env.DEV) {
                           // eslint-disable-next-line no-console
-                          console.log('[Budget pool creation payload]', payload);
+                          logger.log('[Budget pool creation payload]', payload);
                         }
                         setCreatingPool(true);
                         try {

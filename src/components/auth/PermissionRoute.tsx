@@ -5,6 +5,7 @@ import AccessRestrictedPage from '@/pages/AccessRestrictedPage';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { resolveStaffShellEntryOrHome } from '@/lib/access/effectiveAccess';
+import { logger } from "@/lib/logger";
 
 interface PermissionRouteProps {
   module: PermissionModule;
@@ -24,7 +25,7 @@ export function PermissionRoute({ module, actionPath, children }: PermissionRout
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Route Guard] permission check', {
+    logger.log('[Route Guard] permission check', {
       module,
       action: actionPath || 'view',
       allowed,

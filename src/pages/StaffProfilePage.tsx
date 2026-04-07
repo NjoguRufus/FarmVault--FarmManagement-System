@@ -10,6 +10,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { uploadEmployeeAvatar, clearEmployeeAvatar } from '@/services/avatarService';
 import { useQueryClient } from '@tanstack/react-query';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
+import { logger } from "@/lib/logger";
 
 export default function StaffProfilePage() {
   const { user, employeeProfile } = useAuth();
@@ -61,7 +62,7 @@ export default function StaffProfilePage() {
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[StaffProfile] initial employee row loaded', {
+          logger.log('[StaffProfile] initial employee row loaded', {
             table: 'public.employees',
             companyId,
             employeeId,
@@ -94,7 +95,7 @@ export default function StaffProfilePage() {
           setAvatarUrl(avatarFromRow);
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[StaffProfile] final displayed values', {
+            logger.log('[StaffProfile] final displayed values', {
               displayName: nameFromRow,
               avatarUrl: avatarFromRow,
             });
@@ -137,7 +138,7 @@ export default function StaffProfilePage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[StaffProfile] save payload', {
+        logger.log('[StaffProfile] save payload', {
           companyId,
           employeeId,
           payload,
@@ -154,7 +155,7 @@ export default function StaffProfilePage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[StaffProfile] employee update response', {
+        logger.log('[StaffProfile] employee update response', {
           table: 'public.employees',
           companyId,
           employeeId,
@@ -182,7 +183,7 @@ export default function StaffProfilePage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[StaffProfile] post-save refetch result', {
+        logger.log('[StaffProfile] post-save refetch result', {
           table: 'public.employees',
           companyId,
           employeeId,
@@ -216,7 +217,7 @@ export default function StaffProfilePage() {
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[StaffProfile] final displayed values', {
+          logger.log('[StaffProfile] final displayed values', {
             displayName: finalName,
             avatarUrl: finalAvatar,
           });
@@ -298,7 +299,7 @@ export default function StaffProfilePage() {
                     });
                     if (import.meta.env.DEV) {
                       // eslint-disable-next-line no-console
-                      console.log('[StaffProfile] avatar upload result', {
+                      logger.log('[StaffProfile] avatar upload result', {
                         companyId,
                         employeeId,
                         result,
@@ -320,7 +321,7 @@ export default function StaffProfilePage() {
 
                     if (import.meta.env.DEV) {
                       // eslint-disable-next-line no-console
-                      console.log('[StaffProfile] post-save refetch result', {
+                      logger.log('[StaffProfile] post-save refetch result', {
                         table: 'public.employees',
                         companyId,
                         employeeId,
@@ -351,7 +352,7 @@ export default function StaffProfilePage() {
 
                       if (import.meta.env.DEV) {
                         // eslint-disable-next-line no-console
-                        console.log('[StaffProfile] final displayed values', {
+                        logger.log('[StaffProfile] final displayed values', {
                           displayName: finalName,
                           avatarUrl: finalAvatar,
                         });

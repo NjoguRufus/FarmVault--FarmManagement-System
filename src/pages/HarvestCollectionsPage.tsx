@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -345,7 +346,7 @@ export default function HarvestCollectionsPage() {
   }, [isAdminUser, viewPickersLayout]);
 
   if (import.meta.env.DEV && user) {
-    console.log('[HarvestCollections] edit/delete visibility', {
+    logger.log('[HarvestCollections] edit/delete visibility', {
       canManageIntake,
       canDeleteIntakeEntry,
       byKeyEdit: canKey('harvest_collections.edit'),
@@ -377,7 +378,7 @@ export default function HarvestCollectionsPage() {
   const effectiveProjectId = effectiveProject?.id ?? null;
 
   if (import.meta.env.DEV && user) {
-    console.log('[HarvestCollections] staff permissions', {
+    logger.log('[HarvestCollections] staff permissions', {
       uid: user.id,
       canViewCollections,
       canCreateCollection,
@@ -409,9 +410,9 @@ export default function HarvestCollectionsPage() {
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    console.log('[Reload Debug] mount');
+    logger.log('[Reload Debug] mount');
     return () => {
-      console.log('[Reload Debug] unmount');
+      logger.log('[Reload Debug] unmount');
     };
   }, []);
 
@@ -430,7 +431,7 @@ export default function HarvestCollectionsPage() {
     const changed = !prev || prev.viewMode !== next.viewMode || prev.quickMode !== next.quickMode || prev.selectedCollectionId !== next.selectedCollectionId || prev.companyId !== next.companyId || prev.effectiveProjectId !== next.effectiveProjectId;
     reloadDebugPrevRef.current = next;
     if (changed) {
-      console.log('[Reload Debug] state changed', next);
+      logger.log('[Reload Debug] state changed', next);
     }
   }, [viewMode, quickMode, selectedCollectionId, companyId, effectiveProjectId]);
 
@@ -831,7 +832,7 @@ export default function HarvestCollectionsPage() {
       const totalRevenue = Number(collectionsFinancialTotals.totalRevenue ?? collectionsFinancialTotals.totalSales ?? 0) || 0;
 
       if (import.meta.env.DEV) {
-        console.log('[HarvestCollections] summary (Supabase aggregate)', {
+        logger.log('[HarvestCollections] summary (Supabase aggregate)', {
           companyId,
           projectId: effectiveProjectId,
           totalKg,
@@ -870,7 +871,7 @@ export default function HarvestCollectionsPage() {
           revenue,
         };
       });
-      console.log('[HarvestCollections] summary (fallback from collections)', {
+      logger.log('[HarvestCollections] summary (fallback from collections)', {
         companyId,
         projectId: effectiveProjectId,
         totalKg,
@@ -1342,7 +1343,7 @@ export default function HarvestCollectionsPage() {
 
   useEffect(() => {
     if (!(quickMode && viewMode === 'pay')) return;
-    console.log('[Quick Pay Queue]', quickPayQueue);
+    logger.log('[Quick Pay Queue]', quickPayQueue);
   }, [quickPayQueue, quickMode, viewMode]);
 
   useEffect(() => {
@@ -1363,7 +1364,7 @@ export default function HarvestCollectionsPage() {
     if (!(quickMode && viewMode === 'pay') || !quickPayPickerId) return;
     const picker = pickersForCollection.find((p) => p.id === quickPayPickerId);
     const queueRow = quickPayQueue.find((q) => q.pickerId === quickPayPickerId);
-    console.log('[Quick Pay Current Picker]', picker ? { id: picker.id, pickerNumber: picker.pickerNumber, pickerName: picker.pickerName, balance: queueRow?.balance } : null);
+    logger.log('[Quick Pay Current Picker]', picker ? { id: picker.id, pickerNumber: picker.pickerNumber, pickerName: picker.pickerName, balance: queueRow?.balance } : null);
   }, [quickMode, viewMode, quickPayPickerId, pickersForCollection, quickPayQueue]);
 
   const amountPaidOutThisCollection = useMemo(
@@ -1671,7 +1672,7 @@ export default function HarvestCollectionsPage() {
     createCollectionInFlightRef.current = true;
     setCreating(true);
     if (import.meta.env.DEV) {
-      console.log('[HC auth check]', { clerkUserId: user?.id, companyId: user?.companyId, role: user?.role });
+      logger.log('[HC auth check]', { clerkUserId: user?.id, companyId: user?.companyId, role: user?.role });
     }
     try {
       const typedName = (newCollectionName || '').trim();
@@ -1683,7 +1684,7 @@ export default function HarvestCollectionsPage() {
       }
 
       if (import.meta.env.DEV) {
-        console.log('[HarvestCollections] create attempt', {
+        logger.log('[HarvestCollections] create attempt', {
           companyId,
           projectId: effectiveProject.id,
           finalName,
@@ -1773,7 +1774,7 @@ export default function HarvestCollectionsPage() {
           pickerName: name,
         });
         if (import.meta.env.DEV) {
-          console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+          logger.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
         }
         queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
         toast({
@@ -1797,7 +1798,7 @@ export default function HarvestCollectionsPage() {
         pickerName: name,
       });
       if (import.meta.env.DEV) {
-        console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+        logger.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
       }
       queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
       toast({
@@ -1843,7 +1844,7 @@ export default function HarvestCollectionsPage() {
         pickerName: name,
       });
       if (import.meta.env.DEV) {
-        console.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
+        logger.log('[Reload Debug] invalidate', { queryKey: ['harvestPickers', companyId, collectionIds] });
       }
       queryClient.invalidateQueries({ queryKey: ['harvestPickers', companyId, collectionIds] });
       toast({
@@ -1901,7 +1902,7 @@ export default function HarvestCollectionsPage() {
         ...(tripOverridden && { suggestedTripNumber: suggestedTrip }),
       });
 
-      if (import.meta.env.DEV) console.log('[Harvest] Intake save success', { pickerId: savedPickerId, kg, collectionId: selectedCollectionId });
+      logger.log('[Harvest] Intake save success', { pickerId: savedPickerId, kg, collectionId: selectedCollectionId });
 
       setLastWeighPickerId(savedPickerId);
       setRecentPickerIds((prev) => {
@@ -2287,12 +2288,12 @@ export default function HarvestCollectionsPage() {
         queryClient.invalidateQueries({ queryKey: ['projectWalletLedger', companyId, effectiveProject.id] });
       }
       const remainingBalance = Math.max(0, balance - amountClamped);
-      console.log('[Quick Pay Save]', {
+      logger.log('[Quick Pay Save]', {
         pickerId: quickPayPickerId,
         amountPaid: amountClamped,
         remainingBalance,
       });
-      if (import.meta.env.DEV) console.log('[Harvest] Payment save success', { pickerId: quickPayPickerId, amount: amountClamped, collectionId: selectedCollectionId });
+      logger.log('[Harvest] Payment save success', { pickerId: quickPayPickerId, amount: amountClamped, collectionId: selectedCollectionId });
       toast({ title: 'Paid' });
       setQuickPayAmount('');
       const nextId = getNextQuickPayPickerId({

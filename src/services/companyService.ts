@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mirrorPublicProfileForClerkUser } from '@/lib/auth/tenantMembershipRecovery';
 import { db } from '@/lib/db';
+import { logger } from "@/lib/logger";
 
 export type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'enterprise';
 export type SubscriptionStatus = 'active' | 'expired' | 'grace' | 'paused';
@@ -190,7 +191,7 @@ export async function updateCompany(
   if (Object.keys(updates).length <= 1) return;
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[CompanyService/updateCompany] Payload', {
+    logger.log('[CompanyService/updateCompany] Payload', {
       schema: 'core',
       table: 'companies',
       companyId,
@@ -206,7 +207,7 @@ export async function updateCompany(
     .maybeSingle();
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[CompanyService/updateCompany] Supabase response', {
+    logger.log('[CompanyService/updateCompany] Supabase response', {
       data: updated,
       error,
     });

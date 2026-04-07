@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import type { Supplier } from '@/types';
+import { logger } from "@/lib/logger";
 
 const TABLE = 'suppliers';
 
@@ -144,7 +145,7 @@ async function updateSupplierRow(
 
 export async function listSuppliers(companyId: string): Promise<Supplier[]> {
   if (import.meta.env?.DEV) {
-    console.log('[suppliers] listSuppliers', { companyId, table: TABLE, select: '*' });
+    logger.log('[suppliers] listSuppliers', { companyId, table: TABLE, select: '*' });
   }
   const { data, error } = await supabase
     .from(TABLE)
@@ -152,7 +153,7 @@ export async function listSuppliers(companyId: string): Promise<Supplier[]> {
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
   if (import.meta.env?.DEV) {
-    console.log('[suppliers] listSuppliers response', {
+    logger.log('[suppliers] listSuppliers response', {
       table: TABLE,
       error,
       rows: Array.isArray(data) ? data.length : null,
@@ -196,7 +197,7 @@ export async function createSupplier(input: {
   if (rn) payload.review_notes = rn;
 
   if (import.meta.env?.DEV) {
-    console.log('[suppliers] createSupplier', { table: TABLE, payload });
+    logger.log('[suppliers] createSupplier', { table: TABLE, payload });
   }
 
   let data: DbRow;
@@ -224,7 +225,7 @@ export async function createSupplier(input: {
     throw error;
   }
   if (import.meta.env?.DEV) {
-    console.log('[suppliers] createSupplier response', { data });
+    logger.log('[suppliers] createSupplier response', { data });
   }
   const created = toSupplier(data);
   captureEvent(AnalyticsEvents.SUPPLIER_CREATED, {

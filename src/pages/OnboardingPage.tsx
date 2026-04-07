@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Onboarding: create company + membership + profile, start trial, then optional project (same NewProjectForm as Projects).
  */
@@ -239,7 +240,7 @@ export default function OnboardingPage() {
       });
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Onboarding] company_created', {
+        logger.log('[Onboarding] company_created', {
           companyId: newId,
           companyName: companyName.trim(),
           companyEmail: normalizedCompanyEmail || null,
@@ -317,7 +318,7 @@ export default function OnboardingPage() {
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Onboarding] handoff_to_dashboard', { companyId, companyName: companyName.trim() });
+      logger.log('[Onboarding] handoff_to_dashboard', { companyId, companyName: companyName.trim() });
     }
     try {
       await syncTenantCompanyFromServer();
@@ -357,7 +358,7 @@ export default function OnboardingPage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Onboarding] subscription_initialized', { companyId });
+        logger.log('[Onboarding] subscription_initialized', { companyId });
       }
 
       captureEvent(AnalyticsEvents.TRIAL_STARTED, {

@@ -70,6 +70,7 @@ import {
 import { setCompanyPaidAccess } from '@/services/developerService';
 import { useSearchParams } from 'react-router-dom';
 import { useNow } from '@/hooks/useNow';
+import { logger } from "@/lib/logger";
 
 type LatestSubscriptionPayment = {
   id?: string;
@@ -368,7 +369,7 @@ export default function DeveloperCompaniesPage() {
               : 'Company and linked data have been removed.',
         });
         // eslint-disable-next-line no-console
-        console.log('[DevDelete] Company cleanup counts:', result.deleted_counts ?? null);
+        logger.log('[DevDelete] Company cleanup counts:', result.deleted_counts ?? null);
         queryClient.invalidateQueries({ queryKey: ['developer', 'companies'] });
         setDeleteModal({ open: false, company: null, confirmValue: '' });
       } else {
@@ -439,7 +440,7 @@ export default function DeveloperCompaniesPage() {
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[DevApproval] mutation success', {
+        logger.log('[DevApproval] mutation success', {
           route: location.pathname,
           pathBefore,
           isDeveloper,
@@ -468,7 +469,7 @@ export default function DeveloperCompaniesPage() {
       if (import.meta.env.DEV) {
         const pathAfter = typeof window !== 'undefined' ? window.location.pathname : location.pathname;
         // eslint-disable-next-line no-console
-        console.log('[DevApproval] after list invalidate', {
+        logger.log('[DevApproval] after list invalidate', {
           pathBefore,
           pathAfter,
           isDeveloper,
@@ -483,7 +484,7 @@ export default function DeveloperCompaniesPage() {
 
       const emailLookupCompanyId = rpcResult.company_id ?? params.companyId;
       // eslint-disable-next-line no-console
-      console.log('Approval email companyId:', emailLookupCompanyId);
+      logger.log('Approval email companyId:', emailLookupCompanyId);
 
       const token = await getSupabaseAccessToken();
       if (!token) {
@@ -513,7 +514,7 @@ export default function DeveloperCompaniesPage() {
       }
 
       // eslint-disable-next-line no-console
-      console.log('[FarmVault] workspace email will send', {
+      logger.log('[FarmVault] workspace email will send', {
         source: resolved.source,
         companyName: resolved.companyName,
       });
@@ -526,7 +527,7 @@ export default function DeveloperCompaniesPage() {
           : `${window.location.origin}/dashboard`;
 
       // eslint-disable-next-line no-console
-      console.log('Approval email payload', { to, companyName, dashboardUrl });
+      logger.log('Approval email payload', { to, companyName, dashboardUrl });
 
       const notify = await invokeNotifyCompanyWorkspaceReady({
         to,

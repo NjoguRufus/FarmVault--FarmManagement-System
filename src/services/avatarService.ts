@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * FarmVault avatar: custom uploads stored in Supabase Storage,
  * URL saved to core.profiles.avatar_url.
@@ -48,7 +49,7 @@ export async function uploadAvatar(params: UploadAvatarParams): Promise<UploadAv
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload/profile] Uploading avatar', {
+    logger.log('[AvatarUpload/profile] Uploading avatar', {
       bucket: AVATARS_BUCKET,
       path,
       size: file.size,
@@ -80,7 +81,7 @@ export async function uploadAvatar(params: UploadAvatarParams): Promise<UploadAv
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload/profile] Supabase update response', {
+    logger.log('[AvatarUpload/profile] Supabase update response', {
       data: updatedRow,
       error: updateError,
     });
@@ -122,7 +123,7 @@ export async function uploadEmployeeAvatar(params: UploadEmployeeAvatarParams): 
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload] selected file', {
+    logger.log('[AvatarUpload] selected file', {
       name: file.name,
       size: file.size,
       type: file.type,
@@ -130,7 +131,7 @@ export async function uploadEmployeeAvatar(params: UploadEmployeeAvatarParams): 
       employeeId,
     });
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload] uploading to storage', { bucket: AVATARS_BUCKET, path });
+    logger.log('[AvatarUpload] uploading to storage', { bucket: AVATARS_BUCKET, path });
   }
 
   const { error: uploadError } = await supabase.storage
@@ -150,7 +151,7 @@ export async function uploadEmployeeAvatar(params: UploadEmployeeAvatarParams): 
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload] upload success', { path, url });
+    logger.log('[AvatarUpload] upload success', { path, url });
   }
 
   const { error: updateError } = await db
@@ -166,7 +167,7 @@ export async function uploadEmployeeAvatar(params: UploadEmployeeAvatarParams): 
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload] saved avatar_url', { companyId, employeeId, url });
+    logger.log('[AvatarUpload] saved avatar_url', { companyId, employeeId, url });
   }
 
   return { url, path };
@@ -191,7 +192,7 @@ export async function clearEmployeeAvatar(companyId: string, employeeId: string)
 export async function clearAvatar(clerkUserId: string): Promise<void> {
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload/profile] Clearing avatar', {
+    logger.log('[AvatarUpload/profile] Clearing avatar', {
       schema: 'core',
       table: 'profiles',
       where: { clerk_user_id: clerkUserId },
@@ -209,7 +210,7 @@ export async function clearAvatar(clerkUserId: string): Promise<void> {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[AvatarUpload/profile] Clear avatar response', {
+    logger.log('[AvatarUpload/profile] Clear avatar response', {
       data,
       error,
     });

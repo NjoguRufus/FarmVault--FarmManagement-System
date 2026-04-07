@@ -33,6 +33,7 @@ import {
   repairProfileActiveCompany,
 } from '@/lib/auth/tenantMembershipRecovery';
 import { fetchPlatformUserProfile } from '@/lib/auth/fetchPlatformUserProfile';
+import { logger } from "@/lib/logger";
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -389,7 +390,7 @@ function buildEffectivePermissions(
   if (isCompanyAdmin) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Auth] buildEffectivePermissions: company-admin → full access', {
+      logger.log('[Auth] buildEffectivePermissions: company-admin → full access', {
         uid: user.id,
         role: user.role,
         hasEmployeeProfile: !!employeeProfile,
@@ -453,7 +454,7 @@ function buildEffectiveAccess(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Auth] buildEffectiveAccess', {
+    logger.log('[Auth] buildEffectiveAccess', {
       uid: user.id,
       role: user.role,
       isDeveloper,
@@ -856,7 +857,7 @@ export function AuthProvider({
 
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Developer session', {
+            logger.log('[Auth] Developer session', {
               uid: devUser.id,
               email: devUser.email,
               isDeveloper: true,
@@ -977,7 +978,7 @@ export function AuthProvider({
             }
           } else if (import.meta.env.DEV && resolvedProfile.action === 'merged_from_email') {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
+            logger.log('[Auth] Merged platform profile from normalized email to current Clerk user', {
               clerk_user_id: resolvedProfile.clerk_user_id,
             });
           }
@@ -1001,7 +1002,7 @@ export function AuthProvider({
 
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] bootstrap access (no profile yet)', {
+            logger.log('[Auth] bootstrap access (no profile yet)', {
               profile: null,
               companyMembership,
               ambassadorRole,
@@ -1147,7 +1148,7 @@ export function AuthProvider({
                 contextRole = pickedCompany.role;
                 if (import.meta.env.DEV) {
                   // eslint-disable-next-line no-console
-                  console.log('[Auth] Repaired context: previous company deleted, switched membership', {
+                  logger.log('[Auth] Repaired context: previous company deleted, switched membership', {
                     uid: userId,
                     companyId: contextCompanyId,
                     role: contextRole,
@@ -1242,7 +1243,7 @@ export function AuthProvider({
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[Auth] current_context', {
+          logger.log('[Auth] current_context', {
             uid: userId,
             company_id: contextCompanyId,
             role: contextRole,
@@ -1256,7 +1257,7 @@ export function AuthProvider({
           const { data: ensureData, error: ensureError } = await supabase.rpc('ensure_current_membership');
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Membership ensure result (pre-link)', {
+            logger.log('[Auth] Membership ensure result (pre-link)', {
               error: ensureError,
               data: ensureData,
             });
@@ -1317,7 +1318,7 @@ export function AuthProvider({
               });
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
-                console.log('[Auth] Employee invite activation matched', {
+                logger.log('[Auth] Employee invite activation matched', {
                   company_id: linkResult.company_id,
                   employee_id: linkResult.employee_id,
                   role: linkResult.role,
@@ -1345,7 +1346,7 @@ export function AuthProvider({
                   .eq('clerk_user_id', userId);
                 if (import.meta.env.DEV) {
                   // eslint-disable-next-line no-console
-                  console.log('[Auth] Active company set from RPC-activated employee', {
+                  logger.log('[Auth] Active company set from RPC-activated employee', {
                     clerk_user_id: userId,
                     companyId: effectiveCompanyId,
                     error: profileUpdateError ?? null,
@@ -1355,7 +1356,7 @@ export function AuthProvider({
                   const { data: ensureAfterData, error: ensureAfterError } = await supabase.rpc('ensure_current_membership');
                   if (import.meta.env.DEV) {
                     // eslint-disable-next-line no-console
-                    console.log('[Auth] Membership ensure result (post-activation)', {
+                    logger.log('[Auth] Membership ensure result (post-activation)', {
                       error: ensureAfterError,
                       data: ensureAfterData,
                       companyId: effectiveCompanyId,
@@ -1376,7 +1377,7 @@ export function AuthProvider({
           employeeLinkingSkipped = true;
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] SKIPPED employee invite activation (user is company admin)', {
+            logger.log('[Auth] SKIPPED employee invite activation (user is company admin)', {
               uid: userId,
               contextRole,
               normalizedRole,
@@ -1416,7 +1417,7 @@ export function AuthProvider({
                 ? ambassadorAllowsNoCompany
                 : await getAmbassadorAccessThisBootstrap();
           // eslint-disable-next-line no-console
-          console.log({
+          logger.log({
             profile: hasCoreProfile,
             companyMembership: { company_id: contextCompanyId, role: contextRole },
             ambassadorRole: ambassadorRoleForLog,
@@ -1426,7 +1427,7 @@ export function AuthProvider({
         if (needsAmbassadorCheck && ambassadorAllowsNoCompany) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Farm setup incomplete but ambassador row exists — skip forced onboarding', {
+            logger.log('[Auth] Farm setup incomplete but ambassador row exists — skip forced onboarding', {
               uid: userId,
             });
           }
@@ -1445,7 +1446,7 @@ export function AuthProvider({
         if (setupIncompleteFlag && !hasEffectiveCompany) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Owner onboarding path (no company, no invite/membership match)', {
+            logger.log('[Auth] Owner onboarding path (no company, no invite/membership match)', {
               uid: userId,
               email: fallbackEmail,
               contextCompanyId,
@@ -1482,7 +1483,7 @@ export function AuthProvider({
           // For company admins, we may still want their display name from profiles but NOT their employee role
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] SKIPPED employee profile loading for routing (user is company admin)', {
+            logger.log('[Auth] SKIPPED employee profile loading for routing (user is company admin)', {
               uid: userId,
               role: normalizedRole,
             });
@@ -1493,24 +1494,24 @@ export function AuthProvider({
         if (import.meta.env.DEV) {
           if (employeeFromRpc && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Redirecting employee to /dashboard (invite matched via RPC)');
+            logger.log('[Auth] Redirecting employee to /dashboard (invite matched via RPC)');
           } else if (employee && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Employee session path', {
+            logger.log('[Auth] Employee session path', {
               uid: userId,
               employeeId: employee.id,
               companyId: mappedWithCompany.companyId,
             });
           } else if (isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Company admin session path → /dashboard', {
+            logger.log('[Auth] Company admin session path → /dashboard', {
               uid: userId,
               companyId: mappedWithCompany.companyId,
               role: mappedWithCompany.role,
             });
           } else {
             // eslint-disable-next-line no-console
-            console.log('[Auth] Normal sign-in path (no employee profile)', {
+            logger.log('[Auth] Normal sign-in path (no employee profile)', {
               uid: userId,
               companyId: mappedWithCompany.companyId,
               role: mappedWithCompany.role,
@@ -1552,7 +1553,7 @@ export function AuthProvider({
             { forceCompanyAdmin: isContextCompanyAdmin }
           );
           // eslint-disable-next-line no-console
-          console.log('[Auth] === ROLE RESOLUTION SUMMARY ===', {
+          logger.log('[Auth] === ROLE RESOLUTION SUMMARY ===', {
             currentUserId: userId,
             currentContextRole: contextRole,
             currentContextCompanyId: contextCompanyId,
@@ -1567,7 +1568,7 @@ export function AuthProvider({
               .slice(0, 8),
           });
           // eslint-disable-next-line no-console
-          console.log('[Employee Context] loaded employee', {
+          logger.log('[Employee Context] loaded employee', {
             employeeId: employee?.id ?? null,
             employeeFullName: employee?.fullName ?? null,
             employeeRole: employee?.employeeRole ?? employee?.role ?? null,
@@ -1575,7 +1576,7 @@ export function AuthProvider({
             usedForRouting: !isContextCompanyAdmin,
           });
           // eslint-disable-next-line no-console
-          console.log('[Employee Context] loaded permissions', {
+          logger.log('[Employee Context] loaded permissions', {
             rawPermissions: employee?.permissions ?? null,
             effectivePermissions,
             isFullAccess: isContextCompanyAdmin,
@@ -1844,7 +1845,7 @@ export function AuthProvider({
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Auth] syncTenantCompanyFromServer applied', {
+        logger.log('[Auth] syncTenantCompanyFromServer applied', {
           companyId: contextCompanyId,
           role: normalizedRole,
         });
@@ -1927,7 +1928,7 @@ export function AuthProvider({
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Auth] refreshAuthState applied', {
+        logger.log('[Auth] refreshAuthState applied', {
           uid: userId,
           isCompanyAdmin,
           employeeRole: employeeRoleForUser,
@@ -1985,7 +1986,7 @@ export function AuthProvider({
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Auth] forceDeveloperMode applied', {
+        logger.log('[Auth] forceDeveloperMode applied', {
           uid: devUser.id,
           landingPage: access.landingPage,
         });

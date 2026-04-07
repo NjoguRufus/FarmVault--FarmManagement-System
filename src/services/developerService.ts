@@ -1,5 +1,6 @@
 import { invokeNotifyCompanyTransactional } from '@/lib/email';
 import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
+import { logger } from "@/lib/logger";
 
 type ClerkJwtProvider = () => Promise<string | null>;
 import { sendCompanyPaymentReceipt } from '@/services/receiptsService';
@@ -196,7 +197,7 @@ export async function fetchDeveloperUsers(params?: {
   const { search = null, limit = 100, offset = 0 } = params ?? {};
 
   // eslint-disable-next-line no-console
-  console.log('[DevService] Calling list_users RPC...');
+  logger.log('[DevService] Calling list_users RPC...');
   const { data, error, status, statusText } = await supabase.rpc('list_users', {
     p_search: search,
     p_limit: limit,
@@ -204,7 +205,7 @@ export async function fetchDeveloperUsers(params?: {
   });
   
   // eslint-disable-next-line no-console
-  console.log('[DevService] list_users response:', { status, statusText, hasData: !!data, error });
+  logger.log('[DevService] list_users response:', { status, statusText, hasData: !!data, error });
   
   if (error) {
     // eslint-disable-next-line no-console
@@ -231,7 +232,7 @@ export async function fetchPendingPayments(): Promise<PendingPayment[]> {
   }
   const rows = (Array.isArray(data) ? data : []) as PendingPayment[];
   // eslint-disable-next-line no-console
-  console.log('[DevService] list_pending_payments:', {
+  logger.log('[DevService] list_pending_payments:', {
     count: rows.length,
     first: rows[0] ?? null,
   });
@@ -245,7 +246,7 @@ export async function approveSubscriptionPayment(
   getAccessToken: ClerkJwtProvider = getSupabaseAccessToken,
 ): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[Payment] Payment confirmed — ID:', id, '| company:', payment?.company_id ?? '(unknown)');
+  logger.log('[Payment] Payment confirmed — ID:', id, '| company:', payment?.company_id ?? '(unknown)');
 
   const { data: beforeRow, error: beforeErr } = await supabase
     .from('subscription_payments')
@@ -261,21 +262,21 @@ export async function approveSubscriptionPayment(
   const previousStatus = String(beforeRow.status ?? '').toLowerCase();
   if (previousStatus === 'approved') {
     // eslint-disable-next-line no-console
-    console.log('[DevService] approve_subscription_payment skipped — already approved', { paymentId: id });
+    logger.log('[DevService] approve_subscription_payment skipped — already approved', { paymentId: id });
     return;
   }
 
   // eslint-disable-next-line no-console
-  console.log('[DevService] approve_subscription_payment RPC (syncs company_subscriptions)', { paymentId: id });
+  logger.log('[DevService] approve_subscription_payment RPC (syncs company_subscriptions)', { paymentId: id });
   const { error } = await supabase.rpc('approve_subscription_payment', { _payment_id: id });
   if (error) {
     throw new Error(error.message ?? 'Failed to approve payment');
   }
   // eslint-disable-next-line no-console
-  console.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
+  logger.log('[DevService] approve_subscription_payment OK — tenant UI should refresh via realtime / next gate fetch');
 
   // eslint-disable-next-line no-console
-  console.log('PAYMENT APPROVED EMAIL (notify)', payment?.company_id ?? beforeRow?.company_id ?? '(unknown)');
+  logger.log('PAYMENT APPROVED EMAIL (notify)', payment?.company_id ?? beforeRow?.company_id ?? '(unknown)');
   try {
     await sendCompanyPaymentReceipt(id, getAccessToken, { sendEmail: false });
   } catch (e) {
@@ -464,7 +465,7 @@ export async function fetchSubscriptionAnalytics(params?: {
     : emptyPaymentStats;
 
   // eslint-disable-next-line no-console
-  console.log('[DevService] get_subscription_analytics parsed:', {
+  logger.log('[DevService] get_subscription_analytics parsed:', {
     rowCount: (payload.rows ?? []).length,
     payment_stats,
   });
@@ -526,7 +527,7 @@ export interface SeasonChallengesIntelligence {
 export async function getSeasonChallengesIntelligence(): Promise<SeasonChallengesIntelligence> {
   try {
     // eslint-disable-next-line no-console
-    console.log('[DevService] Querying season_challenges table...');
+    logger.log('[DevService] Querying season_challenges table...');
     const { data, error, status, statusText } = await supabase
       .from('season_challenges')
       .select('id, company_id, project_id, crop_type, title, severity, status, stage_name, created_at')
@@ -534,7 +535,7 @@ export async function getSeasonChallengesIntelligence(): Promise<SeasonChallenge
       .limit(500);
 
     // eslint-disable-next-line no-console
-    console.log('[DevService] season_challenges response:', { status, statusText, rowCount: data?.length ?? 0, error });
+    logger.log('[DevService] season_challenges response:', { status, statusText, rowCount: data?.length ?? 0, error });
 
     if (error || !data) {
       // eslint-disable-next-line no-console

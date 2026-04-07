@@ -61,6 +61,7 @@ import {
 } from '@/components/ui/command';
 import { format } from 'date-fns';
 import { toDate, formatDate } from '@/lib/dateUtils';
+import { logger } from "@/lib/logger";
 
 export default function OperationsPage() {
   const navigate = useNavigate();
@@ -187,7 +188,7 @@ export default function OperationsPage() {
 
   if (import.meta.env.DEV && typeof workCards !== 'undefined') {
     // Temporary debug: list query result length (remove after verifying create visibility)
-    console.log('[Operations] work cards list', { companyIdForCards, count: workCards?.length ?? 0, projectIds: workCards?.map((c) => c.projectId) });
+    logger.log('[Operations] work cards list', { companyIdForCards, count: workCards?.length ?? 0, projectIds: workCards?.map((c) => c.projectId) });
   }
   const workCardsForProject = useMemo(() => {
     if (!activeProject) return workCards;
@@ -362,7 +363,7 @@ export default function OperationsPage() {
       if (import.meta.env.DEV) {
         // Temporary debug: inspect createWorkCard payload shape.
         // eslint-disable-next-line no-console
-        console.log('[Operations] createWorkCard payload', {
+        logger.log('[Operations] createWorkCard payload', {
           companyId: selectedProjectForCard.companyId,
           projectId: selectedProjectForCard.id,
           stageId: stage?.id ?? null,
@@ -416,7 +417,7 @@ export default function OperationsPage() {
         actorUserName: user.name ?? user.email ?? null,
       });
       if (import.meta.env.DEV) {
-        console.log('[Operations] createWorkCard result', { id: created.id, projectId: created.projectId, status: created.status });
+        logger.log('[Operations] createWorkCard result', { id: created.id, projectId: created.projectId, status: created.status });
       }
       invalidateWorkCards();
       await refetchWorkCards();
@@ -571,7 +572,7 @@ export default function OperationsPage() {
       actorUserName: user.name ?? user.email ?? null,
     };
     if (import.meta.env.DEV) {
-      console.log('updateWorkCard payload', payload);
+      logger.log('updateWorkCard payload', payload);
     }
     setSavingCardUpdate(true);
     try {
