@@ -22,7 +22,6 @@ import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
-import { InstallFarmVault } from '@/components/pwa/InstallFarmVault';
 import { logger } from "@/lib/logger";
 
 interface StaffNavbarProps {
@@ -261,8 +260,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
               <span className="leading-tight">Pro trial ended — ask admin to pick a plan</span>
             </div>
           )}
-
-          <InstallFarmVault compact className="inline-flex shrink-0 max-w-[min(100%,9rem)]" />
 
           <FarmVaultUserMenu
             accountLabel="My Staff Account"

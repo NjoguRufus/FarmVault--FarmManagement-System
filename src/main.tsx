@@ -9,7 +9,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AmbassadorAccessProvider } from "@/contexts/AmbassadorAccessContext";
 import { ClerkAuthBridge } from "@/components/auth/ClerkAuthBridge";
 import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary";
-import { schedulePwaInstallDeferred } from "@/lib/pwa-install";
+import { initPwaInstall } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
 import { getAppEntryUrl, isMarketingProductionHost, isPwaEnabledHost } from "@/lib/urls/domains";
@@ -23,9 +23,9 @@ if (pwaHost) {
   initServiceWorkerPushFeedback();
 }
 
-// Defer PWA install listeners until after load so sign-up / Clerk are not affected by the same early errors.
+// Capture beforeinstallprompt as early as possible (same document load as the app shell).
 if (pwaHost) {
-  schedulePwaInstallDeferred();
+  initPwaInstall();
 }
 
 // Migrate/reset Quick Unlock state to fix broken states from previous versions

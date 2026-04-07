@@ -42,6 +42,7 @@ let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let installState: InstallState = "idle";
 let browserInfo: BrowserInfo | null = null;
 const listeners: Set<(state: InstallState) => void> = new Set();
+let pwaInstallInitRan = false;
 
 // Always log PWA install events for debugging (prefixed so users can filter)
 function log(...args: unknown[]) {
@@ -149,13 +150,16 @@ export function getBrowserInfo(): BrowserInfo {
 }
 
 /**
- * Initialize PWA install prompt capture.
- * Prefer {@link schedulePwaInstallDeferred} at app startup so auth/sign-up is not
- * contending with PWA listeners; may miss a very early `beforeinstallprompt` in edge cases.
+ * Initialize PWA install prompt capture. Call from app entry as early as possible
+ * (e.g. main.tsx) so `beforeinstallprompt` is not missed.
  */
 function initPwaInstallImpl(): void {
+  if (pwaInstallInitRan) {
+    return;
+  }
+
   log("=== Initializing PWA Install Prompt Capture ===");
-  
+
   // Detect browser capabilities first
   browserInfo = detectBrowser();
   log("Browser:", browserInfo.browser, "Platform:", browserInfo.platform);
@@ -166,79 +170,62 @@ function initPwaInstallImpl(): void {
   // Check if already installed
   const standalone = getIsStandalone();
   log("Already running as standalone PWA?", standalone);
-  
+
   if (standalone) {
     log("App is already installed (running standalone) - hiding install button");
     setState("installed");
+    pwaInstallInitRan = true;
     return;
   }
 
   // If browser doesn't support beforeinstallprompt, mark as unsupported immediately
-  // This allows the UI to show fallback instructions right away
   if (!browserInfo.supportsBeforeInstallPrompt) {
     log("Browser does NOT support beforeinstallprompt - will use fallback instructions");
     log("Fallback will be shown for:", browserInfo.browser, "on", browserInfo.platform);
     setState("unsupported");
+    pwaInstallInitRan = true;
     return;
   }
 
-  // For supported browsers, listen for the beforeinstallprompt event
-  log("Browser supports beforeinstallprompt - setting up event listener");
+  pwaInstallInitRan = true;
 
   const handleBeforeInstallPrompt = (event: Event) => {
     log("=== beforeinstallprompt EVENT FIRED ===");
-    log("Event object:", event);
-    event.preventDefault(); // Prevent Chrome's mini-infobar
+    event.preventDefault(); // Prevent browser mini-infobar; keep install for our button
     deferredPrompt = event as BeforeInstallPromptEvent;
-    log("Deferred prompt stored successfully");
-    log("deferredPrompt.prompt is function?", typeof deferredPrompt.prompt === "function");
+    log("Deferred prompt stored; prompt() callable:", typeof deferredPrompt.prompt === "function");
     setState("available");
-    log("Install button will now trigger native prompt");
   };
 
-  // Listen for successful installation
   const handleAppInstalled = () => {
     log("=== appinstalled EVENT FIRED ===");
-    log("App was successfully installed!");
     deferredPrompt = null;
     setState("installed");
   };
 
-  // Listen for display mode changes (e.g., user opens as standalone)
   const mediaQuery = window.matchMedia("(display-mode: standalone)");
   const handleDisplayModeChange = (e: MediaQueryListEvent) => {
-    log("Display mode changed, standalone:", e.matches);
     if (e.matches) {
       deferredPrompt = null;
       setState("installed");
     }
   };
 
+  // Register as early as possible so we never miss beforeinstallprompt
   window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
   window.addEventListener("appinstalled", handleAppInstalled);
   mediaQuery.addEventListener("change", handleDisplayModeChange);
 
-  log("Event listeners registered, waiting for beforeinstallprompt...");
-  log("Note: Event will NOT fire if:");
-  log("  - App is already installed");
-  log("  - Manifest is invalid or missing required fields");
-  log("  - Site isn't served over HTTPS (except localhost)");
-  log("  - Service worker isn't registered");
+  log("beforeinstallprompt listener registered (install UI will call prompt() + userChoice)");
 
-  // For supported browsers, log status after a delay to help debugging
-  // If we haven't received the event, PWA criteria may not be met
   setTimeout(() => {
     if (installState === "idle" && !deferredPrompt) {
-      log("=== TIMEOUT: No beforeinstallprompt received after 3s ===");
-      log("Current state:", installState);
-      log("Browser supports the event but PWA criteria may not be met");
-      log("Check: manifest, service worker, HTTPS, icons");
-      // Mark as unavailable - we expected the event but didn't get it
+      log("=== TIMEOUT: No beforeinstallprompt after 10s (manifest / SW / HTTPS) ===");
       setState("unavailable");
     } else if (deferredPrompt) {
-      log("Good: beforeinstallprompt was captured, native install available");
+      log("beforeinstallprompt captured — native install ready");
     }
-  }, 3000);
+  }, 10_000);
 }
 
 export function initPwaInstall(): void {
@@ -251,25 +238,17 @@ export function initPwaInstall(): void {
 }
 
 /**
- * Run PWA install capture after `load` + delay so sign-up and Clerk are not blocked by
- * the same turn as early PWA setup.
+ * @deprecated Prefer {@link initPwaInstall} on startup so `beforeinstallprompt` is not missed.
  */
 export function schedulePwaInstallDeferred(): void {
   if (typeof window === "undefined") return;
-  const run = () => {
-    setTimeout(() => {
-      try {
-        initPwaInstall();
-      } catch (error) {
-        console.warn("PWA init skipped:", error);
-      }
-    }, 1000);
-  };
-  if (document.readyState === "complete") {
-    run();
-  } else {
-    window.addEventListener("load", run);
-  }
+  queueMicrotask(() => {
+    try {
+      initPwaInstall();
+    } catch (error) {
+      console.warn("PWA init skipped:", error);
+    }
+  });
 }
 
 /**
@@ -288,30 +267,49 @@ export function getInstallState(): InstallState {
 
 /**
  * Check if native install prompt is available.
- * Returns true if we have a deferred prompt and can trigger it.
+ * True when we captured `beforeinstallprompt` and can call `prompt()`.
  */
 export function canInstall(): boolean {
   const hasPrompt = deferredPrompt !== null;
-  const canTrigger = hasPrompt && 
-    installState !== "installed" && 
-    installState !== "prompting" &&
-    installState !== "unavailable";
+  const canTrigger =
+    hasPrompt && installState !== "installed" && installState !== "prompting";
   log("canInstall check:", { hasPrompt, installState, canTrigger });
   return canTrigger;
 }
 
 /**
- * Check if fallback instructions should be shown.
- * This is true when:
- * - Browser doesn't support beforeinstallprompt (Safari, Firefox)
- * - OR PWA criteria aren't met (unavailable state)
- * - AND app is not already installed
+ * True when the browser did not give us a deferred install event (manual steps only).
+ * Hidden whenever native prompt is available (`deferredPrompt` set).
  */
 export function needsFallback(): boolean {
-  const needs = (installState === "unsupported" || installState === "unavailable") && 
-    !getIsStandalone();
+  if (getIsStandalone()) return false;
+  if (deferredPrompt !== null) return false;
+  const needs = installState === "unsupported" || installState === "unavailable";
   log("needsFallback check:", { installState, needs });
   return needs;
+}
+
+/**
+ * Wait until `beforeinstallprompt` is captured (e.g. user tapped Install before SW/manifest finished).
+ */
+export function waitForDeferredPrompt(maxMs: number): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  if (deferredPrompt) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const tick = () => {
+      if (deferredPrompt) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start >= maxMs) {
+        resolve(false);
+        return;
+      }
+      window.requestAnimationFrame(tick);
+    };
+    tick();
+  });
 }
 
 /**
