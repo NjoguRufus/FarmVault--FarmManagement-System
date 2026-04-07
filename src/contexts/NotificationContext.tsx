@@ -15,6 +15,8 @@ import {
   type NotificationPortalType,
 } from '@/lib/notificationBellSection';
 import { logger } from "@/lib/logger";
+import { db } from '@/lib/db';
+import { isUuid } from '@/lib/uuid';
 
 export type { NotificationPortalType };
 
@@ -46,6 +48,12 @@ interface AddNotificationOptions {
   dedupeKey?: string;
   /** When true, only append to the bell list (no toast, no sound). */
   silent?: boolean;
+  /** When set, mirrors `public.notifications.id` (UUID) for read sync + dedupe with Web Push. */
+  id?: string;
+  /** When mirroring DB rows; default false. */
+  read?: boolean;
+  /** Epoch ms when mirroring DB `created_at` (defaults to now). */
+  createdAt?: number;
 }
 
 interface NotificationContextValue {
@@ -206,8 +214,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         if (dedupeKeysRef.current.has(k)) return;
         dedupeKeysRef.current.add(k);
       }
-      const createdAt = Date.now();
-      const id = `n-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const createdAt = typeof n.createdAt === 'number' && Number.isFinite(n.createdAt) ? n.createdAt : Date.now();
+      const id = n.id ?? `n-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -227,7 +235,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           id,
           title: n.title,
           message: n.message,
-          read: false,
+          read: n.read ?? false,
           createdAt,
           toastType: n.toastType ?? 'info',
           type: n.type ?? 'company',
@@ -319,15 +327,27 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const onMsg = (event: MessageEvent) => {
       const d = event.data as {
         type?: string;
-        payload?: { title?: string; body?: string; url?: string; bellDedupe?: string };
+        payload?: {
+          title?: string;
+          body?: string;
+          url?: string;
+          bellDedupe?: string;
+          notification_id?: string;
+        };
       };
       if (d?.type !== SW_MSG_PUSH_BELL_SYNC || !d.payload) return;
       const p = d.payload;
       const url = typeof p.url === 'string' && p.url.startsWith('/') ? p.url : '/dashboard';
-      const dedupe =
-        typeof p.bellDedupe === 'string' && p.bellDedupe.length > 0
-          ? `web_push:${p.bellDedupe}`.slice(0, 160)
-          : `web_push:${Date.now()}`;
+      let dedupe: string;
+      if (typeof p.bellDedupe === 'string' && p.bellDedupe.startsWith('db_notification:')) {
+        dedupe = p.bellDedupe.slice(0, 160);
+      } else if (typeof p.notification_id === 'string' && p.notification_id.length > 0) {
+        dedupe = `db_notification:${p.notification_id}`;
+      } else if (typeof p.bellDedupe === 'string' && p.bellDedupe.length > 0) {
+        dedupe = `web_push:${p.bellDedupe}`.slice(0, 160);
+      } else {
+        dedupe = `web_push:${Date.now()}`;
+      }
       addNotificationRef.current({
         title: p.title?.trim() || 'FarmVault',
         message: typeof p.body === 'string' ? p.body : undefined,
@@ -343,19 +363,50 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return () => navigator.serviceWorker.removeEventListener('message', onMsg);
   }, [user?.id]);
 
-  const markAsRead = useCallback((id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  }, []);
+  const markAsRead = useCallback(
+    (id: string) => {
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      if (user?.id && isUuid(id)) {
+        void db
+          .public()
+          .from('notifications')
+          .update({ read: true })
+          .eq('id', id)
+          .eq('clerk_user_id', user.id);
+      }
+    },
+    [user?.id],
+  );
 
   const markAllRead = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, []);
+    if (user?.id) {
+      void db
+        .public()
+        .from('notifications')
+        .update({ read: true })
+        .eq('clerk_user_id', user.id)
+        .eq('read', false);
+    }
+  }, [user?.id]);
 
-  const markAllReadForSection = useCallback((portal: NotificationPortalType) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.type === portal ? { ...n, read: true } : n)),
-    );
-  }, []);
+  const markAllReadForSection = useCallback(
+    (portal: NotificationPortalType) => {
+      setNotifications((prev) =>
+        prev.map((n) => (n.type === portal ? { ...n, read: true } : n)),
+      );
+      if (user?.id) {
+        void db
+          .public()
+          .from('notifications')
+          .update({ read: true })
+          .eq('clerk_user_id', user.id)
+          .eq('read', false)
+          .eq('type', portal);
+      }
+    },
+    [user?.id],
+  );
 
   const unreadCount = useMemo(
     () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),

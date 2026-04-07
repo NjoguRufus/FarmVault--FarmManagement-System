@@ -87,11 +87,25 @@ Deno.serve(async (req: Request) => {
   }
 
   const sub = body.subscription;
+  const companyId =
+    typeof body.company_id === "string" && body.company_id.trim().length > 0
+      ? body.company_id.trim()
+      : null;
+  const role =
+    typeof body.role === "string" && body.role.trim().length > 0 ? body.role.trim() : null;
+  const deviceInfo =
+    body.device_info != null && typeof body.device_info === "object" && !Array.isArray(body.device_info)
+      ? body.device_info
+      : null;
+
   const row = {
     clerk_user_id: clerkUserId,
     endpoint: sub.endpoint,
     subscription_json: sub,
     updated_at: new Date().toISOString(),
+    company_id: companyId,
+    role,
+    device_info: deviceInfo,
   };
 
   const { error } = await admin.from("push_subscriptions").upsert(row, {

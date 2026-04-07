@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-r
 import { HelmetProvider } from "react-helmet-async";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { NotificationsTableBridge } from "@/components/notifications/NotificationsTableBridge";
 import { ConnectivityProvider } from "@/contexts/ConnectivityContext";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompanyDashboard } from "@/pages/dashboard/CompanyDashboard";
@@ -533,6 +534,7 @@ const App = () => (
       <ErrorBoundary>
         <ProjectProvider>
           <NotificationProvider>
+            <NotificationsTableBridge />
             <ConnectivityProvider>
               <TooltipProvider>
                 <Toaster />

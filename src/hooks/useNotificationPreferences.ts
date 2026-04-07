@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { NotificationSoundFile } from '@/services/notificationSoundService';
+import {
+  collectDeviceInfo,
+  isWebPushConfiguredInApp,
+  syncWebPushSubscriptionToServer,
+} from '@/services/webPushSubscriptionService';
 
 export interface NotificationPreferences {
   notificationsEnabled: boolean;
@@ -119,7 +124,7 @@ export function useNotificationPreferences() {
 
   const enableNotifications = useCallback(async (soundFile?: NotificationSoundFile) => {
     const permission = await requestBrowserPermission();
-    
+
     updatePreferences({
       notificationsEnabled: permission === 'granted',
       soundEnabled: true,
@@ -127,8 +132,16 @@ export function useNotificationPreferences() {
       promptSeen: true,
     });
 
+    if (permission === 'granted' && isWebPushConfiguredInApp() && !import.meta.env.DEV) {
+      void syncWebPushSubscriptionToServer({
+        companyId: user?.companyId ?? null,
+        role: user?.role ?? null,
+        deviceInfo: collectDeviceInfo(),
+      });
+    }
+
     return permission;
-  }, [requestBrowserPermission, updatePreferences, preferences.soundFile]);
+  }, [requestBrowserPermission, updatePreferences, preferences.soundFile, user?.companyId, user?.role]);
 
   const disableNotifications = useCallback(() => {
     updatePreferences({

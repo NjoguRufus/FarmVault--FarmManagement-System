@@ -3,7 +3,7 @@
  * Adds vibration pattern where supported. Icon uses FarmVault PWA assets.
  */
 
-/** Align with `src/sw.ts` push branding */
+/** Align with `src/service-worker.ts` push branding */
 const DEFAULT_ICON = '/icons/farmvault-192.png';
 const DEFAULT_BADGE = '/icons/badge.png';
 /** Noticeable but short vibration (ms). */

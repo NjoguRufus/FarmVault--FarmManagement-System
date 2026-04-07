@@ -69,6 +69,10 @@ verify_jwt = false
 [functions.admin-alert-push-notify]
 verify_jwt = false
 
+# DB trigger (pg_net) + NOTIFICATION_PUSH_SECRET; no Supabase JWT.
+[functions.notification-push-dispatch]
+verify_jwt = false
+
 [functions.notify-developer-transactional]
 verify_jwt = false
 
