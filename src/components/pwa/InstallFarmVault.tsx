@@ -23,6 +23,7 @@ import {
 import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { isPwaEnabledHost } from "@/lib/urls/domains";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -35,7 +36,15 @@ interface InstallFarmVaultProps {
   compact?: boolean;
 }
 
-export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) {
+/** Install prompt + fallback UI; only rendered on app.farmvault.africa (and localhost dev). */
+export function InstallFarmVault(props: InstallFarmVaultProps) {
+  if (!isPwaEnabledHost()) {
+    return null;
+  }
+  return <InstallFarmVaultInner {...props} />;
+}
+
+function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
   const { 
     canInstall, 
@@ -149,8 +158,8 @@ export function InstallFarmVault({ className, compact }: InstallFarmVaultProps) 
           </>
         ) : (
           <>
-            <Download className="h-4 w-4 mr-2" />
-            Install FarmVault
+            <            Download className="h-4 w-4 mr-2" />
+            Install App
           </>
         )}
       </Button>

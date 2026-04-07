@@ -31,6 +31,11 @@ export default defineConfig(({ mode }) => ({
       srcDir: "src",
       filename: "service-worker.ts",
       registerType: "autoUpdate",
+      /** Registration is done in main.tsx via virtual:pwa-register (gated by host). */
+      injectRegister: false,
+      /** Web manifest lives in public/manifest.json; injected only on app.farmvault.africa (see index.html). */
+      manifest: false,
+      includeManifestIcons: false,
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2,mp3,wav}"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
@@ -41,6 +46,7 @@ export default defineConfig(({ mode }) => ({
         "placeholder.svg",
         "farm-background-desktop.jpg",
         "farm-backgroundmobile.jpg",
+        "manifest.json",
         "icons/icon-192.png",
         "icons/icon-512.png",
         "icons/icon-512-maskable.png",
@@ -48,32 +54,6 @@ export default defineConfig(({ mode }) => ({
         "icons/farmvault-512.png",
         "icons/badge.png",
       ],
-      manifest: {
-        name: "FarmVault",
-        short_name: "FarmVault",
-        description: "FarmVault smart farm management app",
-        theme_color: "#0b1d14",
-        background_color: "#0b1d14",
-        display: "standalone",
-        start_url: "/",
-        scope: "/",
-        icons: [
-          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-          {
-            src: "/icons/icon-192.png",
-            sizes: "192x192",
-            type: "image/png",
-            purpose: "maskable",
-          },
-          {
-            src: "/icons/icon-512-maskable.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "maskable",
-          },
-        ],
-      },
       devOptions: {
         enabled: false,
         type: "module",

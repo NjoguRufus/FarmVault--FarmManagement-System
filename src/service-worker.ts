@@ -1,4 +1,8 @@
 /// <reference lib="webworker" />
+/**
+ * Served only from https://app.farmvault.africa/ (see main.tsx + vite-plugin-pwa).
+ * Default scope is this origin’s root, so it never controls farmvault.africa marketing pages.
+ */
 import { clientsClaim } from "workbox-core";
 import { precacheAndRoute, createHandlerBoundToURL } from "workbox-precaching";
 import { registerRoute, NavigationRoute } from "workbox-routing";
@@ -69,6 +73,26 @@ const FARMVAULT_NOTIFY_TITLE = "FarmVault";
 const FARMVAULT_NOTIFY_ICON = "/icons/farmvault-192.png";
 const FARMVAULT_NOTIFY_BADGE = "/icons/badge.png";
 const FARMVAULT_NOTIFY_TAG = "farmvault";
+
+/** Chrome/Android show generic icons when relative URLs fail to resolve from the SW scope — always use absolute app-origin URLs. */
+function assetUrl(path: string): string {
+  const p = path.trim().startsWith("/") ? path.trim() : `/${path.trim()}`;
+  return new URL(p, self.location.origin).href;
+}
+
+/**
+ * Tray title is always {@link FARMVAULT_NOTIFY_TITLE}. Payload `title` is the DB headline (e.g. "Low stock alert");
+ * `body` is the message — combined so the user sees FarmVault-branded alerts, not a raw site title.
+ */
+function buildBrandedNotificationBody(data: PushData, fallbackBody: string): string {
+  const rawTitle = typeof data.title === "string" ? data.title.trim() : "";
+  const rawBody = typeof data.body === "string" ? data.body.trim() : "";
+  const headline = rawTitle && rawTitle !== FARMVAULT_NOTIFY_TITLE ? rawTitle : "";
+  if (headline && rawBody) return `${headline} — ${rawBody}`;
+  if (headline) return headline;
+  if (rawBody) return rawBody;
+  return fallbackBody;
+}
 
 function vibratePatternForPushType(type: string | undefined): number[] {
   switch (type) {
@@ -149,10 +173,15 @@ self.addEventListener("push", (event: PushEvent) => {
   const msgType = data.type ?? "system_alert";
   const vibrate = vibratePatternForPushType(msgType);
 
+  // Required: every push must show a user-visible notification (userVisibleOnly subscription) or the browser may drop the event.
   event.waitUntil(
     (async () => {
-      const title = (typeof data.title === "string" && data.title.trim()) || FARMVAULT_NOTIFY_TITLE;
-      const body = data.body ?? fallback.body!;
+      const displayTitle = FARMVAULT_NOTIFY_TITLE;
+      const bodyText = buildBrandedNotificationBody(data, fallback.body!);
+      const headlineForBell =
+        typeof data.title === "string" && data.title.trim() && data.title.trim() !== FARMVAULT_NOTIFY_TITLE
+          ? data.title.trim()
+          : displayTitle;
       const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/dashboard";
       const tag = (typeof data.tag === "string" && data.tag.trim()) || FARMVAULT_NOTIFY_TAG;
       const rawNid = typeof data.notification_id === "string" ? data.notification_id.trim() : "";
@@ -161,9 +190,11 @@ self.addEventListener("push", (event: PushEvent) => {
         ? `db_notification:${nid}`
         : tag.length > 0
           ? `web_push:${tag}`
-          : `${msgType}:${body.slice(0, 48)}`;
-      const icon = (typeof data.icon === "string" && data.icon.trim()) || FARMVAULT_NOTIFY_ICON;
-      const badge = (typeof data.badge === "string" && data.badge.trim()) || FARMVAULT_NOTIFY_BADGE;
+          : `${msgType}:${bodyText.slice(0, 48)}`;
+      const iconPath = (typeof data.icon === "string" && data.icon.trim()) || FARMVAULT_NOTIFY_ICON;
+      const badgePath = (typeof data.badge === "string" && data.badge.trim()) || FARMVAULT_NOTIFY_BADGE;
+      const icon = assetUrl(iconPath);
+      const badge = assetUrl(badgePath);
       const tsSec = typeof data.ts === "number" && Number.isFinite(data.ts) ? data.ts : Math.floor(Date.now() / 1000);
 
       if (await hasVisibleClientOnPath(url)) {
@@ -177,8 +208,8 @@ self.addEventListener("push", (event: PushEvent) => {
         (c as WindowClient).postMessage({
           type: "FARMVAULT_PUSH_BELL_SYNC",
           payload: {
-            title,
-            body,
+            title: headlineForBell,
+            body: bodyText,
             url,
             bellDedupe,
             notification_id: nid || undefined,
@@ -186,14 +217,15 @@ self.addEventListener("push", (event: PushEvent) => {
         });
       }
 
-      await self.registration.showNotification(title, {
-        body,
+      await self.registration.showNotification(displayTitle, {
+        body: bodyText,
         icon,
         badge,
         tag: nid ? `fv-${nid}` : tag,
         renotify: true,
         vibrate,
         timestamp: tsSec * 1000,
+        silent: false,
         data: {
           url,
           type: msgType,
@@ -228,7 +260,7 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
         : `click_${Date.now()}`;
   const bellPayload = {
     title: n.title || FARMVAULT_NOTIFY_TITLE,
-    body: n.body || undefined,
+    body: typeof n.body === "string" && n.body.length > 0 ? n.body : undefined,
     url: path,
     bellDedupe,
     notification_id: nid || undefined,
