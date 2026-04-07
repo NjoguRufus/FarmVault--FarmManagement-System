@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { db, requireCompanyId } from '@/lib/db';
 import type { CropStage, Project } from '@/types';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 
 type DbProjectRow = {
   id: string;
@@ -535,6 +536,25 @@ export async function completeProjectStageAndAdvanceNext(params: {
       endDate: params.next.endDate,
       isCurrent: true,
     });
+  }
+
+  try {
+    if (typeof window !== 'undefined') {
+      const refreshed = await listProjectStages(params.projectId);
+      const cur = refreshed.find((s) => s.status === 'in-progress');
+      if (cur) {
+        enqueueUnifiedNotification({
+          tier: 'insights',
+          kind: 'insight_crop_stage',
+          title: 'Crop stage updated',
+          body: `Current stage: ${cur.stageName}.`,
+          path: '/crop-stages',
+          toastType: 'info',
+        });
+      }
+    }
+  } catch {
+    /* non-fatal */
   }
 }
 

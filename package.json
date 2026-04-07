@@ -8,7 +8,10 @@
     "generate:sitemap": "node scripts/generate-sitemap.mjs",
     "generate:email-qr": "node scripts/generate-email-branded-qr.mjs",
     "generate:webp": "node scripts/generate-webp.mjs",
-    "prebuild": "npm run generate:sitemap",
+    "generate:vapid": "node scripts/generate-vapid-keys.mjs",
+    "generate:push-icons": "node scripts/generate-push-brand-icons.mjs",
+    "generate:push-sound": "node scripts/generate-push-notification-sound.mjs",
+    "prebuild": "npm run generate:sitemap && npm run generate:push-icons && npm run generate:push-sound",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
@@ -111,6 +114,13 @@
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
     "vite-plugin-pwa": "^0.20.5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "web-push": "^3.6.7",
+    "workbox-cacheable-response": "^7.3.0",
+    "workbox-core": "^7.3.0",
+    "workbox-expiration": "^7.3.0",
+    "workbox-precaching": "^7.3.0",
+    "workbox-routing": "^7.3.0",
+    "workbox-strategies": "^7.3.0"
   }
 }

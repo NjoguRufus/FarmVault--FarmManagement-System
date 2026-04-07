@@ -28,4 +28,6 @@ interface ImportMetaEnv {
   readonly VITE_PUBLIC_POSTHOG_HOST?: string;
   /** When "1" / "true", enables session replay with input masking (opt-in). */
   readonly VITE_PUBLIC_POSTHOG_SESSION_REPLAY?: string;
+  /** Web Push VAPID public key (URL-safe base64). Pair with Edge secrets VAPID_* and `npm run generate:vapid`. */
+  readonly VITE_VAPID_PUBLIC_KEY?: string;
 }

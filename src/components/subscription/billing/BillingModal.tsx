@@ -33,6 +33,7 @@ import { useBillingPrices } from '@/hooks/useBillingPrices';
 import { CLERK_JWT_TEMPLATE_SUPABASE, getAuthedSupabase } from '@/lib/supabase';
 import { initiateMpesaStkPush } from '@/services/mpesaStkService';
 import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
+import { dispatchUnifiedNotificationNow } from '@/services/unifiedNotificationPipeline';
 
 export interface BillingModalProps {
   open: boolean;
@@ -191,6 +192,15 @@ export function BillingModal({
     },
     onSuccess: async () => {
       setSuccess(true);
+      dispatchUnifiedNotificationNow({
+        tier: 'premium',
+        kind: 'premium_payment',
+        title: 'Payment submitted',
+        body: "We're verifying your payment. Your plan will activate shortly.",
+        path: '/billing',
+        toastType: 'success',
+        audiences: ['company'],
+      });
       if (companyId) {
         captureEvent(AnalyticsEvents.UPGRADE_COMPLETED, {
           company_id: companyId,
@@ -504,6 +514,15 @@ export function BillingModal({
       activationFallbackRef.current = null;
     }
     stopStkGatePoll();
+    dispatchUnifiedNotificationNow({
+      tier: 'premium',
+      kind: 'premium_subscription',
+      title: 'Subscription active',
+      body: 'Your FarmVault plan is now active.',
+      path: '/dashboard',
+      toastType: 'success',
+      audiences: ['company'],
+    });
     const cid = companyIdRef.current;
     if (cid) await refetchSubscriptionQueries(cid);
     // Let one paint cycle show updated plan in navbar before unmounting checkout.

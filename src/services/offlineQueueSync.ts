@@ -5,6 +5,7 @@
  */
 import { db } from '@/lib/db';
 import type { OfflineQueueItem } from '@/lib/offlineQueue';
+import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 
 export async function processOfflineQueue(item: OfflineQueueItem): Promise<void> {
   const { type, payload } = item;
@@ -35,6 +36,16 @@ export async function processOfflineQueue(item: OfflineQueueItem): Promise<void>
       .single();
 
     if (error) throw error;
+    if (typeof window !== 'undefined') {
+      enqueueUnifiedNotification({
+        tier: 'activity',
+        kind: 'activity_harvest_recorded',
+        title: 'Harvest recorded',
+        body: `${kg} ${(payload.unit as string) || 'kg'} logged for intake.`,
+        path: '/harvest-collections',
+        toastType: 'success',
+      });
+    }
     return;
   }
 

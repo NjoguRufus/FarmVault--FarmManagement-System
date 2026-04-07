@@ -9,7 +9,10 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNotifications } from '@/contexts/NotificationContext';
+import {
+  dispatchUnifiedNotificationNow,
+  unifiedNotificationWouldDeliverToUser,
+} from '@/services/unifiedNotificationPipeline';
 import { playNotificationSound, preloadAllSounds } from '@/services/notificationSoundService';
 import type { NotificationSoundFile } from '@/services/notificationSoundService';
 import type { RealtimeChannel, RealtimePostgresInsertPayload } from '@supabase/supabase-js';
@@ -135,9 +138,17 @@ function saveProcessedIds(ids: Set<string>): void {
   }
 }
 
+function resolveAdminAlertPath(alert: AdminAlertRow): string {
+  const d = alert.detail_path?.trim();
+  if (d?.startsWith('/')) return d;
+  const m = (alert.module ?? '').toLowerCase();
+  if (m === 'inventory') return '/inventory';
+  if (m === 'operations' || m.includes('work')) return '/operations';
+  return '/dashboard';
+}
+
 export function useAdminAlertsRealtime() {
   const { user } = useAuth();
-  const { addNotification } = useNotifications();
   const channelRef = useRef<RealtimeChannel | null>(null);
   const processedIdsRef = useRef<Set<string>>(getProcessedIds());
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -160,7 +171,14 @@ export function useAdminAlertsRealtime() {
     };
   }, []);
   
-  const isAdminOrDeveloper = user?.role === 'company-admin' || user?.role === 'company_admin' || user?.role === 'developer';
+  /** Farm/workspace operators + platform dev — not field staff (`employee`). */
+  const receivesAdminAlertStream =
+    Boolean(user?.companyId) &&
+    (user?.role === 'company-admin' ||
+      user?.role === 'company_admin' ||
+      user?.role === 'manager' ||
+      user?.role === 'broker' ||
+      user?.role === 'developer');
   const companyId = user?.companyId;
   const userId = user?.id;
 
@@ -190,17 +208,6 @@ export function useAdminAlertsRealtime() {
         return;
       }
 
-      // Mark as processed
-      processedIdsRef.current.add(alert.id);
-      saveProcessedIds(processedIdsRef.current);
-
-      // Trim the set if it gets too large
-      if (processedIdsRef.current.size > 500) {
-        const idsArray = Array.from(processedIdsRef.current);
-        processedIdsRef.current = new Set(idsArray.slice(-250));
-        saveProcessedIds(processedIdsRef.current);
-      }
-
       console.log('[AdminAlertsRealtime] New alert received', {
         id: alert.id,
         module: alert.module,
@@ -211,12 +218,37 @@ export function useAdminAlertsRealtime() {
         source,
       });
 
-      // Create notification (skipSound=true because we handle sound playback here)
       const title = formatAlertTitle(alert);
       const message = formatAlertMessage(alert);
       const type = alert.severity === 'critical' ? 'error' : alert.severity === 'high' ? 'warning' : 'info';
 
-      addNotification({ title, message, type, skipSound: true });
+      const tier = alert.severity === 'critical' ? 'premium' : 'insights';
+      const kind =
+        alert.severity === 'critical' ? 'premium_critical_alert' : 'insight_admin_alert';
+
+      const unifiedPayload = {
+        tier,
+        kind,
+        title,
+        body: message,
+        path: resolveAdminAlertPath(alert),
+        toastType: type,
+        skipSound: true,
+      } as const;
+
+      if (!unifiedNotificationWouldDeliverToUser(unifiedPayload, user)) {
+        return;
+      }
+
+      processedIdsRef.current.add(alert.id);
+      saveProcessedIds(processedIdsRef.current);
+      if (processedIdsRef.current.size > 500) {
+        const idsArray = Array.from(processedIdsRef.current);
+        processedIdsRef.current = new Set(idsArray.slice(-250));
+        saveProcessedIds(processedIdsRef.current);
+      }
+
+      dispatchUnifiedNotificationNow(unifiedPayload);
 
       // Play sound based on user preferences
       const prefs = getNotificationPrefs(userId);
@@ -247,7 +279,7 @@ export function useAdminAlertsRealtime() {
         });
       }
     },
-    [addNotification, userId]
+    [userId, user]
   );
 
   const handleRealtimeAlert = useCallback(
@@ -323,9 +355,9 @@ export function useAdminAlertsRealtime() {
 
   // Set up real-time subscription
   useEffect(() => {
-    if (!isAdminOrDeveloper || !companyId) {
+    if (!receivesAdminAlertStream || !companyId) {
       console.log('[AdminAlertsRealtime] Not subscribing - conditions not met', {
-        isAdminOrDeveloper,
+        receivesAdminAlertStream,
         companyId,
         userRole: user?.role,
       });
@@ -388,7 +420,7 @@ export function useAdminAlertsRealtime() {
         pollIntervalRef.current = null;
       }
     };
-  }, [isAdminOrDeveloper, companyId, userId, user?.role, handleRealtimeAlert, pollForAlerts]);
+  }, [receivesAdminAlertStream, companyId, userId, user?.role, handleRealtimeAlert, pollForAlerts]);
 
   return { realtimeConnected };
 }

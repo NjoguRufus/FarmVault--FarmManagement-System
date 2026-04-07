@@ -4,7 +4,31 @@
  */
 
 import { db } from '@/lib/db';
+import { getSupabaseAccessToken } from '@/lib/supabase';
 import type { AdminAlertPayload, AlertSeverity } from '@/types/alerts';
+
+async function notifyAdminAlertPush(alertId: string): Promise<void> {
+  const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+  const apikey =
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim() ||
+    (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
+  if (!base || !apikey) return;
+  const token = await getSupabaseAccessToken();
+  if (!token) return;
+  try {
+    await fetch(`${base}/functions/v1/admin-alert-push-notify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        apikey,
+      },
+      body: JSON.stringify({ alertId }),
+    });
+  } catch {
+    /* non-fatal */
+  }
+}
 
 const STORAGE_KEY = 'farmvault:admin_alerts:v1';
 const MAX_STORED = 200;
@@ -64,6 +88,7 @@ export async function createAdminAlert(payload: AdminAlertPayload): Promise<Stor
       appendToLocalFallback(record);
     } else {
       console.log('[AdminAlert] Successfully inserted to admin_alerts', record.id);
+      void notifyAdminAlertPush(record.id);
     }
   } catch (e) {
     console.error('[AdminAlert] Exception during insert', e);

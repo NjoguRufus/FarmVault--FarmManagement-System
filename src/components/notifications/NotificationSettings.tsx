@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bell, Volume2, VolumeX, Play, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { Bell, Volume2, VolumeX, Play, AlertCircle, CheckCircle2, XCircle, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -9,6 +9,7 @@ import {
   testNotificationSound,
   type NotificationSoundFile 
 } from '@/services/notificationSoundService';
+import { isWebPushConfiguredInApp, syncWebPushSubscriptionToServer } from '@/services/webPushSubscriptionService';
 
 export function NotificationSettings() {
   const {
@@ -21,6 +22,13 @@ export function NotificationSettings() {
 
   const [playingSound, setPlayingSound] = useState<string | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushHint, setPushHint] = useState<string | null>(null);
+
+  const canRegisterDevicePush =
+    isWebPushConfiguredInApp() &&
+    !import.meta.env.DEV &&
+    isPermissionGranted;
 
   const handleTestSound = async (soundFile: NotificationSoundFile) => {
     setPlayingSound(soundFile);
@@ -116,6 +124,56 @@ export function NotificationSettings() {
             disabled={isPermissionBlocked}
           />
         </div>
+
+        {/* Web Push (VAPID) — production + HTTPS */}
+        {isWebPushConfiguredInApp() && (
+          <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Smartphone className="h-4 w-4 text-primary shrink-0" />
+              <p className="text-sm font-medium text-foreground">Phone &amp; desktop push</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Native tray notifications when the app is closed (Web Push, no Firebase). Uses the same schedule as
+              morning / evening / weekly messages, plus inventory alerts.
+            </p>
+            {import.meta.env.DEV && (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                Local dev unregisters the service worker; use a production build over HTTPS to test push.
+              </p>
+            )}
+            {canRegisterDevicePush && (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-fit"
+                  disabled={pushBusy}
+                  onClick={async () => {
+                    setPushHint(null);
+                    setPushBusy(true);
+                    try {
+                      const r = await syncWebPushSubscriptionToServer();
+                      setPushHint(r.ok ? 'This device is registered for push.' : (r.error ?? 'Registration failed.'));
+                    } finally {
+                      setPushBusy(false);
+                    }
+                  }}
+                >
+                  {pushBusy ? 'Registering…' : 'Register this device'}
+                </Button>
+                {pushHint && (
+                  <p className={cn('text-xs', pushHint.includes('failed') || pushHint.includes('not ') ? 'text-destructive' : 'text-emerald-600')}>
+                    {pushHint}
+                  </p>
+                )}
+              </>
+            )}
+            {!canRegisterDevicePush && isWebPushConfiguredInApp() && !import.meta.env.DEV && !isPermissionGranted && (
+              <p className="text-xs text-muted-foreground">Allow browser notifications above, then register this device.</p>
+            )}
+          </div>
+        )}
 
         {/* Sound Toggle */}
         <div className="flex items-center justify-between">

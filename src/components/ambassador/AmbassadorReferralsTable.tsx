@@ -72,18 +72,16 @@ export function AmbassadorReferralsTable({
   rows,
   loading,
   emptyMessage = "No referrals yet.",
+  /** When true, render only the scrollable table (for use inside a parent card with shared header/tabs). */
+  embedInPanel = false,
 }: {
   rows: AmbassadorReferralRow[];
   loading?: boolean;
   emptyMessage?: string;
+  embedInPanel?: boolean;
 }) {
-  return (
-    <div className="fv-card overflow-hidden rounded-xl border border-border/50 bg-card/60">
-      <div className="border-b border-border/50 px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">Referrals</h2>
-        <p className="text-xs text-muted-foreground mt-0.5">People referred through your code.</p>
-      </div>
-      <div className="max-h-[min(520px,55vh)] overflow-auto">
+  const tableBlock = (
+    <div className="max-h-[min(520px,55vh)] overflow-auto">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent border-border/50">
@@ -156,7 +154,20 @@ export function AmbassadorReferralsTable({
             )}
           </TableBody>
         </Table>
+    </div>
+  );
+
+  if (embedInPanel) {
+    return tableBlock;
+  }
+
+  return (
+    <div className="fv-card overflow-hidden rounded-xl border border-border/50 bg-card/60">
+      <div className="border-b border-border/50 px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">Referrals</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">People referred through your code.</p>
       </div>
+      {tableBlock}
     </div>
   );
 }

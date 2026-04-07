@@ -1,5 +1,6 @@
 import { db, requireCompanyId } from '@/lib/db';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 
 // New simplified status model: no approval workflow
 export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
@@ -452,6 +453,18 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
     project_id: input.projectId,
     module_name: 'operations',
   });
+  if (typeof window !== 'undefined') {
+    const when = input.plannedDate ? String(input.plannedDate) : 'the schedule';
+    enqueueUnifiedNotification({
+      tier: 'activity',
+      kind: 'staff_work_assigned',
+      title: 'Work assigned',
+      body: `${input.workTitle || 'New field task'} — planned for ${when}.`,
+      path: '/operations',
+      toastType: 'info',
+      audiences: ['company', 'staff'],
+    });
+  }
   return card;
 }
 
@@ -609,6 +622,18 @@ export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
     project_id: card.projectId ?? undefined,
     module_name: 'operations',
   });
+  if (typeof window !== 'undefined') {
+    const label = card.workTitle || card.title || 'Field work';
+    enqueueUnifiedNotification({
+      tier: 'activity',
+      kind: 'activity_operation_logged',
+      title: 'Operation logged',
+      body: `${label} recorded.`,
+      path: '/operations',
+      toastType: 'success',
+      audiences: ['company', 'staff'],
+    });
+  }
   return logged;
 }
 
@@ -770,6 +795,19 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
     userName: input.actorUserName,
     metadata: { amount: input.amount, method: input.method ?? 'cash' },
   });
+
+  if (typeof window !== 'undefined') {
+    const label = card.workTitle || card.title || 'Task';
+    enqueueUnifiedNotification({
+      tier: 'activity',
+      kind: 'activity_task_completed',
+      title: 'Task completed',
+      body: `${label} marked paid (KES ${input.amount.toLocaleString('en-KE')}).`,
+      path: '/operations',
+      toastType: 'success',
+      audiences: ['company', 'staff'],
+    });
+  }
 
   return mapRowToWorkCard(data);
 }

@@ -62,6 +62,13 @@ verify_jwt = false
 [functions.engagement-email-cron]
 verify_jwt = false
 
+# Clerk Bearer verified in function (same pattern as create-company-onboarding).
+[functions.sync-push-subscription]
+verify_jwt = false
+
+[functions.admin-alert-push-notify]
+verify_jwt = false
+
 [functions.notify-developer-transactional]
 verify_jwt = false
 
