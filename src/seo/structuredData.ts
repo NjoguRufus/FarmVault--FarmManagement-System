@@ -28,7 +28,7 @@ export interface SoftwareApplicationSchema {
   description: string;
   url: string;
   areaServed?: { "@type": "Country"; name: string };
-  offers?: { "@type": "Offer"; price: string; priceCurrency: string };
+  offers?: { "@type": "Offer"; price: string; priceCurrency: string; description?: string };
 }
 
 export interface ArticleSchema {
@@ -97,12 +97,17 @@ export function getSoftwareApplicationSchema(overrides?: Partial<SoftwareApplica
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: "FarmVault",
-    applicationCategory: "BusinessApplication",
+    applicationCategory: "Agriculture Software",
     operatingSystem: "Web",
     description: "FarmVault helps Kenyan farmers manage crops, budgets, inventory, expenses and harvest logistics in one intelligent farm management system.",
     url: BASE_URL,
     areaServed: { "@type": "Country", name: "Kenya" },
-    offers: { "@type": "Offer", price: "0", priceCurrency: "KES" },
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "KES",
+      description: "Free tier available; paid subscription plans priced in KES. See farmvault.africa/pricing for current tiers.",
+    },
     ...overrides,
   };
 }

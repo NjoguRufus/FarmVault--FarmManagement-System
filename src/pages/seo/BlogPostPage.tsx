@@ -5,6 +5,7 @@ import { SeoHead } from "@/seo/SeoHead";
 import { getArticleSchema, getBreadcrumbSchema } from "@/seo/structuredData";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getBlogPost } from "@/data/blogPosts";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 
 export default function BlogPostPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -67,8 +68,9 @@ export default function BlogPostPage() {
             </p>
           </div>
         )}
-        <footer className="mt-12 pt-8 border-t">
+        <footer className="mt-12 pt-8 border-t space-y-8">
           <Link to={SEO_ROUTES.blog} className="text-primary hover:underline">← Back to Blog</Link>
+          <SeoInternalLinks />
         </footer>
       </article>
     </SeoPageLayout>

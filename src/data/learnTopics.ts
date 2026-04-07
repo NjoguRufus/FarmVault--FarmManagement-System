@@ -364,7 +364,7 @@ const LEARN_BY_SLUG: Record<LearnTopicSlug, LearnTopicData> = {
     title: "Avocado farming management",
     metaDescription:
       "Avocado farm management in Kenya: orchard records, costs, and traceability. FarmVault for export-oriented growers.",
-    intro: `Kenya’s avocado sector rewards traceability, grade, and consistent supply. ${K}`,
+    intro: `Kenya's avocado sector rewards traceability, grade, and consistent supply. ${K}`,
     sections: [
       {
         title: "Orchard operations",

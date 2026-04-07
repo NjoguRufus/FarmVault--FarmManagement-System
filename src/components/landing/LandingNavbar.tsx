@@ -12,6 +12,8 @@ const navLinks = [
   { name: "Features", href: "/features", type: "route" },
   { name: "How It Works", href: "/#how-it-works", type: "anchor" },
   { name: "Pricing", href: "/pricing", type: "route" },
+  { name: "Learn", href: "/learn", type: "route" },
+  { name: "FAQ", href: "/faq", type: "route" },
   { name: "About", href: "/about", type: "route" },
   { name: "Blog", href: "/blog", type: "route" },
 ] as const;

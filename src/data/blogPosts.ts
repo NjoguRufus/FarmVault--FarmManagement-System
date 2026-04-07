@@ -134,6 +134,71 @@ export const BLOG_POSTS: Record<BlogSlug, BlogPost> = {
     description: "Climate smart agriculture in Kenya: how good records and farm management software support adaptation and resilience.",
     datePublished: "2024-07-20",
   },
+  "best-farm-management-software-kenya": {
+    slug: "best-farm-management-software-kenya",
+    title: "Best farm management software Kenya | What to compare in 2026",
+    description:
+      "How to choose farm management software in Kenya: crops, workers, harvest, KES pricing, and mobile use. Why teams pick FarmVault.",
+    datePublished: "2026-04-01",
+    dateModified: "2026-04-07",
+    content: `
+<p class="lead text-muted-foreground">Kenyan farms need software that matches horticulture and broadacre reality—not generic business tools with a farm label.</p>
+<h2>What “best” means on a Kenyan farm</h2>
+<p>Look for crop projects, harvest logging, expense tracking in <strong>KES</strong>, inventory, and reports that connect cost to yield. Mobile access for supervisors is non‑negotiable.</p>
+<h2>FarmVault checklist</h2>
+<ul>
+<li>Structured workers and harvest workflows</li>
+<li>Expenses tagged to projects</li>
+<li>Guides for <a href="/learn/farm-management">farm management</a> and <a href="/learn">Learn</a></li>
+</ul>
+<p>See <a href="/pricing">pricing</a>, <a href="/features">features</a>, and <a href="/farm-management-software-kenya">farm management software Kenya</a> for depth.</p>
+`,
+  },
+  "agriculture-software-africa": {
+    slug: "agriculture-software-africa",
+    title: "Agriculture software Africa | Kenya hub, East Africa scale",
+    description:
+      "Agriculture SaaS in Africa: why Kenya is the launchpad, what FarmVault covers today, and how records unlock finance and buyers.",
+    datePublished: "2026-04-02",
+    dateModified: "2026-04-07",
+    content: `
+<p>African agriculture is diverse, but good software starts with <strong>local currency</strong>, <strong>local crops</strong>, and <strong>field-first UX</strong>.</p>
+<h2>Kenya as the reference market</h2>
+<p>FarmVault is built around Kenyan supply chains and pricing, then extends to comparable systems across the continent.</p>
+<p>Read <a href="/agriculture-software-kenya">agriculture software Kenya</a> and the <a href="/blog/agricultural-management-software-africa">management software Africa</a> article for related context.</p>
+<h2>Explore</h2>
+<p><a href="/learn">Learn hub</a> · <a href="/pricing">Pricing</a> · <a href="/">Home</a></p>
+`,
+  },
+  "how-to-manage-farm-workers-kenya": {
+    slug: "how-to-manage-farm-workers-kenya",
+    title: "How to manage farm workers Kenya | Fair records & payouts",
+    description:
+      "Practical steps for farm worker management in Kenya: daily logs, piece rates, M‑Pesa reconciliation, and software that reduces disputes.",
+    datePublished: "2026-04-03",
+    dateModified: "2026-04-07",
+    content: `
+<p>Trust comes from <strong>transparent tallies</strong>. Train team leads, pick a unit (kg, crates, hours), and reconcile before pay day.</p>
+<h2>Software support</h2>
+<p>FarmVault links people to operations and harvest so you are not copying notebooks twice.</p>
+<p>Guides: <a href="/learn/farm-worker-management">Farm worker management</a>, <a href="/learn/how-to-track-farm-workers">How to track farm workers</a>.</p>
+<p><a href="/features">Features</a> · <a href="/faq">FAQ</a></p>
+`,
+  },
+  "farm-record-keeping-system-kenya": {
+    slug: "farm-record-keeping-system-kenya",
+    title: "Farm record keeping system Kenya | Digital register",
+    description:
+      "Build a farm record keeping system: inputs, labour, harvest, sales. Why Kenyan growers digitise and how FarmVault centralises history.",
+    datePublished: "2026-04-04",
+    dateModified: "2026-04-07",
+    content: `
+<p>Minimum viable records: <strong>planting</strong>, <strong>inputs</strong>, <strong>protection</strong>, <strong>harvest</strong>, <strong>sales</strong>, and <strong>labour payments</strong>.</p>
+<h2>Why digitise</h2>
+<p>Searchable history, easier audits, and faster answers when a buyer or bank asks for proof.</p>
+<p><a href="/learn/farm-record-keeping">Farm record keeping guide</a> · <a href="/learn">Learn</a> · <a href="/pricing">Pricing</a></p>
+`,
+  },
 };
 
 export const BLOG_SLUGS_LIST = Object.keys(BLOG_POSTS) as BlogSlug[];

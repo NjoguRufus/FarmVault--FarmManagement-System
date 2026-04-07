@@ -74,6 +74,12 @@ import FarmBudgetCalculatorPage from "@/pages/seo/calculators/FarmBudgetCalculat
 import YieldPerAcreCalculatorPage from "@/pages/seo/calculators/YieldPerAcreCalculatorPage";
 import BlogIndexPage from "@/pages/seo/BlogIndexPage";
 import BlogPostPage from "@/pages/seo/BlogPostPage";
+import LearnHubPage from "@/pages/learn/LearnHubPage";
+import FarmManagementLearnMasterPage from "@/pages/learn/FarmManagementLearnMasterPage";
+import LearnTopicPage from "@/pages/learn/LearnTopicPage";
+import FaqPage from "@/pages/FaqPage";
+import WhatIsFarmVaultPage from "@/pages/seo/WhatIsFarmVaultPage";
+import AgricultureSoftwareKenyaPage from "@/pages/seo/AgricultureSoftwareKenyaPage";
 import FeaturesPage from "@/pages/FeaturesPage";
 import PricingPage from "@/pages/PricingPage";
 import AboutPage from "@/pages/AboutPage";
@@ -268,6 +274,12 @@ const AppRoutesWithLock = () => (
       <Route path="/features" element={<FeaturesPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/about" element={<AboutPage />} />
+      <Route path="/faq" element={<FaqPage />} />
+      <Route path="/what-is-farmvault" element={<WhatIsFarmVaultPage />} />
+      <Route path="/agriculture-software-kenya" element={<AgricultureSoftwareKenyaPage />} />
+      <Route path="/learn/farm-management" element={<FarmManagementLearnMasterPage />} />
+      <Route path="/learn/:slug" element={<LearnTopicPage />} />
+      <Route path="/learn" element={<LearnHubPage />} />
       {/* Legal pages — no auth required */}
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />

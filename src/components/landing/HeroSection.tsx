@@ -25,7 +25,7 @@ export function HeroSection() {
             src="/landing/hero-bg.jpg"
             webpSrc="/landing/hero-bg.webp"
             priority
-            alt=""
+            alt="FarmVault farm management dashboard Kenya — hero background"
             className="w-full h-full object-cover scale-105"
           />
           <div className="absolute inset-0 gradient-hero-overlay" />
@@ -118,7 +118,7 @@ export function HeroSection() {
                 <div className="absolute inset-0 -m-6 rounded-full bg-gradient-to-tr from-gold/10 to-primary/10 blur-[40px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
                 <OptimizedImage
                   src="/landing/landing%20page%20mock.png"
-                  alt="FarmVault farm management system dashboard on desktop, tablet and mobile"
+                  alt="FarmVault farm management dashboard Kenya on desktop, tablet and mobile"
                   className="relative z-10 w-[20rem] md:w-[26rem] lg:w-[30rem] xl:w-[34rem] drop-shadow-2xl animate-float"
                 />
                 <motion.div
