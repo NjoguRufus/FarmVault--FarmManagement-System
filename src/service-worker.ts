@@ -239,6 +239,43 @@ self.addEventListener("push", (event: PushEvent) => {
   );
 });
 
+async function pickClientForNotificationTarget(targetHref: string): Promise<WindowClient | undefined> {
+  const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const origin = self.location.origin;
+  let targetPath = "/dashboard";
+  let targetSearch = "";
+  try {
+    const t = new URL(targetHref);
+    targetPath = t.pathname;
+    targetSearch = t.search;
+  } catch {
+    /* use defaults */
+  }
+
+  const sameOrigin: WindowClient[] = [];
+  for (const c of list) {
+    const client = c as WindowClient;
+    if (!client.url.startsWith(origin)) continue;
+    sameOrigin.push(client);
+  }
+  if (sameOrigin.length === 0) return undefined;
+
+  for (const client of sameOrigin) {
+    try {
+      const u = new URL(client.url);
+      if (u.pathname === targetPath && u.search === targetSearch) return client;
+    } catch {
+      /* next */
+    }
+  }
+
+  for (const client of sameOrigin) {
+    if (client.focused) return client;
+  }
+
+  return sameOrigin[0];
+}
+
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close();
   const n = event.notification;
@@ -268,20 +305,22 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
 
   event.waitUntil(
     (async () => {
-      const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      for (const rawClient of list) {
-        const client = rawClient as WindowClient;
-        if (!client.url.startsWith(self.location.origin)) continue;
+      const existing = await pickClientForNotificationTarget(targetUrl);
+      if (existing) {
         try {
-          if (typeof client.navigate === "function") {
-            await client.navigate(targetUrl);
+          if (typeof existing.navigate === "function") {
+            const cur = new URL(existing.url);
+            const want = new URL(targetUrl);
+            if (cur.pathname !== want.pathname || cur.search !== want.search) {
+              await existing.navigate(targetUrl);
+            }
           }
         } catch {
-          /* keep existing URL; user still gets sound + focus */
+          /* focus still useful */
         }
-        await client.focus();
-        client.postMessage(PUSH_UI_SOUND_MSG);
-        client.postMessage({ type: "FARMVAULT_PUSH_BELL_SYNC", payload: bellPayload });
+        await existing.focus();
+        existing.postMessage(PUSH_UI_SOUND_MSG);
+        existing.postMessage({ type: "FARMVAULT_PUSH_BELL_SYNC", payload: bellPayload });
         return;
       }
       const opened = await self.clients.openWindow(targetUrl);

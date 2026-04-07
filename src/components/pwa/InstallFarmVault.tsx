@@ -21,6 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { usePwaInstall } from "@/hooks/usePwaInstall";
+import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/pwa-install";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { isPwaEnabledHost } from "@/lib/urls/domains";
@@ -46,15 +47,7 @@ export function InstallFarmVault(props: InstallFarmVaultProps) {
 
 function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
-  const { 
-    canInstall, 
-    needsFallback,
-    isInstalled, 
-    installState, 
-    browserInfo,
-    promptInstall, 
-    getFallbackInstructions,
-  } = usePwaInstall();
+  const { isInstalled, installState, browserInfo, promptInstall, getFallbackInstructions } = usePwaInstall();
   const [showFallback, setShowFallback] = useState(false);
 
   const handleOpenApp = () => {
@@ -62,30 +55,32 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   };
 
   const handleInstallClick = async () => {
-    log("=== Install button clicked ===");
-    log("Current state:", { canInstall, needsFallback, isInstalled, installState, browserInfo });
-    
-    // If native install prompt is available, trigger it directly
-    if (canInstall) {
-      log("Native install prompt is available - triggering...");
+    log("=== Install FarmVault clicked ===", { nativeReady: nativeInstallReady(), installState, browserInfo });
+
+    // Never show the manual sheet while we are about to use the native dialog
+    setShowFallback(false);
+
+    let ready = nativeInstallReady();
+    if (!ready && browserInfo.supportsBeforeInstallPrompt && installState !== "unsupported") {
+      ready = await waitForDeferredPrompt(10_000);
+    }
+
+    if (ready) {
+      log("Opening native install prompt (prompt + userChoice)");
       const result = await promptInstall();
       log("Native install result:", result);
-      
+
       if (result === "accepted") {
         toast.success("FarmVault installed! Open it from your home screen.");
       } else if (result === "dismissed") {
         toast.info("Install cancelled. You can try again anytime.");
       } else if (result === "unavailable") {
-        log("Prompt became unavailable - showing fallback");
         setShowFallback(true);
       }
       return;
     }
 
-    // If browser doesn't support native install, show fallback instructions
-    log("Native install NOT available - showing fallback instructions");
-    log("Browser:", browserInfo.browser, "Platform:", browserInfo.platform);
-    log("Supports beforeinstallprompt:", browserInfo.supportsBeforeInstallPrompt);
+    log("No deferred install event — showing fallback instructions");
     setShowFallback(true);
   };
 
@@ -158,8 +153,8 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
           </>
         ) : (
           <>
-            <            Download className="h-4 w-4 mr-2" />
-            Install App
+            <Download className="h-4 w-4 mr-2" />
+            Install FarmVault
           </>
         )}
       </Button>

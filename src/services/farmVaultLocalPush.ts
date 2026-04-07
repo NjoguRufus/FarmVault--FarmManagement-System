@@ -56,16 +56,6 @@ export async function showFarmVaultLocalNotification(input: FarmVaultLocalNotifi
       return;
     }
   } catch {
-    /* fall through */
-  }
-
-  try {
-    new Notification(TRAY_TITLE, {
-      body,
-      icon: assetUrl(DEFAULT_ICON),
-      tag,
-    });
-  } catch {
-    /* ignore */
+    /* ignore — do not fall back to `new Notification()` (generic Chrome/site tray, no badge/vibrate) */
   }
 }

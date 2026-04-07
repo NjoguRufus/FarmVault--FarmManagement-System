@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { NotificationSoundFile } from '@/services/notificationSoundService';
 import {
@@ -78,10 +78,27 @@ export function useNotificationPreferences() {
   const [preferences, setPreferences] = useState<NotificationPreferences>(() => 
     loadPreferences(user?.id)
   );
+  const sessionPushSyncDone = useRef(false);
 
   useEffect(() => {
     setPreferences(loadPreferences(user?.id));
   }, [user?.id]);
+
+  /** Re-upsert Web Push subscription when the user already enabled notifications (new tab, SW update, PWA reinstall). */
+  useEffect(() => {
+    if (!user?.id || import.meta.env.DEV) return;
+    if (sessionPushSyncDone.current) return;
+    const prefs = loadPreferences(user.id);
+    if (!prefs.notificationsEnabled) return;
+    if (getBrowserPermission() !== 'granted') return;
+    if (!isWebPushConfiguredInApp()) return;
+    sessionPushSyncDone.current = true;
+    void syncWebPushSubscriptionToServer({
+      companyId: user.companyId ?? null,
+      role: user.role ?? null,
+      deviceInfo: collectDeviceInfo(),
+    });
+  }, [user?.id, user?.companyId, user?.role]);
 
   useEffect(() => {
     const handlePermissionChange = () => {
