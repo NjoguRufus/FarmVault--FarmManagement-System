@@ -4,9 +4,8 @@ import { SeoPageLayout } from "@/components/seo/SeoPageLayout";
 import { SeoHead } from "@/seo/SeoHead";
 import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 import { getArticleSchema, getBreadcrumbSchema } from "@/seo/structuredData";
-import { getLearnTopic } from "@/data/learnTopics";
+import { getLearnTopic, LEARN_HUB_PATH, LEARN_MASTER_PATH } from "@/data/learnTopics";
 import { SEO_ROUTES } from "@/seo/routes";
-import { LEARN_HUB_PATH, LEARN_MASTER_PATH } from "@/data/learnTopics";
 
 export default function LearnTopicPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -48,11 +47,11 @@ export default function LearnTopicPage() {
         <p className="text-lg text-muted-foreground leading-relaxed mb-10">{topic.intro}</p>
 
         <div className="prose prose-neutral dark:prose-invert max-w-none">
-          {topic.sections.map((section) => (
-            <section key={section.title}>
+          {topic.sections.map((section, si) => (
+            <section key={`${topic.slug}-${si}`}>
               <h2 className="text-2xl font-semibold text-foreground mt-10 mb-4 not-prose">{section.title}</h2>
-              {section.paragraphs.map((p) => (
-                <p key={p.slice(0, 40)} className="text-muted-foreground leading-relaxed">
+              {section.paragraphs.map((p, i) => (
+                <p key={i} className="text-muted-foreground leading-relaxed">
                   {p}
                 </p>
               ))}
@@ -61,8 +60,8 @@ export default function LearnTopicPage() {
 
           <section className="mt-10 rounded-xl border border-primary/20 bg-primary/5 p-6 not-prose">
             <h2 className="text-xl font-semibold text-foreground mb-3">How FarmVault helps</h2>
-            {topic.solutionParagraphs.map((p) => (
-              <p key={p.slice(0, 40)} className="text-muted-foreground leading-relaxed mb-3 last:mb-0">
+            {topic.solutionParagraphs.map((p, i) => (
+              <p key={i} className="text-muted-foreground leading-relaxed mb-3 last:mb-0">
                 {p}
               </p>
             ))}

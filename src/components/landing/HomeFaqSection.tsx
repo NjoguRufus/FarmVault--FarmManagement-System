@@ -5,29 +5,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-
-export const HOME_FAQ_ITEMS = [
-  {
-    question: "What is FarmVault?",
-    answer: "FarmVault is farm management software for Kenya. It helps you plan crops, track expenses, manage inventory and coordinate harvests in one system. Used by smallholders and growing agribusinesses across the country.",
-  },
-  {
-    question: "How much does FarmVault cost?",
-    answer: "FarmVault offers a free tier so you can start recording crops and expenses at no cost. Paid plans add more users and features. Pricing is in KES and designed for Kenyan farmers.",
-  },
-  {
-    question: "Can I use FarmVault on my phone?",
-    answer: "Yes. FarmVault works in your mobile browser and can be installed as an app. Log expenses in the field, check inventory and update crop stages from your phone.",
-  },
-  {
-    question: "Which crops does FarmVault support?",
-    answer: "FarmVault supports tomatoes, maize, rice, French beans, capsicum, watermelon and many other crops. You get crop-specific stages, common diseases and fertilizer guidance, plus budgeting and harvest tracking.",
-  },
-  {
-    question: "How do I start?",
-    answer: "Create your free account, add your first project and begin logging crops and expenses. You can also request a demo or call 0714 748299 to speak with the team.",
-  },
-];
+import { FAQ_PRIMARY_ITEMS } from "@/data/faqContent";
 
 export function HomeFaqSection() {
   return (
@@ -42,7 +20,7 @@ export function HomeFaqSection() {
           </p>
         </div>
         <Accordion type="single" collapsible className="max-w-3xl mx-auto">
-          {HOME_FAQ_ITEMS.map((item, i) => (
+          {FAQ_PRIMARY_ITEMS.map((item, i) => (
               <AccordionItem key={i} value={`home-faq-${i}`}>
                 <AccordionTrigger className="text-left font-medium">
                   {item.question}

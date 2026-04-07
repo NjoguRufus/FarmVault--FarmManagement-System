@@ -8,6 +8,7 @@ import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { Footer } from "@/components/landing/Footer";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getOrganizationSchema, getBreadcrumbSchema } from "@/seo/structuredData";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 
 const breadcrumbs = [
   { name: "Home", path: "/" },
@@ -303,6 +304,10 @@ export default function FeaturesPage() {
           </motion.div>
         </div>
       </section>
+
+      <div className="container mx-auto px-4 lg:px-8 max-w-4xl pb-8">
+        <SeoInternalLinks />
+      </div>
 
       <Footer />
     </div>

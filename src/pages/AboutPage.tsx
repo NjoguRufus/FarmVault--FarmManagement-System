@@ -8,6 +8,7 @@ import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { Footer } from "@/components/landing/Footer";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getOrganizationSchema, getBreadcrumbSchema } from "@/seo/structuredData";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 
 const breadcrumbs = [
   { name: "Home", path: "/" },
@@ -58,8 +59,8 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-background font-body">
       <SeoHead
-        title="About FarmVault - Smart Farm Management System for African Farmers"
-        description="FarmVault is built for African farmers. Learn about our mission to empower farmers with smart tools for crop management, expense tracking, and harvest sales."
+        title="About FarmVault | Kenyan agricultural software platform"
+        description="FarmVault is a Kenyan agricultural software platform helping farmers manage operations—workers, harvest, expenses, inventory, and analytics."
         canonical={SEO_ROUTES.about}
         jsonLd={[
           getOrganizationSchema(),
@@ -97,7 +98,7 @@ export default function AboutPage() {
               by People Who Care
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed">
-              FarmVault is the all-in-one farm management system designed for African agriculture. We combine crop planning, operations, inventory, expenses, and harvest sales in one place so you can focus on what matters most—growing.
+              FarmVault is a Kenyan agricultural software platform helping farmers manage operations. We combine crop planning, workers, harvest, inventory, expenses, and analytics so you can run the farm with clarity—from smallholdings to growing agribusinesses.
             </p>
           </motion.div>
         </div>
@@ -273,6 +274,10 @@ export default function AboutPage() {
           </motion.div>
         </div>
       </section>
+
+      <div className="container mx-auto px-4 lg:px-8 max-w-4xl pb-8">
+        <SeoInternalLinks />
+      </div>
 
       <Footer />
     </div>

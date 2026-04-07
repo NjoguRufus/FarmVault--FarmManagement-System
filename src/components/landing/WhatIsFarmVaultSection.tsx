@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function WhatIsFarmVaultSection() {
   return (
@@ -34,6 +34,49 @@ export function WhatIsFarmVaultSection() {
             <p className="text-lg text-muted-foreground leading-relaxed mb-8">
               From harvest collection and labor tracking to inventory and expenses, FarmVault gives farmers a clear view of what is happening on their farm every day.
             </p>
+
+            <div className="rounded-2xl border border-border bg-muted/20 p-6 md:p-8 mb-8 text-left">
+              <h3 className="text-lg font-semibold text-foreground mb-4">FarmVault helps farmers</h3>
+              <ul className="space-y-3 text-muted-foreground list-none m-0 p-0">
+                <li>
+                  <Link to="/learn/farm-worker-management" className="text-primary font-medium hover:underline">
+                    Track workers
+                  </Link>{" "}
+                  and field teams with clear records
+                </li>
+                <li>
+                  <Link to="/learn/harvest-tracking" className="text-primary font-medium hover:underline">
+                    Track harvest
+                  </Link>{" "}
+                  and collections against projects
+                </li>
+                <li>
+                  <Link to="/learn/farm-expense-management" className="text-primary font-medium hover:underline">
+                    Manage expenses
+                  </Link>{" "}
+                  in KES with categories you control
+                </li>
+                <li>
+                  <Link to="/learn/farm-inventory-management" className="text-primary font-medium hover:underline">
+                    Manage inventory
+                  </Link>{" "}
+                  for inputs and tools
+                </li>
+                <li>
+                  <Link to="/learn/agriculture-analytics" className="text-primary font-medium hover:underline">
+                    Analyze farm performance
+                  </Link>{" "}
+                  with reports tied to real operations
+                </li>
+              </ul>
+              <p className="text-sm text-muted-foreground mt-4 mb-0">
+                Browse all topics in the{" "}
+                <Link to="/learn" className="text-primary font-medium hover:underline">
+                  Learn hub
+                </Link>
+                .
+              </p>
+            </div>
 
             <div className="bg-secondary/30 rounded-2xl p-6 md:p-8 border border-border">
               <p className="text-base text-muted-foreground leading-relaxed m-0">

@@ -36,6 +36,8 @@ export interface SeoHeadProps {
   author?: string;
   /** No-index this page. */
   noindex?: boolean;
+  /** Optional meta keywords (homepage and key landings). */
+  keywords?: string;
   /** JSON-LD script(s) – array of object(s) to serialize. */
   jsonLd?: object | object[];
 }
@@ -62,6 +64,7 @@ export function SeoHead({
   modifiedTime,
   author = "FarmVault",
   noindex = false,
+  keywords,
   jsonLd,
 }: SeoHeadProps) {
   const safeTitle = truncate(title, TITLE_MAX_LENGTH);
@@ -76,8 +79,13 @@ export function SeoHead({
     <Helmet>
       <title>{safeTitle}</title>
       <meta name="description" content={safeDescription} />
+      {keywords ? <meta name="keywords" content={keywords} /> : null}
       <link rel="canonical" href={canonicalUrl} />
-      {shouldNoindex && <meta name="robots" content="noindex, nofollow" />}
+      {shouldNoindex ? (
+        <meta name="robots" content="noindex, nofollow" />
+      ) : (
+        <meta name="robots" content="index, follow" />
+      )}
 
       {/* Open Graph */}
       <meta property="og:title" content={safeTitle} />

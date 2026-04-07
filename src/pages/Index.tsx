@@ -16,38 +16,47 @@ import { HomeFaqSection } from "@/components/landing/HomeFaqSection";
 import { HomeTestimonialsSection } from "@/components/landing/HomeTestimonialsSection";
 import { PersistentCtaBar } from "@/components/landing/PersistentCtaBar";
 import { Footer } from "@/components/landing/Footer";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 import { SeoHead } from "@/seo/SeoHead";
 import { getOrganizationSchema, getSoftwareApplicationSchema, getFAQSchema } from "@/seo/structuredData";
-import { HOME_FAQ_ITEMS } from "@/components/landing/HomeFaqSection";
+import { FAQ_PRIMARY_ITEMS } from "@/data/faqContent";
 
 const Index = () => {
   return (
     <div className="landing-page min-h-screen bg-background font-body">
       <SeoHead
-        title="FarmVault – Farm Management System in Kenya | Track Harvest, Labor & Expenses"
-        description="FarmVault is a farm management system in Kenya that helps farmers track harvest, labor, inventory, and expenses in real time. Built from real farm experience for African farmers."
+        title="FarmVault – Farm Management Software in Kenya"
+        description="FarmVault helps farmers manage workers, harvests, expenses, and farm operations."
+        keywords="farm management software kenya, agriculture software kenya, farm ERP kenya"
         canonical="/"
         jsonLd={[
           getOrganizationSchema(),
           getSoftwareApplicationSchema(),
-          getFAQSchema(HOME_FAQ_ITEMS),
+          getFAQSchema(
+            FAQ_PRIMARY_ITEMS.map((item) => ({ question: item.question, answer: item.answer }))
+          ),
         ]}
       />
       <LandingNavbar />
-      <HeroSection />
-      <WhatIsFarmVaultSection />
-      <ProblemSection />
-      <SolutionSection />
-      <FeaturesSection />
-      <RealWorldSection />
-      <HowItWorksSection />
-      <PricingSection />
-      <WhyFarmVault />
-      <AboutSection />
-      <HomeTestimonialsSection />
-      <ContactSection />
-      <CtaSection />
-      <HomeFaqSection />
+      <main id="main-content">
+        <HeroSection />
+        <WhatIsFarmVaultSection />
+        <ProblemSection />
+        <SolutionSection />
+        <FeaturesSection />
+        <RealWorldSection />
+        <HowItWorksSection />
+        <PricingSection />
+        <WhyFarmVault />
+        <AboutSection />
+        <HomeTestimonialsSection />
+        <ContactSection />
+        <CtaSection />
+        <HomeFaqSection />
+        <div className="container mx-auto px-4 lg:px-8 max-w-4xl pb-8">
+          <SeoInternalLinks />
+        </div>
+      </main>
       <Footer />
       <PersistentCtaBar />
     </div>

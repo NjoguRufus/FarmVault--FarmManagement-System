@@ -5,6 +5,7 @@ import { SeoHead } from "@/seo/SeoHead";
 import { getBreadcrumbSchema } from "@/seo/structuredData";
 import { SEO_ROUTES } from "@/seo/routes";
 import { BLOG_POSTS, BLOG_SLUGS_LIST } from "@/data/blogPosts";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 
 const breadcrumbs = [{ name: "Home", path: "/" }, { name: "Blog" }];
 
@@ -44,6 +45,7 @@ export default function BlogIndexPage() {
             );
           })}
         </ul>
+        <SeoInternalLinks />
       </article>
     </SeoPageLayout>
   );

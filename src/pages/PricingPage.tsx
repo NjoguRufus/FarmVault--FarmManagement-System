@@ -8,6 +8,7 @@ import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { Footer } from "@/components/landing/Footer";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getOrganizationSchema, getBreadcrumbSchema, getFAQSchema } from "@/seo/structuredData";
+import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
 import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from "@/config/plans";
 import { BillingModeSelector } from "@/components/subscription/BillingModeSelector";
 
@@ -314,6 +315,10 @@ export default function PricingPage() {
           </motion.div>
         </div>
       </section>
+
+      <div className="container mx-auto px-4 lg:px-8 max-w-4xl pb-8">
+        <SeoInternalLinks />
+      </div>
 
       <Footer />
     </div>
