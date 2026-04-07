@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getSubscriptionGateState, hasConfirmedMpesaStkForCompany } from '@/services/subscriptionService';
 import { resolveWorkspaceSubscriptionState } from '@/lib/resolveWorkspaceSubscriptionState';
 import type { WorkspaceSubscriptionPlan, WorkspaceSubscriptionStatus } from '@/lib/resolveWorkspaceSubscriptionState';
+import { logger } from "@/lib/logger";
 
 export type SubscriptionPlan = WorkspaceSubscriptionPlan;
 export type SubscriptionStatus = WorkspaceSubscriptionStatus;
@@ -87,7 +88,7 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
   useEffect(() => {
     if (!import.meta.env.DEV || !companyId) return;
     // eslint-disable-next-line no-console
-    console.log('[SubscriptionStatus] gate row + resolver', {
+    logger.log('[SubscriptionStatus] gate row + resolver', {
       companyId,
       rawGate: subscriptionState ?? null,
       resolved,

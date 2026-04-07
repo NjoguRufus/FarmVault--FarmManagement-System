@@ -95,7 +95,7 @@ export function RecordStockInModal({
       addNotification({
         title: 'Stock Added',
         message: `${user?.name ?? 'User'} added ${qty} ${item.unit || 'units'} to ${item.name}`,
-        type: 'success',
+        toastType: 'success',
       });
 
       toast.success('Stock in recorded.');

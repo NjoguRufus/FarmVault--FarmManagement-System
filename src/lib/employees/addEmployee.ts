@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Add/invite an employee: insert into employees, assign preset, project access, log activity.
  * Uses Supabase only for DB; caller must be authenticated via Clerk (token sent by client).
@@ -61,7 +62,7 @@ export async function addEmployee(input: AddEmployeeInput): Promise<{ employee_i
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[addEmployee] employees.insert payload', employeeInsertPayload);
+    logger.log('[addEmployee] employees.insert payload', employeeInsertPayload);
     if ('name' in (employeeInsertPayload as any) || 'created_by' in (employeeInsertPayload as any)) {
       // eslint-disable-next-line no-console
       console.warn('[addEmployee] Forbidden employees columns detected in insert payload', employeeInsertPayload);

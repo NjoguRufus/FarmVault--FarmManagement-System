@@ -23,6 +23,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { markWorkCardPaid, type WorkCard } from '@/services/operationsWorkCardService';
 import { createAdminAlert } from '@/services/adminAlertService';
 import { createFinanceExpense } from '@/services/financeExpenseService';
+import { logger } from "@/lib/logger";
 
 interface MarkPaidModalProps {
   open: boolean;
@@ -85,7 +86,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
           createdBy: user?.id ?? null,
         });
         if (import.meta.env.DEV) {
-          console.log('[MarkPaid] Labor expense created in Supabase', {
+          logger.log('[MarkPaid] Labor expense created in Supabase', {
             amount: formData.amount,
             workCardId: workCard.id,
             category: 'labour',

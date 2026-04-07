@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
+import {
   CheckCircle2, 
   Download, 
   ExternalLink, 
@@ -22,10 +22,11 @@ import {
 } from "@/components/ui/sheet";
 import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log("[PWA Install Button]", ...args);
+  logger.log("[PWA Install Button]", ...args);
 }
 
 interface InstallFarmVaultProps {

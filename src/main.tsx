@@ -15,6 +15,7 @@ import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics
 import { getAppEntryUrl } from "@/lib/urls/domains";
 import { initServiceWorkerPushFeedback } from "@/lib/pushNotificationFeedback";
 import "./index.css";
+import { logger } from "@/lib/logger";
 
 initServiceWorkerPushFeedback();
 
@@ -101,8 +102,8 @@ if (pk) {
     clerkDomain = 'could not decode';
   }
 
-  console.log(`[Clerk Config] Key prefix: ${keyPrefix}, Live: ${isLiveKey}, Test: ${isTestKey}`);
-  console.log(`[Clerk Config] Frontend API domain: ${clerkDomain}`);
+  logger.log(`[Clerk Config] Key prefix: ${keyPrefix}, Live: ${isLiveKey}, Test: ${isTestKey}`);
+  logger.log(`[Clerk Config] Frontend API domain: ${clerkDomain}`);
 
   if (isTestKey && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
     console.warn('[Clerk Config] ⚠️ USING TEST KEY IN NON-LOCALHOST ENVIRONMENT! Production should use pk_live_');

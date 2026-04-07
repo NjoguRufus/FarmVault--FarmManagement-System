@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { listCompanies, type DeveloperCompanyRow } from '@/services/developerAdminService';
+import { logger } from "@/lib/logger";
 
 // ============== TYPES ==============
 
@@ -128,12 +129,12 @@ export interface MigrationDetails {
  */
 export async function listCompaniesForMigration(): Promise<CompanyForMigration[]> {
   // eslint-disable-next-line no-console
-  console.log('[CompanyMigration] Calling list_companies_for_migration RPC...');
+  logger.log('[CompanyMigration] Calling list_companies_for_migration RPC...');
   
   const { data, error, status, statusText } = await supabase.rpc('list_companies_for_migration');
 
   // eslint-disable-next-line no-console
-  console.log('[CompanyMigration] list_companies_for_migration response:', {
+  logger.log('[CompanyMigration] list_companies_for_migration response:', {
     status,
     statusText,
     hasData: !!data,
@@ -146,20 +147,20 @@ export async function listCompaniesForMigration(): Promise<CompanyForMigration[]
   if (!error && data) {
     const companies = Array.isArray(data) ? data : [];
     // eslint-disable-next-line no-console
-    console.log('[CompanyMigration] Using list_companies_for_migration data:', companies.length, 'companies');
+    logger.log('[CompanyMigration] Using list_companies_for_migration data:', companies.length, 'companies');
     return companies as CompanyForMigration[];
   }
 
   // Fallback: use the same list_companies RPC that the Companies page uses
   // eslint-disable-next-line no-console
-  console.log('[CompanyMigration] Falling back to list_companies RPC...');
+  logger.log('[CompanyMigration] Falling back to list_companies RPC...');
   
   try {
     const fallbackResult = await listCompanies();
     const rows = fallbackResult.rows ?? [];
     
     // eslint-disable-next-line no-console
-    console.log('[CompanyMigration] Fallback list_companies returned:', rows.length, 'companies');
+    logger.log('[CompanyMigration] Fallback list_companies returned:', rows.length, 'companies');
     
     // Transform DeveloperCompanyRow to CompanyForMigration
     const sevenDaysAgo = new Date();
@@ -193,7 +194,7 @@ export async function listCompaniesForMigration(): Promise<CompanyForMigration[]
     });
     
     // eslint-disable-next-line no-console
-    console.log('[CompanyMigration] Transformed companies:', transformed.map(c => ({
+    logger.log('[CompanyMigration] Transformed companies:', transformed.map(c => ({
       company_id: c.company_id,
       company_name: c.company_name,
     })));

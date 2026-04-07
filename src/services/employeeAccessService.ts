@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Employee Management & Access Control service.
  * Multi-company: all queries scoped by company_id.
@@ -97,7 +98,7 @@ export async function getEffectivePermissionKeys(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Access] loaded employee.permissions', {
+    logger.log('[Employee Access] loaded employee.permissions', {
       companyId,
       employeeId,
       permissions: empRow?.permissions ?? null,
@@ -108,7 +109,7 @@ export async function getEffectivePermissionKeys(
   if (fromPermissions) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Employee Access] initial form state source = permissions', {
+      logger.log('[Employee Access] initial form state source = permissions', {
         companyId,
         employeeId,
       });
@@ -118,7 +119,7 @@ export async function getEffectivePermissionKeys(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Access] initial form state source = preset', {
+    logger.log('[Employee Access] initial form state source = preset', {
       companyId,
       employeeId,
       role,
@@ -219,7 +220,7 @@ export async function setEmployeePermissions(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Access] save payload', {
+    logger.log('[Employee Access] save payload', {
       companyId,
       employeeId,
       allowedKeys: Array.from(allowedKeys),
@@ -248,7 +249,7 @@ export async function setEmployeePermissions(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Access] save response', {
+    logger.log('[Employee Access] save response', {
       companyId,
       employeeId,
       ok: !empPermError,

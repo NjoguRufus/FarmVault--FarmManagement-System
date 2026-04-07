@@ -73,6 +73,7 @@ import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { BASIC_LIMITS } from '@/config/basicLimits';
 import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
+import { logger } from "@/lib/logger";
 
 type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
@@ -223,7 +224,7 @@ export default function EmployeesPage() {
       setEmployeesSupabase(list);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[EmployeesPage] refetchSupabaseEmployees', {
+        logger.log('[EmployeesPage] refetchSupabaseEmployees', {
           table: 'public.employees',
           companyId,
           total: list.length,
@@ -313,7 +314,7 @@ export default function EmployeesPage() {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[EmployeesPage] auth', {
+    logger.log('[EmployeesPage] auth', {
       clerkUserId: user?.id,
       activeCompanyId: companyId,
       provider: employeesProvider,
@@ -333,7 +334,7 @@ export default function EmployeesPage() {
   setEditStatus((employee.status as typeof editStatus) || 'active');
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Edit] loaded employee row', {
+    logger.log('[Employee Edit] loaded employee row', {
       id: employee.id,
       fullName: employee.fullName,
       role: employee.role,
@@ -361,13 +362,13 @@ export default function EmployeesPage() {
     }
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Employee Edit] initialized permissions source = employees.permissions', {
+      logger.log('[Employee Edit] initialized permissions source = employees.permissions', {
         employeeId: employee.id,
       });
     }
   } else if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Edit] initialized permissions source = preset', {
+    logger.log('[Employee Edit] initialized permissions source = preset', {
       employeeId: employee.id,
     });
   }
@@ -478,7 +479,7 @@ export default function EmployeesPage() {
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[Employee Edit] save payload', {
+          logger.log('[Employee Edit] save payload', {
             employeeId: editingEmployee.id,
             full_name: editName,
             role: selectedRole,
@@ -511,7 +512,7 @@ export default function EmployeesPage() {
         await refetchSupabaseEmployees();
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[Employee Edit] save response', {
+          logger.log('[Employee Edit] save response', {
             employeeId: editingEmployee.id,
             ok: true,
           });
@@ -610,7 +611,7 @@ export default function EmployeesPage() {
             : 'viewer';
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.log('[EmployeesPage] inviteEmployee payload', {
+          logger.log('[EmployeesPage] inviteEmployee payload', {
             companyId: effectiveCompanyId,
             fullName: name.trim() || email.trim(),
             email: email.trim().toLowerCase(),
@@ -756,7 +757,7 @@ export default function EmployeesPage() {
   if (import.meta.env.DEV) {
     const all = isEmployeesSupabase ? employeesSupabase : employees;
     // eslint-disable-next-line no-console
-    console.log('[EmployeesPage] companyEmployees snapshot', {
+    logger.log('[EmployeesPage] companyEmployees snapshot', {
       provider: employeesProvider,
       total: companyEmployees.length,
       rawTotal: all.length,
@@ -846,7 +847,7 @@ export default function EmployeesPage() {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[EmployeesPage] filteredEmployees', {
+    logger.log('[EmployeesPage] filteredEmployees', {
       section,
       count: filteredEmployees.length,
       byStatus: filteredEmployees.reduce<Record<string, number>>((acc, e) => {
@@ -1893,7 +1894,7 @@ export default function EmployeesPage() {
                                     setResendingEmployeeId(employee.id);
                                     if (import.meta.env.DEV) {
                                       // eslint-disable-next-line no-console
-                                      console.log('[EmployeesPage] resendEmployeeInvite', {
+                                      logger.log('[EmployeesPage] resendEmployeeInvite', {
                                         companyId,
                                         email,
                                         employeeId: employee.id,
@@ -1934,7 +1935,7 @@ export default function EmployeesPage() {
                                   try {
                                     if (import.meta.env.DEV) {
                                       // eslint-disable-next-line no-console
-                                      console.log('[EmployeesPage] revokeEmployeeInvite', {
+                                      logger.log('[EmployeesPage] revokeEmployeeInvite', {
                                         companyId,
                                         email,
                                         employeeId: employee.id,
@@ -2309,7 +2310,7 @@ export default function EmployeesPage() {
                                   setResendingEmployeeId(employee.id);
                                   if (import.meta.env.DEV) {
                                     // eslint-disable-next-line no-console
-                                    console.log('[EmployeesPage] resendEmployeeInvite (mobile)', {
+                                    logger.log('[EmployeesPage] resendEmployeeInvite (mobile)', {
                                       companyId,
                                       email: emailAddr,
                                       employeeId: employee.id,
@@ -2350,7 +2351,7 @@ export default function EmployeesPage() {
                                 try {
                                   if (import.meta.env.DEV) {
                                     // eslint-disable-next-line no-console
-                                    console.log('[EmployeesPage] revokeEmployeeInvite (mobile)', {
+                                    logger.log('[EmployeesPage] revokeEmployeeInvite (mobile)', {
                                       companyId,
                                       email: emailAddr,
                                       employeeId: employee.id,

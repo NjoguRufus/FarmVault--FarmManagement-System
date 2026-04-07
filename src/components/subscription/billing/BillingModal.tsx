@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Smartphone, Sparkles } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Smartphone, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +35,7 @@ import { CLERK_JWT_TEMPLATE_SUPABASE, getAuthedSupabase } from '@/lib/supabase';
 import { initiateMpesaStkPush } from '@/services/mpesaStkService';
 import { StkPushConfirmation } from '@/components/subscription/billing/StkPushConfirmation';
 import { dispatchUnifiedNotificationNow } from '@/services/unifiedNotificationPipeline';
+import { logger } from "@/lib/logger";
 
 export interface BillingModalProps {
   open: boolean;
@@ -167,6 +169,7 @@ export function BillingModal({
   const [stkCheckoutRequestId, setStkCheckoutRequestId] = useState<string | null>(null);
   const [stkPhone, setStkPhone] = useState('');
   const [stkActivating, setStkActivating] = useState(false);
+  const [manualSubmissionOpen, setManualSubmissionOpen] = useState(false);
   const activationFallbackRef = useRef<number | null>(null);
   /** Rapid refetch while STK callback activates subscription (realtime can lag a few hundred ms). */
   const stkGatePollRef = useRef<number | null>(null);
@@ -237,6 +240,7 @@ export function BillingModal({
       setStkCheckoutRequestId(null);
       setStkPhone('');
       setStkActivating(false);
+      setManualSubmissionOpen(false);
       if (activationFallbackRef.current) {
         window.clearTimeout(activationFallbackRef.current);
         activationFallbackRef.current = null;
@@ -385,7 +389,7 @@ export function BillingModal({
     if (!Number.isFinite(safeAmount) || safeAmount <= 0) missing.push('amount');
 
     // eslint-disable-next-line no-console
-    console.log('STK preflight (BillingModal):', {
+    logger.log('STK preflight (BillingModal):', {
       company_id: companyId,
       billing_reference: billingRefTrim || '(omitted — server uses DB)',
       plan,
@@ -424,7 +428,7 @@ export function BillingModal({
     setStkLoading(true);
     try {
       // eslint-disable-next-line no-console
-      console.log('STK company context:', {
+      logger.log('STK company context:', {
         company_id: companyId,
         billing_reference: billingRefTrim || undefined,
         plan,
@@ -618,8 +622,8 @@ export function BillingModal({
                 ) : null}
 
                 {/*
-                  Mobile: plan → cycle → summary → Till/manual → STK (bottom).
-                  Desktop: summary (left col) + Till/manual + STK (right col, STK last).
+                  Mobile: plan → cycle → summary (list) + STK → manual submission (collapsible).
+                  Desktop: summary (left) + STK (right); full-width manual submission row at bottom.
                 */}
                 <div
                   className={cn(
@@ -641,84 +645,42 @@ export function BillingModal({
                     className="order-2 shrink-0 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-6 lg:col-start-1 lg:row-start-2 lg:border-t-0 lg:pt-0"
                   />
 
-                  <PaymentSummaryCard
-                    plan={plan}
-                    cycle={cycle}
-                    tillNumber={TILL}
-                    businessName={BUSINESS}
-                    workspaceName={workspaceName}
-                    displayAmountKes={amount}
-                    bundleSavingsKes={summaryBundleSavingsKes}
+                  <div
                     className={cn(
-                      'order-3 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-1 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0',
+                      'order-3 flex flex-col gap-0 max-lg:border-t max-lg:border-border/40 max-lg:pt-3',
+                      'lg:contents lg:border-0 lg:pt-0',
                     )}
-                  />
+                  >
+                    <PaymentSummaryCard
+                      plan={plan}
+                      cycle={cycle}
+                      businessName={BUSINESS}
+                      workspaceName={workspaceName}
+                      displayAmountKes={amount}
+                      bundleSavingsKes={summaryBundleSavingsKes}
+                      className={cn(
+                        'max-lg:rounded-none max-lg:border-0 max-lg:shadow-none max-lg:ring-0',
+                        'lg:col-span-3 lg:col-start-1 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0',
+                      )}
+                    />
 
-                  <div className="order-4 flex flex-col gap-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start lg:border-t-0 lg:pt-0">
-                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Till number
-                        </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Pay the amount shown in the summary to our Till. Use the account name below when M-Pesa asks for
-                          it, then submit your details here for verification.
-                        </p>
-                      </div>
-                      <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
-                        <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">Till number</dt>
-                          <dd className="font-mono font-medium text-foreground">{TILL}</dd>
-                        </div>
-                        <div className="flex justify-between gap-2">
-                          <dt className="text-muted-foreground">Account name</dt>
-                          <dd className="text-right font-medium text-foreground">FarmVault Technologies</dd>
-                        </div>
-                      </dl>
-                      <MpesaPaymentForm
-                        mpesaName={mpesaName}
-                        mpesaPhone={mpesaPhone}
-                        transactionCode={transactionCode}
-                        onMpesaNameChange={(v) => {
-                          setMpesaName(v);
-                          if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
-                        }}
-                        onMpesaPhoneChange={(v) => {
-                          setMpesaPhone(v);
-                          if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
-                        }}
-                        onTransactionCodeChange={(v) => {
-                          setTransactionCode(v);
-                          if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
-                        }}
-                        onTransactionCodePaste={handleTransactionCodePaste}
-                        fieldErrors={fieldErrors}
-                        disabled={busy}
-                        onSubmit={() => void handleSubmit()}
-                        onDismiss={() => onOpenChange(false)}
-                        submitLoading={mutation.isPending}
-                        className="space-y-3 lg:space-y-4"
-                      />
-                    </section>
-
-                    <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4">
-                      <div className="border-b border-border/40 pb-2">
+                    <div className="flex flex-col gap-4 max-lg:border-t max-lg:border-border/40 max-lg:bg-muted/10 max-lg:p-4 lg:col-span-3 lg:col-start-4 lg:row-start-3 lg:self-start lg:border-t-0 lg:bg-transparent lg:p-0">
+                      <section className="space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:p-4 max-lg:border-0 max-lg:bg-transparent max-lg:p-0">
+                        <div className="border-b border-border/40 pb-2 max-lg:border-border/30">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                           Pay via M-Pesa STK push
                         </p>
                         {STK_PUSH_ENABLED ? (
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            Amount due matches your selected plan (KES{' '}
-                            {amount != null ? amount.toLocaleString() : '—'}). Approve the prompt on your
-                            phone; your subscription activates automatically.
+                            Approve the prompt on your phone; your subscription activates automatically.
                           </p>
                         ) : (
                           <p className="mt-2 text-xs font-medium text-muted-foreground">
-                            STK push prompt coming soon. Use Till payment above to complete your subscription.
+                            STK push prompt coming soon. Open Manual submission below to pay at our Till.
                           </p>
                         )}
-                      </div>
-                      {STK_PUSH_ENABLED ? (
+                        </div>
+                        {STK_PUSH_ENABLED ? (
                         <>
                           <div className="space-y-1.5">
                             <label htmlFor="billing-stk-phone" className="text-xs font-medium text-foreground">
@@ -764,8 +726,78 @@ export function BillingModal({
                           ) : null}
                         </>
                       ) : null}
-                    </section>
+                      </section>
+                    </div>
                   </div>
+
+                  <Collapsible
+                    open={manualSubmissionOpen}
+                    onOpenChange={setManualSubmissionOpen}
+                    className="order-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-6 lg:col-start-1 lg:row-start-4"
+                  >
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 w-full justify-between gap-2 rounded-xl border-dashed px-4 text-sm font-medium lg:h-11"
+                      >
+                        <span>Manual submission</span>
+                        <ChevronDown
+                          className={cn(
+                            'h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
+                            manualSubmissionOpen && 'rotate-180',
+                          )}
+                        />
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="overflow-hidden">
+                      <section className="mt-3 space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:mt-4 sm:p-4">
+                        <div className="border-b border-border/40 pb-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Till number
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Pay the amount shown in the summary to our Till. Use the account name below when M-Pesa asks
+                            for it, then submit your details here for verification.
+                          </p>
+                        </div>
+                        <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-muted-foreground">Till number</dt>
+                            <dd className="font-mono font-medium text-foreground">{TILL}</dd>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-muted-foreground">Account name</dt>
+                            <dd className="text-right font-medium text-foreground">FarmVault Technologies</dd>
+                          </div>
+                        </dl>
+                        <MpesaPaymentForm
+                          mpesaName={mpesaName}
+                          mpesaPhone={mpesaPhone}
+                          transactionCode={transactionCode}
+                          onMpesaNameChange={(v) => {
+                            setMpesaName(v);
+                            if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
+                          }}
+                          onMpesaPhoneChange={(v) => {
+                            setMpesaPhone(v);
+                            if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
+                          }}
+                          onTransactionCodeChange={(v) => {
+                            setTransactionCode(v);
+                            if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
+                          }}
+                          onTransactionCodePaste={handleTransactionCodePaste}
+                          fieldErrors={fieldErrors}
+                          disabled={busy}
+                          onSubmit={() => void handleSubmit()}
+                          onDismiss={() => onOpenChange(false)}
+                          submitLoading={mutation.isPending}
+                          className="space-y-3 lg:space-y-4"
+                        />
+                      </section>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
               </div>
             </>

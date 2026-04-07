@@ -82,7 +82,7 @@ export default function AdminBackupsPage() {
     setError(null);
     try {
       await restoreCompanyFromBackup(companyId, snapshotId);
-      addNotification({ title: 'Restore completed', message: 'Company data has been restored.', type: 'success' });
+      addNotification({ title: 'Restore completed', message: 'Company data has been restored.', toastType: 'success' });
     } catch (e: any) {
       setError(e?.message || 'Restore failed');
     } finally {

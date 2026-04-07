@@ -127,7 +127,10 @@ Deno.serve(async (req) => {
         }
 
         const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
-        const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
+        const resendKey =
+          (Deno.env.get("RESEND_API_KEY")?.trim() ??
+            Deno.env.get("VITE_RESEND_API_KEY")?.trim() ??
+            "");
         const logAdmin = getServiceRoleClientForEmailLogs();
         const appUrl = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");
         const postDeveloperNotify = (jsonBody: Record<string, unknown>) => {

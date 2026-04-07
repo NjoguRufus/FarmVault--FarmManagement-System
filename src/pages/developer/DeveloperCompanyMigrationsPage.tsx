@@ -43,6 +43,7 @@ import {
 } from '@/services/companyMigrationService';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { logger } from "@/lib/logger";
 
 type TabType = 'migrate' | 'history';
 
@@ -73,7 +74,7 @@ export default function DeveloperCompanyMigrationsPage() {
   // Debug logging for companies fetch
   React.useEffect(() => {
     // eslint-disable-next-line no-console
-    console.log('[CompanyMigrationsPage] Companies state:', {
+    logger.log('[CompanyMigrationsPage] Companies state:', {
       isLoading: companiesLoading,
       isFetching: companiesFetching,
       hasError: !!companiesError,

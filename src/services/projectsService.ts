@@ -3,6 +3,7 @@ import { db, requireCompanyId } from '@/lib/db';
 import type { CropStage, Project } from '@/types';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
+import { logger } from "@/lib/logger";
 
 type DbProjectRow = {
   id: string;
@@ -184,7 +185,7 @@ export async function listProjects(companyId: string | null): Promise<Project[]>
 
   const projects = (data ?? []).map((row) => mapProjectRow(row as DbProjectRow));
   if (import.meta.env.DEV) {
-    console.log('[Projects Loaded]', projects.length);
+    logger.log('[Projects Loaded]', projects.length);
   }
   return projects;
 }

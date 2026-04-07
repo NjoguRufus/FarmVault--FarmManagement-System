@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
 import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
+import { logger } from "@/lib/logger";
 
 export function DeveloperLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -53,7 +54,7 @@ export function DeveloperLayout() {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    console.log('[DeveloperLayout] shell', {
+    logger.log('[DeveloperLayout] shell', {
       width,
       isDesktop,
       path: location.pathname,

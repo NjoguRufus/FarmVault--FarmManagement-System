@@ -13,6 +13,7 @@ import { ProBadge } from '@/components/subscription';
 import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
+import { logger } from "@/lib/logger";
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -66,7 +67,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[Nav] visible nav items', {
+    logger.log('[Nav] visible nav items', {
       uid: user.id,
       items: navItems.map((i) => i.path),
     });

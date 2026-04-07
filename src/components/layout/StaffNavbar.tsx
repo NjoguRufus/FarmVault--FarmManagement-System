@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
+import { logger } from "@/lib/logger";
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -61,7 +62,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   useEffect(() => {
     if (!import.meta.env.DEV || !companyId) return;
     // eslint-disable-next-line no-console
-    console.log('[StaffNavbar] subscription badge state', {
+    logger.log('[StaffNavbar] subscription badge state', {
       companyId,
       isActivePaid,
       isTrial,
@@ -94,7 +95,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    console.log('[StaffNavbar] employee identity loaded', {
+    logger.log('[StaffNavbar] employee identity loaded', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,

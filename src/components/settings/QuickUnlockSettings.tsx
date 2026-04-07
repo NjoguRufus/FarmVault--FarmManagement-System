@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Quick Unlock Settings component.
  * Allows users to enable/disable PIN-based quick unlock on their device.
@@ -35,7 +36,7 @@ import { cn } from '@/lib/utils';
 // Debug logging
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log('[QuickUnlockSettings]', ...args);
+  logger.log('[QuickUnlockSettings]', ...args);
 }
 
 export function QuickUnlockSettings() {

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Invited employee activation: SECURITY DEFINER RPC only.
  *
@@ -29,7 +30,7 @@ export async function linkCurrentUserToInvitedEmployee(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Auth] Calling activate_invited_employee_by_email RPC', {
+    logger.log('[Auth] Calling activate_invited_employee_by_email RPC', {
       p_email: email,
       p_clerk_user_id: input.clerk_user_id,
     });
@@ -45,7 +46,7 @@ export async function linkCurrentUserToInvitedEmployee(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Auth] activate_invited_employee_by_email result', {
+    logger.log('[Auth] activate_invited_employee_by_email result', {
       matched,
       company_id: row?.company_id ?? null,
       employee_id: row?.employee_id ?? null,

@@ -1,5 +1,6 @@
 import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
+import { logger } from "@/lib/logger";
 
 /**
  * Inventory read models & RPC integration for the new Supabase schema.
@@ -212,7 +213,7 @@ export async function listInventoryStock(params: {
   // DEBUG: Log raw response from Supabase
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] listInventoryStock raw response:', {
+    logger.log('[inventory] listInventoryStock raw response:', {
       rowCount: data?.length ?? 0,
       sample: data?.slice(0, 2).map(row => ({
         id: row.id,
@@ -341,9 +342,9 @@ export async function createInventoryCategory(input: {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] createInventoryCategory payload', payload);
+    logger.log('[inventory] createInventoryCategory payload', payload);
     // eslint-disable-next-line no-console
-    console.log('[inventory] createInventoryCategory activeCompanyId', { companyId: tenant });
+    logger.log('[inventory] createInventoryCategory activeCompanyId', { companyId: tenant });
   }
 
   const { data, error } = await db
@@ -408,7 +409,7 @@ export async function createInventoryItem(input: CreateInventoryItemInput): Prom
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] createInventoryItem (public.inventory_item_master) payload', payload);
+    logger.log('[inventory] createInventoryItem (public.inventory_item_master) payload', payload);
   }
 
   const { data, error } = await db
@@ -455,7 +456,7 @@ export async function recordInventoryStockIn(input: RecordStockInInput): Promise
   };
 
   // eslint-disable-next-line no-console
-  console.log('[inventory] record_inventory_stock_in CALLING RPC', {
+  logger.log('[inventory] record_inventory_stock_in CALLING RPC', {
     payload: rpcPayload,
     inputCompanyId: input.companyId,
     resolvedTenant: tenant,
@@ -478,7 +479,7 @@ export async function recordInventoryStockIn(input: RecordStockInInput): Promise
   }
   
   // eslint-disable-next-line no-console
-  console.log('[inventory] record_inventory_stock_in SUCCESS', {
+  logger.log('[inventory] record_inventory_stock_in SUCCESS', {
     transactionId: rpcResult,
     payload: rpcPayload,
   });
@@ -500,7 +501,7 @@ export async function recordInventoryUsage(input: RecordUsageInput): Promise<voi
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] record_inventory_usage payload', rpcPayload);
+    logger.log('[inventory] record_inventory_usage payload', rpcPayload);
   }
 
   const { error } = await db.public().rpc('record_inventory_usage', rpcPayload);
@@ -550,7 +551,7 @@ export async function deductInventoryStock(input: DeductStockInput): Promise<voi
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] deduct_inventory_stock (via usage) payload', rpcPayload);
+    logger.log('[inventory] deduct_inventory_stock (via usage) payload', rpcPayload);
   }
 
   const { error } = await db.public().rpc('record_inventory_usage', rpcPayload);
@@ -592,7 +593,7 @@ export async function archiveInventoryItem(input: ArchiveInventoryItemInput): Pr
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] archiveInventoryItem payload', { itemId: input.itemId, ...payload });
+    logger.log('[inventory] archiveInventoryItem payload', { itemId: input.itemId, ...payload });
   }
 
   const { error } = await db
@@ -637,7 +638,7 @@ export async function restoreInventoryItem(input: RestoreInventoryItemInput): Pr
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] restoreInventoryItem payload', { itemId: input.itemId, ...payload });
+    logger.log('[inventory] restoreInventoryItem payload', { itemId: input.itemId, ...payload });
   }
 
   const { error } = await db
@@ -827,7 +828,7 @@ export async function logInventoryAuditEvent(input: LogAuditEventInput): Promise
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[inventory] logInventoryAuditEvent payload', payload);
+    logger.log('[inventory] logInventoryAuditEvent payload', payload);
   }
 
   try {

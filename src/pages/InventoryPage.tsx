@@ -23,6 +23,7 @@ import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer'
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { logger } from "@/lib/logger";
 
 export default function InventoryPage() {
   const { activeProject } = useProject();
@@ -44,7 +45,7 @@ export default function InventoryPage() {
   if (import.meta.env.DEV) {
     const inv = (permissions?.inventory ?? {}) as Record<string, unknown>;
     // eslint-disable-next-line no-console
-    console.log('[InventoryPage] permission state', {
+    logger.log('[InventoryPage] permission state', {
       inventoryCreate: inv.create,
       inventoryAddItem: inv.addItem,
       canAddByAddItem,

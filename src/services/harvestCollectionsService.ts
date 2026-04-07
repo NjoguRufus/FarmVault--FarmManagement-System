@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * French Beans harvest collections – Supabase-only.
  * Tables: harvest.harvest_collections, harvest.harvest_pickers,
@@ -270,7 +271,7 @@ export async function createHarvestCollection(params: {
 
   if (import.meta.env.DEV) {
     const { data: whoami, error: whoErr } = await supabase.schema('admin').rpc('whoami');
-    console.log('[HC whoami]', { whoami, whoErr });
+    logger.log('[HC whoami]', { whoami, whoErr });
   }
 
   const { data, error } = await supabase.schema('harvest').rpc('create_collection', {
@@ -294,7 +295,7 @@ export async function createHarvestCollection(params: {
     : ((data as CreateCollectionRpcRow | null) ?? null);
 
   if (import.meta.env.DEV && row) {
-    console.log('[createHarvestCollection] returned row', row);
+    logger.log('[createHarvestCollection] returned row', row);
   }
 
   if (!row?.id) throw new Error('Create harvest collection failed');
@@ -1079,7 +1080,7 @@ export async function recordPickerPayment(params: {
     };
     if (params.paidBy != null) insertPayload.paid_by = params.paidBy;
 
-    console.log('[Payment Insert Payload]', insertPayload);
+    logger.log('[Payment Insert Payload]', insertPayload);
 
     const { data, error } = await harvest()
       .from('picker_payment_entries')
@@ -1220,7 +1221,7 @@ export async function syncPickerPaymentToExpenseForOffline(params: {
     expense_date: expenseDate,
     note,
   };
-  console.log('[Picker Payment Expense Payload]', payload);
+  logger.log('[Picker Payment Expense Payload]', payload);
 
   const { error } = await db
     .finance()
@@ -1387,7 +1388,7 @@ export async function registerHarvestCash(params: {
 
   try {
     await ensureProjectWallet(params.companyId, params.projectId);
-    if (import.meta.env.DEV) console.log('[Harvest Cash Register payload]', walletPayload);
+    logger.log('[Harvest Cash Register payload]', walletPayload);
     const { error } = await db
       .finance()
       .from('project_wallet_ledger')

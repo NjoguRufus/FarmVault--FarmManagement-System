@@ -348,6 +348,11 @@
       @apply font-medium text-muted-foreground text-xs uppercase;
     }
   }
+
+  /* Table layout at all breakpoints (no mobile card stack). Pair parent with overflow-x-auto + min-w on table for horizontal scroll. */
+  .fv-table-scroll {
+    @apply w-full border-collapse;
+  }
 }
 
 @layer utilities {

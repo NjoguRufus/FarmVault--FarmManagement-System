@@ -47,6 +47,7 @@ import { Button } from '@/components/ui/button';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { logger } from "@/lib/logger";
 
 if (import.meta.env?.DEV) {
   assertCropStagesDev();
@@ -71,7 +72,7 @@ export default function ProjectDetailsPage() {
     queryKey: ['project', projectId ?? '', companyId ?? ''],
     queryFn: () => {
       if (import.meta.env?.DEV) {
-        console.log('[ProjectDetailsPage] project details fetch', { projectId, companyId });
+        logger.log('[ProjectDetailsPage] project details fetch', { projectId, companyId });
       }
       return getProject(projectId!, { companyId });
     },
@@ -91,7 +92,7 @@ export default function ProjectDetailsPage() {
   }, [project?.id, project?.name, project?.cropType, project?.cropTypeKey, companyId]);
 
   if (import.meta.env.DEV && projectId && !projectsLoading && project) {
-    console.log('[ProjectDetailsPage] project details loaded', { projectId, name: project.name });
+    logger.log('[ProjectDetailsPage] project details loaded', { projectId, name: project.name });
   }
   if (import.meta.env.DEV && projectId && !projectsLoading && !project && (projectError != null || project === null)) {
     console.warn('[ProjectDetailsPage] Project not found', {
@@ -104,7 +105,7 @@ export default function ProjectDetailsPage() {
 
   const { challenges: allChallengesFromHook } = useSeasonChallenges(companyId, projectId ?? null);
   if (import.meta.env?.DEV && companyId && projectId) {
-    console.log('[ProjectDetailsPage] season challenges fetch (project-specific)', {
+    logger.log('[ProjectDetailsPage] season challenges fetch (project-specific)', {
       projectId,
       count: allChallengesFromHook.length,
     });
@@ -175,7 +176,7 @@ export default function ProjectDetailsPage() {
     [allChallenges, companyId, projectId],
   );
   if (import.meta.env?.DEV && projectId) {
-    console.log('[ProjectDetailsPage] project-specific challenge filtering', {
+    logger.log('[ProjectDetailsPage] project-specific challenge filtering', {
       projectId,
       totalFromHook: allChallenges.length,
       filtered: challenges.length,
@@ -280,7 +281,7 @@ export default function ProjectDetailsPage() {
   useEffect(() => {
     if (!import.meta.env.DEV || !projectId || !project) return;
     // eslint-disable-next-line no-console
-    console.log('[ProjectDetails financial snapshot source]', {
+    logger.log('[ProjectDetails financial snapshot source]', {
       projectId,
       financeExpenseCount: financeExpensesRaw.length,
       totalSpent: totalExpenses,

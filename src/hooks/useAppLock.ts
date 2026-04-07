@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * useAppLock hook.
  * Manages app lock state sync with server and handles the first-time prompt.
@@ -51,7 +52,7 @@ export interface UseAppLockResult {
 // Debug logging
 function debugLog(...args: unknown[]): void {
   // eslint-disable-next-line no-console
-  console.log('[useAppLock]', ...args);
+  logger.log('[useAppLock]', ...args);
 }
 
 /**

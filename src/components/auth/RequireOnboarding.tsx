@@ -5,6 +5,7 @@ import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { SignInRedirect } from '@/components/auth/SignInRedirect';
 import { SubscriptionAccessGate } from '@/components/subscription/SubscriptionAccessGate';
 import { COMPANY_ONBOARDING_PATH } from '@/lib/routing/postAuthDestination';
+import { logger } from "@/lib/logger";
 interface RequireOnboardingProps {
   children: React.ReactElement;
 }
@@ -27,7 +28,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (!user) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Redirect to /sign-in (no user)', { authReady });
+      logger.log('[RequireOnboarding] Redirect to /sign-in (no user)', { authReady });
     }
     return <SignInRedirect />;
   }
@@ -36,7 +37,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (isDeveloper || user.role === 'developer') {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
+      logger.log('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
     }
     return <Navigate to="/developer" replace />;
   }
@@ -46,7 +47,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (pt === 'ambassador' || (pt === 'both' && !user.companyId)) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Ambassador profile bypass → /ambassador/console/dashboard', {
+      logger.log('[RequireOnboarding] Ambassador profile bypass → /ambassador/console/dashboard', {
         profileUserType: pt,
         companyId: user.companyId,
       });
@@ -59,7 +60,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (setupIncomplete) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[RequireOnboarding] Onboarding required → /onboarding/company', {
+      logger.log('[RequireOnboarding] Onboarding required → /onboarding/company', {
         companyId: user.companyId,
         role: user.role,
         setupIncomplete,
@@ -78,14 +79,14 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Auth] Redirecting employee to /dashboard');
+      logger.log('[Auth] Redirecting employee to /dashboard');
     }
     return children;
   }
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[RequireOnboarding] Normal app path (no onboarding)', {
+    logger.log('[RequireOnboarding] Normal app path (no onboarding)', {
       uid: user.id,
       companyId: user.companyId,
       role: user.role,

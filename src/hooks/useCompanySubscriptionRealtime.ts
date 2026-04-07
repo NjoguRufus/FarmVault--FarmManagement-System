@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { companyWorkspaceStatusQueryKey } from '@/hooks/useCompanyWorkspaceApprovalStatus';
+import { logger } from "@/lib/logger";
 
 /** Force in-flight network refetch so plan/status update on screen immediately (not next stale window). */
 function refetchWorkspaceBillingQueries(queryClient: QueryClient, companyId: string) {
@@ -42,7 +43,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
         (payload) => {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[SubscriptionRealtime] core.companies change', {
+            logger.log('[SubscriptionRealtime] core.companies change', {
               companyId,
               event: payload.eventType,
             });
@@ -56,7 +57,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
         (payload) => {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[SubscriptionRealtime] company_subscriptions change', {
+            logger.log('[SubscriptionRealtime] company_subscriptions change', {
               companyId,
               event: payload.eventType,
             });
@@ -70,7 +71,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
         (payload) => {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[SubscriptionRealtime] subscription_payments change', {
+            logger.log('[SubscriptionRealtime] subscription_payments change', {
               companyId,
               event: payload.eventType,
             });
@@ -84,7 +85,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
         (payload) => {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.log('[SubscriptionRealtime] mpesa_payments change', {
+            logger.log('[SubscriptionRealtime] mpesa_payments change', {
               companyId,
               event: payload.eventType,
             });
@@ -95,7 +96,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
       .subscribe((status) => {
         if (import.meta.env.DEV && status === 'SUBSCRIBED') {
           // eslint-disable-next-line no-console
-          console.log('[SubscriptionRealtime] subscribed', { channelName });
+          logger.log('[SubscriptionRealtime] subscribed', { channelName });
         }
       });
 

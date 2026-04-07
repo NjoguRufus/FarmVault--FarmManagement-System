@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * QuickUnlockScreen component.
  * Shows a PIN entry screen to unlock the app on a trusted device.
@@ -15,7 +16,7 @@ import { cn } from '@/lib/utils';
 // Debug logging
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log('[QuickUnlock]', ...args);
+  logger.log('[QuickUnlock]', ...args);
 }
 
 interface QuickUnlockScreenProps {

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Real-time subscription for admin alerts.
  * Listens to Supabase admin_alerts table and triggers notifications + sounds
@@ -57,16 +58,16 @@ function getNotificationPrefs(userId: string | undefined): {
   soundFile: NotificationSoundFile;
 } {
   if (typeof window === 'undefined' || !userId) {
-    console.log('[AdminAlertsRealtime] getNotificationPrefs: no window or userId', { userId });
+    logger.log('[AdminAlertsRealtime] getNotificationPrefs: no window or userId', { userId });
     return { enabled: false, soundEnabled: false, soundFile: 'notification1.aac' };
   }
   try {
     const storageKey = `${NOTIFICATION_PREFS_KEY_PREFIX}${userId}`;
     const raw = window.localStorage.getItem(storageKey);
-    console.log('[AdminAlertsRealtime] getNotificationPrefs raw from storage', { storageKey, raw });
+    logger.log('[AdminAlertsRealtime] getNotificationPrefs raw from storage', { storageKey, raw });
     
     if (!raw) {
-      console.log('[AdminAlertsRealtime] No prefs found, returning defaults (disabled)');
+      logger.log('[AdminAlertsRealtime] No prefs found, returning defaults (disabled)');
       return { enabled: false, soundEnabled: false, soundFile: 'notification1.aac' };
     }
     
@@ -77,7 +78,7 @@ function getNotificationPrefs(userId: string | undefined): {
       soundFile: (parsed.soundFile || 'notification1.aac') as NotificationSoundFile,
     };
     
-    console.log('[AdminAlertsRealtime] Parsed notification prefs', result);
+    logger.log('[AdminAlertsRealtime] Parsed notification prefs', result);
     return result;
   } catch (err) {
     console.error('[AdminAlertsRealtime] Error parsing notification prefs', err);
@@ -189,7 +190,7 @@ export function useAdminAlertsRealtime() {
 
   const processAlert = useCallback(
     (alert: AdminAlertRow, source: 'realtime' | 'poll') => {
-      console.log(`[AdminAlertsRealtime] Processing alert from ${source}`, {
+      logger.log(`[AdminAlertsRealtime] Processing alert from ${source}`, {
         id: alert.id,
         action: alert.action,
         actorUserId: alert.actor_user_id,
@@ -198,17 +199,17 @@ export function useAdminAlertsRealtime() {
 
       // Skip if this is our own action
       if (alert.actor_user_id === userId) {
-        console.log('[AdminAlertsRealtime] Skipping own action');
+        logger.log('[AdminAlertsRealtime] Skipping own action');
         return;
       }
 
       // Skip if already processed (deduplication)
       if (processedIdsRef.current.has(alert.id)) {
-        console.log('[AdminAlertsRealtime] Already processed, skipping', alert.id);
+        logger.log('[AdminAlertsRealtime] Already processed, skipping', alert.id);
         return;
       }
 
-      console.log('[AdminAlertsRealtime] New alert received', {
+      logger.log('[AdminAlertsRealtime] New alert received', {
         id: alert.id,
         module: alert.module,
         action: alert.action,
@@ -252,7 +253,7 @@ export function useAdminAlertsRealtime() {
 
       // Play sound based on user preferences
       const prefs = getNotificationPrefs(userId);
-      console.log('[AdminAlertsRealtime] Sound prefs for playback', {
+      logger.log('[AdminAlertsRealtime] Sound prefs for playback', {
         enabled: prefs.enabled,
         soundEnabled: prefs.soundEnabled,
         soundFile: prefs.soundFile,
@@ -260,11 +261,11 @@ export function useAdminAlertsRealtime() {
       });
 
       if (prefs.enabled && prefs.soundEnabled) {
-        console.log('[AdminAlertsRealtime] Attempting to play sound:', prefs.soundFile);
+        logger.log('[AdminAlertsRealtime] Attempting to play sound:', prefs.soundFile);
         
         playNotificationSound(prefs.soundFile, { force: true })
           .then((played) => {
-            console.log('[AdminAlertsRealtime] Sound playback result:', {
+            logger.log('[AdminAlertsRealtime] Sound playback result:', {
               played,
               soundFile: prefs.soundFile,
             });
@@ -273,7 +274,7 @@ export function useAdminAlertsRealtime() {
             console.warn('[AdminAlertsRealtime] Sound playback failed', err);
           });
       } else {
-        console.log('[AdminAlertsRealtime] Sound not enabled, skipping playback', {
+        logger.log('[AdminAlertsRealtime] Sound not enabled, skipping playback', {
           notificationsEnabled: prefs.enabled,
           soundEnabled: prefs.soundEnabled,
         });
@@ -284,11 +285,11 @@ export function useAdminAlertsRealtime() {
 
   const handleRealtimeAlert = useCallback(
     (payload: RealtimePostgresInsertPayload<AdminAlertRow>) => {
-      console.log('[AdminAlertsRealtime] Realtime payload received', payload);
+      logger.log('[AdminAlertsRealtime] Realtime payload received', payload);
       const alert = payload.new;
 
       if (!alert || !alert.id) {
-        console.log('[AdminAlertsRealtime] Invalid payload, missing alert or id');
+        logger.log('[AdminAlertsRealtime] Invalid payload, missing alert or id');
         return;
       }
 
@@ -304,7 +305,7 @@ export function useAdminAlertsRealtime() {
     try {
       const since = lastPollTimeRef.current || new Date(Date.now() - 60000).toISOString(); // Last minute on first poll
       
-      console.log('[AdminAlertsRealtime] Polling for alerts since', since);
+      logger.log('[AdminAlertsRealtime] Polling for alerts since', since);
 
       const { data, error } = await db
         .public()
@@ -330,7 +331,7 @@ export function useAdminAlertsRealtime() {
       }
 
       if (data && data.length > 0) {
-        console.log('[AdminAlertsRealtime] Poll found alerts', data.length);
+        logger.log('[AdminAlertsRealtime] Poll found alerts', data.length);
         data.forEach((alert) => processAlert(alert as AdminAlertRow, 'poll'));
         // Update last poll time to the most recent alert
         lastPollTimeRef.current = data[data.length - 1].created_at;
@@ -356,7 +357,7 @@ export function useAdminAlertsRealtime() {
   // Set up real-time subscription
   useEffect(() => {
     if (!receivesAdminAlertStream || !companyId) {
-      console.log('[AdminAlertsRealtime] Not subscribing - conditions not met', {
+      logger.log('[AdminAlertsRealtime] Not subscribing - conditions not met', {
         receivesAdminAlertStream,
         companyId,
         userRole: user?.role,
@@ -364,7 +365,7 @@ export function useAdminAlertsRealtime() {
       return;
     }
 
-    console.log('[AdminAlertsRealtime] Setting up real-time subscription', {
+    logger.log('[AdminAlertsRealtime] Setting up real-time subscription', {
       companyId,
       userId,
       userRole: user?.role,
@@ -388,11 +389,11 @@ export function useAdminAlertsRealtime() {
         handleRealtimeAlert
       )
       .subscribe((status, err) => {
-        console.log('[AdminAlertsRealtime] Subscription status changed', { status, error: err });
+        logger.log('[AdminAlertsRealtime] Subscription status changed', { status, error: err });
         
         if (status === 'SUBSCRIBED') {
           setRealtimeConnected(true);
-          console.log('[AdminAlertsRealtime] Successfully subscribed to real-time');
+          logger.log('[AdminAlertsRealtime] Successfully subscribed to real-time');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setRealtimeConnected(false);
           console.warn('[AdminAlertsRealtime] Real-time connection issue, will rely on polling', { status, err });
@@ -408,7 +409,7 @@ export function useAdminAlertsRealtime() {
     setTimeout(pollForAlerts, 1000);
 
     return () => {
-      console.log('[AdminAlertsRealtime] Cleaning up subscription');
+      logger.log('[AdminAlertsRealtime] Cleaning up subscription');
       
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);

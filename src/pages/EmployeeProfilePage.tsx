@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Employee profile page: Profile, Access & Permissions, Project Access, Activity, Security.
  * Admin-only; company-scoped.
@@ -112,7 +113,7 @@ export default function EmployeeProfilePage() {
       const updated = fresh.find((e) => e.id === employeeId) ?? null;
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[Employee Access] post-save refetch result', {
+        logger.log('[Employee Access] post-save refetch result', {
           employeeId,
           permissions: updated?.permissions ?? null,
         });

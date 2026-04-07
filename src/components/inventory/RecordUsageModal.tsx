@@ -91,7 +91,7 @@ export function RecordUsageModal({
       addNotification({
         title: 'Usage Recorded',
         message: `${user?.name ?? 'User'} used ${qty} ${item.unit || 'units'} of ${item.name}`,
-        type: 'warning',
+        toastType: 'warning',
       });
 
       toast.success('Usage recorded.');

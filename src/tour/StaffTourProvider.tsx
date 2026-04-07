@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { logger } from "@/lib/logger";
 import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step } from 'react-joyride';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -278,7 +279,7 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
 
         if (import.meta.env.DEV && user) {
           // eslint-disable-next-line no-console
-          console.log('[StaffTour] starting tour', {
+          logger.log('[StaffTour] starting tour', {
             uid: user.id,
             totalSteps: mounted.length,
             stepIds: mounted.map((s) => s.id),
@@ -405,7 +406,7 @@ export function StaffTourProvider({ children }: { children: React.ReactNode }) {
 
   if (import.meta.env.DEV && user && activeSteps.length > 0) {
     // eslint-disable-next-line no-console
-    console.log('[StaffTour] active steps snapshot', {
+    logger.log('[StaffTour] active steps snapshot', {
       uid: user.id,
       stepIndex,
       total: activeSteps.length,

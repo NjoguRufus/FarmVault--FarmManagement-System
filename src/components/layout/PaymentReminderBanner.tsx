@@ -34,7 +34,7 @@ export function PaymentReminderBanner() {
       addNotification({
         title: 'Payment reminder dismissed',
         message: 'The payment reminder was dismissed for your account.',
-        type: 'info',
+        toastType: 'info',
       });
     } finally {
       setDismissing(false);
@@ -65,7 +65,7 @@ export function PaymentReminderBanner() {
       message: nextPayment
         ? `Your next payment is due on ${nextPayment}.`
         : 'Please update your payment to continue with full access.',
-      type: 'warning',
+      toastType: 'warning',
     });
   }, [addNotification, company, companyId, nextPayment, reminderActive]);
 

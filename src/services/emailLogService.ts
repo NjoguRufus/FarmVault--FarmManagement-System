@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { logger } from "@/lib/logger";
 
 export type EmailLogStatus = 'pending' | 'sent' | 'failed';
 
@@ -73,7 +74,7 @@ export async function fetchEmailLogs(filters: EmailLogListFilters): Promise<Emai
   // TEMP: verify developer UI sees the same row count PostgREST returns
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[email_logs page] query row count', rows.length);
+    logger.log('[email_logs page] query row count', rows.length);
   }
   return rows;
 }
@@ -111,7 +112,7 @@ export async function fetchEmailLogStats(): Promise<EmailLogStats> {
   };
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[email_logs page] stats counts', stats);
+    logger.log('[email_logs page] stats counts', stats);
   }
   return stats;
 }

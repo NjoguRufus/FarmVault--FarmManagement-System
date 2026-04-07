@@ -40,6 +40,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { BillingReceiptsManager } from '@/components/subscription/billing/BillingReceiptsManager';
+import { logger } from "@/lib/logger";
 
 function paymentStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
@@ -235,7 +236,7 @@ export default function DeveloperBillingConfirmationPage() {
       const row = list?.find((x) => x.id === paymentId);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
+        logger.log('[DevBilling] approve payment payload', { paymentId, row: row ?? null });
       }
       await approveSubscriptionPayment(paymentId, row ?? undefined, clerkSupabaseToken);
       // Paid window + trial end are applied in approve_subscription_payment (DB). Avoid
@@ -295,7 +296,7 @@ export default function DeveloperBillingConfirmationPage() {
       const row = list?.find((x) => x.id === paymentId);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[DevBilling] reject payment payload', { paymentId, row: row ?? null });
+        logger.log('[DevBilling] reject payment payload', { paymentId, row: row ?? null });
       }
       return rejectSubscriptionPayment(paymentId);
     },

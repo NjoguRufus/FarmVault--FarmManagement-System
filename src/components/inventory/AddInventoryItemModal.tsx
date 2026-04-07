@@ -774,7 +774,7 @@ export function AddInventoryItemModal({
       addNotification({
         title: 'Item Created',
         message: `${user?.name ?? 'User'} created new inventory item: ${name}`,
-        type: 'success',
+        toastType: 'success',
       });
 
       toast.success('Inventory item created.');

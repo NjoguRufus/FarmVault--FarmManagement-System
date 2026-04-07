@@ -43,6 +43,7 @@ import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestColle
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { FeatureGate, ProBadge } from '@/components/subscription';
+import { logger } from "@/lib/logger";
 
 const DEFAULT_MARKETS = ['Muthurwa Market', 'Githurai Market', 'Sagana Market'];
 
@@ -180,13 +181,13 @@ export default function HarvestSalesPage() {
 
   useEffect(() => {
     if (import.meta.env.DEV && showHarvestCollections) {
-      console.log('[Harvest Sales Totals]', {
+      logger.log('[Harvest Sales Totals]', {
         totalHarvestKg,
         totalSales: totalSalesAmount,
         completedSales: completedSalesAmount,
         pendingSales: pendingSalesAmount,
       });
-      console.log('[Harvest Sales Records]', {
+      logger.log('[Harvest Sales Records]', {
         companyId,
         projectId: activeProject?.id,
         rowCount: collectionRecords.length,

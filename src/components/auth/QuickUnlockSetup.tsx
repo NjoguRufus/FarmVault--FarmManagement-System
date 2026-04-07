@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * QuickUnlockSetup component.
  * First-time PIN setup flow for Quick Unlock.
@@ -32,7 +33,7 @@ interface QuickUnlockSetupProps {
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
-  console.log('[QuickUnlockSetup]', ...args);
+  logger.log('[QuickUnlockSetup]', ...args);
 }
 
 export function QuickUnlockSetup({

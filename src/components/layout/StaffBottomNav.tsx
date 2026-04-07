@@ -9,6 +9,7 @@ import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
+import { logger } from "@/lib/logger";
 
 const ACTIVE_TAB_SHADOW =
   '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
@@ -37,7 +38,7 @@ export function StaffBottomNav() {
       setIsDesktop(width >= 1024);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.log('[StaffBottomNav] viewport', { width, isDesktop: width >= 1024 });
+        logger.log('[StaffBottomNav] viewport', { width, isDesktop: width >= 1024 });
       }
     };
     update();
@@ -76,7 +77,7 @@ export function StaffBottomNav() {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[StaffBottomNav] visible nav items', {
+    logger.log('[StaffBottomNav] visible nav items', {
       uid: user.id,
       items: items.map((i) => i.path),
     });

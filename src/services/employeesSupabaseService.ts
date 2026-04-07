@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * Supabase-backed employee operations (invite, list, update).
  * Uses Clerk for auth: never call supabase.auth. Identity from Clerk only.
@@ -71,7 +72,7 @@ export async function listEmployees(companyId: string): Promise<Employee[]> {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] listEmployees read', {
+    logger.log('[employeesSupabaseService] listEmployees read', {
       table,
       filters,
       select: EMPLOYEES_SELECT,
@@ -108,7 +109,7 @@ export async function listEmployees(companyId: string): Promise<Employee[]> {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] listEmployees result', {
+    logger.log('[employeesSupabaseService] listEmployees result', {
       table,
       filters,
       total: rows.length,
@@ -167,7 +168,7 @@ export async function saveEmployeeDraft(input: SaveEmployeeDraftInput): Promise<
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] saveEmployeeDraft write', {
+    logger.log('[employeesSupabaseService] saveEmployeeDraft write', {
       table: 'public.employees',
       operation: input.id ? 'update' : 'insert',
       payload: { id: input.id, ...basePayload },
@@ -278,7 +279,7 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
 
   if (shouldLogInviteRequest) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] inviteEmployee request', {
+    logger.log('[employeesSupabaseService] inviteEmployee request', {
       url,
       hasAuth: !!token,
       environment: import.meta.env.MODE,
@@ -315,7 +316,7 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
 
     if (shouldLogInviteRequest) {
       // eslint-disable-next-line no-console
-      console.log('[employeesSupabaseService] inviteEmployee response', {
+      logger.log('[employeesSupabaseService] inviteEmployee response', {
         url,
         status: res.status,
         ok: res.ok,
@@ -430,7 +431,7 @@ export async function revokeEmployeeInvite(companyId: string, email: string): Pr
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] revokeEmployeeInvite request', { url, body });
+    logger.log('[employeesSupabaseService] revokeEmployeeInvite request', { url, body });
   }
 
   if (url) {
@@ -453,7 +454,7 @@ export async function revokeEmployeeInvite(companyId: string, email: string): Pr
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[employeesSupabaseService] revokeEmployeeInvite response', {
+      logger.log('[employeesSupabaseService] revokeEmployeeInvite response', {
         status: res.status,
         ok: res.ok,
         data,
@@ -480,7 +481,7 @@ export async function revokeEmployeeInvite(companyId: string, email: string): Pr
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] revokeEmployeeInvite invoke result', {
+    logger.log('[employeesSupabaseService] revokeEmployeeInvite invoke result', {
       data: res.data,
       error: res.error,
     });
@@ -513,7 +514,7 @@ export async function resendEmployeeInvite(companyId: string, employeeId: string
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] resendEmployeeInvite request', { url, body });
+    logger.log('[employeesSupabaseService] resendEmployeeInvite request', { url, body });
   }
 
   if (url) {
@@ -536,7 +537,7 @@ export async function resendEmployeeInvite(companyId: string, employeeId: string
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[employeesSupabaseService] resendEmployeeInvite response', {
+      logger.log('[employeesSupabaseService] resendEmployeeInvite response', {
         status: res.status,
         ok: res.ok,
         data,
@@ -566,7 +567,7 @@ export async function resendEmployeeInvite(companyId: string, employeeId: string
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[employeesSupabaseService] resendEmployeeInvite invoke result', {
+    logger.log('[employeesSupabaseService] resendEmployeeInvite invoke result', {
       data: res.data,
       error: res.error,
     });
@@ -612,7 +613,7 @@ export async function updateEmployee(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Save] permissions payload', {
+    logger.log('[Employee Save] permissions payload', {
       employeeId,
       updates,
     });
@@ -631,7 +632,7 @@ export async function updateEmployee(
   if (updateEmpError) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.log('[Employee Save] Supabase response', {
+      logger.log('[Employee Save] Supabase response', {
         employeeId,
         ok: false,
         error: updateEmpError,
@@ -642,7 +643,7 @@ export async function updateEmployee(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[Employee Save] Supabase response', {
+    logger.log('[Employee Save] Supabase response', {
       employeeId,
       ok: true,
     });

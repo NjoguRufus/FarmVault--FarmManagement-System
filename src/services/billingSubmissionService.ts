@@ -6,6 +6,7 @@ import {
 import { mpesaRowIndicatesConfirmedPayment, mpesaRowIndicatesFailedPayment } from '@/services/subscriptionService';
 import { getSupabaseAccessToken, supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
+import { logger } from "@/lib/logger";
 
 type TokenProvider = () => Promise<string | null>;
 
@@ -107,7 +108,7 @@ export async function createPaymentSubmission(
     throw new Error('Payment submitted but no reference was returned.');
   }
   // eslint-disable-next-line no-console
-  console.log('[BillingSubmit] submit_manual_subscription_payment → public.subscription_payments id:', id);
+  logger.log('[BillingSubmit] submit_manual_subscription_payment → public.subscription_payments id:', id);
   const notifyToken = getToken ?? getSupabaseAccessToken;
   const { data: payRow } = await sb
     .from('subscription_payments')

@@ -25,7 +25,7 @@ export interface MpesaActiveConfig {
 const SANDBOX_STK_SHORTCODE = "174379";
 /** Daraja sandbox passkey for the test app above. */
 const SANDBOX_STK_PASSKEY =
-  "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
+  "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ad1ed2c919";
 
 function darajaBaseUrlForEnv(env: MpesaEnvName): string {
   return env === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
@@ -76,9 +76,14 @@ export function loadMpesaConfig(): MpesaActiveConfig {
     }
   }
 
-  const callbackUrl = Deno.env.get("MPESA_CALLBACK_URL")?.trim() ?? "";
+  const callbackUrl =
+    (Deno.env.get("MPESA_CALLBACK_URL")?.trim() ??
+      Deno.env.get("MPESA_STK_CALLBACK_URL")?.trim() ??
+      "");
   if (!callbackUrl) {
-    throw new Error("MPESA_CALLBACK_URL is missing — set it in Supabase Edge secrets");
+    throw new Error(
+      "MPESA_CALLBACK_URL is missing — set it in Supabase Edge secrets (or MPESA_STK_CALLBACK_URL for legacy)",
+    );
   }
 
   const baseUrl = darajaBaseUrlForEnv(env);

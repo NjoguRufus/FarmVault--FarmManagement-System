@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { logger } from "@/lib/logger";
 
 /**
  * Resolve the effective company_id for Supabase writes using the authenticated user context.
@@ -35,7 +36,7 @@ export async function resolveCompanyIdForWrite(
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.log('[tenant] resolveCompanyIdForWrite', {
+    logger.log('[tenant] resolveCompanyIdForWrite', {
       profileCompanyId,
       callerCompanyId: caller,
     });
