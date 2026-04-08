@@ -158,3 +158,56 @@ export function queueOneSignalPromptPermission(): void {
   });
 }
 
+/**
+ * Force a clean re-subscription cycle:
+ *   1. Clear the "prompt-attempted" localStorage flag so the popup can appear again.
+ *   2. Opt out of the current subscription.
+ *   3. Re-request browser permission.
+ *   4. Opt back in.
+ *
+ * Call this from a "Fix Notifications" button or once on login to recover
+ * existing users whose subscription silently expired or was never confirmed.
+ */
+export function resetOneSignalSubscription(userId?: string): void {
+  // Clear the per-user "already prompted" flag so the permission popup is allowed again.
+  if (userId && typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(`${PROMPT_ATTEMPT_PREFIX}${userId}`);
+    } catch {
+      // Non-blocking.
+    }
+  }
+
+  const queue = getQueue();
+  if (!queue) return;
+
+  queue.push(async (oneSignal) => {
+    try {
+      // Step 1: opt out so OneSignal treats this as a fresh device.
+      if (oneSignal.User.PushSubscription?.optOut) {
+        await oneSignal.User.PushSubscription.optOut();
+      }
+
+      // Brief pause to let the SDK settle.
+      await new Promise<void>((r) => setTimeout(r, 500));
+
+      // Step 2: re-request browser permission (shows popup if not yet granted/denied).
+      if (oneSignal.Notifications?.requestPermission) {
+        await oneSignal.Notifications.requestPermission();
+      }
+
+      // Step 3: opt back in so the subscription is registered with OneSignal.
+      if (oneSignal.User.PushSubscription?.optIn) {
+        await oneSignal.User.PushSubscription.optIn();
+      }
+
+      // eslint-disable-next-line no-console
+      console.log("[OneSignal] Subscribed:", oneSignal.User.PushSubscription?.optedIn);
+      // eslint-disable-next-line no-console
+      console.log("[OneSignal] Player ID:", oneSignal.User.PushSubscription?.id);
+    } catch {
+      // Non-blocking.
+    }
+  });
+}
+

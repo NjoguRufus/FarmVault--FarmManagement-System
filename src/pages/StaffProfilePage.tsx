@@ -408,9 +408,10 @@ export default function StaffProfilePage() {
                   size="sm"
                   disabled={uploadingAvatar}
                   onClick={async () => {
+                    const previousAvatar = avatarUrl;
+                    setAvatarUrl(null);
                     try {
                       await clearEmployeeAvatar(companyId, employeeId);
-                      setAvatarUrl(null);
                       await queryClient.invalidateQueries({
                         queryKey: ['staffEmployeeRow', companyId, employeeId],
                       });
@@ -422,6 +423,7 @@ export default function StaffProfilePage() {
                         description: 'We will now show your initials instead.',
                       });
                     } catch (err: any) {
+                      setAvatarUrl(previousAvatar);
                       toast({
                         title: 'Failed to remove photo',
                         description: err?.message ?? 'Could not remove profile photo.',

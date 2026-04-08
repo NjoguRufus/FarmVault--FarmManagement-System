@@ -17,6 +17,7 @@ import {
   isWebPushConfiguredInApp,
   syncWebPushSubscriptionToServer,
 } from '@/services/webPushSubscriptionService';
+import { resetOneSignalSubscription } from '@/services/oneSignalService';
 
 type OneSignalRuntime = {
   Notifications?: {
@@ -67,6 +68,7 @@ export function NotificationSettings() {
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushHint, setPushHint] = useState<string | null>(null);
+  const [fixBusy, setFixBusy] = useState(false);
   const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
   const canonicalPushHost = 'app.farmvault.africa';
   const isLocalhost =
@@ -272,6 +274,33 @@ export function NotificationSettings() {
             disabled={isPermissionBlocked || (!isCompanyAdmin && !companyData?.notifications_enabled)}
           />
         </div>
+
+        {/* Fix Notifications — re-runs the full subscribe cycle for this device */}
+        {isCanonicalPushHost && user?.id && (
+          <div className="flex items-center justify-between gap-4 pt-1">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Not receiving notifications?</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Re-triggers the permission prompt and re-subscribes this device.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={fixBusy}
+              onClick={async () => {
+                setFixBusy(true);
+                resetOneSignalSubscription(user.id);
+                // Give the queued async work time to run before re-enabling.
+                await new Promise<void>((r) => setTimeout(r, 3000));
+                setFixBusy(false);
+              }}
+            >
+              {fixBusy ? 'Fixing…' : 'Fix Notifications'}
+            </Button>
+          </div>
+        )}
 
         {/* Web Push (VAPID) — production + HTTPS */}
         {isWebPushConfiguredInApp() && (

@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubscriptionStatus } from "@/hooks/useSubscriptionStatus";
-import { queueOneSignalIdentitySync, queueOneSignalLogout } from "@/services/oneSignalService";
+import { queueOneSignalIdentitySync, queueOneSignalLogout, resetOneSignalSubscription } from "@/services/oneSignalService";
 import { getCompany } from "@/services/companyService";
 
 function mapRoleTag(role: string | undefined, profileUserType: string | null | undefined): "developer" | "company" | "ambassador" {
@@ -32,6 +32,15 @@ function mapPlanTag(plan: "trial" | "basic" | "pro" | "enterprise" | undefined):
 export function OneSignalIdentitySync() {
   const { user, isAuthenticated } = useAuth();
   const { plan } = useSubscriptionStatus();
+  const resetDone = useRef(false);
+
+  // Run once per session after login to recover users whose subscription
+  // silently expired, was never confirmed, or missed the initial prompt.
+  useEffect(() => {
+    if (!user?.id || resetDone.current) return;
+    resetDone.current = true;
+    resetOneSignalSubscription(user.id);
+  }, [user?.id]);
 
   const { data: companyData } = useQuery({
     queryKey: ["company", user?.companyId],

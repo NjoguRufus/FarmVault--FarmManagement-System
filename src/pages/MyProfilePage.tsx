@@ -173,12 +173,14 @@ export default function MyProfilePage() {
                 onClick={async () => {
                   if (!user?.id) return;
                   setUploadingAvatar(true);
+                  const previousAvatar = avatarUrl;
+                  setAvatarUrl(null);
                   try {
                     await clearAvatar(user.id);
-                    setAvatarUrl(null);
                     await refreshUserProfile();
                     toast({ title: 'Removed', description: 'Profile photo removed.' });
                   } catch (err: any) {
+                    setAvatarUrl(previousAvatar);
                     toast({
                       title: 'Error',
                       description: err?.message ?? 'Could not remove profile photo.',
