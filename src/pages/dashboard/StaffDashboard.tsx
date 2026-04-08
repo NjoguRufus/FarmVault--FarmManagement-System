@@ -318,6 +318,7 @@ export function StaffDashboard() {
       <div className="space-y-3">
         <CropStageProgressCard
           projectName={activeProject?.name}
+          cropType={activeProject?.cropTypeKey ?? activeProject?.cropType ?? null}
           stages={effectiveActiveProjectStages}
           activeStageOverride={canSeeCropStage ? activeStageOverride : undefined}
           knowledgeDetection={canSeeCropStage ? resolvedKnowledgeDetection ?? undefined : undefined}

@@ -7,7 +7,6 @@ const KNOWN_CROP_IMAGE_FILES: Record<string, string> = {
   frenchbeans: 'Frenchbeans.png',
   capsicum: 'capsicum.png',
   maize: 'maize.png',
-  rice: 'rice.png',
   watermelon: 'watermelon.png',
   watermelons: 'watermelon.png',
 };
@@ -26,23 +25,12 @@ const prettifyCropName = (crop: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const toTitleCase = (value: string) =>
-  value.replace(/\b\w/g, (char) => char.toUpperCase());
-
 function buildCropImageCandidates(crop: string) {
-  const raw = String(crop || '').trim();
-  const spaced = raw.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
-  const lowered = spaced.toLowerCase();
-  const titled = toTitleCase(lowered);
-  const normalized = normalizeCropKey(raw);
+  const normalized = normalizeCropKey(String(crop || '').trim());
 
+  const strictMapped = KNOWN_CROP_IMAGE_FILES[normalized];
   const candidates = [
-    KNOWN_CROP_IMAGE_FILES[normalized] ? `/cropstage images/${KNOWN_CROP_IMAGE_FILES[normalized]}` : null,
-    raw ? `/cropstage images/${raw}.png` : null,
-    spaced ? `/cropstage images/${spaced}.png` : null,
-    lowered ? `/cropstage images/${lowered}.png` : null,
-    titled ? `/cropstage images/${titled}.png` : null,
-    normalized ? `/cropstage images/${normalized}.png` : null,
+    strictMapped ? `/cropstage images/${strictMapped}` : null,
     '/cropstage images/tomatoes.png',
   ].filter(Boolean) as string[];
 
