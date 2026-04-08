@@ -21,7 +21,7 @@ import { resetOneSignalSubscription } from '@/services/oneSignalService';
 
 type OneSignalRuntime = {
   Notifications?: {
-    requestPermission?: () => Promise<void>;
+    requestPermission?: () => Promise<string>;
   };
   login?: (externalId: string) => Promise<void>;
   User?: {
@@ -107,6 +107,17 @@ export function NotificationSettings() {
       const permission = await requestBrowserPermission();
       if (permission === 'granted') {
         setNotificationsEnabled(true);
+        // Also queue OneSignal opt-in so the device registers with the SDK.
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        window.OneSignalDeferred.push(async (OneSignal) => {
+          try {
+            if (OneSignal.User?.PushSubscription?.optIn) {
+              await OneSignal.User.PushSubscription.optIn();
+            }
+          } catch {
+            // Non-blocking.
+          }
+        });
       }
     } finally {
       setIsRequestingPermission(false);
@@ -177,12 +188,17 @@ export function NotificationSettings() {
           }
 
           if (!optedIn) {
+            let granted =
+              typeof window !== 'undefined' &&
+              'Notification' in window &&
+              Notification.permission === 'granted';
             if (OneSignal.Notifications?.requestPermission) {
-              await OneSignal.Notifications.requestPermission();
+              const result = await OneSignal.Notifications.requestPermission();
+              granted = result === 'granted';
             } else {
-              await requestBrowserPermission();
+              granted = (await requestBrowserPermission()) === 'granted';
             }
-            if (OneSignal.User?.PushSubscription?.optIn) {
+            if (granted && OneSignal.User?.PushSubscription?.optIn) {
               await OneSignal.User.PushSubscription.optIn();
             }
           }
@@ -294,6 +310,12 @@ export function NotificationSettings() {
                 resetOneSignalSubscription(user.id);
                 // Give the queued async work time to run before re-enabling.
                 await new Promise<void>((r) => setTimeout(r, 3000));
+                // Sync UI permission state from browser after reset cycle.
+                if (typeof window !== 'undefined' && 'Notification' in window) {
+                  if (Notification.permission === 'granted') {
+                    setNotificationsEnabled(true);
+                  }
+                }
                 setFixBusy(false);
               }}
             >
