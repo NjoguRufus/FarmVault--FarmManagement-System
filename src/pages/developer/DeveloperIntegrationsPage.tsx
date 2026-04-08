@@ -42,10 +42,10 @@ function mask(value: string | undefined | null): string {
 }
 
 function getStatusBadgeClass(status: IntegrationStatus): string {
-  if (status === 'connected') return 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40';
-  if (status === 'partial') return 'bg-amber-500/20 text-amber-300 border-amber-400/40';
-  if (status === 'error') return 'bg-red-500/20 text-red-300 border-red-400/40';
-  return 'bg-zinc-500/20 text-zinc-300 border-zinc-400/40';
+  if (status === 'connected') return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/40';
+  if (status === 'partial') return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/40';
+  if (status === 'error') return 'bg-destructive/15 text-destructive border-destructive/40';
+  return 'bg-muted text-muted-foreground border-border';
 }
 
 function getStatusLabel(status: IntegrationStatus): string {
@@ -167,7 +167,7 @@ export default function DeveloperIntegrationsPage() {
           type="button"
           variant="outline"
           size="sm"
-          className="gap-1.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200"
+          className="gap-1.5"
           onClick={onRefreshStatus}
         >
           <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
@@ -181,7 +181,7 @@ export default function DeveloperIntegrationsPage() {
           return (
             <article
               key={integration.name}
-              className="relative rounded-2xl border border-emerald-500/20 bg-zinc-900/70 p-5 shadow-[0_10px_30px_-20px_rgba(16,185,129,0.5)] backdrop-blur"
+              className="relative rounded-2xl border border-border/60 bg-background p-5 shadow-[8px_8px_18px_rgba(0,0,0,0.12),-8px_-8px_18px_rgba(255,255,255,0.03)] dark:shadow-[8px_8px_18px_rgba(0,0,0,0.45),-8px_-8px_18px_rgba(255,255,255,0.02)]"
             >
               <Badge
                 className={cn(
@@ -193,7 +193,7 @@ export default function DeveloperIntegrationsPage() {
               </Badge>
 
               <div className="mb-4 flex items-start gap-3 pr-24">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/15 text-amber-300">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-muted/50 text-primary shadow-[inset_2px_2px_4px_rgba(255,255,255,0.06),inset_-2px_-2px_4px_rgba(0,0,0,0.18)]">
                   {integration.icon}
                 </span>
                 <div className="min-w-0">
@@ -202,9 +202,9 @@ export default function DeveloperIntegrationsPage() {
                 </div>
               </div>
 
-              <div className="mb-4 rounded-lg border border-zinc-700/60 bg-zinc-950/50 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Key Info</p>
-                <p className="truncate text-sm text-zinc-200">{integration.keyInfo}</p>
+              <div className="mb-4 rounded-lg border border-border/60 bg-muted/35 px-3 py-2 shadow-[inset_2px_2px_5px_rgba(0,0,0,0.16),inset_-2px_-2px_5px_rgba(255,255,255,0.03)]">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Key Info</p>
+                <p className="truncate text-sm text-foreground">{integration.keyInfo}</p>
               </div>
 
               <Button
@@ -215,7 +215,7 @@ export default function DeveloperIntegrationsPage() {
                 className={cn(
                   'w-full',
                   !isPlanned &&
-                    'bg-emerald-600 text-white hover:bg-emerald-500',
+                    'bg-primary text-primary-foreground hover:bg-primary/90',
                 )}
                 onClick={() => onTest(integration)}
               >
