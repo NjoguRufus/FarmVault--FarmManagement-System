@@ -24,6 +24,7 @@ import {
   Mail,
   ClipboardCheck,
   Scale,
+  Plug,
 } from 'lucide-react';
 
 export type NavGroup = 'main' | 'more';
@@ -89,6 +90,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'more' },
   { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'more' },
   { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
+  { label: 'Integrations', path: '/developer/integrations', icon: Plug, group: 'more' },
   { label: 'Records', path: '/developer/records', icon: FileText, group: 'more' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },
   { label: 'Compliance & Documents', path: '/developer/documents', icon: Scale, group: 'more' },
