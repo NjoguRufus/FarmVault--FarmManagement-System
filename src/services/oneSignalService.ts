@@ -7,7 +7,7 @@ type OneSignalRuntime = {
   login: (externalId: string) => Promise<void>;
   logout: () => Promise<void>;
   Notifications?: {
-    requestPermission?: () => Promise<void>;
+    requestPermission?: () => Promise<string>;
   };
   User: {
     addTag: (key: string, value: string) => Promise<void> | void;
@@ -192,19 +192,27 @@ export function resetOneSignalSubscription(userId?: string): void {
       await new Promise<void>((r) => setTimeout(r, 500));
 
       // Step 2: re-request browser permission (shows popup if not yet granted/denied).
+      let permissionGranted =
+        typeof window !== "undefined" &&
+        "Notification" in window &&
+        Notification.permission === "granted";
       if (oneSignal.Notifications?.requestPermission) {
-        await oneSignal.Notifications.requestPermission();
+        const result = await oneSignal.Notifications.requestPermission();
+        permissionGranted = result === "granted";
       }
 
-      // Step 3: opt back in so the subscription is registered with OneSignal.
-      if (oneSignal.User.PushSubscription?.optIn) {
+      // Step 3: opt back in only when permission was granted.
+      if (permissionGranted && oneSignal.User.PushSubscription?.optIn) {
         await oneSignal.User.PushSubscription.optIn();
       }
 
+      const optedIn = Boolean(oneSignal.User.PushSubscription?.optedIn);
       // eslint-disable-next-line no-console
-      console.log("[OneSignal] Subscribed:", oneSignal.User.PushSubscription?.optedIn);
+      console.log("[OneSignal] Permission:", typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unknown");
       // eslint-disable-next-line no-console
-      console.log("[OneSignal] Player ID:", oneSignal.User.PushSubscription?.id);
+      console.log("[OneSignal] Subscribed:", optedIn);
+      // eslint-disable-next-line no-console
+      console.log("[OneSignal] Player:", oneSignal.User.PushSubscription?.id);
     } catch {
       // Non-blocking.
     }

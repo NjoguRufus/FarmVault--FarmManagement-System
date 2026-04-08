@@ -32,7 +32,7 @@ export function Footer() {
               <span className="font-semibold text-xl text-primary-foreground">FarmVault</span>
             </div>
             <h2 className="text-base font-semibold text-primary-foreground mb-3">
-              Farm Management System in Kenya
+              Farm Management System in Africa
             </h2>
             <p className="text-sm text-primary-foreground/50 leading-relaxed max-w-sm font-light">
               Track harvest, labor, inventory, and expenses with a modern farm management system built for African farmers.
