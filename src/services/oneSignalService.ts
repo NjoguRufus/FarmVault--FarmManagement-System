@@ -73,3 +73,16 @@ export function queueOneSignalLogout(): void {
   });
 }
 
+export function queueOneSignalPromptPermission(): void {
+  const queue = getQueue();
+  if (!queue) return;
+
+  queue.push(async (oneSignal) => {
+    try {
+      oneSignal.showSlidedownPrompt();
+    } catch {
+      // Non-blocking.
+    }
+  });
+}
+

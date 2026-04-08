@@ -16,6 +16,7 @@ import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { queueOneSignalPromptPermission } from '@/services/oneSignalService';
 import { cn } from '@/lib/utils';
 
 type IntegrationStatus = 'connected' | 'partial' | 'planned' | 'error';
@@ -148,6 +149,9 @@ export default function DeveloperIntegrationsPage() {
   };
 
   const onTest = (integration: Integration) => {
+    if (integration.name === 'OneSignal') {
+      queueOneSignalPromptPermission();
+    }
     toast({
       title: `${integration.name}: ${integration.actionLabel}`,
       description: 'Test action queued for developer verification.',
