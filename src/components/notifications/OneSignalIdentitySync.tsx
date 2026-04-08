@@ -29,8 +29,9 @@ export function OneSignalIdentitySync() {
       userId: user.id,
       role: mapRoleTag(user.role, user.profileUserType),
       plan: mapPlanTag(plan),
+      companyId: user.companyId ?? null,
     });
-  }, [isAuthenticated, user?.id, user?.role, user?.profileUserType, plan]);
+  }, [isAuthenticated, user?.id, user?.role, user?.profileUserType, user?.companyId, plan]);
 
   return null;
 }
