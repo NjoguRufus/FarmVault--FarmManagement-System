@@ -175,10 +175,12 @@ import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
 import DeveloperSettingsPage from "@/pages/developer/DeveloperSettingsPage";
 import DeveloperDocumentsPage from "@/pages/developer/DeveloperDocumentsPage";
+import DeveloperIntegrationsPage from "@/pages/developer/DeveloperIntegrationsPage";
 import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
 import { ReferralAttributionCapture } from "@/components/referral/ReferralAttributionCapture";
 import { SignedInAuthEscape } from "@/components/auth/SignedInAuthEscape";
+import { OneSignalIdentitySync } from "@/components/notifications/OneSignalIdentitySync";
 import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
 import { logger } from "@/lib/logger";
 
@@ -513,6 +515,7 @@ const AppRoutesWithLock = () => (
         <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
         <Route path="qr" element={<DevQRGeneratorPage />} />
         <Route path="documents" element={<DeveloperDocumentsPage />} />
+        <Route path="integrations" element={<DeveloperIntegrationsPage />} />
       </Route>
       
       {/* 404 route */}
@@ -545,6 +548,7 @@ const App = () => (
                     <SignedInAuthEscape />
                     <RoutePersistence />
                     <PosthogAnalytics />
+                    <OneSignalIdentitySync />
                     <OnboardingModalPriorityProvider>
                       <TourProvider>
                         <AppRoutesWithLock />
