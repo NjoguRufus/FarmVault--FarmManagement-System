@@ -16,6 +16,12 @@ const LAST_ROUTE_KEY = 'farmvault:last-route:v1';
 export function RootRoute() {
   const { authReady, isAuthenticated, clerkLoaded, clerkSignedIn, hasClerkSession } = useAuth();
 
+  // Public marketing domain should always open the landing page immediately.
+  // Navigation to auth/app happens only through explicit user actions (Get started, Login, Open dashboard).
+  if (isPublicProductionHost()) {
+    return <Index />;
+  }
+
   // Prevent the marketing landing from flashing while Clerk is still hydrating.
   // If Clerk hasn't loaded yet, we don't know whether a session exists.
   if (!clerkLoaded) {
@@ -32,11 +38,6 @@ export function RootRoute() {
   }
 
   if (isAuthenticated) {
-    // On the public production domain, allow authenticated users to view marketing pages intentionally.
-    // (The landing navbar will show an "Open Dashboard" button that goes to the app domain.)
-    if (isPublicProductionHost()) {
-      return <Index />;
-    }
     let to = '/dashboard';
     try {
       const saved = window.localStorage.getItem(LAST_ROUTE_KEY) || '';

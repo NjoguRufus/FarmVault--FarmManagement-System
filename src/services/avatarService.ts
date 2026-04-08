@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 
 const AVATARS_BUCKET = 'avatars';
-const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB (profile avatars)
+const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB (profile avatars)
 const MAX_EMPLOYEE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB (employee staff avatars)
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
@@ -36,7 +36,7 @@ export async function uploadAvatar(params: UploadAvatarParams): Promise<UploadAv
     throw new Error('File and user id are required');
   }
   if (file.size > MAX_SIZE_BYTES) {
-    throw new Error('Image must be 2MB or smaller');
+    throw new Error('Image must be 5MB or smaller');
   }
   if (!ALLOWED_TYPES.includes(file.type)) {
     throw new Error('Allowed types: JPEG, PNG, WebP');

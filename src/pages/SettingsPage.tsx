@@ -42,6 +42,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | undefined>(user?.avatar);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Profile state
@@ -224,6 +225,10 @@ export default function SettingsPage() {
     }
   }, [company]);
 
+  useEffect(() => {
+    setAvatarPreviewUrl(user?.avatar);
+  }, [user?.avatar]);
+
   // Check if there are unsaved changes
   const hasChanges =
     (editName.trim() !== (company?.name ?? '').trim()) ||
@@ -376,14 +381,14 @@ export default function SettingsPage() {
             {/* Avatar section */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-4">
               <UserAvatar
-                avatarUrl={user?.avatar}
+                avatarUrl={avatarPreviewUrl}
                 name={profileName || user?.name}
                 size="lg"
                 className="h-20 w-20 shrink-0 rounded-full border-2 border-border"
               />
               <div className="flex-1 space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  {user?.avatar
+                  {avatarPreviewUrl
                     ? 'Custom avatar or Google photo. Upload a new image to replace it, or remove to use default.'
                     : 'Upload a profile photo. Google sign-in users can override their Google photo with a custom avatar.'}
                 </p>
@@ -403,11 +408,12 @@ export default function SettingsPage() {
                       setAvatarError(null);
                       setAvatarUploading(true);
                       try {
-                        await uploadAvatar({
+                        const result = await uploadAvatar({
                           file,
                           clerkUserId: user.id,
                           companyId: user.companyId ?? null,
                         });
+                        setAvatarPreviewUrl(result.url);
                         await refreshUserAvatar?.();
                         addNotification({ title: 'Avatar updated', message: 'Your profile photo has been saved.', toastType: 'success' });
                       } catch (err: any) {
@@ -426,7 +432,7 @@ export default function SettingsPage() {
                     {avatarUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                     {avatarUploading ? 'Uploading…' : 'Upload photo'}
                   </button>
-                  {user?.avatar && (
+                  {avatarPreviewUrl && (
                     <button
                       type="button"
                       disabled={avatarUploading}
@@ -434,11 +440,14 @@ export default function SettingsPage() {
                         if (!user?.id) return;
                         setAvatarError(null);
                         setAvatarUploading(true);
+                        const previousAvatar = avatarPreviewUrl;
+                        setAvatarPreviewUrl(undefined);
                         try {
                           await clearAvatar(user.id);
                           await refreshUserAvatar?.();
                           addNotification({ title: 'Avatar removed', message: 'Using default or Google photo.', toastType: 'success' });
                         } catch (err: any) {
+                          setAvatarPreviewUrl(previousAvatar);
                           setAvatarError(err?.message ?? 'Failed to remove');
                         } finally {
                           setAvatarUploading(false);
