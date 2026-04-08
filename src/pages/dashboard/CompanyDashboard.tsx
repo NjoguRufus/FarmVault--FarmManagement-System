@@ -1224,6 +1224,7 @@ export function CompanyDashboard() {
                 farmProgressStatusFilter={farmProgressDashboardFilter}
                 onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
                 projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
+                cropType={activeProject?.cropTypeKey ?? activeProject?.cropType ?? null}
                 stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
                 activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
                 knowledgeDetection={
@@ -1325,6 +1326,7 @@ export function CompanyDashboard() {
               farmProgressStatusFilter={farmProgressDashboardFilter}
               onFarmProgressStatusFilterChange={setFarmProgressDashboardFilter}
               projectName={loneProjectCropCardProps?.projectName ?? activeProject?.name}
+              cropType={activeProject?.cropTypeKey ?? activeProject?.cropType ?? null}
               stages={loneProjectCropCardProps?.stages ?? effectiveActiveProjectStages}
               activeStageOverride={loneProjectCropCardProps?.activeStageOverride ?? activeStageOverride}
               knowledgeDetection={

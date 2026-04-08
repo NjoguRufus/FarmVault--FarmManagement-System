@@ -68,6 +68,7 @@ export interface CropStageProgressCardProps {
   farmProgressStatusFilter?: FarmProgressDashboardFilter;
   onFarmProgressStatusFilterChange?: (filter: FarmProgressDashboardFilter) => void;
   projectName?: string | null;
+  cropType?: string | null;
   stages?: StageLike[];
   activeStageOverride?: StageLike | null;
   knowledgeDetection?: {
@@ -287,6 +288,7 @@ export function CropStageProgressCard({
   farmProgressStatusFilter,
   onFarmProgressStatusFilterChange,
   projectName,
+  cropType = null,
   stages = [],
   activeStageOverride = null,
   knowledgeDetection = null,
@@ -367,7 +369,7 @@ export function CropStageProgressCard({
     return (
       <div className={hasDrawer ? 'rounded-lg border border-border/50 bg-card/60 overflow-hidden' : undefined}>
         <CropProgressCard
-          crop={resolveCropNameForImage(knowledgeDetection.cropType, projectName)}
+          crop={resolveCropNameForImage(cropType, knowledgeDetection.cropType, projectName)}
           farmName={projectName}
           stage={knowledgeDetection.stageLabel}
           progress={progressPct}
@@ -497,7 +499,7 @@ export function CropStageProgressCard({
   return (
     <div className={hasDrawer ? 'rounded-lg border border-border/50 bg-card/60 overflow-hidden' : undefined}>
       <CropProgressCard
-        crop={resolveCropNameForImage(stageDetails.stage.cropType, projectName)}
+        crop={resolveCropNameForImage(cropType, stageDetails.stage.cropType, projectName)}
         farmName={projectName}
         stage={stageDetails.stageName}
         progress={progressPct}
