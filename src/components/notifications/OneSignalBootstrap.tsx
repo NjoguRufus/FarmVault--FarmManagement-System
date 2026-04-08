@@ -19,6 +19,14 @@ declare global {
 export function OneSignalBootstrap() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const host = (window.location.hostname || '').toLowerCase();
+    const canonicalHost = 'app.farmvault.africa';
+    const isLocalhost =
+      host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost');
+    if (!isLocalhost && host !== canonicalHost) {
+      // Standardize push subscriptions to the app origin only.
+      return;
+    }
     const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
     if (!appId) {
       // eslint-disable-next-line no-console

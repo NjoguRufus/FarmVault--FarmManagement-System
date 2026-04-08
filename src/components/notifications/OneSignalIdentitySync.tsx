@@ -10,6 +10,18 @@ function mapRoleTag(role: string | undefined, profileUserType: string | null | u
   return "company";
 }
 
+function resolveRoleTags(role: string | undefined, profileUserType: string | null | undefined): Array<"developer" | "company" | "ambassador"> {
+  const out = new Set<"developer" | "company" | "ambassador">();
+  const baseRole = (role ?? "").trim().toLowerCase();
+  const profileType = (profileUserType ?? "").trim().toLowerCase();
+  if (baseRole === "developer") out.add("developer");
+  if (profileType === "ambassador" || profileType === "both") out.add("ambassador");
+  // Most FarmVault users are company users unless strictly developer-only.
+  if (baseRole !== "developer" || profileType === "both") out.add("company");
+  if (out.size === 0) out.add("company");
+  return Array.from(out);
+}
+
 function mapPlanTag(plan: "trial" | "basic" | "pro" | "enterprise" | undefined): "basic" | "pro" {
   if (plan === "pro" || plan === "enterprise") return "pro";
   return "basic";
@@ -28,6 +40,7 @@ export function OneSignalIdentitySync() {
     queueOneSignalIdentitySync({
       userId: user.id,
       role: mapRoleTag(user.role, user.profileUserType),
+      roles: resolveRoleTags(user.role, user.profileUserType),
       plan: mapPlanTag(plan),
       companyId: user.companyId ?? null,
     });

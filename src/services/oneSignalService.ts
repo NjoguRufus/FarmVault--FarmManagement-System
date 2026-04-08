@@ -27,6 +27,7 @@ declare global {
 type SyncIdentityArgs = {
   userId: string;
   role: OneSignalTagRole;
+  roles?: OneSignalTagRole[];
   plan: OneSignalTagPlan;
   companyId?: string | null;
   onPlayerId?: (playerId: string) => void;
@@ -49,9 +50,20 @@ export function queueOneSignalIdentitySync(args: SyncIdentityArgs): void {
     try {
       await oneSignal.login(args.userId);
       await Promise.resolve(oneSignal.User.addTag("role", args.role));
+      const roleTags = Array.isArray(args.roles) && args.roles.length > 0 ? args.roles : [args.role];
+      await Promise.resolve(oneSignal.User.addTag("roles", roleTags.join(",")));
+      await Promise.resolve(oneSignal.User.addTag("has_role_developer", roleTags.includes("developer") ? "1" : "0"));
+      await Promise.resolve(oneSignal.User.addTag("has_role_company", roleTags.includes("company") ? "1" : "0"));
+      await Promise.resolve(oneSignal.User.addTag("has_role_ambassador", roleTags.includes("ambassador") ? "1" : "0"));
       await Promise.resolve(oneSignal.User.addTag("plan", args.plan));
       if (args.companyId) {
         await Promise.resolve(oneSignal.User.addTag("companyId", args.companyId));
+      }
+      if (typeof window !== "undefined") {
+        const host = window.location.hostname || "";
+        if (host) {
+          await Promise.resolve(oneSignal.User.addTag("origin_host", host));
+        }
       }
 
       const optedIn = Boolean(oneSignal.User.PushSubscription?.optedIn);

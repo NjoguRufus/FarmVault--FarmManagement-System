@@ -51,6 +51,11 @@ export function NotificationSettings() {
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushHint, setPushHint] = useState<string | null>(null);
+  const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+  const canonicalPushHost = 'app.farmvault.africa';
+  const isLocalhost =
+    host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost');
+  const isCanonicalPushHost = isLocalhost || host === canonicalPushHost;
 
   const permissionStatus = preferences.browserPermission;
   const isPermissionBlocked = permissionStatus === 'denied';
@@ -60,6 +65,17 @@ export function NotificationSettings() {
     isWebPushConfiguredInApp() &&
     !import.meta.env.DEV &&
     isPermissionGranted;
+
+  const resolveRoleTags = (): string[] => {
+    const out = new Set<string>();
+    const baseRole = (user?.role ?? '').trim().toLowerCase();
+    const profileType = String((user as any)?.profileUserType ?? '').trim().toLowerCase();
+    if (baseRole) out.add(baseRole);
+    if (profileType === 'ambassador' || profileType === 'both') out.add('ambassador');
+    if (baseRole !== 'developer' || profileType === 'both') out.add('company');
+    if (out.size === 0) out.add('company');
+    return Array.from(out);
+  };
 
   const handleTestSound = async (soundFile: NotificationSoundFile) => {
     setPlayingSound(soundFile);
@@ -81,6 +97,7 @@ export function NotificationSettings() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!isCanonicalPushHost) return;
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async (OneSignal) => {
       try {
@@ -93,7 +110,7 @@ export function NotificationSettings() {
   }, [setNotificationsEnabled]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (typeof window === 'undefined' || !('Notification' in window) || !isCanonicalPushHost) return;
     const permission = Notification.permission;
     if (permission === 'granted') {
       // Keep local toggle aligned with browser permission after refresh/reload.
@@ -102,6 +119,10 @@ export function NotificationSettings() {
   }, [setNotificationsEnabled]);
 
   const handleToggleNotifications = async (enabled: boolean) => {
+    if (!isCanonicalPushHost) {
+      setNotificationsEnabled(false);
+      return;
+    }
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async (OneSignal) => {
       try {
@@ -113,6 +134,13 @@ export function NotificationSettings() {
           }
           if (user?.role && OneSignal.User?.addTag) {
             await Promise.resolve(OneSignal.User.addTag('role', String(user.role)));
+          }
+          const roleTags = resolveRoleTags();
+          if (OneSignal.User?.addTag) {
+            await Promise.resolve(OneSignal.User.addTag('roles', roleTags.join(',')));
+            await Promise.resolve(OneSignal.User.addTag('has_role_developer', roleTags.includes('developer') ? '1' : '0'));
+            await Promise.resolve(OneSignal.User.addTag('has_role_company', roleTags.includes('company') ? '1' : '0'));
+            await Promise.resolve(OneSignal.User.addTag('has_role_ambassador', roleTags.includes('ambassador') ? '1' : '0'));
           }
           if (user?.companyId && OneSignal.User?.addTag) {
             await Promise.resolve(OneSignal.User.addTag('companyId', String(user.companyId)));
@@ -190,6 +218,11 @@ export function NotificationSettings() {
             <p className="text-xs text-muted-foreground mt-2">
               OneSignal status syncs with browser permission and subscription state.
             </p>
+            {!isCanonicalPushHost && (
+              <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+                Push subscriptions are standardized on {canonicalPushHost}. Open the app on that domain to enable phone tray notifications.
+              </p>
+            )}
           </div>
         </div>
 
@@ -238,7 +271,7 @@ export function NotificationSettings() {
                     try {
                       const r = await syncWebPushSubscriptionToServer({
                         companyId: user?.companyId ?? null,
-                        role: user?.role ?? null,
+                        role: resolveRoleTags().join(','),
                         deviceInfo: collectDeviceInfo(),
                       });
                       setPushHint(r.ok ? 'This device is registered for push.' : (r.error ?? 'Registration failed.'));
