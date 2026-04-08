@@ -16,6 +16,27 @@ import {
   syncWebPushSubscriptionToServer,
 } from '@/services/webPushSubscriptionService';
 
+type OneSignalRuntime = {
+  Notifications?: {
+    requestPermission?: () => Promise<void>;
+  };
+  login?: (externalId: string) => Promise<void>;
+  User?: {
+    addTag?: (key: string, value: string) => Promise<void> | void;
+    PushSubscription?: {
+      optedIn?: boolean;
+      optIn?: () => Promise<void>;
+      optOut?: () => Promise<void>;
+    };
+  };
+};
+
+declare global {
+  interface Window {
+    OneSignalDeferred?: Array<(oneSignal: OneSignalRuntime) => void | Promise<void>>;
+  }
+}
+
 export function NotificationSettings() {
   const { user } = useAuth();
   const {
@@ -58,15 +79,68 @@ export function NotificationSettings() {
     }
   };
 
-  const handleToggleNotifications = async (enabled: boolean) => {
-    if (enabled && preferences.browserPermission !== 'granted') {
-      const permission = await requestBrowserPermission();
-      if (permission === 'granted') {
-        setNotificationsEnabled(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async (OneSignal) => {
+      try {
+        const optedIn = Boolean(OneSignal.User?.PushSubscription?.optedIn);
+        setNotificationsEnabled(optedIn);
+      } catch {
+        // Non-blocking.
       }
-    } else {
-      setNotificationsEnabled(enabled);
+    });
+  }, [setNotificationsEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const permission = Notification.permission;
+    if (permission === 'granted') {
+      // Keep local toggle aligned with browser permission after refresh/reload.
+      setNotificationsEnabled(true);
     }
+  }, [setNotificationsEnabled]);
+
+  const handleToggleNotifications = async (enabled: boolean) => {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async (OneSignal) => {
+      try {
+        const optedIn = Boolean(OneSignal.User?.PushSubscription?.optedIn);
+
+        if (enabled) {
+          if (user?.id && OneSignal.login) {
+            await OneSignal.login(user.id);
+          }
+          if (user?.role && OneSignal.User?.addTag) {
+            await Promise.resolve(OneSignal.User.addTag('role', String(user.role)));
+          }
+          if (user?.companyId && OneSignal.User?.addTag) {
+            await Promise.resolve(OneSignal.User.addTag('companyId', String(user.companyId)));
+          }
+
+          if (!optedIn) {
+            if (OneSignal.Notifications?.requestPermission) {
+              await OneSignal.Notifications.requestPermission();
+            } else {
+              await requestBrowserPermission();
+            }
+            if (OneSignal.User?.PushSubscription?.optIn) {
+              await OneSignal.User.PushSubscription.optIn();
+            }
+          }
+          const finalOptedIn = Boolean(OneSignal.User?.PushSubscription?.optedIn);
+          setNotificationsEnabled(finalOptedIn);
+          return;
+        }
+
+        if (OneSignal.User?.PushSubscription?.optOut) {
+          await OneSignal.User.PushSubscription.optOut();
+        }
+        setNotificationsEnabled(false);
+      } catch {
+        setNotificationsEnabled(enabled);
+      }
+    });
   };
 
   return (
@@ -113,6 +187,9 @@ export function NotificationSettings() {
                 {isRequestingPermission ? 'Requesting...' : 'Request Permission'}
               </Button>
             )}
+            <p className="text-xs text-muted-foreground mt-2">
+              OneSignal status syncs with browser permission and subscription state.
+            </p>
           </div>
         </div>
 
