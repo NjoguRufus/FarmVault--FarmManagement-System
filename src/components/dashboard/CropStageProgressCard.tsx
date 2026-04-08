@@ -93,8 +93,29 @@ export interface CropStageProgressCardProps {
 const formatStageDate = (date: Date) =>
   date.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
 
-const resolveCropNameForImage = (cropType?: string | null) =>
-  String(cropType || '').trim() || 'tomatoes';
+const CROP_NAME_FALLBACK_MATCHERS: Array<{ canonical: string; patterns: RegExp[] }> = [
+  { canonical: 'tomatoes', patterns: [/\btomato(es)?\b/i] },
+  { canonical: 'french-beans', patterns: [/\bfrench[\s-]?beans?\b/i] },
+  { canonical: 'capsicum', patterns: [/\bcapsicum\b/i, /\bpepper(s)?\b/i] },
+  { canonical: 'watermelon', patterns: [/\bwater[\s-]?melons?\b/i] },
+  { canonical: 'maize', patterns: [/\bmaize\b/i, /\bcorn\b/i] },
+  { canonical: 'rice', patterns: [/\brice\b/i] },
+];
+
+const resolveCropNameForImage = (...candidates: Array<string | null | undefined>) => {
+  const primary = String(candidates[0] || '').trim();
+  if (primary.length > 0) return primary;
+
+  for (const candidate of candidates) {
+    const raw = String(candidate || '');
+    const match = CROP_NAME_FALLBACK_MATCHERS.find((entry) =>
+      entry.patterns.some((pattern) => pattern.test(raw)),
+    );
+    if (match) return match.canonical;
+  }
+
+  return 'tomatoes';
+};
 
 const cardClasses =
   'relative overflow-hidden rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-3 sm:p-4 transition-all after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-gradient-to-r after:from-primary/60 after:via-primary/20 after:to-transparent';
@@ -346,7 +367,7 @@ export function CropStageProgressCard({
     return (
       <div className={hasDrawer ? 'rounded-lg border border-border/50 bg-card/60 overflow-hidden' : undefined}>
         <CropProgressCard
-          crop={resolveCropNameForImage(knowledgeDetection.cropType)}
+          crop={resolveCropNameForImage(knowledgeDetection.cropType, projectName)}
           farmName={projectName}
           stage={knowledgeDetection.stageLabel}
           progress={progressPct}
@@ -476,7 +497,7 @@ export function CropStageProgressCard({
   return (
     <div className={hasDrawer ? 'rounded-lg border border-border/50 bg-card/60 overflow-hidden' : undefined}>
       <CropProgressCard
-        crop={resolveCropNameForImage(stageDetails.stage.cropType)}
+        crop={resolveCropNameForImage(stageDetails.stage.cropType, projectName)}
         farmName={projectName}
         stage={stageDetails.stageName}
         progress={progressPct}
