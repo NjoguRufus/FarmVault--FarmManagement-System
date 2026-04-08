@@ -44,6 +44,8 @@ export interface CompanyDoc {
   paymentReminderDismissedBy?: string | null;
   subscriptionPlan?: string;
   subscription?: CompanySubscription;
+  /** Master push-notification switch. When true, OneSignal will prompt users to subscribe. */
+  notifications_enabled?: boolean;
   [key: string]: unknown;
 }
 
@@ -69,6 +71,7 @@ function mapRowToCompanyDoc(row: Record<string, unknown>): CompanyDoc {
     createdAt: row.created_at ?? undefined,
     subscription: sub ?? undefined,
     subscriptionPlan: sub?.plan ?? undefined,
+    notifications_enabled: row.notifications_enabled != null ? Boolean(row.notifications_enabled) : false,
   };
 }
 
@@ -180,6 +183,7 @@ export async function updateCompany(
     plan?: string;
     status?: string;
     customWorkTypes?: string[];
+    notificationsEnabled?: boolean;
   }
 ): Promise<void> {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -188,6 +192,7 @@ export async function updateCompany(
   if (data.plan !== undefined) updates.plan = data.plan;
   if (data.status !== undefined) updates.status = data.status;
   if (data.customWorkTypes !== undefined) updates.custom_work_types = data.customWorkTypes;
+  if (data.notificationsEnabled !== undefined) updates.notifications_enabled = data.notificationsEnabled;
   if (Object.keys(updates).length <= 1) return;
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console

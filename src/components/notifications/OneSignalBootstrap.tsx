@@ -2,11 +2,6 @@ import { useEffect } from 'react';
 
 type OneSignalRuntime = {
   init: (options: Record<string, unknown>) => Promise<void>;
-  showSlidedownPrompt?: () => void | Promise<void>;
-  Notifications?: {
-    permission?: 'default' | 'granted' | 'denied';
-    requestPermission?: () => Promise<void>;
-  };
 };
 
 declare global {
@@ -44,26 +39,11 @@ export function OneSignalBootstrap() {
         appId,
         serviceWorkerPath: '/OneSignalSDKWorker.js',
         serviceWorkerUpdaterPath: '/OneSignalSDKUpdaterWorker.js',
-        notifyButton: { enable: true },
+        // notifyButton disabled — permission is requested only when company.notifications_enabled is true
+        notifyButton: { enable: false },
         allowLocalhostAsSecureOrigin: true,
-        promptOptions: {
-          slidedown: {
-            prompts: [
-              {
-                type: 'push',
-                autoPrompt: true,
-                delay: { pageViews: 1, timeDelay: 8 },
-              },
-            ],
-          },
-        },
+        // No auto-prompt: permission requests are gated by company.notifications_enabled in OneSignalIdentitySync
       });
-
-      // Avoid forcing native permission on page-load (Chrome may suppress it without user gesture).
-      // Prefer OneSignal soft prompt first.
-      if (OneSignal.Notifications?.permission === 'default' && OneSignal.showSlidedownPrompt) {
-        await Promise.resolve(OneSignal.showSlidedownPrompt());
-      }
     });
   }, []);
 

@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useNotificationPreferences } from '@/hooks/useNotificationPreferences';
-import { 
-  NOTIFICATION_SOUNDS, 
+import {
+  NOTIFICATION_SOUNDS,
   testNotificationSound,
-  type NotificationSoundFile 
+  type NotificationSoundFile
 } from '@/services/notificationSoundService';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getCompany, updateCompany } from '@/services/companyService';
 import {
   collectDeviceInfo,
   isWebPushConfiguredInApp,
@@ -46,6 +48,20 @@ export function NotificationSettings() {
     setSoundFile,
     requestBrowserPermission,
   } = useNotificationPreferences();
+
+  const queryClient = useQueryClient();
+  const companyId = user?.companyId ?? null;
+  const isCompanyAdmin =
+    user?.role === 'company-admin' ||
+    (user as any)?.role === 'company_admin' ||
+    user?.role === 'developer';
+
+  const { data: companyData } = useQuery({
+    queryKey: ['company', companyId],
+    enabled: !!companyId,
+    queryFn: () => getCompany(companyId!),
+    staleTime: 30_000,
+  });
 
   const [playingSound, setPlayingSound] = useState<string | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
@@ -123,6 +139,18 @@ export function NotificationSettings() {
       setNotificationsEnabled(false);
       return;
     }
+
+    // Company admins/developers also persist the flag to the database so that
+    // OneSignalIdentitySync picks it up for every user on their next load.
+    if (isCompanyAdmin && companyId) {
+      try {
+        await updateCompany(companyId, { notificationsEnabled: enabled });
+        await queryClient.invalidateQueries({ queryKey: ['company', companyId] });
+      } catch {
+        // Non-blocking — still proceed with device-level toggle.
+      }
+    }
+
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async (OneSignal) => {
       try {
@@ -173,71 +201,75 @@ export function NotificationSettings() {
 
   return (
     <div className="fv-card">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-5">
         <Bell className="h-5 w-5 text-primary" />
         <h3 className="text-lg font-semibold text-foreground">Notifications</h3>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {/* Browser Permission Status */}
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-          {isPermissionGranted ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-          ) : isPermissionBlocked ? (
-            <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-          ) : (
-            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              Browser Permission: {' '}
-              <span className={cn(
+        <div className="flex items-start justify-between gap-4 p-3 rounded-lg bg-muted/50">
+          <div className="flex items-start gap-2.5">
+            {isPermissionGranted ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : isPermissionBlocked ? (
+              <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="text-sm font-medium text-foreground">Browser permission</p>
+              <p className={cn(
+                'text-xs mt-0.5',
                 isPermissionGranted && 'text-emerald-600',
                 isPermissionBlocked && 'text-destructive',
-                !isPermissionGranted && !isPermissionBlocked && 'text-amber-600'
+                !isPermissionGranted && !isPermissionBlocked && 'text-muted-foreground'
               )}>
-                {isPermissionGranted ? 'Allowed' : isPermissionBlocked ? 'Blocked' : 'Not set'}
-              </span>
-            </p>
-            {isPermissionBlocked && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Notifications are blocked by your browser. To enable them, click the lock icon in your browser's address bar and allow notifications for this site.
+                {isPermissionGranted
+                  ? 'Allowed — this browser can receive notifications'
+                  : isPermissionBlocked
+                  ? 'Blocked — click the lock icon in your address bar to allow'
+                  : 'Not yet granted'}
               </p>
-            )}
-            {!isPermissionGranted && !isPermissionBlocked && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={handleRequestPermission}
-                disabled={isRequestingPermission}
-              >
-                {isRequestingPermission ? 'Requesting...' : 'Request Permission'}
-              </Button>
-            )}
-            <p className="text-xs text-muted-foreground mt-2">
-              OneSignal status syncs with browser permission and subscription state.
-            </p>
-            {!isCanonicalPushHost && (
-              <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
-                Push subscriptions are standardized on {canonicalPushHost}. Open the app on that domain to enable phone tray notifications.
-              </p>
-            )}
+              {!isCanonicalPushHost && (
+                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                  Open {canonicalPushHost} to enable push on this device.
+                </p>
+              )}
+            </div>
           </div>
+          {!isPermissionGranted && !isPermissionBlocked && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={handleRequestPermission}
+              disabled={isRequestingPermission}
+            >
+              {isRequestingPermission ? 'Requesting…' : 'Allow'}
+            </Button>
+          )}
         </div>
 
         {/* Enable Notifications Toggle */}
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-foreground">Enable Notifications</p>
-            <p className="text-xs text-muted-foreground">
-              Receive alerts for inventory actions and important updates
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Push notifications</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isCompanyAdmin
+                ? 'Enable push alerts for all team members'
+                : 'Receive push alerts on this device'}
             </p>
+            {!isCompanyAdmin && companyData && !companyData.notifications_enabled && (
+              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                Disabled by your company admin.
+              </p>
+            )}
           </div>
           <Switch
             checked={preferences.notificationsEnabled}
             onCheckedChange={handleToggleNotifications}
-            disabled={isPermissionBlocked}
+            disabled={isPermissionBlocked || (!isCompanyAdmin && !companyData?.notifications_enabled)}
           />
         </div>
 
@@ -249,12 +281,11 @@ export function NotificationSettings() {
               <p className="text-sm font-medium text-foreground">Phone &amp; desktop push</p>
             </div>
             <p className="text-xs text-muted-foreground">
-              Native tray notifications when the app is closed (Web Push, no Firebase). Uses the same schedule as
-              morning / evening / weekly messages, plus inventory alerts.
+              Receive tray notifications even when the app is closed.
             </p>
             {import.meta.env.DEV && (
-              <p className="text-xs text-amber-700 dark:text-amber-500">
-                Local dev unregisters the service worker; use a production build over HTTPS to test push.
+              <p className="text-xs text-amber-600 dark:text-amber-500">
+                Use a production build over HTTPS to test push.
               </p>
             )}
             {canRegisterDevicePush && (
@@ -289,25 +320,23 @@ export function NotificationSettings() {
                 )}
               </>
             )}
-            {!canRegisterDevicePush && isWebPushConfiguredInApp() && !import.meta.env.DEV && !isPermissionGranted && (
+            {!canRegisterDevicePush && !import.meta.env.DEV && !isPermissionGranted && (
               <p className="text-xs text-muted-foreground">Allow browser notifications above, then register this device.</p>
             )}
           </div>
         )}
 
         {/* Sound Toggle */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
             {preferences.soundEnabled ? (
-              <Volume2 className="h-4 w-4 text-muted-foreground" />
+              <Volume2 className="h-4 w-4 text-muted-foreground shrink-0" />
             ) : (
-              <VolumeX className="h-4 w-4 text-muted-foreground" />
+              <VolumeX className="h-4 w-4 text-muted-foreground shrink-0" />
             )}
             <div>
-              <p className="text-sm font-medium text-foreground">Notification Sound</p>
-              <p className="text-xs text-muted-foreground">
-                Play a sound when notifications arrive
-              </p>
+              <p className="text-sm font-medium text-foreground">Alert sound</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Play a sound when alerts arrive</p>
             </div>
           </div>
           <Switch
@@ -319,29 +348,29 @@ export function NotificationSettings() {
 
         {/* Sound Selection */}
         {preferences.notificationsEnabled && preferences.soundEnabled && (
-          <div className="space-y-3 pt-2 border-t border-border">
-            <p className="text-sm font-medium text-foreground">Select Sound</p>
-            <div className="grid gap-2">
+          <div className="space-y-2 pt-3 border-t border-border">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Select alert sound</p>
+            <div className="grid gap-1.5">
               {NOTIFICATION_SOUNDS.map((sound) => (
                 <div
                   key={sound.id}
                   className={cn(
-                    'flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors',
+                    'flex items-center justify-between px-3 py-2.5 rounded-lg border cursor-pointer transition-colors',
                     preferences.soundFile === sound.id
                       ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      : 'border-border hover:border-primary/40 hover:bg-muted/50'
                   )}
                   onClick={() => setSoundFile(sound.id)}
                 >
                   <div className="flex items-center gap-3">
                     <div className={cn(
-                      'w-4 h-4 rounded-full border-2 flex items-center justify-center',
+                      'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0',
                       preferences.soundFile === sound.id
                         ? 'border-primary bg-primary'
                         : 'border-muted-foreground/30'
                     )}>
                       {preferences.soundFile === sound.id && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
+                        <div className="w-1 h-1 rounded-full bg-primary-foreground" />
                       )}
                     </div>
                     <span className="text-sm">{sound.label}</span>
@@ -349,17 +378,14 @@ export function NotificationSettings() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 w-8 p-0"
+                    className="h-7 px-2 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleTestSound(sound.id);
                     }}
                   >
-                    <Play className={cn(
-                      'h-4 w-4',
-                      playingSound === sound.id && 'text-primary animate-pulse'
-                    )} />
-                    <span className="sr-only">Test {sound.label}</span>
+                    <Play className={cn('h-3.5 w-3.5 shrink-0', playingSound === sound.id && 'text-primary animate-pulse')} />
+                    {playingSound === sound.id ? 'Playing…' : 'Preview'}
                   </Button>
                 </div>
               ))}
