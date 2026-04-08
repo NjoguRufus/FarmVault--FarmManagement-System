@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubscriptionStatus } from "@/hooks/useSubscriptionStatus";
 import { queueOneSignalIdentitySync, queueOneSignalLogout } from "@/services/oneSignalService";
+import { getCompany } from "@/services/companyService";
 
 function mapRoleTag(role: string | undefined, profileUserType: string | null | undefined): "developer" | "company" | "ambassador" {
   const profileType = (profileUserType ?? "").trim().toLowerCase();
@@ -31,6 +33,13 @@ export function OneSignalIdentitySync() {
   const { user, isAuthenticated } = useAuth();
   const { plan } = useSubscriptionStatus();
 
+  const { data: companyData } = useQuery({
+    queryKey: ["company", user?.companyId],
+    enabled: !!user?.companyId,
+    queryFn: () => getCompany(user!.companyId!),
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     if (!isAuthenticated || !user?.id) {
       queueOneSignalLogout();
@@ -43,9 +52,9 @@ export function OneSignalIdentitySync() {
       roles: resolveRoleTags(user.role, user.profileUserType),
       plan: mapPlanTag(plan),
       companyId: user.companyId ?? null,
+      notificationsEnabled: companyData?.notifications_enabled ?? false,
     });
-  }, [isAuthenticated, user?.id, user?.role, user?.profileUserType, user?.companyId, plan]);
+  }, [isAuthenticated, user?.id, user?.role, user?.profileUserType, user?.companyId, plan, companyData?.notifications_enabled]);
 
   return null;
 }
-

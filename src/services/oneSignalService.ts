@@ -14,6 +14,8 @@ type OneSignalRuntime = {
     PushSubscription?: {
       id?: string | null;
       optedIn?: boolean;
+      optIn?: () => Promise<void>;
+      optOut?: () => Promise<void>;
     };
   };
 };
@@ -30,6 +32,8 @@ type SyncIdentityArgs = {
   roles?: OneSignalTagRole[];
   plan: OneSignalTagPlan;
   companyId?: string | null;
+  /** When true, request push permission and optIn if not already subscribed. */
+  notificationsEnabled?: boolean;
   onPlayerId?: (playerId: string) => void;
 };
 
@@ -67,7 +71,9 @@ export function queueOneSignalIdentitySync(args: SyncIdentityArgs): void {
       }
 
       const optedIn = Boolean(oneSignal.User.PushSubscription?.optedIn);
-      if (!optedIn) {
+
+      if (args.notificationsEnabled && !optedIn) {
+        // Company has enabled notifications — prompt once per user per device.
         const promptKey = `${PROMPT_ATTEMPT_PREFIX}${args.userId}`;
         let alreadyAttempted = false;
         try {
@@ -75,13 +81,23 @@ export function queueOneSignalIdentitySync(args: SyncIdentityArgs): void {
         } catch {
           alreadyAttempted = false;
         }
-        if (!alreadyAttempted && oneSignal.Notifications?.requestPermission) {
-          await oneSignal.Notifications.requestPermission();
+        if (!alreadyAttempted) {
+          if (oneSignal.Notifications?.requestPermission) {
+            await oneSignal.Notifications.requestPermission();
+          }
+          if (oneSignal.User.PushSubscription?.optIn) {
+            await oneSignal.User.PushSubscription.optIn();
+          }
           try {
             window.localStorage.setItem(promptKey, "1");
           } catch {
             // Non-blocking.
           }
+        }
+      } else if (!args.notificationsEnabled && optedIn) {
+        // Company disabled notifications — silently opt out this device.
+        if (oneSignal.User.PushSubscription?.optOut) {
+          await oneSignal.User.PushSubscription.optOut();
         }
       }
 
@@ -107,6 +123,22 @@ export function queueOneSignalLogout(): void {
   queue.push(async (oneSignal) => {
     try {
       await oneSignal.logout();
+    } catch {
+      // Non-blocking.
+    }
+  });
+}
+
+/** Opt out of push for this device without removing the user identity/tags. */
+export function queueOneSignalOptOut(): void {
+  const queue = getQueue();
+  if (!queue) return;
+
+  queue.push(async (oneSignal) => {
+    try {
+      if (oneSignal.User.PushSubscription?.optOut) {
+        await oneSignal.User.PushSubscription.optOut();
+      }
     } catch {
       // Non-blocking.
     }
