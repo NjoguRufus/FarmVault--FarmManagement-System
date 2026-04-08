@@ -28,11 +28,15 @@ export function isWebPushConfiguredInApp(): boolean {
 
 export function collectDeviceInfo(): Record<string, unknown> {
   if (typeof navigator === 'undefined') return {};
+  const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
+  const host = typeof window !== 'undefined' ? window.location.hostname : undefined;
   return {
     userAgent: navigator.userAgent,
     language: navigator.language,
     platform: navigator.platform,
     maxTouchPoints: navigator.maxTouchPoints,
+    origin,
+    host,
   };
 }
 

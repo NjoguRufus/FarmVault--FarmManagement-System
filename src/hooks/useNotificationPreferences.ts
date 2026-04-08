@@ -7,6 +7,20 @@ import {
   syncWebPushSubscriptionToServer,
 } from '@/services/webPushSubscriptionService';
 
+function resolveRoleForSubscription(
+  role: string | undefined,
+  profileUserType: string | null | undefined,
+): string | null {
+  const roles = new Set<string>();
+  const baseRole = (role ?? '').trim().toLowerCase();
+  const profileType = (profileUserType ?? '').trim().toLowerCase();
+  if (baseRole) roles.add(baseRole);
+  if (profileType === 'ambassador' || profileType === 'both') roles.add('ambassador');
+  if (baseRole !== 'developer' || profileType === 'both') roles.add('company');
+  if (roles.size === 0) roles.add('company');
+  return Array.from(roles).join(',');
+}
+
 export interface NotificationPreferences {
   notificationsEnabled: boolean;
   soundEnabled: boolean;
@@ -95,10 +109,10 @@ export function useNotificationPreferences() {
     sessionPushSyncDone.current = true;
     void syncWebPushSubscriptionToServer({
       companyId: user.companyId ?? null,
-      role: user.role ?? null,
+      role: resolveRoleForSubscription(user.role, (user as any).profileUserType ?? null),
       deviceInfo: collectDeviceInfo(),
     });
-  }, [user?.id, user?.companyId, user?.role]);
+  }, [user?.id, user?.companyId, user?.role, (user as any)?.profileUserType]);
 
   useEffect(() => {
     const handlePermissionChange = () => {
@@ -152,7 +166,7 @@ export function useNotificationPreferences() {
     if (permission === 'granted' && isWebPushConfiguredInApp() && !import.meta.env.DEV) {
       void syncWebPushSubscriptionToServer({
         companyId: user?.companyId ?? null,
-        role: user?.role ?? null,
+        role: resolveRoleForSubscription(user?.role, (user as any)?.profileUserType ?? null),
         deviceInfo: collectDeviceInfo(),
       });
     }
