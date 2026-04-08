@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2, 
@@ -24,7 +24,7 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/pwa-install";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import { isPwaEnabledHost } from "@/lib/urls/domains";
+import { buildUrl, getAppBaseUrl, isPwaEnabledHost } from "@/lib/urls/domains";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -40,9 +40,33 @@ interface InstallFarmVaultProps {
 /** Install prompt + fallback UI; only rendered on app.farmvault.africa (and localhost dev). */
 export function InstallFarmVault(props: InstallFarmVaultProps) {
   if (!isPwaEnabledHost()) {
-    return null;
+    return <InstallFarmVaultCrossHost {...props} />;
   }
   return <InstallFarmVaultInner {...props} />;
+}
+
+function InstallFarmVaultCrossHost({ className, compact }: InstallFarmVaultProps) {
+  const handleGoToAppInstall = () => {
+    if (typeof window === "undefined") return;
+    const target = buildUrl(getAppBaseUrl(), "/?install=1");
+    window.location.assign(target);
+  };
+
+  return (
+    <Button
+      type="button"
+      size={compact ? "sm" : "lg"}
+      onClick={handleGoToAppInstall}
+      className={cn(
+        "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+        compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+        className,
+      )}
+    >
+      <Download className="h-4 w-4 mr-2" />
+      Install FarmVault
+    </Button>
+  );
 }
 
 function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
@@ -106,6 +130,18 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
 
   const isPrompting = installState === "prompting";
   const fallbackInfo = getFallbackInstructions();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("install") === "1") {
+      window.setTimeout(() => {
+        void handleInstallClick();
+      }, 300);
+      url.searchParams.delete("install");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   // Choose the right icon based on fallback type
   const getFallbackIcon = () => {
