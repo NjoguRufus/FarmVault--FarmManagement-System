@@ -3,7 +3,6 @@ import { useLocation } from 'react-router-dom';
 import {
   buildUrl,
   getAppBaseUrl,
-  getPublicBaseUrl,
   isAppProductionHost,
   isLocalhostHost,
   isProdLike,
@@ -40,7 +39,8 @@ export function DomainGuard() {
     }
 
     if (isAppProductionHost() && isPublicRoutePath(pathname)) {
-      const to = buildUrl(getPublicBaseUrl(), fullPath);
+      // App host should never render marketing pages; always route to auth/app flow.
+      const to = buildUrl(getAppBaseUrl(), '/sign-in');
       if (window.location.href !== to) window.location.replace(to);
     }
   }, [loc.pathname, loc.search, loc.hash]);
