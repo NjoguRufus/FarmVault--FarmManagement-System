@@ -39,63 +39,6 @@
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
     <script>
       window.OneSignalDeferred = window.OneSignalDeferred || [];
-      OneSignalDeferred.push(async function (OneSignal) {
-        await OneSignal.init({
-          appId: "c9bda911-e3a1-4b12-a1c3-0eab892c4d5a",
-          notifyButton: {
-            enable: true,
-            theme: "default",
-            size: "large",
-            position: "bottom-right",
-            offset: {
-              bottom: "24px",
-              right: "24px",
-            },
-            colors: {
-              "circle.background": "#166534",
-              "circle.foreground": "#ffffff",
-              "badge.background": "#f59e0b",
-              "badge.foreground": "#ffffff",
-            },
-            text: {
-              "tip.state.unsubscribed": "Enable FarmVault alerts",
-              "tip.state.subscribed": "FarmVault alerts enabled",
-              "tip.state.blocked": "Notifications blocked in browser settings",
-              "message.prenotify": "Get FarmVault updates",
-              "message.action.subscribed": "FarmVault alerts turned on",
-              "message.action.resubscribed": "FarmVault alerts turned back on",
-              "message.action.unsubscribed": "FarmVault alerts turned off",
-              "dialog.main.title": "Manage FarmVault alerts",
-              "dialog.main.button.subscribe": "Enable alerts",
-              "dialog.main.button.unsubscribe": "Disable alerts",
-              "dialog.blocked.title": "Enable notifications",
-              "dialog.blocked.message":
-                "Allow notifications in your browser to receive payment, referral, and system alerts.",
-            },
-          },
-          allowLocalhostAsSecureOrigin: true,
-          promptOptions: {
-            slidedown: {
-              prompts: [
-                {
-                  type: "push",
-                  autoPrompt: true,
-                  text: {
-                    actionMessage: "Stay updated with FarmVault alerts for payments, referrals, and account activity.",
-                    acceptButton: "Enable Alerts",
-                    cancelButton: "Not Now",
-                  },
-                  delay: {
-                    pageViews: 1,
-                    timeDelay: 10,
-                  },
-                },
-              ],
-            },
-          },
-        });
-        OneSignal.showSlidedownPrompt();
-      });
     </script>
 
     <meta charset="UTF-8" />

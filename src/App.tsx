@@ -180,6 +180,7 @@ import { DevAuthDebugPanel } from "@/components/debug/DevAuthDebugPanel";
 import { PosthogAnalytics } from "@/components/analytics/PosthogAnalytics";
 import { ReferralAttributionCapture } from "@/components/referral/ReferralAttributionCapture";
 import { SignedInAuthEscape } from "@/components/auth/SignedInAuthEscape";
+import { OneSignalBootstrap } from "@/components/notifications/OneSignalBootstrap";
 import { OneSignalIdentitySync } from "@/components/notifications/OneSignalIdentitySync";
 import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
 import { logger } from "@/lib/logger";
@@ -548,6 +549,7 @@ const App = () => (
                     <SignedInAuthEscape />
                     <RoutePersistence />
                     <PosthogAnalytics />
+                    <OneSignalBootstrap />
                     <OneSignalIdentitySync />
                     <OnboardingModalPriorityProvider>
                       <TourProvider>
