@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2, 
@@ -48,7 +48,7 @@ export function InstallFarmVault(props: InstallFarmVaultProps) {
 function InstallFarmVaultCrossHost({ className, compact }: InstallFarmVaultProps) {
   const handleGoToAppInstall = () => {
     if (typeof window === "undefined") return;
-    const target = buildUrl(getAppBaseUrl(), "/?install=1");
+    const target = buildUrl(getAppBaseUrl(), "/");
     window.location.assign(target);
   };
 
@@ -130,18 +130,6 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
 
   const isPrompting = installState === "prompting";
   const fallbackInfo = getFallbackInstructions();
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("install") === "1") {
-      window.setTimeout(() => {
-        void handleInstallClick();
-      }, 300);
-      url.searchParams.delete("install");
-      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-  }, []);
 
   // Choose the right icon based on fallback type
   const getFallbackIcon = () => {
