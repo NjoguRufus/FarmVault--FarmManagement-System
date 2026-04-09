@@ -70,10 +70,10 @@
       "has": [
         {
           "type": "host",
-          "value": "farmvaultco.vercel.app"
+          "value": "farmvault.africa"
         }
       ],
-      "destination": "https://farmvault.africa/$1",
+      "destination": "https://app.farmvault.africa/$1",
       "permanent": true
     },
     {
@@ -84,7 +84,18 @@
           "value": "www.farmvault.africa"
         }
       ],
-      "destination": "https://farmvault.africa/$1",
+      "destination": "https://app.farmvault.africa/$1",
+      "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "farmvaultco.vercel.app"
+        }
+      ],
+      "destination": "https://app.farmvault.africa/$1",
       "permanent": true
     }
   ]
