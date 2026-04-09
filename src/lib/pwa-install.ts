@@ -195,6 +195,21 @@ function initPwaInstallImpl(): void {
     deferredPrompt = event as BeforeInstallPromptEvent;
     log("Deferred prompt stored; prompt() callable:", typeof deferredPrompt.prompt === "function");
     setState("available");
+
+    // Auto-trigger install when redirected from marketing site with ?install=true
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("install") === "true") {
+      log("?install=true detected — auto-triggering install prompt");
+      // Remove the param before prompting so it doesn't re-trigger on back navigation
+      params.delete("install");
+      const newSearch = params.toString();
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname + (newSearch ? `?${newSearch}` : ""),
+      );
+      void promptInstall();
+    }
   };
 
   const handleAppInstalled = () => {
