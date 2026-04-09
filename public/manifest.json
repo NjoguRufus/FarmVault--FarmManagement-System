@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "FarmVault",
   "short_name": "FarmVault",
   "description": "Smart farm management platform for farmers and agribusinesses",
@@ -8,6 +9,10 @@
   "orientation": "portrait",
   "background_color": "#0B3D2E",
   "theme_color": "#0B3D2E",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "business", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -32,6 +37,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/landing/phone-mockup.png",
+      "sizes": "408x612",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "FarmVault dashboard on mobile"
+    },
+    {
+      "src": "/landing/landing%20page%20mock.png",
+      "sizes": "612x408",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "FarmVault farm management overview"
     }
   ]
 }
