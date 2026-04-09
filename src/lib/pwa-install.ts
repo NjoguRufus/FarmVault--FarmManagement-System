@@ -1,4 +1,17 @@
 import { logger } from "@/lib/logger";
+
+declare global {
+  interface Window {
+    /**
+     * Set to `true` by pwa-install when ?install=true is detected on load.
+     * DomainGuard reads this to suppress the /sign-in redirect while the
+     * native PWA install dialog is being prepared and shown.
+     * Cleared by pwa-install after the dialog resolves (or on any failure path).
+     */
+    __FARMVAULT_INSTALL_MODE__?: boolean;
+  }
+}
+
 /**
  * Global PWA Install Prompt Manager
  * 
@@ -160,6 +173,15 @@ function initPwaInstallImpl(): void {
 
   log("=== Initializing PWA Install Prompt Capture ===");
 
+  // Set install mode flag BEFORE any routing or auth logic runs.
+  // DomainGuard (a React effect) reads this to suppress the /sign-in redirect
+  // so the native install dialog has a chance to fire on this page.
+  const installParams = new URLSearchParams(window.location.search);
+  if (installParams.get("install") === "true") {
+    window.__FARMVAULT_INSTALL_MODE__ = true;
+    log("Install mode activated (__FARMVAULT_INSTALL_MODE__ = true)");
+  }
+
   // Detect browser capabilities first
   browserInfo = detectBrowser();
   log("Browser:", browserInfo.browser, "Platform:", browserInfo.platform);
@@ -173,6 +195,7 @@ function initPwaInstallImpl(): void {
 
   if (standalone) {
     log("App is already installed (running standalone) - hiding install button");
+    window.__FARMVAULT_INSTALL_MODE__ = false;
     setState("installed");
     pwaInstallInitRan = true;
     return;
@@ -182,6 +205,7 @@ function initPwaInstallImpl(): void {
   if (!browserInfo.supportsBeforeInstallPrompt) {
     log("Browser does NOT support beforeinstallprompt - will use fallback instructions");
     log("Fallback will be shown for:", browserInfo.browser, "on", browserInfo.platform);
+    window.__FARMVAULT_INSTALL_MODE__ = false;
     setState("unsupported");
     pwaInstallInitRan = true;
     return;
@@ -208,7 +232,14 @@ function initPwaInstallImpl(): void {
         document.title,
         window.location.pathname + (newSearch ? `?${newSearch}` : ""),
       );
-      void promptInstall();
+      // Keep __FARMVAULT_INSTALL_MODE__ = true while the native dialog is open so
+      // DomainGuard does not navigate the page away underneath the dialog.
+      // Clear it only after the dialog resolves (accepted or dismissed).
+      void (async () => {
+        await promptInstall();
+        window.__FARMVAULT_INSTALL_MODE__ = false;
+        log("Install prompt handled — install mode cleared");
+      })();
     }
   };
 
@@ -236,6 +267,8 @@ function initPwaInstallImpl(): void {
   setTimeout(() => {
     if (installState === "idle" && !deferredPrompt) {
       log("=== TIMEOUT: No beforeinstallprompt after 10s (manifest / SW / HTTPS) ===");
+      // Clear install mode so DomainGuard can resume normal routing.
+      window.__FARMVAULT_INSTALL_MODE__ = false;
       setState("unavailable");
     } else if (deferredPrompt) {
       log("beforeinstallprompt captured — native install ready");
