@@ -6,7 +6,7 @@
 import { clientsClaim } from "workbox-core";
 import { precacheAndRoute, createHandlerBoundToURL } from "workbox-precaching";
 import { registerRoute, NavigationRoute } from "workbox-routing";
-import { NetworkOnly, CacheFirst } from "workbox-strategies";
+import { NetworkOnly, NetworkFirst, CacheFirst } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
 import { CacheableResponsePlugin } from "workbox-cacheable-response";
 
@@ -36,6 +36,30 @@ function isClerkHost(hostname: string): boolean {
 registerRoute(
   ({ url }) => isClerkHost(url.hostname),
   new NetworkOnly(),
+);
+
+// Supabase auth & realtime — never cache credentials or WebSocket upgrade requests
+registerRoute(
+  ({ url }) =>
+    url.hostname.endsWith(".supabase.co") &&
+    (url.pathname.startsWith("/auth/") || url.pathname.startsWith("/realtime/")),
+  new NetworkOnly(),
+);
+
+// Supabase data API (REST + Storage) — network-first so the app stays fresh,
+// but falls back to a short-lived cache when the device is offline.
+registerRoute(
+  ({ url }) =>
+    url.hostname.endsWith(".supabase.co") &&
+    (url.pathname.startsWith("/rest/") || url.pathname.startsWith("/storage/")),
+  new NetworkFirst({
+    cacheName: "supabase-api",
+    networkTimeoutSeconds: 10,
+    plugins: [
+      new ExpirationPlugin({ maxEntries: 150, maxAgeSeconds: 5 * 60 }),
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+    ],
+  }),
 );
 
 registerRoute(

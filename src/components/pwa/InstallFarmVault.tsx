@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
@@ -10,6 +10,7 @@ import {
   Plus,
   Monitor,
   Smartphone,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/p
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { isMarketingProductionHost, getAppBaseUrl } from "@/lib/urls/domains";
+
+const APK_DOWNLOAD_URL = "/downloads/farmvault.apk";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -44,8 +47,39 @@ export function InstallFarmVault(props: InstallFarmVaultProps) {
 
 function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
-  const { isInstalled, installState, browserInfo, promptInstall, getFallbackInstructions } = usePwaInstall();
+  const { isInstalled, installState, canInstall, browserInfo, promptInstall, getFallbackInstructions } = usePwaInstall();
   const [showFallback, setShowFallback] = useState(false);
+  const [showApkFallback, setShowApkFallback] = useState(false);
+
+  // APK is viable on any non-iOS platform
+  const isApkViable = browserInfo.platform !== "ios";
+
+  // Show APK button when the native install prompt won't be available
+  useEffect(() => {
+    if (isInstalled || !isApkViable) return;
+
+    // Immediately show for browsers that definitively don't support beforeinstallprompt
+    if (!browserInfo.supportsBeforeInstallPrompt) {
+      setShowApkFallback(true);
+      return;
+    }
+
+    // For Chromium browsers: wait 1.5s to see if the prompt fires before showing APK
+    const timer = setTimeout(() => {
+      setShowApkFallback(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Hide APK button when the native install prompt becomes available
+  useEffect(() => {
+    if (canInstall) setShowApkFallback(false);
+  }, [canInstall]);
+
+  const handleApkDownload = () => {
+    window.location.href = APK_DOWNLOAD_URL;
+  };
 
   const handleOpenApp = () => {
     navigate("/dashboard");
@@ -109,6 +143,16 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
     );
   }
 
+  // Determine which primary action to show:
+  // - canInstall → native browser install prompt available
+  // - iOS/macOS Safari → show install button that opens manual instructions Sheet
+  // - Otherwise → APK download (after 1.5s timeout)
+  const isIosOrSafari =
+    browserInfo.platform === "ios" ||
+    (browserInfo.platform === "macos" && browserInfo.browser === "safari");
+  const showInstallButton = canInstall || isIosOrSafari;
+  const showApkButton = showApkFallback && !canInstall && !isInstalled && isApkViable && !isIosOrSafari;
+
   const isPrompting = installState === "prompting";
   const fallbackInfo = getFallbackInstructions();
 
@@ -140,29 +184,50 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
 
   return (
     <>
-      <Button
-        type="button"
-        size={compact ? "sm" : "lg"}
-        onClick={handleInstallClick}
-        disabled={isPrompting}
-        className={cn(
-          "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
-          compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
-          className,
-        )}
-      >
-        {isPrompting ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            Installing...
-          </>
-        ) : (
-          <>
-            <Download className="h-4 w-4 mr-2" />
-            Install FarmVault
-          </>
-        )}
-      </Button>
+      {/* Native install button — only shown when prompt is ready or iOS/Safari needs Sheet instructions */}
+      {showInstallButton && (
+        <Button
+          type="button"
+          size={compact ? "sm" : "lg"}
+          onClick={handleInstallClick}
+          disabled={isPrompting}
+          className={cn(
+            "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+            compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+            className,
+          )}
+        >
+          {isPrompting ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Installing...
+            </>
+          ) : (
+            <>
+              <Download className="h-4 w-4 mr-2" />
+              Install FarmVault
+            </>
+          )}
+        </Button>
+      )}
+
+      {/* APK download fallback — shown after 1.5s when native install is unavailable */}
+      {showApkButton && (
+        <Button
+          type="button"
+          size={compact ? "sm" : "lg"}
+          onClick={handleApkDownload}
+          variant="outline"
+          className={cn(
+            "btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02] border-primary text-primary hover:bg-primary/10",
+            compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+            className,
+          )}
+        >
+          <Package className="h-4 w-4 mr-2" />
+          Download APK
+        </Button>
+      )}
 
       {/* Fallback Instructions Sheet */}
       <Sheet open={showFallback} onOpenChange={setShowFallback}>
@@ -203,10 +268,28 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
               <p className="text-xs text-muted-foreground text-center">
                 Once installed, FarmVault will appear on your home screen and work offline.
               </p>
+
+              {/* APK option inside the sheet for non-iOS browsers */}
+              {isApkViable && (
+                <div className="pt-2">
+                  <p className="text-xs text-muted-foreground text-center mb-2">Or install directly via APK:</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleApkDownload}
+                    className="w-full rounded-xl border-primary text-primary hover:bg-primary/10"
+                  >
+                    <Package className="h-4 w-4 mr-2" />
+                    Download FarmVault APK
+                  </Button>
+                </div>
+              )}
+
               {/* Show browser info for debugging in development */}
               {import.meta.env.DEV && (
                 <p className="text-[10px] text-muted-foreground/50 text-center font-mono">
-                  {browserInfo.browser} on {browserInfo.platform} | 
+                  {browserInfo.browser} on {browserInfo.platform} |
                   {browserInfo.supportsBeforeInstallPrompt ? " ✓ supports prompt" : " ✗ no prompt support"}
                 </p>
               )}

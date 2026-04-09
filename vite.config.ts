@@ -48,6 +48,7 @@ export default defineConfig(({ mode }) => ({
         "farm-backgroundmobile.jpg",
         "manifest.json",
         "icons/icon-192.png",
+        "icons/icon-192-maskable.png",
         "icons/icon-512.png",
         "icons/icon-512-maskable.png",
         "icons/farmvault-192.png",
