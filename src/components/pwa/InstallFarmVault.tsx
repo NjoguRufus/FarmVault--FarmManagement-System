@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
@@ -24,6 +24,7 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/pwa-install";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { buildUrl, getAppBaseUrl, isPwaEnabledHost } from "@/lib/urls/domains";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -36,15 +37,77 @@ interface InstallFarmVaultProps {
   compact?: boolean;
 }
 
-/** Install prompt + fallback UI. Works on any FarmVault host. */
+/**
+ * Install prompt + fallback UI.
+ * On app.farmvault.africa (and localhost): triggers native beforeinstallprompt.
+ * On farmvault.africa (marketing): navigates to app.farmvault.africa/?autoinstall=1
+ * which auto-fires the native dialog immediately on arrival.
+ */
 export function InstallFarmVault(props: InstallFarmVaultProps) {
+  if (!isPwaEnabledHost()) {
+    return <InstallFarmVaultCrossHost {...props} />;
+  }
   return <InstallFarmVaultInner {...props} />;
+}
+
+function InstallFarmVaultCrossHost({ className, compact }: InstallFarmVaultProps) {
+  const handleGoToAppInstall = () => {
+    if (typeof window === "undefined") return;
+    // Navigate to the app domain with ?autoinstall=1 so the native install
+    // dialog fires immediately on arrival — no useless landing, straight to prompt.
+    const target = buildUrl(getAppBaseUrl(), "/?autoinstall=1");
+    window.location.assign(target);
+  };
+
+  return (
+    <Button
+      type="button"
+      size={compact ? "sm" : "lg"}
+      onClick={handleGoToAppInstall}
+      className={cn(
+        "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
+        compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
+        className,
+      )}
+    >
+      <Download className="h-4 w-4 mr-2" />
+      Install FarmVault
+    </Button>
+  );
 }
 
 function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   const navigate = useNavigate();
   const { isInstalled, installState, browserInfo, promptInstall, getFallbackInstructions } = usePwaInstall();
   const [showFallback, setShowFallback] = useState(false);
+
+  // Auto-trigger install when arriving from ?autoinstall=1 (set by the marketing domain button).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autoinstall") !== "1") return;
+
+    // Remove the param from the URL immediately so a refresh doesn't re-trigger.
+    const cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState(null, "", cleanUrl);
+
+    log("autoinstall=1 detected — waiting for beforeinstallprompt then triggering");
+
+    let cancelled = false;
+    (async () => {
+      const ready = nativeInstallReady() || await waitForDeferredPrompt(10_000);
+      if (cancelled) return;
+      if (ready) {
+        const result = await promptInstall();
+        if (result === "accepted") {
+          toast.success("FarmVault installed! Open it from your home screen.");
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleOpenApp = () => {
     navigate("/dashboard");

@@ -94,19 +94,15 @@ export function isAppProductionHost(hostname = getHostname()): boolean {
 }
 
 /**
- * PWA (manifest + service worker + install prompt) is enabled on both the app host
- * and the marketing host so the Install button works from the landing page without
- * redirecting. Also enabled on localhost for development.
+ * PWA (manifest + service worker + install prompt) is enabled only on the app host
+ * and on localhost for development. Marketing sites (farmvault.africa, etc.) must not
+ * register a service worker or expose a web manifest.
  */
 export function isPwaEnabledHost(hostname = getHostname()): boolean {
   if (typeof window === 'undefined') return false;
   if (isLocalhostHost(hostname)) return true;
   if (!isProdLike()) return false;
-  return (
-    hostname === 'app.farmvault.africa' ||
-    hostname === 'farmvault.africa' ||
-    hostname === 'www.farmvault.africa'
-  );
+  return hostname === 'app.farmvault.africa';
 }
 
 /**
