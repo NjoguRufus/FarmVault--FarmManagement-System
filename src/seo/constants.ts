@@ -11,7 +11,7 @@ export const CANONICAL_DOMAIN = "https://farmvault.africa";
 export const SEO_BASE_URL = CANONICAL_DOMAIN;
 
 export const DEFAULT_SITE_NAME = "FarmVault";
-export const DEFAULT_TITLE = "FarmVault – Farm Management Software in Kenya";
+export const DEFAULT_TITLE = "FarmVault – Farm Management Software in Africa";
 export const DEFAULT_DESCRIPTION =
   "FarmVault helps farmers manage workers, harvests, expenses, and farm operations.";
 export const DEFAULT_OG_IMAGE = "/Logo/FarmVault_Logo dark mode.png";

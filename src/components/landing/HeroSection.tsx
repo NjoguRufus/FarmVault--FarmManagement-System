@@ -44,7 +44,7 @@ export function HeroSection() {
               <h1 className="text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-extrabold leading-[1.05] mb-6 text-primary-foreground tracking-tight">
                 <span className="text-gradient-gold">Farm Management</span>
                 <br />
-                System in Kenya
+                System in Africa
               </h1>
 
               <p className="text-lg md:text-xl text-primary-foreground/80 mb-4 leading-relaxed max-w-lg font-medium">

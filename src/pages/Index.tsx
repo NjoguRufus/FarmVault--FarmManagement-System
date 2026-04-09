@@ -25,7 +25,7 @@ const Index = () => {
   return (
     <div className="landing-page min-h-screen bg-background font-body">
       <SeoHead
-        title="FarmVault – Farm Management Software in Kenya"
+        title="FarmVault – Farm Management Software in Africa"
         description="FarmVault helps farmers manage workers, harvests, expenses, and farm operations."
         keywords="farm management software kenya, agriculture software kenya, farm ERP kenya"
         canonical="/"
