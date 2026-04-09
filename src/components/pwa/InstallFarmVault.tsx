@@ -53,10 +53,22 @@ export function InstallFarmVault(props: InstallFarmVaultProps) {
 function InstallFarmVaultCrossHost({ className, compact }: InstallFarmVaultProps) {
   const handleGoToAppInstall = () => {
     if (typeof window === "undefined") return;
-    // Navigate to the app domain with ?autoinstall=1 so the native install
-    // dialog fires immediately on arrival — no useless landing, straight to prompt.
     const target = buildUrl(getAppBaseUrl(), "/?autoinstall=1");
-    window.location.assign(target);
+
+    // Open app.farmvault.africa in a small background popup so the user stays on
+    // this page. The popup auto-fires the native install dialog and closes itself
+    // after the user accepts or dismisses.
+    const popup = window.open(
+      target,
+      "farmvault-install",
+      "width=1,height=1,left=-9999,top=-9999,scrollbars=no,resizable=no",
+    );
+
+    if (!popup) {
+      // Popup was blocked by the browser — fall back to same-tab navigation.
+      log("Popup blocked — falling back to same-tab navigation");
+      window.location.assign(target);
+    }
   };
 
   return (
@@ -81,17 +93,22 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   const { isInstalled, installState, browserInfo, promptInstall, getFallbackInstructions } = usePwaInstall();
   const [showFallback, setShowFallback] = useState(false);
 
-  // Auto-trigger install when arriving from ?autoinstall=1 (set by the marketing domain button).
+  // Auto-trigger install when arriving from ?autoinstall=1.
+  // This is set by the marketing-domain button, which opens app.farmvault.africa
+  // in a tiny background popup so the user never leaves farmvault.africa.
+  // After the dialog resolves (accepted or dismissed) we close the popup.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("autoinstall") !== "1") return;
 
-    // Remove the param from the URL immediately so a refresh doesn't re-trigger.
+    // Strip the param so a refresh doesn't re-trigger.
     const cleanUrl = window.location.pathname + window.location.hash;
     window.history.replaceState(null, "", cleanUrl);
 
     log("autoinstall=1 detected — waiting for beforeinstallprompt then triggering");
+
+    const isPopup = Boolean(window.opener);
 
     let cancelled = false;
     (async () => {
@@ -99,9 +116,14 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
       if (cancelled) return;
       if (ready) {
         const result = await promptInstall();
-        if (result === "accepted") {
+        if (result === "accepted" && !isPopup) {
+          // Only show toast when running in the main tab (not inside the popup).
           toast.success("FarmVault installed! Open it from your home screen.");
         }
+      }
+      // Close the background popup — the user was never meant to see this window.
+      if (isPopup) {
+        window.close();
       }
     })();
 
