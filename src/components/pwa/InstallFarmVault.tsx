@@ -24,6 +24,7 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/pwa-install";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { isMarketingProductionHost, getAppBaseUrl } from "@/lib/urls/domains";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -52,6 +53,14 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
 
   const handleInstallClick = async () => {
     log("=== Install FarmVault clicked ===", { nativeReady: nativeInstallReady(), installState, browserInfo });
+
+    // On the marketing site (farmvault.africa) the manifest is blocked and
+    // beforeinstallprompt will never fire. Redirect to the app subdomain
+    // with ?install=true so the real PWA host handles the install prompt.
+    if (isMarketingProductionHost()) {
+      window.location.href = `${getAppBaseUrl()}?install=true`;
+      return;
+    }
 
     // Never show the manual sheet while we are about to use the native dialog
     setShowFallback(false);
