@@ -93,13 +93,15 @@
 
     <!-- Additional SEO Tags -->
     <meta name="theme-color" content="#000000" />
-    <!-- PWA: manifest + theme only on app.farmvault.africa (and localhost dev); marketing hosts skip installability. -->
+    <!-- PWA: manifest + theme on all FarmVault hosts so the Install button works on the landing page too. -->
     <script>
       (function () {
         if (typeof window === "undefined") return;
         var h = (window.location.hostname || "").toLowerCase();
         var pwaHost =
           h === "app.farmvault.africa" ||
+          h === "farmvault.africa" ||
+          h === "www.farmvault.africa" ||
           h === "localhost" ||
           h === "127.0.0.1" ||
           h === "[::1]" ||

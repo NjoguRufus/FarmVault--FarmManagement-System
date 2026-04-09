@@ -12,7 +12,7 @@ import { ClerkLoadErrorBoundary } from "@/components/auth/ClerkLoadErrorBoundary
 import { initPwaInstall } from "@/lib/pwa-install";
 import { migrateQuickUnlockState } from "@/services/appLockService";
 import { getPosthogProjectToken, getPosthogClientOptions } from "@/lib/analytics/posthog";
-import { getAppEntryUrl, isMarketingProductionHost, isPwaEnabledHost } from "@/lib/urls/domains";
+import { getAppEntryUrl, isPwaEnabledHost } from "@/lib/urls/domains";
 import { initServiceWorkerPushFeedback } from "@/lib/pushNotificationFeedback";
 import "./index.css";
 import { logger } from "@/lib/logger";
@@ -36,14 +36,6 @@ const DEV_SW_RESET_MARKER = "__farmvault_dev_sw_reset__";
 let shouldRenderApp = true;
 
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-  if (import.meta.env.PROD && isMarketingProductionHost()) {
-    void navigator.serviceWorker
-      .getRegistrations()
-      .then((registrations) => Promise.all(registrations.map((r) => r.unregister())));
-    if ("caches" in window) {
-      void caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))));
-    }
-  }
   if (import.meta.env.DEV) {
     // Flush stale SW and caches once in dev to avoid mixed old/new chunk execution.
     let alreadyReset = false;

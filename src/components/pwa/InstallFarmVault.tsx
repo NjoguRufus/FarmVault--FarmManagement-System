@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  CheckCircle2, 
-  Download, 
-  ExternalLink, 
-  Loader2, 
-  Share2, 
-  MoreVertical, 
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Loader2,
+  Share2,
+  MoreVertical,
   Plus,
   Monitor,
   Smartphone,
@@ -24,7 +24,6 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { canInstall as nativeInstallReady, waitForDeferredPrompt } from "@/lib/pwa-install";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import { buildUrl, getAppBaseUrl, isPwaEnabledHost } from "@/lib/urls/domains";
 
 function log(...args: unknown[]) {
   // eslint-disable-next-line no-console
@@ -37,36 +36,9 @@ interface InstallFarmVaultProps {
   compact?: boolean;
 }
 
-/** Install prompt + fallback UI; only rendered on app.farmvault.africa (and localhost dev). */
+/** Install prompt + fallback UI. Works on any FarmVault host. */
 export function InstallFarmVault(props: InstallFarmVaultProps) {
-  if (!isPwaEnabledHost()) {
-    return <InstallFarmVaultCrossHost {...props} />;
-  }
   return <InstallFarmVaultInner {...props} />;
-}
-
-function InstallFarmVaultCrossHost({ className, compact }: InstallFarmVaultProps) {
-  const handleGoToAppInstall = () => {
-    if (typeof window === "undefined") return;
-    const target = buildUrl(getAppBaseUrl(), "/");
-    window.location.assign(target);
-  };
-
-  return (
-    <Button
-      type="button"
-      size={compact ? "sm" : "lg"}
-      onClick={handleGoToAppInstall}
-      className={cn(
-        "gradient-primary text-primary-foreground btn-luxury shadow-luxury transition-transform duration-300 hover:scale-[1.02]",
-        compact ? "rounded-xl px-5 h-10 text-sm font-medium" : "rounded-2xl px-7 h-14 text-base font-semibold",
-        className,
-      )}
-    >
-      <Download className="h-4 w-4 mr-2" />
-      Install FarmVault
-    </Button>
-  );
 }
 
 function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
