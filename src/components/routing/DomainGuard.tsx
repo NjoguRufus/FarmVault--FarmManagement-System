@@ -39,6 +39,10 @@ export function DomainGuard() {
     }
 
     if (isAppProductionHost() && isPublicRoutePath(pathname)) {
+      // Suppress the redirect while the PWA install dialog is being prepared or shown.
+      // pwa-install.ts sets this flag when ?install=true arrives and clears it after
+      // the native dialog resolves (or on any non-installable path).
+      if (window.__FARMVAULT_INSTALL_MODE__) return;
       // App host should never render marketing pages; always route to auth/app flow.
       const to = buildUrl(getAppBaseUrl(), '/sign-in');
       if (window.location.href !== to) window.location.replace(to);
