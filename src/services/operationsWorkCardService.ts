@@ -2,6 +2,7 @@ import { db, requireCompanyId } from '@/lib/db';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 import { logger } from "@/lib/logger";
+import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
 
 // New simplified status model: no approval workflow
 export type WorkCardStatus = 'planned' | 'logged' | 'edited' | 'paid';
@@ -91,6 +92,8 @@ export interface WorkCard {
 
   createdAt: string;
   updatedAt: string | null;
+  /** When present, maps from ops.work_cards.row_version */
+  rowVersion?: number;
 }
 
 type WorkCardRow = {
@@ -106,7 +109,11 @@ type WorkCardRow = {
   worker_ids: string[] | null;
   created_at: string;
   updated_at: string;
+  row_version?: number | null;
 };
+
+const WORK_CARD_ROW_SELECT =
+  'id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at, row_version';
 
 export type CreateWorkCardInput = {
   companyId: string;
@@ -133,6 +140,7 @@ export type CreateWorkCardInput = {
 
 export type UpdateWorkCardInput = {
   id: string;
+  expectedRowVersion?: number | null;
   workTitle?: string;
   workCategory?: string;
   plannedDate?: string | null;
@@ -152,6 +160,7 @@ export type UpdateWorkCardInput = {
 
 export type RecordWorkInput = {
   id: string;
+  expectedRowVersion?: number | null;
   actualDate: string;
   actualWorkers: number;
   actualRatePerPerson: number;
@@ -166,6 +175,7 @@ export type RecordWorkInput = {
 
 export type EditWorkInput = {
   id: string;
+  expectedRowVersion?: number | null;
   actualDate?: string;
   actualWorkers?: number;
   actualRatePerPerson?: number;
@@ -180,6 +190,7 @@ export type EditWorkInput = {
 
 export type MarkWorkCardPaidInput = {
   id: string;
+  expectedRowVersion?: number | null;
   amount: number;
   method?: 'cash' | 'mpesa' | 'bank' | 'other';
   notes?: string | null;
@@ -331,6 +342,7 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
 
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? null,
+    rowVersion: row.row_version != null ? Number(row.row_version) : undefined,
   };
 }
 
@@ -338,7 +350,7 @@ async function getRowById(id: string): Promise<WorkCardRow | null> {
   const { data, error } = await db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .select(WORK_CARD_ROW_SELECT)
     .eq('id', id)
     .maybeSingle<WorkCardRow>();
 
@@ -418,7 +430,7 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
       edit_history: [],
       worker_ids: [],
     })
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .select(WORK_CARD_ROW_SELECT)
     .single<WorkCardRow>();
 
   if (error) {
@@ -505,7 +517,7 @@ export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCa
     input.allocatedManagerId !== undefined ? input.allocatedManagerId : card.allocatedManagerId
   );
 
-  const { data, error } = await db
+  let uq = db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
@@ -513,12 +525,21 @@ export async function updateWorkCard(input: UpdateWorkCardInput): Promise<WorkCa
       allocated_manager_id: allocatedManagerId,
       payload,
     })
-    .eq('id', input.id)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
-    .single<WorkCardRow>();
+    .eq('id', input.id);
+  const v = input.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    uq = uq.eq('row_version', Number(v));
+  }
+  const { data, error } = await uq.select(WORK_CARD_ROW_SELECT).maybeSingle<WorkCardRow>();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    if (v != null && Number.isFinite(Number(v))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Work card update failed');
   }
 
   await logAuditEvent({
@@ -585,7 +606,7 @@ export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
     workerNames,
   };
 
-  const { data, error } = await db
+  let uqRw = db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
@@ -594,12 +615,21 @@ export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
       inputs_used: inputsUsed,
       worker_ids: workerIds,
     })
-    .eq('id', input.id)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
-    .single<WorkCardRow>();
+    .eq('id', input.id);
+  const vRw = input.expectedRowVersion;
+  if (vRw != null && Number.isFinite(Number(vRw))) {
+    uqRw = uqRw.eq('row_version', Number(vRw));
+  }
+  const { data, error } = await uqRw.select(WORK_CARD_ROW_SELECT).maybeSingle<WorkCardRow>();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    if (vRw != null && Number.isFinite(Number(vRw))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Work card update failed');
   }
 
   await logAuditEvent({
@@ -704,7 +734,7 @@ export async function editWork(input: EditWorkInput): Promise<WorkCard> {
     workerNames,
   };
 
-  const { data, error } = await db
+  let uqEw = db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
@@ -714,12 +744,21 @@ export async function editWork(input: EditWorkInput): Promise<WorkCard> {
       edit_history: newEditHistory,
       worker_ids: workerIds,
     })
-    .eq('id', input.id)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
-    .single<WorkCardRow>();
+    .eq('id', input.id);
+  const vEw = input.expectedRowVersion;
+  if (vEw != null && Number.isFinite(Number(vEw))) {
+    uqEw = uqEw.eq('row_version', Number(vEw));
+  }
+  const { data, error } = await uqEw.select(WORK_CARD_ROW_SELECT).maybeSingle<WorkCardRow>();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    if (vEw != null && Number.isFinite(Number(vEw))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Work card update failed');
   }
 
   await logAuditEvent({
@@ -772,19 +811,28 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
     payment,
   };
 
-  const { data, error } = await db
+  let uqPaid = db
     .ops()
     .from(WORK_CARDS_TABLE)
     .update({
       status: 'paid',
       payload,
     })
-    .eq('id', input.id)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
-    .single<WorkCardRow>();
+    .eq('id', input.id);
+  const vPaid = input.expectedRowVersion;
+  if (vPaid != null && Number.isFinite(Number(vPaid))) {
+    uqPaid = uqPaid.eq('row_version', Number(vPaid));
+  }
+  const { data, error } = await uqPaid.select(WORK_CARD_ROW_SELECT).maybeSingle<WorkCardRow>();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    if (vPaid != null && Number.isFinite(Number(vPaid))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Work card update failed');
   }
 
   await logAuditEvent({
@@ -863,7 +911,7 @@ export async function getWorkCardsForCompany(params: {
   let query = db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .select(WORK_CARD_ROW_SELECT)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
@@ -904,7 +952,7 @@ export async function getWorkCardsForWorker(params: {
   let query = db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .select(WORK_CARD_ROW_SELECT)
     .eq('company_id', companyId)
     .eq('allocated_manager_id', params.workerId)
     .order('created_at', { ascending: false });
@@ -925,7 +973,7 @@ export async function getTodayWorkCards(companyId: string): Promise<WorkCard[]> 
   const { data, error } = await db
     .ops()
     .from(WORK_CARDS_TABLE)
-    .select('id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at')
+    .select(WORK_CARD_ROW_SELECT)
     .eq('company_id', companyId)
     .gte('created_at', `${today}T00:00:00`)
     .order('created_at', { ascending: false })

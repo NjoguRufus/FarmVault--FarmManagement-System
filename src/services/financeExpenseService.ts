@@ -5,6 +5,7 @@
  */
 
 import { db, requireCompanyId } from '@/lib/db';
+import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 
@@ -21,6 +22,7 @@ export type FinanceExpenseRow = {
   note: string | null;
   created_by: string | null;
   created_at: string;
+  row_version?: number | null;
 };
 
 /** Shape compatible with Expense for listing (date as Date or string). */
@@ -51,7 +53,7 @@ export async function getFinanceExpenses(
   let q = db
     .finance()
     .from('expenses')
-    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at')
+    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .order('expense_date', { ascending: false });
@@ -135,7 +137,7 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
       note: input.note ?? null,
       created_by: input.createdBy ?? null,
     })
-    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at')
+    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
     .single();
 
   if (error) throw error;
@@ -179,4 +181,48 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
     amount: Number(row.amount ?? 0),
     date: row.expense_date,
   };
+}
+
+/**
+ * Update an existing finance.expenses row with optional optimistic concurrency.
+ * Prefer passing expectedRowVersion from the row the user edited.
+ */
+export async function updateFinanceExpense(params: {
+  id: string;
+  companyId: string;
+  expectedRowVersion?: number | null;
+  amount?: number;
+  note?: string | null;
+  expenseDate?: string | null;
+  category?: string;
+  projectId?: string | null;
+}): Promise<void> {
+  const tenant = requireCompanyId(params.companyId);
+  const patch: Record<string, unknown> = {};
+  if (params.amount !== undefined) patch.amount = params.amount;
+  if (params.note !== undefined) patch.note = params.note;
+  if (params.expenseDate !== undefined) patch.expense_date = params.expenseDate;
+  if (params.category !== undefined) patch.category = params.category;
+  if (params.projectId !== undefined) patch.project_id = params.projectId;
+  if (Object.keys(patch).length === 0) return;
+
+  let q = db
+    .finance()
+    .from('expenses')
+    .update(patch)
+    .eq('id', params.id)
+    .eq('company_id', tenant)
+    .is('deleted_at', null);
+  const v = params.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    q = q.eq('row_version', Number(v));
+  }
+  const { data, error } = await q.select('id').maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    if (v != null && Number.isFinite(Number(v))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Expense not found or could not be updated');
+  }
 }

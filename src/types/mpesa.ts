@@ -1,4 +1,4 @@
-export type MpesaPaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
+export type MpesaPaymentStatus = 'PENDING' | 'PENDING_VERIFICATION' | 'SUCCESS' | 'FAILED';
 
 export type MpesaBillingCycle = 'monthly' | 'seasonal' | 'annual';
 
@@ -17,6 +17,8 @@ export interface MpesaPaymentRow {
   status: string;
   paid_at: string | null;
   subscription_activated: boolean;
+  /** Set by DB once activation RPC completed (M-Pesa durability migration). */
+  success_processed?: boolean;
   created_at: string;
 }
 

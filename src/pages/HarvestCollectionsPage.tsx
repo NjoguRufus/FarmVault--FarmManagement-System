@@ -105,6 +105,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { format } from 'date-fns';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -509,6 +510,7 @@ export default function HarvestCollectionsPage() {
         oldName: renameTargetCollection.name ?? null,
         newName: nextName,
         actorUserId: user?.id ?? null,
+        expectedRowVersion: renameTargetCollection.rowVersion ?? null,
       });
 
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
@@ -525,7 +527,9 @@ export default function HarvestCollectionsPage() {
     } catch (e: any) {
       toast({
         title: 'Rename failed',
-        description: e?.message ?? 'Could not rename collection.',
+        description: isConcurrentUpdateConflict(e)
+          ? CONCURRENT_UPDATE_MESSAGE
+          : (e?.message ?? 'Could not rename collection.'),
         variant: 'destructive',
       });
       throw e;
@@ -545,7 +549,11 @@ export default function HarvestCollectionsPage() {
 
     setDeletingCollection(true);
     try {
-      await deleteHarvestCollection({ collectionId: deleteCollectionConfirm.id, companyId });
+      await deleteHarvestCollection({
+        collectionId: deleteCollectionConfirm.id,
+        companyId,
+        expectedRowVersion: deleteCollectionConfirm.rowVersion ?? null,
+      });
       // Refresh list + clear selection if needed.
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
       if (selectedCollectionId === deleteCollectionConfirm.id) setSelectedCollectionId(null);
@@ -553,7 +561,9 @@ export default function HarvestCollectionsPage() {
     } catch (e: any) {
       toast({
         title: 'Delete failed',
-        description: e?.message ?? 'Could not delete collection.',
+        description: isConcurrentUpdateConflict(e)
+          ? CONCURRENT_UPDATE_MESSAGE
+          : (e?.message ?? 'Could not delete collection.'),
         variant: 'destructive',
       });
     } finally {

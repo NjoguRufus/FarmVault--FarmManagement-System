@@ -53,6 +53,8 @@ export interface InventoryStockRow {
   packaging_type?: PackagingType | null;
   description?: string | null;
   farm_usage_notes?: string | null;
+  /** Passed through when the stock view exposes inventory_items.row_version */
+  row_version?: number | null;
 }
 
 export interface InventoryTransactionRow {

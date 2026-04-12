@@ -10,6 +10,7 @@ import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { notifyInventoryChangeUnified } from '@/services/inventoryUnifiedNotify';
+import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
 import type {
   InventoryItem,
   InventoryCategory,
@@ -48,6 +49,7 @@ type DbInventoryItemRow = {
   min_threshold: number | null;
   last_updated: string;
   created_at: string;
+  row_version?: number | null;
 };
 
 export type InventoryMovementDirection = 'in' | 'out';
@@ -130,6 +132,8 @@ export type AddInventoryItemInput = {
 export type UpdateInventoryItemInput = {
   id: string;
   companyId: string;
+  /** When set, update runs only if row_version still matches (optimistic concurrency). */
+  expectedRowVersion?: number | null;
   name?: string;
   category?: InventoryCategory;
   unit?: string;
@@ -161,6 +165,7 @@ export type RestockInventoryInput = {
   projectId?: string | null;
   supplierId?: string | null;
   date: string;
+  expectedRowVersion?: number | null;
 } & ActorInfo;
 
 export type DeductInventoryManualInput = {
@@ -168,6 +173,7 @@ export type DeductInventoryManualInput = {
   itemId: string;
   quantity: number;
   reason?: string;
+  expectedRowVersion?: number | null;
 } & ActorInfo;
 
 export type RecordInventoryMovementInput = {
@@ -177,6 +183,7 @@ export type RecordInventoryMovementInput = {
   reason?: string;
   source?: InventoryMovementSource;
   metadata?: Record<string, unknown>;
+  expectedRowVersion?: number | null;
 } & ActorInfo;
 
 function mapRowToInventoryItem(row: DbInventoryItemRow): InventoryItem {
@@ -205,6 +212,7 @@ function mapRowToInventoryItem(row: DbInventoryItemRow): InventoryItem {
     minThreshold: row.min_threshold ?? undefined,
     lastUpdated: new Date(row.last_updated),
     createdAt: row.created_at ? new Date(row.created_at) : undefined,
+    rowVersion: row.row_version != null ? Number(row.row_version) : undefined,
   };
 }
 
@@ -292,6 +300,7 @@ async function applyStockChange(params: {
   source: InventoryMovementSource;
   metadata?: Record<string, unknown>;
   actor: ActorInfo;
+  expectedRowVersion?: number | null;
 }): Promise<{ item: InventoryItem; movement: InventoryMovement | null }> {
   const companyId = requireCompanyId(params.companyId);
   if (!params.itemId) {
@@ -321,7 +330,7 @@ async function applyStockChange(params: {
     throw new Error('Insufficient stock for this adjustment');
   }
 
-  const { data: updatedRow, error: updateError } = await db
+  let uq = db
     .inventory()
     .from(ITEMS_TABLE)
     .update({
@@ -329,12 +338,21 @@ async function applyStockChange(params: {
       last_updated: new Date().toISOString(),
     })
     .eq('company_id', companyId)
-    .eq('id', params.itemId)
-    .select('*')
-    .single<DbInventoryItemRow>();
+    .eq('id', params.itemId);
+  const ev = params.expectedRowVersion;
+  if (ev != null && Number.isFinite(Number(ev))) {
+    uq = uq.eq('row_version', Number(ev));
+  }
+  const { data: updatedRow, error: updateError } = await uq.select('*').maybeSingle<DbInventoryItemRow>();
 
   if (updateError) {
     throw updateError;
+  }
+  if (!updatedRow) {
+    if (ev != null && Number.isFinite(Number(ev))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Inventory item not found');
   }
 
   let movement: InventoryMovement | null = null;
@@ -440,7 +458,7 @@ export async function updateInventoryItem(
     return existing;
   }
 
-  const { data, error } = await db
+  let uq = db
     .inventory()
     .from(ITEMS_TABLE)
     .update({
@@ -448,12 +466,21 @@ export async function updateInventoryItem(
       last_updated: new Date().toISOString(),
     })
     .eq('company_id', companyId)
-    .eq('id', input.id)
-    .select('*')
-    .single<DbInventoryItemRow>();
+    .eq('id', input.id);
+  const ev = input.expectedRowVersion;
+  if (ev != null && Number.isFinite(Number(ev))) {
+    uq = uq.eq('row_version', Number(ev));
+  }
+  const { data, error } = await uq.select('*').maybeSingle<DbInventoryItemRow>();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    if (ev != null && Number.isFinite(Number(ev))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Inventory item not found');
   }
 
   await logAuditEvent({
@@ -538,6 +565,7 @@ export async function restockInventory(
       date: dateIso,
     },
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+    expectedRowVersion: input.expectedRowVersion,
   });
 
   const pricePerUnit =
@@ -603,6 +631,7 @@ export async function deductInventoryManual(
     source: 'manual',
     metadata: undefined,
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+    expectedRowVersion: input.expectedRowVersion,
   });
 
   await logAuditEvent({
@@ -636,6 +665,7 @@ export async function recordInventoryMovement(
     source: input.source ?? (input.delta > 0 ? 'restock' : 'manual'),
     metadata: input.metadata,
     actor: { actorUserId: input.actorUserId, actorName: input.actorName },
+    expectedRowVersion: input.expectedRowVersion,
   });
 
   await logAuditEvent({

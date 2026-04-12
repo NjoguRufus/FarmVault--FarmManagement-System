@@ -36,6 +36,7 @@ import {
 } from '@/lib/billingPricing';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
+import { ManualPaymentModal } from '@/components/subscription/billing/ManualPaymentModal';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import {
   createReceiptPdfSignedUrl,
@@ -168,6 +169,7 @@ export default function BillingPage() {
   const receiptBackfillRunKeyRef = useRef<string | null>(null);
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [manualPaymentOpen, setManualPaymentOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<BillingSubmissionPlan>('pro');
   const [selectedCycle, setSelectedCycle] = useState<BillingSubmissionCycle>('monthly');
   const prefsInitialized = useRef(false);
@@ -1037,22 +1039,50 @@ export default function BillingPage() {
         </>
       ) : null}
 
+      {!isDeveloper && !isOverrideActive ? (
+        <div className={cn(BILLING_CONTENT, 'flex flex-col items-center gap-2 pb-1')}>
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(
+              billingOutlineBtn,
+              'h-11 w-full max-w-md border-border/50 text-sm font-medium text-foreground shadow-sm sm:h-10',
+            )}
+            onClick={() => setManualPaymentOpen(true)}
+          >
+            Already paid? Verify payment
+          </Button>
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-muted-foreground">
+            Use this if you paid by Till or another route and your plan is still inactive.
+          </p>
+        </div>
+      ) : null}
+
       <p className={cn(BILLING_CONTENT, 'text-center text-xs text-muted-foreground')}>
         Workspace: <span className="font-medium text-foreground">{company?.name ?? companyId}</span>
       </p>
       </div>
 
       {!isDeveloper ? (
-        <UpgradeModal
-          open={checkoutOpen}
-          onOpenChange={setCheckoutOpen}
-          isTrial={isTrial}
-          isExpired={isExpired}
-          daysRemaining={daysRemaining}
-          checkoutPlan={selectedPlan}
-          checkoutCycle={selectedCycle}
-          workspaceCompanyId={companyId}
-        />
+        <>
+          <UpgradeModal
+            open={checkoutOpen}
+            onOpenChange={setCheckoutOpen}
+            isTrial={isTrial}
+            isExpired={isExpired}
+            daysRemaining={daysRemaining}
+            checkoutPlan={selectedPlan}
+            checkoutCycle={selectedCycle}
+            workspaceCompanyId={companyId}
+          />
+          <ManualPaymentModal
+            open={manualPaymentOpen}
+            onOpenChange={setManualPaymentOpen}
+            planCode={selectedPlan}
+            billingCycle={selectedCycle}
+            amountKes={checkoutAmount ?? null}
+          />
+        </>
       ) : null}
 
       <Dialog

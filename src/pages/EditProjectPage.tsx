@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 
 const PROJECT_STATUSES: Project['status'][] = ['planning', 'active', 'completed', 'archived'];
 
@@ -90,14 +91,18 @@ export default function EditProjectPage() {
 
     setSaving(true);
     try {
-      await updateProject(projectId, patch);
+      await updateProject(projectId, patch, { expectedRowVersion: project.rowVersion ?? null });
       await queryClient.invalidateQueries({ queryKey: ['project', projectId, companyId] });
       await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
       toast.success('Project updated.');
       navigate(`/projects/${projectId}`);
     } catch (err) {
       console.error('Failed to update project:', err);
-      toast.error('Failed to update project. Please try again.');
+      if (isConcurrentUpdateConflict(err)) {
+        toast.error(CONCURRENT_UPDATE_MESSAGE);
+      } else {
+        toast.error('Failed to update project. Please try again.');
+      }
     } finally {
       setSaving(false);
     }

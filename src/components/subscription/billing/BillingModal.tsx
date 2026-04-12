@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ChevronDown, Smartphone, Sparkles } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Smartphone, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,15 +13,7 @@ import { SUBSCRIPTION_PLANS } from '@/config/plans';
 import { PlanSelector } from '@/components/subscription/billing/PlanSelector';
 import { BillingCycleSelector } from '@/components/subscription/billing/BillingCycleSelector';
 import { PaymentSummaryCard } from '@/components/subscription/billing/PaymentSummaryCard';
-import { MpesaPaymentForm, type MpesaFieldErrors } from '@/components/subscription/billing/MpesaPaymentForm';
-import {
-  createPaymentSubmission,
-  getPendingPaymentStatus,
-} from '@/services/billingSubmissionService';
-import {
-  extractMpesaCodeFromPastedMessage,
-  extractMpesaNameFromPastedMessage,
-} from '@/lib/mpesaExtract';
+import { getPendingPaymentStatus } from '@/services/billingSubmissionService';
 import { getCompany, type CompanyDoc } from '@/services/companyService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { useToast } from '@/hooks/use-toast';
@@ -160,16 +151,10 @@ export function BillingModal({
   const [plan, setPlan] = useState<BillingSubmissionPlan>(() => checkoutPlan ?? 'pro');
   const [cycle, setCycle] = useState<BillingSubmissionCycle>(() => checkoutCycle ?? 'monthly');
   const [formError, setFormError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [mpesaName, setMpesaName] = useState('');
-  const [mpesaPhone, setMpesaPhone] = useState('');
-  const [transactionCode, setTransactionCode] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<MpesaFieldErrors>({});
   const [stkLoading, setStkLoading] = useState(false);
   const [stkCheckoutRequestId, setStkCheckoutRequestId] = useState<string | null>(null);
   const [stkPhone, setStkPhone] = useState('');
   const [stkActivating, setStkActivating] = useState(false);
-  const [manualSubmissionOpen, setManualSubmissionOpen] = useState(false);
   const activationFallbackRef = useRef<number | null>(null);
   /** Rapid refetch while STK callback activates subscription (realtime can lag a few hundred ms). */
   const stkGatePollRef = useRef<number | null>(null);
@@ -193,60 +178,13 @@ export function BillingModal({
     staleTime: 30_000,
   });
 
-  const mutation = useMutation({
-    mutationFn: async (input: Parameters<typeof createPaymentSubmission>[0]) => {
-      const client = await getAuthedSupabase(clerkSupabaseToken);
-      // Same JWT as `client` — `getSupabaseAccessToken` can be null before Clerk bridge runs, which skipped emails silently.
-      return createPaymentSubmission(input, client, clerkSupabaseToken);
-    },
-    onSuccess: async () => {
-      setSuccess(true);
-      dispatchUnifiedNotificationNow({
-        tier: 'premium',
-        kind: 'premium_payment',
-        title: 'Payment submitted',
-        body: "We're verifying your payment. Your plan will activate shortly.",
-        path: '/billing',
-        toastType: 'success',
-        audiences: ['company'],
-      });
-      if (companyId) {
-        captureEvent(AnalyticsEvents.UPGRADE_COMPLETED, {
-          company_id: companyId,
-          subscription_plan: planRef.current,
-          module_name: 'billing',
-        });
-      }
-      const cid = companyId;
-      if (cid) {
-        await Promise.all([
-          queryClient.refetchQueries({ queryKey: ['subscription-gate', cid], type: 'active' }),
-          queryClient.refetchQueries({ queryKey: ['subscription-payment-pending', cid], type: 'active' }),
-          queryClient.refetchQueries({ queryKey: ['subscription-payments-supabase', cid], type: 'active' }),
-          queryClient.refetchQueries({ queryKey: ['company-subscription-row', cid], type: 'active' }),
-          queryClient.refetchQueries({ queryKey: ['company-billing', cid], type: 'active' }),
-          queryClient.refetchQueries({ queryKey: ['billing-receipts', 'company', cid], type: 'active' }),
-        ]);
-      }
-    },
-    onError: (e: Error) => {
-      setFormError(e.message ?? 'Something went wrong. Try again.');
-    },
-  });
-
   useEffect(() => {
     if (!open) {
-      setSuccess(false);
       setFormError(null);
-      setMpesaName('');
-      setMpesaPhone('');
-      setTransactionCode('');
-      setFieldErrors({});
       setStkLoading(false);
       setStkCheckoutRequestId(null);
       setStkPhone('');
       setStkActivating(false);
-      setManualSubmissionOpen(false);
       if (activationFallbackRef.current) {
         window.clearTimeout(activationFallbackRef.current);
         activationFallbackRef.current = null;
@@ -287,14 +225,14 @@ export function BillingModal({
   const subtitle = useMemo(() => {
     if (!STK_PUSH_ENABLED) {
       if (isExpired) {
-        return 'Your trial has ended. Choose a plan, then pay at our Till and submit details for manual verification.';
+        return 'Your trial has ended. Choose a plan, pay at our Till, then use Billing → Already paid? Verify payment on the Billing page.';
       }
-      return 'Choose a plan and cycle. Pay at our Till and submit your confirmation for manual review.';
+      return 'Choose a plan and cycle. Pay at our Till, then verify on the Billing page (Already paid? Verify payment).';
     }
     if (isExpired) {
-      return 'Your trial has ended. Choose a plan, then pay with M-Pesa STK (instant activation) or pay at our Till and submit details for manual verification.';
+      return 'Your trial has ended. Choose a plan and pay with M-Pesa STK for instant activation.';
     }
-    return 'Choose a plan and cycle. Pay with M-Pesa STK for immediate activation, or pay at our Till and submit your confirmation for manual review.';
+    return 'Choose a plan and cycle. Pay with M-Pesa STK for instant activation.';
   }, [isExpired]);
 
   const selectedPlan = useMemo(() => {
@@ -323,43 +261,6 @@ export function BillingModal({
     }
     return computeBundleSavingsKes(plan, cycle);
   }, [billingPriceMatrix, getBillingPriceAmount, getBillingBundleSavings, plan, cycle]);
-
-  const handleSubmit = async () => {
-    setFormError(null);
-    setFieldErrors({});
-    if (!companyId) {
-      setFormError('Workspace not found. Please refresh.');
-      return;
-    }
-    if (amount == null || typeof amount !== 'number') {
-      setFormError('Price not available for this plan. Choose Basic or Pro.');
-      return;
-    }
-    const nextErrors: MpesaFieldErrors = {};
-    if (!mpesaName.trim()) nextErrors.mpesaName = 'Enter the name as shown on the M-Pesa SMS.';
-    const phoneTrim = mpesaPhone.trim();
-    if (phoneTrim && phoneTrim.length < 8) nextErrors.mpesaPhone = 'Enter a valid phone number or leave blank.';
-    const txNorm = extractMpesaCodeFromPastedMessage(transactionCode.trim()) || transactionCode.trim().replace(/[^A-Za-z0-9]/g, '');
-    if (txNorm.length < 8) nextErrors.transactionCode = 'Enter the M-Pesa message or transaction code (at least 8 characters).';
-    if (Object.keys(nextErrors).length > 0) {
-      setFieldErrors(nextErrors);
-      return;
-    }
-
-    const finalTx =
-      extractMpesaCodeFromPastedMessage(transactionCode.trim()) ||
-      transactionCode.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 10);
-
-    await mutation.mutateAsync({
-      planCode: plan,
-      billingCycle: cycle,
-      amount,
-      mpesaName: mpesaName.trim(),
-      mpesaPhone: phoneTrim,
-      transactionCode: finalTx,
-      currency: 'KES',
-    });
-  };
 
   const handleStkPush = async () => {
     setFormError(null);
@@ -546,28 +447,8 @@ export function BillingModal({
     });
   };
 
-  const handleTransactionCodePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const raw = e.clipboardData.getData('text');
-    const looksLikeSms =
-      raw.length >= 25 ||
-      /\bconfirmed\b/i.test(raw) ||
-      /\bm-?pesa\b/i.test(raw) ||
-      /\bsafaricom\b/i.test(raw);
-    if (!looksLikeSms) return;
-    const code = extractMpesaCodeFromPastedMessage(raw);
-    if (code.length < 8) return;
-    e.preventDefault();
-    setTransactionCode(code);
-    setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
-    const name = extractMpesaNameFromPastedMessage(raw);
-    if (name && !mpesaName.trim()) {
-      setMpesaName(name);
-      setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
-    }
-  };
-
-  const busy = mutation.isPending || (STK_PUSH_ENABLED && stkLoading);
-  const showPendingBanner = !success && (pendingStatus?.hasPending ?? false);
+  const busy = STK_PUSH_ENABLED && stkLoading;
+  const showPendingBanner = pendingStatus?.hasPending ?? false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -583,21 +464,7 @@ export function BillingModal({
         }}
       >
         <div className="relative z-[1] max-h-[min(92vh,760px)] overflow-y-auto">
-          {success ? (
-            <div className="flex flex-col items-center px-4 py-12 text-center sm:px-10 sm:py-14">
-              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="h-8 w-8" strokeWidth={1.75} />
-              </div>
-              <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Payment submitted successfully</h2>
-              <div className="mt-4 max-w-md space-y-2 text-sm leading-relaxed text-muted-foreground">
-                <p>Payment submitted. We&apos;ll activate your subscription after verification.</p>
-              </div>
-              <Button className="mt-8 rounded-lg px-8 font-semibold" type="button" onClick={() => onOpenChange(false)}>
-                Done
-              </Button>
-            </div>
-          ) : (
-            <>
+          <>
               <DialogHeader className="space-y-2 border-b border-border/50 bg-muted/20 px-4 pb-4 pt-5 text-left sm:space-y-3 sm:px-8 sm:pb-5 sm:pt-8">
                 <div className="flex flex-wrap items-start justify-between gap-2 pr-7 sm:gap-3 sm:pr-8">
                   <div className="min-w-0 space-y-1.5 sm:space-y-2">
@@ -632,10 +499,6 @@ export function BillingModal({
                   </div>
                 ) : null}
 
-                {/*
-                  Mobile: plan → cycle → summary (list) + STK → manual submission (collapsible).
-                  Desktop: summary (left) + STK (right); full-width manual submission row at bottom.
-                */}
                 <div
                   className={cn(
                     'flex flex-col gap-3.5 sm:gap-4',
@@ -687,7 +550,9 @@ export function BillingModal({
                           </p>
                         ) : (
                           <p className="mt-2 text-xs font-medium text-muted-foreground">
-                            STK push prompt coming soon. Open Manual submission below to pay at our Till.
+                            STK is disabled for this build. Pay the amount shown to our Till, then open{' '}
+                            <span className="font-medium text-foreground">Billing</span> and use{' '}
+                            <span className="font-medium text-foreground">Already paid? Verify payment</span>.
                           </p>
                         )}
                         </div>
@@ -711,7 +576,7 @@ export function BillingModal({
                           <Button
                             type="button"
                             variant="outline"
-                            disabled={busy || stkLoading}
+                            disabled={stkLoading}
                             className="h-9 w-full gap-2 rounded-md text-xs lg:h-10 lg:rounded-lg lg:text-sm"
                             onClick={() => void handleStkPush()}
                           >
@@ -736,43 +601,8 @@ export function BillingModal({
                             />
                           ) : null}
                         </>
-                      ) : null}
-                      </section>
-                    </div>
-                  </div>
-
-                  <Collapsible
-                    open={manualSubmissionOpen}
-                    onOpenChange={setManualSubmissionOpen}
-                    className="order-4 max-lg:border-t max-lg:border-border/40 max-lg:pt-3 lg:order-none lg:col-span-6 lg:col-start-1 lg:row-start-4"
-                  >
-                    <CollapsibleTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full justify-between gap-2 rounded-xl border-dashed px-4 text-sm font-medium lg:h-11"
-                      >
-                        <span>Manual submission</span>
-                        <ChevronDown
-                          className={cn(
-                            'h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
-                            manualSubmissionOpen && 'rotate-180',
-                          )}
-                        />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="overflow-hidden">
-                      <section className="mt-3 space-y-3 rounded-xl border border-border/50 bg-muted/10 p-3 sm:mt-4 sm:p-4">
-                        <div className="border-b border-border/40 pb-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            Till number
-                          </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Pay the amount shown in the summary to our Till. Use the account name below when M-Pesa asks
-                            for it, then submit your details here for verification.
-                          </p>
-                        </div>
-                        <dl className="space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
+                      ) : (
+                        <dl className="mt-3 space-y-2 rounded-lg bg-background/60 px-3 py-2 text-xs ring-1 ring-border/40">
                           <div className="flex justify-between gap-2">
                             <dt className="text-muted-foreground">Till number</dt>
                             <dd className="font-mono font-medium text-foreground">{TILL}</dd>
@@ -782,37 +612,13 @@ export function BillingModal({
                             <dd className="text-right font-medium text-foreground">FarmVault Technologies</dd>
                           </div>
                         </dl>
-                        <MpesaPaymentForm
-                          mpesaName={mpesaName}
-                          mpesaPhone={mpesaPhone}
-                          transactionCode={transactionCode}
-                          onMpesaNameChange={(v) => {
-                            setMpesaName(v);
-                            if (fieldErrors.mpesaName) setFieldErrors((p) => ({ ...p, mpesaName: undefined }));
-                          }}
-                          onMpesaPhoneChange={(v) => {
-                            setMpesaPhone(v);
-                            if (fieldErrors.mpesaPhone) setFieldErrors((p) => ({ ...p, mpesaPhone: undefined }));
-                          }}
-                          onTransactionCodeChange={(v) => {
-                            setTransactionCode(v);
-                            if (fieldErrors.transactionCode) setFieldErrors((p) => ({ ...p, transactionCode: undefined }));
-                          }}
-                          onTransactionCodePaste={handleTransactionCodePaste}
-                          fieldErrors={fieldErrors}
-                          disabled={busy}
-                          onSubmit={() => void handleSubmit()}
-                          onDismiss={() => onOpenChange(false)}
-                          submitLoading={mutation.isPending}
-                          className="space-y-3 lg:space-y-4"
-                        />
+                      )}
                       </section>
-                    </CollapsibleContent>
-                  </Collapsible>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </>
-          )}
+          </>
         </div>
       </DialogContent>
     </Dialog>

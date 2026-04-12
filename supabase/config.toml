@@ -93,3 +93,7 @@ verify_jwt = false
 # Cron / operator: Bearer MPESA_RECONCILE_SECRET.
 [functions.mpesa-payment-reconcile]
 verify_jwt = false
+
+# pg_cron → hourly launch monitoring email (Bearer LAUNCH_MONITORING_REPORT_SECRET).
+[functions.launch-monitoring-report]
+verify_jwt = false

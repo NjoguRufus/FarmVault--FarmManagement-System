@@ -286,6 +286,10 @@ async function authorizePaymentReceived(
     if (!de && isDev === true) return true;
   }
 
+  // Any workspace member (same bar as manual payment submit) may trigger billing confirmation emails
+  // for their company — e.g. employee submits Till payment that auto-validates against STK ledger.
+  if (await assertCompanyMember(admin, companyId, sub)) return true;
+
   return assertCompanyAdmin(admin, companyId, sub);
 }
 

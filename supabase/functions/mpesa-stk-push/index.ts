@@ -441,25 +441,50 @@ export default async function handler(
       phone: normalizedPhone,
       status: "PENDING",
       subscription_activated: false,
+      success_processed: false,
       result_code: null,
       idempotency_key: idempotencyKey || null,
     });
     if (payInsErr) {
-      if (idempotencyKey && payInsErr.code === "23505") {
-        const { data: row } = await admin
+      if (payInsErr.code === "23505") {
+        if (idempotencyKey) {
+          const { data: row } = await admin
+            .from("mpesa_payments")
+            .select("checkout_request_id")
+            .eq("idempotency_key", idempotencyKey)
+            .maybeSingle();
+          const ck = row && (row as { checkout_request_id?: string }).checkout_request_id
+            ? String((row as { checkout_request_id: string }).checkout_request_id)
+            : null;
+          if (ck) {
+            logStk("info", "idempotent_replay_after_race", { idempotencyKey });
+            return jsonOk({
+              success: true,
+              ok: true,
+              checkoutRequestId: ck,
+              idempotentReplay: true,
+              amountKes,
+              mpesaEnv: loadMpesaConfig().env,
+              developerStkTest: isDeveloperPayload,
+            });
+          }
+        }
+        const { data: byCk } = await admin
           .from("mpesa_payments")
           .select("checkout_request_id")
-          .eq("idempotency_key", idempotencyKey)
+          .eq("checkout_request_id", stk.checkoutRequestId)
           .maybeSingle();
-        const ck = row && (row as { checkout_request_id?: string }).checkout_request_id
-          ? String((row as { checkout_request_id: string }).checkout_request_id)
+        const ckDup = byCk && (byCk as { checkout_request_id?: string }).checkout_request_id
+          ? String((byCk as { checkout_request_id: string }).checkout_request_id)
           : null;
-        if (ck) {
-          logStk("info", "idempotent_replay_after_race", { idempotencyKey });
+        if (ckDup) {
+          logStk("info", "idempotent_replay_checkout_request_id", {
+            checkoutRequestId: stk.checkoutRequestId,
+          });
           return jsonOk({
             success: true,
             ok: true,
-            checkoutRequestId: ck,
+            checkoutRequestId: ckDup,
             idempotentReplay: true,
             amountKes,
             mpesaEnv: loadMpesaConfig().env,
@@ -467,7 +492,16 @@ export default async function handler(
           });
         }
       }
+      console.error("Failed to insert mpesa_payments:", payInsErr);
       logStk("error", "mpesa_payments_insert_failed", { detail: payInsErr.message });
+      return jsonResponse(
+        {
+          success: false,
+          message: "Failed to initiate payment. Please try again.",
+          error: payInsErr.message,
+        },
+        500,
+      );
     }
 
     return jsonOk({

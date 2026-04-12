@@ -19,6 +19,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { useAuth } from '@/contexts/AuthContext';
 import { markWorkCardPaid, type WorkCard } from '@/services/operationsWorkCardService';
 import { createAdminAlert } from '@/services/adminAlertService';
@@ -67,6 +68,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
       // Mark work card as paid
       await markWorkCardPaid({
         id: workCard.id,
+        expectedRowVersion: workCard.rowVersion ?? null,
         amount: formData.amount,
         method: formData.method,
         notes: formData.notes.trim() || null,
@@ -116,7 +118,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
       onSuccess?.();
     } catch (error) {
       console.error('Failed to mark work as paid:', error);
-      toast.error('Failed to mark work as paid');
+      toast.error(isConcurrentUpdateConflict(error) ? CONCURRENT_UPDATE_MESSAGE : 'Failed to mark work as paid');
     } finally {
       setSaving(false);
     }
