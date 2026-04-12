@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mirrorPublicProfileForClerkUser } from '@/lib/auth/tenantMembershipRecovery';
+import { normalizeCompanyPlanColumn } from '@/lib/subscription/canonicalCompanyPlan';
 import { db } from '@/lib/db';
 import { logger } from "@/lib/logger";
 
@@ -58,7 +59,7 @@ function mapRowToCompanyDoc(row: Record<string, unknown>): CompanyDoc {
     name: row.name != null ? String(row.name) : undefined,
     email: row.email != null ? String(row.email) : undefined,
     status: row.status != null ? String(row.status) : undefined,
-    plan: row.plan != null ? String(row.plan) : undefined,
+    plan: row.plan != null ? normalizeCompanyPlanColumn(String(row.plan)) : undefined,
     billingReference: (() => {
       const raw = row.billing_reference ?? row.billingReference;
       if (raw == null) return undefined;
@@ -189,7 +190,7 @@ export async function updateCompany(
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (data.name !== undefined) updates.name = data.name;
   if (data.email !== undefined) updates.email = data.email;
-  if (data.plan !== undefined) updates.plan = data.plan;
+  if (data.plan !== undefined) updates.plan = normalizeCompanyPlanColumn(data.plan);
   if (data.status !== undefined) updates.status = data.status;
   if (data.customWorkTypes !== undefined) updates.custom_work_types = data.customWorkTypes;
   if (data.notificationsEnabled !== undefined) updates.notifications_enabled = data.notificationsEnabled;
@@ -225,11 +226,11 @@ export async function updateCompany(
 export async function createCompany(
   name: string,
   companyEmail: string,
-  plan: string = 'starter',
+  plan: string = 'basic',
 ): Promise<string> {
   const now = new Date();
   const trialEndsAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const companyPlan = ['starter', 'professional', 'enterprise'].includes(plan) ? plan : 'starter';
+  const companyPlan = normalizeCompanyPlanColumn(plan);
   const id = crypto.randomUUID();
 
   await db.core().from('companies').insert({
@@ -295,7 +296,6 @@ export async function setCompanyPaidPlan(
   };
   const durationDays = daysByMode[mode] ?? 30;
   const paidUntil = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
-  const legacyPlan = plan === 'basic' ? 'starter' : plan === 'pro' ? 'professional' : 'enterprise';
 
   const { data } = await db
     .core()
@@ -308,7 +308,7 @@ export async function setCompanyPaidPlan(
     .core()
     .from('companies')
     .update({
-      plan: legacyPlan,
+      plan,
       // Clear trial fields explicitly so pro_trial / isTrial flags never survive a paid activation.
       subscription: {
         ...subscription,

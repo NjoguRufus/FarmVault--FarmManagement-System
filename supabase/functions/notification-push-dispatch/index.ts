@@ -10,6 +10,7 @@
 // Deploy: npx supabase functions deploy notification-push-dispatch --no-verify-jwt
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { isWebPushConfigured, sendWebPushToClerkUser } from "../_shared/webPushSend.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,7 +39,7 @@ function mapTypeToPushKind(
   return "inventory_alert";
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notification-push-dispatch", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

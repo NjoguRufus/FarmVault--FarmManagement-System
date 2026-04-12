@@ -6,6 +6,12 @@
 import { db } from '@/lib/db';
 import type { OfflineQueueItem } from '@/lib/offlineQueue';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
+import type { PostgrestError } from '@supabase/supabase-js';
+
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as PostgrestError | undefined;
+  return Boolean(e && typeof e === 'object' && 'code' in e && e.code === '23505');
+}
 
 export async function processOfflineQueue(item: OfflineQueueItem): Promise<void> {
   const { type, payload } = item;
@@ -35,7 +41,7 @@ export async function processOfflineQueue(item: OfflineQueueItem): Promise<void>
       .select('id')
       .single();
 
-    if (error) throw error;
+    if (error && !isUniqueViolation(error)) throw error;
     if (typeof window !== 'undefined') {
       enqueueUnifiedNotification({
         tier: 'activity',
@@ -73,7 +79,7 @@ export async function processOfflineQueue(item: OfflineQueueItem): Promise<void>
       .select('id')
       .single();
 
-    if (error) throw error;
+    if (error && !isUniqueViolation(error)) throw error;
     const paymentEntryId = data?.id;
 
     const projectId = payload.project_id as string | undefined;

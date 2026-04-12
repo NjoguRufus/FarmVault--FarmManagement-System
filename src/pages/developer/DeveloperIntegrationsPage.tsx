@@ -68,7 +68,6 @@ export default function DeveloperIntegrationsPage() {
       typeof window !== 'undefined' &&
       typeof (window as Window & { OneSignal?: unknown }).OneSignal !== 'undefined';
     const hasMpesa = Boolean(ENV.MPESA_CONSUMER_KEY || ENV.VITE_MPESA_CONSUMER_KEY);
-    const hasResend = Boolean(ENV.VITE_RESEND_API_KEY || ENV.RESEND_API_KEY);
     const hasPosthogKey = Boolean(ENV.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN || ENV.VITE_PUBLIC_POSTHOG_KEY);
 
     return [
@@ -106,9 +105,9 @@ export default function DeveloperIntegrationsPage() {
       },
       {
         name: 'Resend Email',
-        status: hasResend ? 'connected' : 'partial',
-        description: 'Email delivery',
-        keyInfo: mask(ENV.VITE_RESEND_API_KEY || ENV.RESEND_API_KEY),
+        status: 'partial',
+        description: 'Email delivery (Edge secret RESEND_API_KEY)',
+        keyInfo: 'Configure in Supabase → Edge Functions secrets (not visible in browser)',
         actionLabel: 'Send Test Email',
         icon: <Mail className="h-4 w-4" />,
       },

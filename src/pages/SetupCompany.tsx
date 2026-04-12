@@ -36,7 +36,7 @@ export default function SetupCompany() {
 
   useEffect(() => {
     if (step === 4 && selectedPlan === null) {
-      setSelectedPlan('professional');
+      setSelectedPlan('pro');
     }
   }, [step, selectedPlan]);
   const [companyName, setCompanyName] = useState('');

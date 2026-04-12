@@ -1,13 +1,14 @@
 // FarmVault Edge Function: create company + company-admin profile (Supabase onboarding).
 // Requires: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("create-company", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -74,11 +75,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const planRaw = (selectedPlan || "").toString();
-    let companyPlan: "starter" | "professional" | "enterprise" = "starter";
+    const planRaw = (selectedPlan || "").toString().toLowerCase().trim();
+    let companyPlan: "basic" | "pro" | "enterprise" = "basic";
     if (planRaw === "enterprise") companyPlan = "enterprise";
-    else if (planRaw === "pro" || planRaw === "professional") companyPlan = "professional";
-    else companyPlan = "starter"; // basic tier maps to starter plan code
+    else if (planRaw === "pro" || planRaw === "professional") companyPlan = "pro";
+    else if (planRaw === "basic" || planRaw === "starter") companyPlan = "basic";
+    else companyPlan = "basic";
 
     const now = new Date();
     const trialEndsAt = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);

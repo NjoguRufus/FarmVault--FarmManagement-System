@@ -173,9 +173,15 @@ export function BillingModal({
   const activationFallbackRef = useRef<number | null>(null);
   /** Rapid refetch while STK callback activates subscription (realtime can lag a few hundred ms). */
   const stkGatePollRef = useRef<number | null>(null);
+  /** One idempotency key per modal open / STK attempt chain so double-submit does not create duplicate STKs. */
+  const stkIdempotencyKeyRef = useRef<string | null>(null);
   const upgradeOpenTrackedRef = useRef(false);
   const planRef = useRef(plan);
   planRef.current = plan;
+
+  useEffect(() => {
+    stkIdempotencyKeyRef.current = null;
+  }, [open]);
 
   const { data: pendingStatus, isLoading: pendingLoading } = useQuery({
     queryKey: ['subscription-payment-pending', companyId],
@@ -434,6 +440,9 @@ export function BillingModal({
         plan,
         billing_cycle: cycle,
       });
+      if (!stkIdempotencyKeyRef.current) {
+        stkIdempotencyKeyRef.current = crypto.randomUUID();
+      }
       const res = await initiateMpesaStkPush(
         {
           companyId: companyId!,
@@ -442,6 +451,7 @@ export function BillingModal({
           billingCycle: cycle,
           ...(billingRefTrim ? { billingReference: billingRefTrim } : {}),
           amount: safeAmount,
+          idempotencyKey: stkIdempotencyKeyRef.current,
         },
         { getAccessToken: clerkSupabaseToken },
       );
@@ -451,6 +461,7 @@ export function BillingModal({
         description: res.customerMessage ?? 'Approve the M-Pesa prompt to complete payment.',
       });
     } catch (e) {
+      stkIdempotencyKeyRef.current = null;
       const msg = e instanceof Error ? e.message : 'STK request failed.';
       setFormError(msg);
       toast({ variant: 'destructive', title: 'STK failed', description: msg });

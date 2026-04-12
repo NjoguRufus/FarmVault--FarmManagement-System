@@ -32,6 +32,7 @@ import type {
 } from "../_shared/farmvault-email/types.ts";
 import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/validatePayload.ts";
 import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -173,7 +174,7 @@ function payloadDataAsRecord(payload: SendFarmVaultEmailPayload): Record<string,
   return { ...payload.data } as Record<string, unknown>;
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

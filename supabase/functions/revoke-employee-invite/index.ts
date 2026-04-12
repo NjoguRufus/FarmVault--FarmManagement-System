@@ -1,6 +1,7 @@
 // FarmVault Edge Function: revoke employee invite and clean up employee records.
 // Uses Clerk Backend API and Supabase service role key. No Supabase Auth.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -88,7 +89,7 @@ async function revokeClerkInvitation(clerkSecretKey: string, invitationId: strin
   }
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("revoke-employee-invite", async (req: Request, _ctx) => {
   log("Request", { method: req.method, url: req.url });
 
   if (req.method === "OPTIONS") {

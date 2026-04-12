@@ -10,15 +10,17 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { uploadAvatar, clearAvatar } from '@/services/avatarService';
 import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 import { QuickUnlockSettings } from '@/components/settings/QuickUnlockSettings';
+import { RecordAuditLogPanel } from '@/components/settings/RecordAuditLogPanel';
 import { db } from '@/lib/db';
 import { useUser } from '@clerk/react';
 import { resolveUserDisplayNameFromSources } from '@/lib/userDisplayName';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { logger } from "@/lib/logger";
+import { normalizeCompanyPlanColumn } from '@/lib/subscription/canonicalCompanyPlan';
 
 const PLANS = [
-  { value: 'starter', label: 'Starter' },
-  { value: 'professional', label: 'Professional' },
+  { value: 'basic', label: 'Basic' },
+  { value: 'pro', label: 'Pro' },
   { value: 'enterprise', label: 'Enterprise' },
 ] as const;
 
@@ -220,7 +222,7 @@ export default function SettingsPage() {
     if (company) {
       setEditName(company.name ?? '');
       setEditEmail(company.email ?? '');
-      setEditPlan(company.plan ?? 'starter');
+      setEditPlan(normalizeCompanyPlanColumn(company.plan));
       setEditStatus(company.status ?? 'active');
     }
   }, [company]);
@@ -233,7 +235,7 @@ export default function SettingsPage() {
   const hasChanges =
     (editName.trim() !== (company?.name ?? '').trim()) ||
     (editEmail.trim() !== (company?.email ?? '').trim()) ||
-    (editPlan !== (company?.plan ?? 'starter')) ||
+    (editPlan !== normalizeCompanyPlanColumn(company?.plan)) ||
     (editStatus !== (company?.status ?? 'active'));
 
   // Validate company name
@@ -521,6 +523,8 @@ export default function SettingsPage() {
 
       {/* Quick unlock / App lock settings */}
       <QuickUnlockSettings />
+
+      {companyId ? <RecordAuditLogPanel companyId={companyId} /> : null}
 
       {/* Company settings - editable by admins/developers, read-only for staff */}
       <div className="fv-card">

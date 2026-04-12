@@ -8,13 +8,14 @@ import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperIn
 import { farmVaultEmailShell } from "../_shared/farmvault-email/farmVaultEmailShell.ts";
 import { escapeHtml } from "../_shared/farmvault-email/escapeHtml.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("create-company-onboarding", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

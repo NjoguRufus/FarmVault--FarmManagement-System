@@ -6,6 +6,7 @@
 // This function verifies the Clerk session token itself via CLERK_SECRET_KEY + JWKS.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.2.0";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -193,7 +194,7 @@ function buildPermissions(preset: string, overrides: Record<string, boolean> | n
   return out;
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("invite-employee", async (req: Request, _ctx) => {
   log("Request", { method: req.method, url: req.url });
 
   if (req.method === "OPTIONS") {

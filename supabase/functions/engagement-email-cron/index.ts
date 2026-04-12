@@ -29,6 +29,7 @@ import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
 import { isWebPushConfigured, sendWebPushToClerkUser } from "../_shared/webPushSend.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 import {
   buildEveningMessage,
   buildMorningMessage,
@@ -915,7 +916,7 @@ async function runTrialExpired(params: {
   return { sent, skipped, errors };
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("engagement-email-cron", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

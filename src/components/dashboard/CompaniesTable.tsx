@@ -2,6 +2,7 @@ import React from 'react';
 import { MoreHorizontal, ExternalLink, LayoutList, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Company } from '@/types';
+import { normalizeCompanyPlanColumn } from '@/lib/subscription/canonicalCompanyPlan';
 import { Link } from 'react-router-dom';
 
 export type CompaniesViewMode = 'list' | 'card';
@@ -30,13 +31,14 @@ export function CompaniesTable({
     return styles[status ?? 'pending'];
   };
 
-  const getPlanBadge = (plan: Company['plan'] | undefined) => {
+  const getPlanBadge = (plan: Company['plan'] | string | undefined) => {
+    const p = normalizeCompanyPlanColumn(plan);
     const styles: Record<Company['plan'], string> = {
       enterprise: 'fv-badge--gold',
-      professional: 'fv-badge--info',
-      starter: 'bg-muted text-muted-foreground',
+      pro: 'fv-badge--info',
+      basic: 'bg-muted text-muted-foreground',
     };
-    return styles[plan ?? 'starter'];
+    return styles[p];
   };
 
   const formatCurrency = (amount: number | undefined) => {

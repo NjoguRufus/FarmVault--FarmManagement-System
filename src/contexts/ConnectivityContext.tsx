@@ -13,6 +13,7 @@ import {
   getPendingCount,
   getIsSyncing,
   syncQueue,
+  resetOfflineRetrySchedule,
   OFFLINE_QUEUE_CHANGE_EVENT,
 } from '@/lib/offlineQueue';
 
@@ -71,19 +72,33 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      void syncQueue().then((r) => {
+      void (async () => {
+        await resetOfflineRetrySchedule();
+        const r = await syncQueue();
         setLastSyncFailed(r.failed > 0);
         refresh();
-      });
+      })();
     };
     const handleOffline = () => setIsOnline(false);
 
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        void syncQueue().then((r) => {
+          setLastSyncFailed(r.failed > 0);
+          refresh();
+        });
+      }
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
 

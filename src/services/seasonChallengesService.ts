@@ -501,6 +501,7 @@ export async function createSeasonChallenge(
         .from('projects')
         .select('company_id')
         .eq('id', input.projectId)
+        .is('deleted_at', null)
         .maybeSingle();
       if (!projectErr && projectRow?.company_id) {
         resolvedCompanyId = String(projectRow.company_id);

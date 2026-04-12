@@ -322,6 +322,7 @@ export async function listHarvestCollections(
     .from('harvest_collections')
     .select(HARVEST_COLLECTIONS_SELECT)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false });
 
@@ -339,6 +340,7 @@ export async function getHarvestCollection(collectionId: string): Promise<Return
     .from('harvest_collections')
     .select(HARVEST_COLLECTIONS_SELECT)
     .eq('id', collectionId)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error) throw error;
@@ -393,6 +395,7 @@ export async function renameHarvestCollection(params: {
     .update({ notes: trimmed })
     .eq('id', params.collectionId)
     .eq('company_id', params.companyId)
+    .is('deleted_at', null)
     .select('id, notes')
     .maybeSingle();
 
@@ -489,9 +492,10 @@ export async function listHarvestCollectionProjectTransfers(params: {
 export async function deleteHarvestCollection(params: { collectionId: string; companyId: string }): Promise<void> {
   const { error } = await harvest()
     .from('harvest_collections')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', params.collectionId)
-    .eq('company_id', params.companyId);
+    .eq('company_id', params.companyId)
+    .is('deleted_at', null);
 
   if (error) throw error;
 }
@@ -1138,7 +1142,8 @@ export async function setBuyerPriceAndClose(params: {
   const { error } = await harvest()
     .from('harvest_collections')
     .update(update)
-    .eq('id', params.collectionId);
+    .eq('id', params.collectionId)
+    .is('deleted_at', null);
 
   if (error) throw error;
   captureEvent(AnalyticsEvents.BUYER_SETTLEMENT_RECORDED, {
@@ -1209,6 +1214,7 @@ export async function syncPickerPaymentToExpenseForOffline(params: {
     .eq('category', 'picker_payout')
     .eq('amount', params.amountPaid)
     .eq('note', note)
+    .is('deleted_at', null)
     .maybeSingle();
   if (existing?.id) return;
 

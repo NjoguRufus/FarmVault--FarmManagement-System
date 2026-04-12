@@ -34,6 +34,8 @@ export interface StkPushParams {
   billingCycle: 'monthly' | 'seasonal' | 'annual';
   billingReference?: string;
   amount: number;
+  /** Stable per checkout attempt so double-submit / retries reuse the same Daraja STK idempotency slot (required). */
+  idempotencyKey: string;
 }
 
 export interface StkPushResult {
@@ -63,13 +65,18 @@ function formatStkEdgeError(data: StkEdgeBody): string {
   return err || det || msg || 'STK Push failed';
 }
 
-async function postMpesaStkPush(body: Record<string, unknown>, token: string): Promise<StkPushResult> {
+async function postMpesaStkPush(
+  body: Record<string, unknown>,
+  token: string,
+  idempotencyKey: string,
+): Promise<StkPushResult> {
   const res = await fetch(`${supabaseFunctionsOrigin()}/functions/v1/mpesa-stk-push`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       apikey: supabaseAnonApiKey(),
+      'Idempotency-Key': idempotencyKey,
     },
     body: JSON.stringify(body),
   });
@@ -133,6 +140,11 @@ export async function initiateMpesaStkPush(
     billing_cycle: params.billingCycle,
   });
 
+  const idempotencyKey = params.idempotencyKey?.trim();
+  if (!idempotencyKey) {
+    throw new Error('Missing idempotencyKey — generate a UUID once per STK attempt and reuse on retry.');
+  }
+
   return postMpesaStkPush(
     {
       company_id: params.companyId,
@@ -141,8 +153,10 @@ export async function initiateMpesaStkPush(
       billing_cycle: params.billingCycle,
       billing_reference: billingRefTrim,
       amount: safeAmount,
+      idempotency_key: idempotencyKey,
     },
     token,
+    idempotencyKey,
   );
 }
 
@@ -166,12 +180,15 @@ export async function sendDeveloperStkTest(
     throw new Error('Invalid STK amount');
   }
 
+  const idempotencyKey = crypto.randomUUID();
   return postMpesaStkPush(
     {
       developerStkTest: true,
       phoneNumber: params.phone.trim(),
       amount: safeAmount,
+      idempotency_key: idempotencyKey,
     },
     token,
+    idempotencyKey,
   );
 }

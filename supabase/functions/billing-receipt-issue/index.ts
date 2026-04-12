@@ -21,6 +21,7 @@ import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { getCompanyEmailAndName } from "../_shared/companyEmailPipeline.ts";
 import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
 import { sendCompanyPaymentEmail } from "../_shared/companyTenantEmailOnboarding.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 async function tryGetCompanyInbox(
   admin: SupabaseClient,
@@ -729,7 +730,7 @@ function receiptEmailFromReceiptRow(
   });
 }
 
-Deno.serve(async (req) => {
+serveFarmVaultEdge("billing-receipt-issue", async (req, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

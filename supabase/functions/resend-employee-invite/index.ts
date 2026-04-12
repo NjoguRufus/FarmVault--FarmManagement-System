@@ -6,6 +6,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.2.0";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -175,7 +176,7 @@ function classifyClerkError(
   return { message: lower || errorMsg, isDuplicate: false, status: 400 };
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("resend-employee-invite", async (req: Request, _ctx) => {
   log("Request", { method: req.method, url: req.url });
 
   if (req.method === "OPTIONS") {

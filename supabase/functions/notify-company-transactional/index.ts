@@ -22,6 +22,7 @@ import {
   executeStkPaymentReceivedCompanyEmail,
 } from "../_shared/subscriptionPaymentCompanyEmails.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const EMAIL_TYPE_TRIAL = "company_pro_trial_started";
 const EMAIL_TYPE_MANUAL_PENDING = "company_manual_payment_awaiting_approval";
@@ -288,7 +289,7 @@ async function authorizePaymentReceived(
   return assertCompanyAdmin(admin, companyId, sub);
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notify-company-transactional", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 

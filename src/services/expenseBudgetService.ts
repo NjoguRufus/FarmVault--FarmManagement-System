@@ -19,6 +19,7 @@ export async function applyExpenseDeduction(
     .select('budget_pool_id')
     .eq('id', projectId)
     .eq('company_id', tenant)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error || !proj) return;

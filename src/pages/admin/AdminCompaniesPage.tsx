@@ -33,6 +33,7 @@ import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { normalizeCompanyPlanColumn } from '@/lib/subscription/canonicalCompanyPlan';
 
 export default function AdminCompaniesPage() {
   const { user } = useAuth();
@@ -119,12 +120,13 @@ export default function AdminCompaniesPage() {
   };
 
   const getPlanBadge = (plan: Company['plan'] | string | undefined) => {
+    const p = normalizeCompanyPlanColumn(plan);
     const styles: Record<string, string> = {
       enterprise: 'fv-badge--gold',
-      professional: 'fv-badge--info',
-      starter: 'bg-muted text-muted-foreground',
+      pro: 'fv-badge--info',
+      basic: 'bg-muted text-muted-foreground',
     };
-    return styles[plan ?? 'starter'] ?? 'bg-muted';
+    return styles[p] ?? 'bg-muted';
   };
 
   const formatCurrency = (amount: number | undefined) => {

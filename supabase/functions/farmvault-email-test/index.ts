@@ -17,6 +17,7 @@ import {
   getFarmVaultEmailFrom,
   type FarmVaultEmailSenderKey,
 } from "../_shared/farmvaultEmailFrom.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,7 +43,7 @@ function escapeHtml(s: string): string {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("farmvault-email-test", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 

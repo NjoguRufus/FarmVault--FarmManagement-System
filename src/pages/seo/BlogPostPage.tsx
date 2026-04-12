@@ -6,6 +6,7 @@ import { getArticleSchema, getBreadcrumbSchema } from "@/seo/structuredData";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getBlogPost } from "@/data/blogPosts";
 import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
+import { sanitizeMarketingHtml } from "@/lib/sanitizeMarketingHtml";
 
 export default function BlogPostPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -56,7 +57,10 @@ export default function BlogPostPage() {
           </p>
         </header>
         {post.content ? (
-          <div className="prose prose-neutral dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: post.content }} />
+          <div
+            className="prose prose-neutral dark:prose-invert max-w-none"
+            dangerouslySetInnerHTML={{ __html: sanitizeMarketingHtml(post.content) }}
+          />
         ) : (
           <div className="prose prose-neutral dark:prose-invert max-w-none">
             <p className="text-muted-foreground lead">{post.description}</p>
