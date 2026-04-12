@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
@@ -226,6 +227,7 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       if (isEdit) {
         await editWork({
           id: workCard.id,
+          expectedRowVersion: workCard.rowVersion ?? null,
           actualDate: format(formData.actualDate, 'yyyy-MM-dd'),
           actualWorkers: formData.actualWorkers,
           actualRatePerPerson: formData.actualRatePerPerson,
@@ -240,6 +242,7 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       } else {
         await recordWork({
           id: workCard.id,
+          expectedRowVersion: workCard.rowVersion ?? null,
           actualDate: format(formData.actualDate, 'yyyy-MM-dd'),
           actualWorkers: formData.actualWorkers,
           actualRatePerPerson: formData.actualRatePerPerson,
@@ -302,7 +305,7 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       onSuccess?.();
     } catch (error) {
       console.error('Failed to record work:', error);
-      toast.error('Failed to record work');
+      toast.error(isConcurrentUpdateConflict(error) ? CONCURRENT_UPDATE_MESSAGE : 'Failed to record work');
     } finally {
       setSaving(false);
     }

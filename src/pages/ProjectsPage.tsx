@@ -21,6 +21,7 @@ import { NewProjectForm } from '@/components/projects/NewProjectForm';
 import { useQueryClient } from '@tanstack/react-query';
 import { updateProject } from '@/services/projectsService';
 import { toast } from 'sonner';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -325,7 +326,7 @@ export default function ProjectsPage() {
     );
 
     try {
-      await updateProject(target.id, { status: 'closed' });
+      await updateProject(target.id, { status: 'closed' }, { expectedRowVersion: target.rowVersion ?? null });
       toast.success('Project closed', {
         description: 'It’s in Closed Projects whenever you need to look it up.',
       });
@@ -343,7 +344,7 @@ export default function ProjectsPage() {
       } else {
         void queryClient.invalidateQueries({ queryKey: ['project', target.id, companyId] });
       }
-      toast.error('Couldn’t close this project. Try again.');
+      toast.error(isConcurrentUpdateConflict(e) ? CONCURRENT_UPDATE_MESSAGE : 'Couldn’t close this project. Try again.');
     }
   };
 
@@ -363,7 +364,7 @@ export default function ProjectsPage() {
     );
 
     try {
-      await updateProject(target.id, { status: 'active' });
+      await updateProject(target.id, { status: 'active' }, { expectedRowVersion: target.rowVersion ?? null });
       toast.success('Project reopened', {
         description: 'It’s back with your ongoing farms.',
       });
@@ -381,7 +382,7 @@ export default function ProjectsPage() {
       } else {
         void queryClient.invalidateQueries({ queryKey: ['project', target.id, companyId] });
       }
-      toast.error('Couldn’t reopen this project. Try again.');
+      toast.error(isConcurrentUpdateConflict(e) ? CONCURRENT_UPDATE_MESSAGE : 'Couldn’t reopen this project. Try again.');
     }
   };
 

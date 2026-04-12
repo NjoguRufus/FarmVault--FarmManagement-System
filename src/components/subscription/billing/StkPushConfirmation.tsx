@@ -63,6 +63,7 @@ export function StkPushConfirmation({
   const activatedFiredRef = useRef(false);
   const successFiredRef = useRef(false);
   const failedFiredRef = useRef(false);
+  const pendingVerificationToastFiredRef = useRef(false);
   const loadingToastIdRef = useRef<string | number | undefined>(undefined);
 
   const onPaymentSuccessRef = useRef(onPaymentSuccess);
@@ -170,6 +171,20 @@ export function StkPushConfirmation({
   useEffect(() => {
     if (!payment) return;
     const st = String(payment.status || '').toUpperCase();
+    if (st !== 'PENDING_VERIFICATION') return;
+    if (pendingVerificationToastFiredRef.current) return;
+    pendingVerificationToastFiredRef.current = true;
+    const tid = loadingToastIdRef.current;
+    toast.info('Payment received. Confirming…', {
+      id: tid,
+      duration: 8000,
+    });
+    loadingToastIdRef.current = undefined;
+  }, [payment]);
+
+  useEffect(() => {
+    if (!payment) return;
+    const st = String(payment.status || '').toUpperCase();
     if (st !== 'FAILED') return;
     if (failedFiredRef.current) return;
     failedFiredRef.current = true;
@@ -238,6 +253,19 @@ export function StkPushConfirmation({
         )}
       >
         <span aria-hidden>⏳</span> Payment pending — approve the M-Pesa prompt on your phone.
+      </div>
+    );
+  }
+
+  if (st === 'PENDING_VERIFICATION') {
+    return (
+      <div
+        className={cn(
+          'rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-sm',
+          'text-amber-950 dark:text-amber-100/90',
+        )}
+      >
+        <span aria-hidden>🔐</span> Payment received — confirming with M-Pesa. This usually completes within a minute.
       </div>
     );
   }

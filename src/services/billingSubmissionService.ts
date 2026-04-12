@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   invokeNotifyCompanyManualPaymentSubmitted,
+  invokeNotifyCompanyTransactional,
   invokeNotifyDeveloperTransactional,
 } from '@/lib/email';
 import { mpesaRowIndicatesConfirmedPayment, mpesaRowIndicatesFailedPayment } from '@/services/subscriptionService';
@@ -75,6 +76,9 @@ export interface PendingPaymentStatusResult {
 function normalizeRpcErrorMessage(raw: string): string {
   const t = raw.toLowerCase();
   if (t.includes('already submitted')) return raw;
+  if (t.includes('payment code has already been used')) {
+    return 'This payment code has already been used.';
+  }
   if (t.includes('amount does not match')) {
     return 'The amount does not match the selected plan and billing cycle. Refresh and try again.';
   }
@@ -112,26 +116,41 @@ export async function createPaymentSubmission(
   const notifyToken = getToken ?? getSupabaseAccessToken;
   const { data: payRow } = await sb
     .from('subscription_payments')
-    .select('company_id')
+    .select('company_id,status')
     .eq('id', id)
     .maybeSingle();
   const companyId =
     payRow && typeof (payRow as { company_id?: unknown }).company_id === 'string'
       ? String((payRow as { company_id: string }).company_id).trim()
       : '';
-  if (companyId) {
+  const rowStatus = String((payRow as { status?: unknown } | null)?.status ?? '').toLowerCase();
+
+  if (companyId && rowStatus === 'approved') {
+    // Server auto-validated against mpesa_payments (STK ledger); same tenant notify as developer approve.
+    void invokeNotifyCompanyTransactional(
+      {
+        companyId,
+        kind: 'payment_approved',
+        subscriptionPaymentId: id,
+      },
+      notifyToken,
+    ).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[BillingSubmit] notify company (payment_approved after auto-validate) failed:', err);
+    });
+  } else if (companyId) {
     void invokeNotifyCompanyManualPaymentSubmitted({ companyId, paymentId: id }, notifyToken).catch((err) => {
       // eslint-disable-next-line no-console
       console.warn('[BillingSubmit] notify company (manual awaiting approval) failed:', err);
     });
+    void invokeNotifyDeveloperTransactional(
+      { event: 'manual_payment_submitted', payment_id: id },
+      notifyToken,
+    ).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[BillingSubmit] notify developer (manual_payment_submitted) failed:', err);
+    });
   }
-  void invokeNotifyDeveloperTransactional(
-    { event: 'manual_payment_submitted', payment_id: id },
-    notifyToken,
-  ).catch((err) => {
-    // eslint-disable-next-line no-console
-    console.warn('[BillingSubmit] notify developer (manual_payment_submitted) failed:', err);
-  });
   return id;
 }
 

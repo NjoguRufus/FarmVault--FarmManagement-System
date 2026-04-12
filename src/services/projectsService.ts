@@ -4,6 +4,7 @@ import type { CropStage, Project } from '@/types';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 import { logger } from "@/lib/logger";
+import { throwIfUpdateReturnedNoRows } from '@/lib/concurrentUpdate';
 
 type DbProjectRow = {
   id: string;
@@ -327,6 +328,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 export async function updateProject(
   projectId: string,
   updates: Partial<Pick<Project, 'name' | 'status' | 'location' | 'acreage' | 'budget'>>,
+  options?: { expectedRowVersion?: number | null },
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   if (updates.name != null) payload.name = updates.name;
@@ -337,32 +339,43 @@ export async function updateProject(
 
   if (Object.keys(payload).length === 0) return;
 
-  const { error } = await db.projects()
+  let q = db.projects()
     .from('projects')
     .update(payload)
     .eq('id', projectId)
     .is('deleted_at', null);
 
-  if (error) {
-    throw error;
+  const v = options?.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    q = q.eq('row_version', Number(v));
   }
+
+  const { data, error } = await q.select('id');
+  throwIfUpdateReturnedNoRows(data, error);
+
   captureEvent(AnalyticsEvents.PROJECT_UPDATED, {
     project_id: projectId,
     module_name: 'projects',
   });
 }
 
-export async function deleteProject(projectId: string): Promise<void> {
+export async function deleteProject(
+  projectId: string,
+  options?: { expectedRowVersion?: number | null },
+): Promise<void> {
   const deletedAt = new Date().toISOString();
-  const { error } = await db
+  let q = db
     .projects()
     .from('projects')
     .update({ deleted_at: deletedAt })
     .eq('id', projectId)
     .is('deleted_at', null);
-  if (error) {
-    throw error;
+  const v = options?.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    q = q.eq('row_version', Number(v));
   }
+  const { data, error } = await q.select('id');
+  throwIfUpdateReturnedNoRows(data, error);
   captureEvent(AnalyticsEvents.PROJECT_ARCHIVED, {
     project_id: projectId,
     module_name: 'projects',

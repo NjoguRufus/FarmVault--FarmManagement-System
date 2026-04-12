@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt, Loader2 } from 'lucide-react';
+import { AuditLogsButton } from '@/components/audit/AuditLogsButton';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -675,6 +676,7 @@ export default function ExpensesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <AuditLogsButton companyId={companyId} tableName="expenses" />
           {showBrokerExpensesButton && (
             <button
               type="button"

@@ -22,6 +22,7 @@ import { ArchiveConfirmDialog } from '@/components/inventory/ArchiveConfirmDialo
 import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer';
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { logger } from "@/lib/logger";
 
@@ -252,22 +253,27 @@ export default function InventoryPage() {
       throw new Error('Missing company or user');
     }
     try {
+      const row = stockItems.find((i) => i.id === itemId);
       await updateInventoryItem({
         companyId,
         id: itemId,
         name: newName,
         actorUserId: user.id,
         actorName: user.name ?? user.email ?? 'Unknown',
+        expectedRowVersion:
+          row?.row_version != null && Number.isFinite(Number(row.row_version))
+            ? Number(row.row_version)
+            : null,
       });
       toast.success('Item name updated');
       // Update the selected item in drawer immediately so user sees the change
       setSelectedItemForDetails((prev) => prev ? { ...prev, name: newName } : null);
       handleInventoryChange();
     } catch (err: any) {
-      toast.error(err?.message ?? 'Failed to update item name');
+      toast.error(isConcurrentUpdateConflict(err) ? CONCURRENT_UPDATE_MESSAGE : (err?.message ?? 'Failed to update item name'));
       throw err;
     }
-  }, [companyId, user?.id, user?.name, user?.email]);
+  }, [companyId, user?.id, user?.name, user?.email, stockItems]);
 
   // IMPORTANT for RLS: use the active auth company id only (no project fallback).
   const effectiveCompanyId = companyId;

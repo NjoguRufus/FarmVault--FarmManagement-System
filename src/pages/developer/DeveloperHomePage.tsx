@@ -9,6 +9,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { useSeasonChallengesIntelligence } from '@/hooks/developer/useSeasonChallengesIntelligence';
 import { computeCompanyStatus } from '@/lib/subscription/companyStatus';
 import { useNow } from '@/hooks/useNow';
+import { LaunchMonitoringDashboard } from '@/components/developer/LaunchMonitoringDashboard';
 
 export default function DeveloperHomePage() {
   const now = useNow(60_000);
@@ -272,6 +273,8 @@ export default function DeveloperHomePage() {
             No developer KPIs available yet. Ensure the `dev_dashboard_kpis` RPC is deployed.
           </div>
         )}
+
+        <LaunchMonitoringDashboard />
       </div>
     </DeveloperPageShell>
   );

@@ -37,6 +37,28 @@ function shouldVerifyStkSuccessWithQuery(): boolean {
   return readMpesaEnvMode() === "production";
 }
 
+/** Escape hatch only: if STK Query throws, still trust callback ResultCode=0 (default false). */
+function trustCallbackWhenStkQueryFails(): boolean {
+  const v = (Deno.env.get("MPESA_TRUST_CALLBACK_WHEN_STK_QUERY_FAILS") ?? "").trim().toLowerCase();
+  return v === "true" || v === "1";
+}
+
+async function logReconciliationIssue(
+  admin: ReturnType<typeof createClient>,
+  row: {
+    checkout_request_id: string | null;
+    db_status: string;
+    daraja_result_code: number | null;
+    daraja_result_desc: string;
+    action_taken: string;
+  },
+): Promise<void> {
+  const { error } = await admin.from("payment_reconciliation_log").insert(row);
+  if (error) {
+    console.error("[mpesa-stk-callback] payment_reconciliation_log insert failed", error.message);
+  }
+}
+
 serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -124,7 +146,6 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
 
         const success = resultCode === 0;
         const amountNum = parseCallbackAmount(amount);
-        const paidAt = success ? new Date().toISOString() : null;
         const rc = Number.isFinite(resultCode) ? resultCode : null;
 
         let allowActivation = success;
@@ -133,7 +154,7 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
             const cfg = loadMpesaConfig();
             const tok = await fetchMpesaAccessToken(cfg);
             const q = await queryStkPush(cfg, tok, checkoutId);
-            await admin.from("payment_reconciliation_log").insert({
+            await logReconciliationIssue(admin, {
               checkout_request_id: checkoutId,
               db_status: "callback_success",
               daraja_result_code: q.resultCode,
@@ -157,15 +178,49 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
               });
             }
           } catch (e) {
-            console.warn("[mpesa-stk-callback] STK Query verification failed (proceeding with callback for activation)", e);
-            await admin.from("payment_reconciliation_log").insert({
+            console.error("[mpesa-stk-callback] STK query failed:", e);
+            const errMsg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+            await logReconciliationIssue(admin, {
               checkout_request_id: checkoutId,
               db_status: "callback_success",
               daraja_result_code: null,
-              daraja_result_desc: (e instanceof Error ? e.message : String(e)).slice(0, 500),
-              action_taken: "stk_query_error_trust_callback",
+              daraja_result_desc: errMsg,
+              action_taken: trustCallbackWhenStkQueryFails()
+                ? "stk_query_error_trust_callback_env"
+                : "stk_query_error_pending_verification",
             });
+            await insertPaymentWebhookFailure(admin, {
+              source: "mpesa_stk_callback_stk_query_error",
+              checkout_request_id: checkoutId,
+              rawBody: rawBody.slice(0, 4000),
+              error_message: `STK Query threw: ${errMsg}`.slice(0, 2000),
+            });
+            if (!trustCallbackWhenStkQueryFails()) {
+              allowActivation = false;
+            }
           }
+        }
+
+        let payStatus: string;
+        let payResultCode: number | null;
+        let payPaidAt: string | null;
+        let payResultDesc = resultDesc.slice(0, 2000) || null;
+
+        if (!success) {
+          payStatus = "FAILED";
+          payResultCode = rc;
+          payPaidAt = null;
+        } else if (allowActivation) {
+          payStatus = "SUCCESS";
+          payResultCode = 0;
+          payPaidAt = new Date().toISOString();
+        } else {
+          payStatus = "PENDING_VERIFICATION";
+          payResultCode = null;
+          payPaidAt = null;
+          const note = "(Awaiting STK query verification)";
+          payResultDesc = [resultDesc, note].filter((s) => String(s).trim() !== "").join(" ").slice(0, 2000) ||
+            note.slice(0, 2000);
         }
 
         const { error: payUpdErr } = await admin
@@ -174,10 +229,10 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
             mpesa_receipt: receipt ?? null,
             ...(amountNum != null ? { amount: amountNum } : {}),
             phone: phoneNumber ?? null,
-            status: success ? "SUCCESS" : "FAILED",
-            result_code: success ? 0 : rc,
-            result_desc: resultDesc.slice(0, 2000) || null,
-            paid_at: paidAt,
+            status: payStatus,
+            result_code: payResultCode,
+            result_desc: payResultDesc,
+            paid_at: payPaidAt,
           })
           .eq("checkout_request_id", checkoutId);
         if (payUpdErr) {

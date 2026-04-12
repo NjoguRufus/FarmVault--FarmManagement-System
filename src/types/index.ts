@@ -543,6 +543,8 @@ export interface InventoryItem {
 
   lastUpdated: Date;
   createdAt?: Date;
+  /** public.inventory_items.row_version when available */
+  rowVersion?: number;
 }
 
 export interface WorkLog {
@@ -988,6 +990,8 @@ export interface OperationsWorkCard {
   createdByManagerId?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  /** ops.work_cards.row_version — optimistic concurrency */
+  rowVersion?: number;
 }
 
 // --- Field Cash Harvest Collection (French Beans: pickers + weigh + buyer) ---
@@ -1026,6 +1030,8 @@ export interface HarvestCollection {
   /** Set when this collection has been synced to Harvest Sales (harvest + sale created) */
   harvestId?: string;
   createdAt?: Date | unknown;
+  /** harvest.harvest_collections.row_version — optimistic concurrency */
+  rowVersion?: number;
 }
 
 export interface HarvestPicker {

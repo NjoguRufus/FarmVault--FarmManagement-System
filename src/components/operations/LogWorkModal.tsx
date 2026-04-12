@@ -217,8 +217,8 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
         }));
 
       await recordWork({
-        workCardId: workCard.id,
-        companyId: companyId!,
+        id: workCard.id,
+        expectedRowVersion: workCard.rowVersion ?? null,
         actorUserId: user?.id ?? '',
         actorUserName: user?.name ?? null,
         actualDate: format(formData.workDate, 'yyyy-MM-dd'),

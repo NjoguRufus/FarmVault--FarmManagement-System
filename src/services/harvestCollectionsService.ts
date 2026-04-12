@@ -15,6 +15,7 @@ import type { HarvestCollectionStatus } from '@/types';
 import { addToOfflineQueue } from '@/lib/offlineQueue';
 import { logActivity } from '@/services/employeeAccessService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
@@ -86,6 +87,7 @@ type DbCollection = {
   notes?: string | null;
   created_by: string | null;
   created_at: string;
+  row_version?: number | null;
 };
 
 type DbPicker = {
@@ -154,6 +156,7 @@ function mapCollection(row: DbCollection): {
   buyerPaidAt?: Date | string | null;
   harvestId?: string;
   createdAt?: string;
+  rowVersion?: number;
 } {
   const status = row.status ?? (row.is_closed ? 'closed' : 'open');
   const pricePerUnit = row.picker_price_per_unit ?? row.price_per_kg;
@@ -172,6 +175,7 @@ function mapCollection(row: DbCollection): {
     status: mapCollectionStatus(status),
     buyerPaidAt: row.is_closed ? row.closed_at ?? undefined : undefined,
     createdAt: row.created_at,
+    rowVersion: row.row_version != null ? Number(row.row_version) : undefined,
   };
 }
 
@@ -312,7 +316,7 @@ export async function createHarvestCollection(params: {
 
 // Explicit columns matching harvest.harvest_collections; do not use select('*') to avoid schema cache errors.
 const HARVEST_COLLECTIONS_SELECT =
-  'id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,sequence_number,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status';
+  'id,company_id,project_id,crop_type,collection_date,buyer_price_per_unit,unit,is_closed,closed_at,sequence_number,created_by,created_at,price_per_kg,notes,picker_price_per_unit,status,row_version';
 
 export async function listHarvestCollections(
   companyId: string,
@@ -385,22 +389,34 @@ export async function renameHarvestCollection(params: {
   oldName?: string | null;
   newName: string;
   actorUserId?: string | null;
+  expectedRowVersion?: number | null;
 }): Promise<RenameHarvestCollectionResult> {
   const trimmed = params.newName.trim();
   if (!trimmed) throw new Error('Collection name cannot be empty');
   if (trimmed.length > 100) throw new Error('Collection name must be 100 characters or fewer');
 
-  const { data, error } = await harvest()
+  let q = harvest()
     .from('harvest_collections')
     .update({ notes: trimmed })
     .eq('id', params.collectionId)
     .eq('company_id', params.companyId)
-    .is('deleted_at', null)
-    .select('id, notes')
-    .maybeSingle();
+    .is('deleted_at', null);
+  const v = params.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    q = q.eq('row_version', Number(v));
+  }
+
+  const { data, error } = await q.select('id, notes');
 
   if (error) throw error;
-  if (!data?.id) throw new Error('Rename failed');
+  if (!data?.length) {
+    if (v != null && Number.isFinite(Number(v))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Rename failed');
+  }
+  const row = data[0] as { id?: string };
+  if (!row?.id) throw new Error('Rename failed');
 
   let auditLogged = false;
   try {
@@ -489,15 +505,29 @@ export async function listHarvestCollectionProjectTransfers(params: {
 }
 
 /** Delete a harvest collection session (cascades to pickers + intake/payment entries). */
-export async function deleteHarvestCollection(params: { collectionId: string; companyId: string }): Promise<void> {
-  const { error } = await harvest()
+export async function deleteHarvestCollection(params: {
+  collectionId: string;
+  companyId: string;
+  expectedRowVersion?: number | null;
+}): Promise<void> {
+  let q = harvest()
     .from('harvest_collections')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', params.collectionId)
     .eq('company_id', params.companyId)
     .is('deleted_at', null);
-
+  const v = params.expectedRowVersion;
+  if (v != null && Number.isFinite(Number(v))) {
+    q = q.eq('row_version', Number(v));
+  }
+  const { data, error } = await q.select('id');
   if (error) throw error;
+  if (!data?.length) {
+    if (v != null && Number.isFinite(Number(v))) {
+      throw new ConcurrentUpdateConflictError();
+    }
+    throw new Error('Could not delete collection');
+  }
 }
 
 export async function addPicker(params: {

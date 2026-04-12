@@ -25,6 +25,7 @@ import {
 import { recordInventoryUsage, checkStockForWorkCard } from '@/services/inventoryDocumentShimService';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { toast } from 'sonner';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getCompany } from '@/services/companyService';
 import {
@@ -559,6 +560,7 @@ export default function OperationsPage() {
     const stageName = (cardStageName?.trim() && cardStageName !== 'undefined') ? cardStageName.trim() : null;
     const payload = {
       id: selectedWorkCard.id,
+      expectedRowVersion: selectedWorkCard.rowVersion ?? null,
       workTitle: (cardWorkTitle || cardWorkCategory || '').trim() || (selectedWorkCard.workTitle ?? ''),
       workCategory: (cardWorkCategory || '').trim() || (selectedWorkCard.workCategory ?? ''),
       plannedDate,
@@ -592,6 +594,12 @@ export default function OperationsPage() {
         allocatedManagerId,
       });
       setWorkCardEditMode(false);
+    } catch (err) {
+      if (isConcurrentUpdateConflict(err)) {
+        toast.error(CONCURRENT_UPDATE_MESSAGE);
+      } else {
+        throw err;
+      }
     } finally {
       setSavingCardUpdate(false);
     }

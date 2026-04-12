@@ -20,6 +20,7 @@ import { ExpensePieChart } from '@/components/reports/ExpensePieChart';
 import { YieldChart } from '@/components/reports/YieldChart';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { AuditLogsButton } from '@/components/audit/AuditLogsButton';
 import { downloadCsv } from '@/lib/csv/downloadCsv';
 import { fetchAnalyticsReportDetailRows } from '@/services/analyticsReportsService';
 import { formatKes } from '@/components/reports/analyticsFormat';
@@ -804,6 +805,7 @@ export default function ReportsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+            <AuditLogsButton companyId={companyId ?? null} showEntityFilters />
             {canExportReports ? (
               <>
                 <Button variant="outline" size="sm" onClick={() => void handleExportPdf()}>

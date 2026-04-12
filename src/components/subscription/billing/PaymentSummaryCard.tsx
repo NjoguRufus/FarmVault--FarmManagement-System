@@ -100,14 +100,14 @@ export function PaymentSummaryCard({
             <dd className="font-medium text-foreground">{billingCycleLabel(cycle)}</dd>
           </div>
           {workspaceName ? (
-            <div className={row}>
+            <div className={cn(row, 'max-lg:hidden')}>
               <dt className="text-muted-foreground">Workspace</dt>
               <dd className="max-w-[58%] truncate text-right font-medium text-foreground" title={workspaceName}>
                 {workspaceName}
               </dd>
             </div>
           ) : null}
-          <div className={row}>
+          <div className={cn(row, 'max-lg:hidden')}>
             <dt className="text-muted-foreground">Business name</dt>
             <dd className="font-medium text-foreground">{businessName}</dd>
           </div>

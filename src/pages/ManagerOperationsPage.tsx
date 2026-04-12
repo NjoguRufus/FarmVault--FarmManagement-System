@@ -962,13 +962,19 @@ export default function ManagerOperationsPage() {
     if (!user || !canMarkAsPaid(card)) return;
     setMarkingWorkCardPaid(true);
     try {
+      const amount = Number(card.actualTotal ?? card.plannedTotal ?? 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        alert('Could not determine a valid payment amount for this task.');
+        return;
+      }
       await markWorkCardPaid({
-        cardId: card.id,
-        currentCard: card,
-        paidBy: user.id,
-        paidByName: user.name,
-        actorEmail: user.email,
-        actorUid: user.id,
+        id: card.id,
+        expectedRowVersion: card.rowVersion ?? null,
+        amount,
+        method: 'cash',
+        notes: null,
+        actorUserId: user.id,
+        actorUserName: user.name ?? null,
       });
       invalidateWorkCards();
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
