@@ -18,6 +18,10 @@ export interface OfflineQueueItem {
   created_by?: string | null;
   synced: boolean;
   sync_status?: SyncStatus;
+  /** Failed sync attempts (used for exponential backoff). */
+  attempt_count?: number;
+  /** When set and in the future, syncQueue skips this item until then. */
+  next_attempt_at?: number | null;
 }
 
 const DB_NAME = 'farmvault_offline';
@@ -43,6 +47,9 @@ class FarmVaultOfflineDB extends Dexie {
     this.version(2).stores({
       [QUEUE_TABLE]: 'id, type, created_at, synced, sync_status',
     });
+    this.version(3).stores({
+      [QUEUE_TABLE]: 'id, type, created_at, synced, sync_status, next_attempt_at',
+    });
   }
 }
 
@@ -53,12 +60,27 @@ export function getOfflineDB(): FarmVaultOfflineDB {
 }
 
 /** Add an item to the queue (offline or after failed write). Includes local UUID and created_by for duplicate protection. */
+function isReadyForSync(item: OfflineQueueItem): boolean {
+  if (item.synced) return false;
+  const t = item.next_attempt_at;
+  if (t == null || Number.isNaN(t)) return true;
+  return t <= Date.now();
+}
+
 export async function addToOfflineQueue(
   type: OfflineQueueType,
   payload: Record<string, unknown>,
   options?: { createdBy?: string | null }
 ): Promise<string> {
   const id = (payload.client_entry_id as string) || crypto.randomUUID();
+  const existing = await db.offline_queue.get(id);
+  if (existing) {
+    if (!existing.synced) {
+      notifyChange();
+      return id;
+    }
+    await db.offline_queue.delete(id);
+  }
   const createdBy = options?.createdBy ?? (payload.created_by as string | undefined) ?? null;
   const item: OfflineQueueItem = {
     id,
@@ -76,7 +98,7 @@ export async function addToOfflineQueue(
 
 /** Number of unsynced items. */
 export async function getPendingCount(): Promise<number> {
-  return db.offline_queue.where('synced').equals(0).count();
+  return db.offline_queue.filter((row) => !row.synced && isReadyForSync(row)).count();
 }
 
 export function getIsSyncing(): boolean {
@@ -91,13 +113,34 @@ async function markSyncedAndRemove(id: string): Promise<void> {
 
 /** Mark item as failed so UI can show "Sync Failed"; item stays in queue for retry. */
 export async function markItemSyncFailed(id: string): Promise<void> {
-  await db.offline_queue.update(id, { sync_status: 'failed' });
+  const row = await db.offline_queue.get(id);
+  const prev = row?.attempt_count ?? 0;
+  const attempt = prev + 1;
+  const delayMs = Math.min(60_000, 5_000 * 2 ** Math.min(attempt - 1, 4));
+  await db.offline_queue.update(id, {
+    sync_status: 'failed',
+    attempt_count: attempt,
+    next_attempt_at: Date.now() + delayMs,
+  });
   notifyChange();
 }
 
 /** All unsynced items. */
 export async function getUnsyncedItems(): Promise<OfflineQueueItem[]> {
-  return db.offline_queue.where('synced').equals(0).sortBy('created_at');
+  const rows = await db.offline_queue.filter((row) => !row.synced && isReadyForSync(row)).toArray();
+  rows.sort((a, b) => a.created_at - b.created_at);
+  return rows;
+}
+
+/** Clear backoff when the browser goes online so a new sync can run immediately. */
+export async function resetOfflineRetrySchedule(): Promise<void> {
+  await db.offline_queue
+    .filter((row) => !row.synced)
+    .modify((row) => {
+      row.next_attempt_at = undefined;
+      if (row.sync_status === 'failed') row.sync_status = 'pending';
+    });
+  notifyChange();
 }
 
 export const OFFLINE_QUEUE_CHANGE_EVENT = QUEUE_CHANGE_EVENT;

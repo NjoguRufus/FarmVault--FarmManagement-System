@@ -16,6 +16,7 @@ import { getAppEntryUrl, isMarketingProductionHost, isPwaEnabledHost } from "@/l
 import { initServiceWorkerPushFeedback } from "@/lib/pushNotificationFeedback";
 import "./index.css";
 import { logger } from "@/lib/logger";
+import { logClerkProductionWarnings } from "@/lib/clerkProductionGuard";
 
 const pwaHost = isPwaEnabledHost();
 
@@ -98,7 +99,10 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 
 // Use only env; no custom Clerk JS host or domain overrides (avoids CORS/origin issues).
 const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-const emergencyAccess = import.meta.env.VITE_EMERGENCY_ACCESS === "true" || import.meta.env.VITE_EMERGENCY_ACCESS === "1";
+const hasSupabaseEmergencyBootstrap = Boolean(
+  import.meta.env.VITE_SUPABASE_URL &&
+    (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY),
+);
 
 // Runtime diagnostic logs for Clerk configuration (helps debug dev vs live instance issues)
 if (pk) {
@@ -124,9 +128,11 @@ if (pk) {
   }
 }
 
-if (!pk && !emergencyAccess) {
+logClerkProductionWarnings();
+
+if (!pk && !hasSupabaseEmergencyBootstrap) {
   throw new Error(
-    "Missing Clerk configuration. Set VITE_CLERK_PUBLISHABLE_KEY in your environment, or enable VITE_EMERGENCY_ACCESS for fallback.",
+    "Missing Clerk configuration (VITE_CLERK_PUBLISHABLE_KEY). For emergency-only bootstrap, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or publishable key); configure the emergency-access Edge Function secrets on Supabase.",
   );
 }
 
@@ -168,7 +174,7 @@ if (shouldRenderApp) {
           </ClerkLoadErrorBoundary>,
         ),
       );
-    } else {
+    } else if (hasSupabaseEmergencyBootstrap) {
       createRoot(root).render(
         wrapPostHog(
           <AmbassadorAccessProvider>
@@ -178,6 +184,8 @@ if (shouldRenderApp) {
           </AmbassadorAccessProvider>,
         ),
       );
+    } else {
+      throw new Error("Unreachable: Clerk key missing but Supabase bootstrap was false.");
     }
   } catch (error) {
     console.error("[Clerk Load Failure]", error);

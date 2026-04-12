@@ -22,6 +22,7 @@ import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -184,7 +185,7 @@ async function trySendCompanyCopy(input: {
   }
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notify-developer-transactional", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 

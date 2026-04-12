@@ -1,11 +1,11 @@
 /**
  * Emergency Access: local session when Clerk is unavailable.
- * Only works when VITE_EMERGENCY_ACCESS=true and email matches VITE_EMERGENCY_EMAIL.
+ * Session is issued by the `emergency-access` Edge Function (server secrets), not VITE_* env.
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createEmergencySession } from '@/contexts/AuthContext';
-import { isEmergencyAccessEnabled } from '@/config/emergencyAccess';
+import { isEmergencyAccessUiAvailable } from '@/config/emergencyAccess';
 
 export default function EmergencyAccessPage() {
   const navigate = useNavigate();
@@ -14,13 +14,13 @@ export default function EmergencyAccessPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  if (!isEmergencyAccessEnabled()) {
+  if (!isEmergencyAccessUiAvailable()) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <div className="max-w-md w-full rounded-lg border border-border bg-card p-6 text-center">
-          <h1 className="text-lg font-semibold text-foreground mb-2">Emergency access is disabled</h1>
+          <h1 className="text-lg font-semibold text-foreground mb-2">Emergency access is not available</h1>
           <p className="text-sm text-muted-foreground mb-4">
-            This feature is not enabled. Use the normal sign-in page.
+            This build is missing Supabase configuration, or the emergency-access Edge Function is not deployed.
           </p>
           <a href="/sign-in" className="fv-btn fv-btn--primary">Go to sign-in</a>
         </div>
@@ -28,7 +28,7 @@ export default function EmergencyAccessPage() {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -38,12 +38,22 @@ export default function EmergencyAccessPage() {
       setLoading(false);
       return;
     }
-    const ok = createEmergencySession(trimmed);
-    setLoading(false);
-    if (ok) {
-      navigate('/auth/callback', { replace: true });
-    } else {
-      setError('Access not allowed for this email. Use the approved emergency account.');
+    if (!secretCode.trim()) {
+      setError('Enter the emergency passphrase from your operator runbook.');
+      setLoading(false);
+      return;
+    }
+    try {
+      const ok = await createEmergencySession(trimmed, secretCode.trim());
+      if (ok) {
+        navigate('/auth/callback', { replace: true });
+      } else {
+        setError('Access not allowed or invalid passphrase.');
+      }
+    } catch {
+      setError('Could not reach the server. Try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -101,7 +111,7 @@ export default function EmergencyAccessPage() {
               </div>
               <div>
                 <label htmlFor="emergency-secret" className="block text-sm font-medium text-foreground mb-1">
-                  Secret code <span className="text-muted-foreground font-normal">(optional)</span>
+                  Emergency passphrase
                 </label>
                 <input
                   id="emergency-secret"
@@ -109,7 +119,7 @@ export default function EmergencyAccessPage() {
                   autoComplete="off"
                   value={secretCode}
                   onChange={(e) => setSecretCode(e.target.value)}
-                  placeholder="Optional"
+                  placeholder="From Supabase Edge secret EMERGENCY_ACCESS_SECRET"
                   className="w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={loading}
                 />
@@ -128,7 +138,7 @@ export default function EmergencyAccessPage() {
               </button>
             </form>
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              Only the approved emergency email can use this. Normal sign-in uses the main page.
+              Your operator must enable the emergency-access function and allowlist your email. Normal sign-in uses the main page.
             </p>
           </div>
 

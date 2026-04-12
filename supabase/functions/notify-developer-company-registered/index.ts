@@ -16,6 +16,7 @@ import {
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const EMAIL_LOG_TYPE = "company_registration_developer_notify";
 
@@ -78,7 +79,7 @@ function fmtIsoOrRaw(v: string | null | undefined): string {
   return s;
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notify-developer-company-registered", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

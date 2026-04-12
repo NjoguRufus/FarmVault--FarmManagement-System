@@ -34,6 +34,11 @@ import {
 } from '@/lib/auth/tenantMembershipRecovery';
 import { fetchPlatformUserProfile } from '@/lib/auth/fetchPlatformUserProfile';
 import { logger } from "@/lib/logger";
+import {
+  readStoredEmergencyServerSession,
+  writeStoredEmergencyServerSession,
+  requestEmergencySessionFromEdge,
+} from '@/config/emergencyAccess';
 
 /** Clerk state passed from ClerkAuthBridge so AuthProvider can run without Clerk when in emergency-only mode. */
 export interface ClerkStateSnapshot {
@@ -104,7 +109,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_USER_CACHE_KEY = 'farmvault:auth:user:v1';
-const EMERGENCY_SESSION_KEY = 'farmvault:emergency-session:v1';
 const CLERK_LOAD_TIMEOUT_MS = 4000;
 const ACCESS_REVOKED_REDIRECT_KEY = 'farmvault:access-revoked:v1';
 
@@ -157,38 +161,21 @@ function redirectToSignInAccessRevoked() {
   window.location.assign('/sign-in?reason=access-revoked');
 }
 
-function isEmergencyAccessEnabled(): boolean {
-  return import.meta.env.VITE_EMERGENCY_ACCESS === 'true' || import.meta.env.VITE_EMERGENCY_ACCESS === '1';
-}
-
-function getEmergencyConfig(): { email: string; userId: string; companyId: string; role: string } | null {
-  if (!isEmergencyAccessEnabled()) return null;
-  const email = import.meta.env.VITE_EMERGENCY_EMAIL;
-  const userId = import.meta.env.VITE_EMERGENCY_USER_ID;
-  const companyId = import.meta.env.VITE_EMERGENCY_COMPANY_ID;
-  const role = import.meta.env.VITE_EMERGENCY_ROLE || 'company_admin';
-  if (!email || !userId || !companyId) return null;
-  return { email: String(email).trim().toLowerCase(), userId: String(userId), companyId: String(companyId), role: String(role) };
-}
-
 function readEmergencySession(): User | null {
   if (typeof window === 'undefined') return null;
-  const config = getEmergencyConfig();
-  if (!config) return null;
   try {
-    const raw = window.localStorage.getItem(EMERGENCY_SESSION_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as { email?: string; userId?: string; companyId?: string; role?: string; name?: string };
-    if (data.email?.toLowerCase() !== config.email || data.userId !== config.userId) return null;
+    const s = readStoredEmergencyServerSession();
+    if (!s) return null;
+    const role = (s.role === 'company_admin' || s.role === 'company-admin' ? 'company-admin' : s.role) as UserRole;
     return {
-      id: config.userId,
-      email: config.email,
-      name: data.name ?? 'Emergency Access',
-      role: (config.role === 'company_admin' || config.role === 'company-admin' ? 'company-admin' : config.role) as UserRole,
+      id: s.userId,
+      email: s.email,
+      name: 'Emergency Access',
+      role,
       employeeRole: undefined,
-      companyId: config.companyId,
+      companyId: s.companyId,
       avatar: undefined,
-      createdAt: new Date(),
+      createdAt: new Date(s.issuedAt),
     };
   } catch {
     return null;
@@ -199,39 +186,26 @@ function writeEmergencySession(user: User | null) {
   if (typeof window === 'undefined') return;
   try {
     if (!user) {
-      window.localStorage.removeItem(EMERGENCY_SESSION_KEY);
+      writeStoredEmergencyServerSession(null);
+      try {
+        window.localStorage.removeItem('farmvault:emergency-session:v1');
+      } catch {
+        // ignore
+      }
       return;
     }
-    window.localStorage.setItem(
-      EMERGENCY_SESSION_KEY,
-      JSON.stringify({ email: user.email, userId: user.id, companyId: user.companyId, role: user.role, name: user.name }),
-    );
   } catch {
     // ignore
   }
 }
 
 /**
- * Called from Emergency Access page to create a local session. Only works when VITE_EMERGENCY_ACCESS is true
- * and email matches VITE_EMERGENCY_EMAIL. Returns true if session was created.
+ * Creates emergency session via Edge Function (server secrets). Returns true on success.
  */
-export function createEmergencySession(email: string): boolean {
-  const config = getEmergencyConfig();
-  if (!config) return false;
-  const normalized = String(email || '').trim().toLowerCase();
-  if (normalized !== config.email) return false;
-  const role = (config.role === 'company_admin' || config.role === 'company-admin' ? 'company-admin' : config.role) as UserRole;
-  const user: User = {
-    id: config.userId,
-    email: config.email,
-    name: 'Emergency Access',
-    role,
-    employeeRole: undefined,
-    companyId: config.companyId,
-    avatar: undefined,
-    createdAt: new Date(),
-  };
-  writeEmergencySession(user);
+export async function createEmergencySession(email: string, passphrase: string): Promise<boolean> {
+  const res = await requestEmergencySessionFromEdge(email, passphrase);
+  if (!res.ok) return false;
+  writeStoredEmergencyServerSession(res.session);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('farmvault:emergency-session-created'));
   }

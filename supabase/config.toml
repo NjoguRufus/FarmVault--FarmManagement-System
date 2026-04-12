@@ -85,3 +85,11 @@ verify_jwt = false
 # Secret header only; no Supabase JWT.
 [functions.farmvault-email-test]
 verify_jwt = false
+
+# Server-only passphrase + allowlist; no Supabase JWT.
+[functions.emergency-access]
+verify_jwt = false
+
+# Cron / operator: Bearer MPESA_RECONCILE_SECRET.
+[functions.mpesa-payment-reconcile]
+verify_jwt = false

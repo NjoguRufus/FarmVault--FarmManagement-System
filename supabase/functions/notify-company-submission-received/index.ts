@@ -22,6 +22,7 @@ import {
 import { buildSubmissionReceivedEmail } from "../_shared/farmvault-email/submissionReceivedTemplate.ts";
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const EMAIL_LOG_TYPE_USER = "submission_received";
 const EMAIL_LOG_TYPE_ADMIN = "submission_admin_notify";
@@ -78,7 +79,7 @@ function validateAnonInvoke(req: Request): { ok: true } | { ok: false; detail: s
   };
 }
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notify-company-submission-received", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

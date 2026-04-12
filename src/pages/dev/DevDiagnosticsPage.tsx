@@ -66,7 +66,8 @@ export default function DevDiagnosticsPage() {
             .projects()
             .from('projects')
             .select('*', { count: 'exact', head: true })
-            .eq('company_id', resolvedCompanyId);
+            .eq('company_id', resolvedCompanyId)
+            .is('deleted_at', null);
           projectsCount = count ?? 0;
         }
 

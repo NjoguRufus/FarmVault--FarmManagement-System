@@ -168,7 +168,8 @@ export interface Company {
   id: string;
   name: string;
   status: 'active' | 'inactive' | 'pending';
-  plan: 'starter' | 'professional' | 'enterprise';
+  /** Mirrors `core.companies.plan`: basic | pro | enterprise */
+  plan: 'basic' | 'pro' | 'enterprise';
   userCount: number;
   projectCount: number;
   revenue: number;
@@ -314,6 +315,8 @@ export interface Project {
   useBlocks?: boolean;
   /** When set, project expenses deduct from this budget pool instead of project.budget. */
   budgetPoolId?: string | null;
+  /** Server-side optimistic concurrency counter (projects.projects.row_version). */
+  rowVersion?: number;
   planning?: {
     seed?: {
       name: string;

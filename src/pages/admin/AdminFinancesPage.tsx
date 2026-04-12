@@ -26,6 +26,7 @@ import { useCollection } from '@/hooks/useCollection';
 import { useQuery } from '@tanstack/react-query';
 import { Company } from '@/types';
 import { cn } from '@/lib/utils';
+import { normalizeCompanyPlanColumn } from '@/lib/subscription/canonicalCompanyPlan';
 import {
   getPlatformExpenses,
   groupExpensesByMonth,
@@ -33,8 +34,8 @@ import {
 } from '@/services/platformExpenseService';
 
 const PLAN_MRR: Record<string, number> = {
-  starter: 2500,
-  professional: 7500,
+  basic: 2500,
+  pro: 7500,
   enterprise: 15000,
 };
 
@@ -62,14 +63,14 @@ export default function AdminFinancesPage() {
     expenseByCategory,
     monthlyData,
   } = useMemo(() => {
-    const planCounts: Record<string, number> = { starter: 0, professional: 0, enterprise: 0 };
+    const planCounts: Record<string, number> = { basic: 0, pro: 0, enterprise: 0 };
     companies.forEach((c) => {
-      const plan = (c.plan ?? c.subscriptionPlan ?? 'professional') as string;
+      const plan = normalizeCompanyPlanColumn((c.plan ?? c.subscriptionPlan) as string | undefined);
       if (PLAN_MRR[plan] != null) planCounts[plan] = (planCounts[plan] ?? 0) + 1;
     });
     const totalRevenue =
-      (planCounts.starter ?? 0) * PLAN_MRR.starter +
-      (planCounts.professional ?? 0) * PLAN_MRR.professional +
+      (planCounts.basic ?? 0) * PLAN_MRR.basic +
+      (planCounts.pro ?? 0) * PLAN_MRR.pro +
       (planCounts.enterprise ?? 0) * PLAN_MRR.enterprise;
 
     const expensesByMonth = groupExpensesByMonth(platformExpenses);
@@ -77,8 +78,8 @@ export default function AdminFinancesPage() {
     const profit = totalRevenue - totalExpenses;
 
     const revenueByPlan = [
-      { name: 'Starter', value: (planCounts.starter ?? 0) * PLAN_MRR.starter },
-      { name: 'Professional', value: (planCounts.professional ?? 0) * PLAN_MRR.professional },
+      { name: 'Basic', value: (planCounts.basic ?? 0) * PLAN_MRR.basic },
+      { name: 'Pro', value: (planCounts.pro ?? 0) * PLAN_MRR.pro },
       { name: 'Enterprise', value: (planCounts.enterprise ?? 0) * PLAN_MRR.enterprise },
     ].filter((r) => r.value > 0);
     const revenueByPlanPie = revenueByPlan.map((r) => ({ category: r.name, amount: r.value }));

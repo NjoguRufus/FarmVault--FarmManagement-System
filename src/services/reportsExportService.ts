@@ -27,7 +27,8 @@ export async function fetchHarvestsForReportExport(companyId: string): Promise<a
       .select(
         'id, harvest_date, quantity, price_per_unit, buyer_name, buyer_paid, unit, notes, project_id, created_at, projects!inner(company_id, crop_type, name)',
       )
-      .eq('projects.company_id', companyId);
+      .eq('projects.company_id', companyId)
+      .is('deleted_at', null);
 
     if (!r2.error && r2.data) {
       return (r2.data as any[]).map((row) => {
@@ -48,7 +49,12 @@ export async function fetchHarvestsForReportExport(companyId: string): Promise<a
       );
     }
 
-    const proj = await db.projects().from('projects').select('id, crop_type').eq('company_id', companyId);
+    const proj = await db
+      .projects()
+      .from('projects')
+      .select('id, crop_type')
+      .eq('company_id', companyId)
+      .is('deleted_at', null);
     if (proj.error) {
       logSelectError({ op: 'select', schema: 'projects', table: 'projects', company_id: companyId }, proj.error);
       return [];
@@ -61,7 +67,7 @@ export async function fetchHarvestsForReportExport(companyId: string): Promise<a
       if (p.id) cropByProject.set(p.id, String(p.crop_type ?? ''));
     });
 
-    const r3 = await db.harvest().from('harvests').select('*').in('project_id', ids);
+    const r3 = await db.harvest().from('harvests').select('*').in('project_id', ids).is('deleted_at', null);
     if (r3.error) {
       logSelectError(
         { op: 'select', schema: 'harvest', table: 'harvests', via: 'project_id in (...)', company_id: companyId },
@@ -173,13 +179,14 @@ export async function queryReportExportEntity(
           .finance()
           .from('expenses')
           .select('*, projects(name, crop_type)')
-          .eq('company_id', companyId);
+          .eq('company_id', companyId)
+          .is('deleted_at', null);
         if (res.error) {
           logSelectError(
             { op: 'select', label, schema: 'finance', table: 'expenses', embed: 'projects', company_id: companyId },
             res.error,
           );
-          res = await db.finance().from('expenses').select('*').eq('company_id', companyId);
+          res = await db.finance().from('expenses').select('*').eq('company_id', companyId).is('deleted_at', null);
         }
         if (res.error) {
           logSelectError(

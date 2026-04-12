@@ -298,6 +298,7 @@ export default function ProjectPlanningPage() {
         .from('projects')
         .select('planning')
         .eq('id', projectId)
+        .is('deleted_at', null)
         .maybeSingle();
       if (error) throw error;
 
@@ -363,7 +364,8 @@ export default function ProjectPlanningPage() {
           planting_date: newDate.toISOString().slice(0, 10),
           planning: nextPlanning,
         })
-        .eq('id', projectId);
+        .eq('id', projectId)
+        .is('deleted_at', null);
       if (updateError) throw updateError;
 
       await queryClient.invalidateQueries({ queryKey: ['project', companyId, projectId] });
@@ -438,6 +440,7 @@ export default function ProjectPlanningPage() {
         .from('projects')
         .select('planning')
         .eq('id', projectId)
+        .is('deleted_at', null)
         .maybeSingle();
       if (error) throw error;
 
@@ -467,7 +470,8 @@ export default function ProjectPlanningPage() {
         .projects()
         .from('projects')
         .update({ planning: nextPlanning })
-        .eq('id', projectId);
+        .eq('id', projectId)
+        .is('deleted_at', null);
       if (updateError) throw updateError;
 
       await queryClient.invalidateQueries({ queryKey: ['project', companyId, projectId] });

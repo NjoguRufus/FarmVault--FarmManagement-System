@@ -53,6 +53,7 @@ export async function getFinanceExpenses(
     .from('expenses')
     .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('expense_date', { ascending: false });
 
   if (projectId) {

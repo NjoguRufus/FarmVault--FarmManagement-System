@@ -100,6 +100,21 @@ function fmtKes(n: number): string {
   return new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 }).format(Math.round(n));
 }
 
+/** Service-role reads bypass RLS; scope harvests to projects that are not soft-deleted. */
+async function activeProjectIdsForCompany(
+  admin: SupabaseClient,
+  companyId: string,
+): Promise<string[]> {
+  const { data, error } = await admin
+    .schema("projects")
+    .from("projects")
+    .select("id")
+    .eq("company_id", companyId)
+    .is("deleted_at", null);
+  if (error || !data?.length) return [];
+  return (data as { id: string }[]).map((r) => String(r.id));
+}
+
 function rowQty(row: Record<string, unknown>): number {
   const q = row.current_quantity ?? row.quantity ?? 0;
   return Number(q) || 0;
@@ -207,7 +222,8 @@ export async function fetchExpenseTotals(
     .select("amount")
     .eq("company_id", companyId)
     .gte("expense_date", weekStart)
-    .lte("expense_date", weekEnd);
+    .lte("expense_date", weekEnd)
+    .is("deleted_at", null);
   if (!w.error && w.data) {
     for (const r of w.data as { amount: number | string }[]) {
       weekTotal += Number(r.amount ?? 0);
@@ -221,12 +237,15 @@ export async function fetchHarvestToday(
   companyId: string,
   localDay: string,
 ): Promise<{ quantity: number; unit: string } | null> {
+  const projectIds = await activeProjectIdsForCompany(admin, companyId);
+  if (projectIds.length === 0) return null;
   const { data, error } = await admin
     .schema("harvest")
     .from("harvests")
     .select("quantity, unit")
     .eq("company_id", companyId)
-    .eq("harvest_date", localDay);
+    .eq("harvest_date", localDay)
+    .in("project_id", projectIds);
   if (error) {
     console.warn("[smartDailyMessaging] harvests today", error.message);
     return null;
@@ -255,13 +274,16 @@ export async function fetchHarvestWeekTotals(
   start: string,
   end: string,
 ): Promise<string> {
+  const projectIds = await activeProjectIdsForCompany(admin, companyId);
+  if (projectIds.length === 0) return "0 kg";
   const { data, error } = await admin
     .schema("harvest")
     .from("harvests")
     .select("quantity, unit")
     .eq("company_id", companyId)
     .gte("harvest_date", start)
-    .lte("harvest_date", end);
+    .lte("harvest_date", end)
+    .in("project_id", projectIds);
   if (error || !data) return "0 kg";
   const byUnit = new Map<string, number>();
   for (const r of data as { quantity: number | string; unit: string }[]) {
@@ -332,21 +354,28 @@ export async function fetchWeeklyAnalytics(
   const inventoryUsed = await fetchInventoryDeductCountWeek(admin, companyId, startIso, endIso);
   let opCount = operations;
   if (opCount === 0) {
-    const { count: h } = await admin
-      .schema("harvest")
-      .from("harvests")
-      .select("*", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .gte("harvest_date", startStr)
-      .lte("harvest_date", endStr);
+    const projectIds = await activeProjectIdsForCompany(admin, companyId);
+    let hCount = 0;
+    if (projectIds.length > 0) {
+      const { count: h } = await admin
+        .schema("harvest")
+        .from("harvests")
+        .select("*", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .gte("harvest_date", startStr)
+        .lte("harvest_date", endStr)
+        .in("project_id", projectIds);
+      hCount = typeof h === "number" ? h : 0;
+    }
     const { count: e } = await admin
       .schema("finance")
       .from("expenses")
       .select("*", { count: "exact", head: true })
       .eq("company_id", companyId)
       .gte("expense_date", startStr)
-      .lte("expense_date", endStr);
-    opCount = (typeof h === "number" ? h : 0) + (typeof e === "number" ? e : 0) + inventoryUsed;
+      .lte("expense_date", endStr)
+      .is("deleted_at", null);
+    opCount = hCount + (typeof e === "number" ? e : 0) + inventoryUsed;
   }
   return {
     operations: opCount,

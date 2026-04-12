@@ -25,6 +25,7 @@ function parseDateOrNull(v: string | null | undefined): Date | null {
 function normPlan(v: string | null | undefined): 'basic' | 'pro' | string {
   const s = String(v ?? '').trim().toLowerCase();
   if (s === 'professional') return 'pro';
+  if (s === 'starter') return 'basic';
   if (!s) return '';
   return s;
 }

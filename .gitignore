@@ -39,6 +39,9 @@ supabase/.temp/
 supabase/.branches/
 supabase/.remote/
 
+# Phase 0 local backup output (never commit)
+backups/
+
 # Local databases / dumps
 *.sqlite
 *.sqlite3

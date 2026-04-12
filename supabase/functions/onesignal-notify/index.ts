@@ -5,6 +5,7 @@
 //
 // Deploy: npx supabase functions deploy onesignal-notify --no-verify-jwt
 import { isOneSignalConfigured, sendNotification } from "../_shared/oneSignal.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +48,7 @@ const templates: Record<TemplateKey, { role: "company" | "ambassador" | "develop
   },
 };
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("onesignal-notify", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 

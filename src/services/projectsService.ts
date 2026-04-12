@@ -22,6 +22,7 @@ type DbProjectRow = {
   created_at: string;
   budget?: number | string | null;
   budget_pool_id?: string | null;
+  row_version?: number | null;
 };
 
 type DbStageRow = {
@@ -94,6 +95,7 @@ function mapProjectRow(row: DbProjectRow): Project {
     useBlocks: false,
     budgetPoolId: row.budget_pool_id ?? null,
     planning: (row.planning as Project['planning']) ?? undefined,
+    rowVersion: row.row_version != null ? Number(row.row_version) : undefined,
   };
 }
 
@@ -173,10 +175,12 @@ export async function listProjects(companyId: string | null): Promise<Project[]>
       planning,
       created_at,
       budget,
-      budget_pool_id
+      budget_pool_id,
+      row_version
     `,
     )
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -213,10 +217,12 @@ export async function getProject(
       field_unit,
       notes,
       planning,
-      created_at
+      created_at,
+      row_version
     `,
     )
     .eq('id', projectId)
+    .is('deleted_at', null)
     .maybeSingle();
 
   if (error) {
@@ -334,7 +340,8 @@ export async function updateProject(
   const { error } = await db.projects()
     .from('projects')
     .update(payload)
-    .eq('id', projectId);
+    .eq('id', projectId)
+    .is('deleted_at', null);
 
   if (error) {
     throw error;
@@ -346,7 +353,13 @@ export async function updateProject(
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  const { error } = await db.projects().from('projects').delete().eq('id', projectId);
+  const deletedAt = new Date().toISOString();
+  const { error } = await db
+    .projects()
+    .from('projects')
+    .update({ deleted_at: deletedAt })
+    .eq('id', projectId)
+    .is('deleted_at', null);
   if (error) {
     throw error;
   }
@@ -376,6 +389,7 @@ export async function listProjectStages(
       .from('projects')
       .select('crop_type')
       .eq('id', projectId)
+      .is('deleted_at', null)
       .maybeSingle();
     cropType = (prow as { crop_type?: string } | null)?.crop_type;
   }
@@ -416,7 +430,8 @@ export async function listCompanyProjectStages(companyId: string): Promise<CropS
   const { data: prows, error: projErr } = await db.projects()
     .from('projects')
     .select('id,crop_type')
-    .in('id', projectIds);
+    .in('id', projectIds)
+    .is('deleted_at', null);
   if (projErr || !prows?.length) return out;
 
   const cmap = new Map((prows as { id: string; crop_type: string }[]).map((p) => [p.id, p.crop_type]));

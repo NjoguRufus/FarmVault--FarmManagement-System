@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { SignIn } from '@clerk/react';
 import { ClerkLoadErrorBoundary } from '@/components/auth/ClerkLoadErrorBoundary';
-import { isEmergencyAccessEnabled } from '@/config/emergencyAccess';
+import { isEmergencyAccessUiAvailable } from '@/config/emergencyAccess';
 import { PremiumAuthShell } from '@/components/auth/PremiumAuthShell';
 import {
   AMBASSADOR_POST_AUTH_PATH,
@@ -125,7 +125,7 @@ export default function SignInPage() {
           />
         </ClerkLoadErrorBoundary>
 
-        {isEmergencyAccessEnabled() && (
+        {isEmergencyAccessUiAvailable() && (
           <p className="text-center">
             <Link to="/emergency-access" className="text-sm text-white/75 hover:text-white underline underline-offset-4">
               Sign-in not loading? Use emergency access

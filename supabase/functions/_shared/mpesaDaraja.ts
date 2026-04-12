@@ -218,3 +218,114 @@ export async function initiateStkPush(
     customerMessage: stkData.CustomerMessage,
   };
 }
+
+export type StkQueryResult = {
+  /** Daraja ResultCode on the STK transaction (0 = success / paid). */
+  resultCode: number | null;
+  resultDesc: string;
+  merchantRequestId: string;
+  responseCode: string;
+  responseDescription: string;
+};
+
+/**
+ * POST /mpesa/stkpushquery/v1/query — confirm STK status (callback recovery / reconciliation).
+ */
+export async function queryStkPush(
+  cfg: MpesaActiveConfig,
+  accessToken: string,
+  checkoutRequestId: string,
+): Promise<StkQueryResult> {
+  const trimmed = checkoutRequestId.trim();
+  if (!trimmed) {
+    return {
+      resultCode: null,
+      resultDesc: "Missing CheckoutRequestID",
+      merchantRequestId: "",
+      responseCode: "1",
+      responseDescription: "Missing CheckoutRequestID",
+    };
+  }
+
+  const timestamp = mpesaTimestampNairobi();
+  const password = buildStkPassword(cfg.shortcode, cfg.passkey, timestamp);
+
+  const body = {
+    BusinessShortCode: cfg.shortcode,
+    Password: password,
+    Timestamp: timestamp,
+    CheckoutRequestID: trimmed,
+  };
+
+  let qResponse: Response;
+  try {
+    qResponse = await fetch(`${cfg.baseUrl}/mpesa/stkpushquery/v1/query`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    console.error("[mpesa] STK query fetch error", e);
+    return {
+      resultCode: null,
+      resultDesc: "Network error",
+      merchantRequestId: "",
+      responseCode: "1",
+      responseDescription: "Network error",
+    };
+  }
+
+  const qText = await qResponse.text();
+  let qData: {
+    MerchantRequestID?: string;
+    CheckoutRequestID?: string;
+    ResponseCode?: string;
+    ResponseDescription?: string;
+    ResultCode?: number | string;
+    ResultDesc?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  };
+
+  try {
+    qData = qText.trim() ? (JSON.parse(qText) as typeof qData) : {};
+  } catch {
+    return {
+      resultCode: null,
+      resultDesc: qText.slice(0, 300) || "Non-JSON STK query response",
+      merchantRequestId: "",
+      responseCode: "1",
+      responseDescription: "Invalid JSON",
+    };
+  }
+
+  const respCode = String(qData.ResponseCode ?? "");
+  const respDesc = String(qData.ResponseDescription ?? qData.errorMessage ?? "");
+
+  const rcRaw = qData.ResultCode;
+  let resultCode: number | null = null;
+  if (typeof rcRaw === "number" && Number.isFinite(rcRaw)) {
+    resultCode = rcRaw;
+  } else if (typeof rcRaw === "string" && rcRaw.trim() !== "") {
+    const n = Number(rcRaw);
+    if (Number.isFinite(n)) resultCode = n;
+  }
+
+  const merchantRequestId = String(qData.MerchantRequestID ?? "");
+  const resultDesc = String(qData.ResultDesc ?? respDesc ?? "");
+
+  if (!qResponse.ok) {
+    console.warn("[mpesa] STK query HTTP", qResponse.status, qText.slice(0, 300));
+  }
+
+  return {
+    resultCode,
+    resultDesc,
+    merchantRequestId,
+    responseCode: respCode,
+    responseDescription: respDesc,
+  };
+}

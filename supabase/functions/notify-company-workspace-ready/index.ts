@@ -14,6 +14,7 @@ import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { buildCompanyApprovedEmail } from "../_shared/farmvault-email/companyApprovedTemplate.ts";
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
+import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const EMAIL_LOG_TYPE = "workspace_ready";
 
@@ -51,7 +52,7 @@ function requireHttpsUrl(v: unknown, field: string): string | null {
 }
 
 
-Deno.serve(async (req: Request) => {
+serveFarmVaultEdge("notify-company-workspace-ready", async (req: Request, _ctx) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
