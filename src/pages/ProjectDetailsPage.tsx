@@ -573,7 +573,9 @@ export default function ProjectDetailsPage() {
           if (!companyId || !project?.id) return;
           setDeletingProject(true);
           try {
-            await deleteProjectService(project.id);
+            await deleteProjectService(project.id, {
+              expectedRowVersion: project.rowVersion ?? 1,
+            });
             if (activeProject?.id === project.id) setActiveProject(null);
             await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
             await queryClient.invalidateQueries({ queryKey: ['project', project.id, companyId] });

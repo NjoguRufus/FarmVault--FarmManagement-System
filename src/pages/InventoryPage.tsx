@@ -260,10 +260,7 @@ export default function InventoryPage() {
         name: newName,
         actorUserId: user.id,
         actorName: user.name ?? user.email ?? 'Unknown',
-        expectedRowVersion:
-          row?.row_version != null && Number.isFinite(Number(row.row_version))
-            ? Number(row.row_version)
-            : null,
+        expectedRowVersion: row?.rowVersion ?? 1,
       });
       toast.success('Item name updated');
       // Update the selected item in drawer immediately so user sees the change

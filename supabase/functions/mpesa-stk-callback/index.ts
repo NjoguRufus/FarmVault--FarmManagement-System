@@ -29,6 +29,14 @@ function parseCallbackAmount(raw: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function accountRefFromRawPayload(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const stk = (raw as { Body?: { stkCallback?: { CallbackMetadata?: unknown } } }).Body?.stkCallback;
+  if (!stk || typeof stk !== "object") return null;
+  const meta = (stk as { CallbackMetadata?: unknown }).CallbackMetadata;
+  return metadataItem(meta, "AccountReference") ?? metadataItem(meta, "BillRefNumber");
+}
+
 /** Belt-and-suspenders: in production, confirm success with Daraja STK Query before activating subscription. */
 function shouldVerifyStkSuccessWithQuery(): boolean {
   const flag = (Deno.env.get("MPESA_VERIFY_SUCCESS_WITH_STK_QUERY") ?? "").trim().toLowerCase();
@@ -131,18 +139,68 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
         console.error("[mpesa-stk-callback] persist failed", insertErr.message);
         await insertPaymentWebhookFailure(admin, {
           source: "mpesa_stk_callback_persist",
-          checkout_request_id: checkoutId || null,
+          checkoutRequestId: checkoutId || null,
           rawBody: rawBody.slice(0, 12000),
-          error_message: `mpesa_stk_callbacks insert: ${insertErr.message}`.slice(0, 2000),
+          errorMessage: `mpesa_stk_callbacks insert: ${insertErr.message}`.slice(0, 2000),
         });
       }
 
       if (checkoutId) {
-        const { data: payBefore } = await admin
+        let { data: payBefore } = await admin
           .from("mpesa_payments")
           .select("plan,company_id")
           .eq("checkout_request_id", checkoutId)
           .maybeSingle();
+
+        if (!payBefore) {
+          const accountRef = accountRefFromRawPayload(payload);
+          let resolvedCompanyId: string | null = null;
+          if (accountRef && accountRef.trim() !== "") {
+            const { data: cid, error: resErr } = await admin.rpc("try_resolve_company_from_fv_account_ref", {
+              p_ref: accountRef.trim(),
+            });
+            if (!resErr && cid != null && String(cid).trim() !== "") {
+              resolvedCompanyId = String(cid).trim();
+            }
+          }
+          const { error: ensureInsErr } = await admin.from("mpesa_payments").insert({
+            checkout_request_id: checkoutId,
+            company_id: resolvedCompanyId,
+            billing_reference: accountRef,
+            plan: null,
+            billing_cycle: null,
+            amount: parseCallbackAmount(amount),
+            phone: phoneNumber ?? null,
+            mpesa_receipt: receipt ?? null,
+            status: "PENDING",
+            subscription_activated: false,
+            success_processed: false,
+            result_code: null,
+            idempotency_key: null,
+          });
+          if (ensureInsErr && ensureInsErr.code !== "23505") {
+            console.error("[mpesa-stk-callback] ensure mpesa_payments row failed", ensureInsErr.message);
+            await insertPaymentWebhookFailure(admin, {
+              source: "mpesa_stk_callback_ensure_row",
+              checkoutRequestId: checkoutId,
+              rawBody: rawBody.slice(0, 4000),
+              errorMessage: ensureInsErr.message.slice(0, 2000),
+            });
+          }
+          await logReconciliationIssue(admin, {
+            checkout_request_id: checkoutId,
+            db_status: "callback_missing_payment_row",
+            daraja_result_code: Number.isFinite(resultCode) ? resultCode : null,
+            daraja_result_desc: (ensureInsErr?.message ?? "inserted_or_existed").slice(0, 500),
+            action_taken: ensureInsErr ? "callback_ensure_row_failed" : "callback_ensure_row_inserted",
+          });
+          const { data: payReload } = await admin
+            .from("mpesa_payments")
+            .select("plan,company_id")
+            .eq("checkout_request_id", checkoutId)
+            .maybeSingle();
+          payBefore = payReload ?? payBefore;
+        }
 
         const success = resultCode === 0;
         const amountNum = parseCallbackAmount(amount);
@@ -170,9 +228,9 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
               });
               await insertPaymentWebhookFailure(admin, {
                 source: "mpesa_stk_callback_stk_query_mismatch",
-                checkout_request_id: checkoutId,
+                checkoutRequestId: checkoutId,
                 rawBody: rawBody.slice(0, 4000),
-                error_message:
+                errorMessage:
                   `Callback ResultCode=0 but STK Query resultCode=${q.resultCode} ${(q.resultDesc || "").slice(0, 400)}`
                     .slice(0, 2000),
               });
@@ -191,9 +249,9 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
             });
             await insertPaymentWebhookFailure(admin, {
               source: "mpesa_stk_callback_stk_query_error",
-              checkout_request_id: checkoutId,
+              checkoutRequestId: checkoutId,
               rawBody: rawBody.slice(0, 4000),
-              error_message: `STK Query threw: ${errMsg}`.slice(0, 2000),
+              errorMessage: `STK Query threw: ${errMsg}`.slice(0, 2000),
             });
             if (!trustCallbackWhenStkQueryFails()) {
               allowActivation = false;
@@ -239,9 +297,9 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
           console.error("[mpesa-stk-callback] mpesa_payments update failed", payUpdErr.message);
           await insertPaymentWebhookFailure(admin, {
             source: "mpesa_stk_callback_payment_row",
-            checkout_request_id: checkoutId,
+            checkoutRequestId: checkoutId,
             rawBody: rawBody.slice(0, 8000),
-            error_message: `mpesa_payments update: ${payUpdErr.message}`.slice(0, 2000),
+            errorMessage: `mpesa_payments update: ${payUpdErr.message}`.slice(0, 2000),
           });
         }
 
@@ -278,9 +336,9 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
             console.error("[mpesa-stk-callback] activate_subscription_from_mpesa_stk", actErr.message);
             await insertPaymentWebhookFailure(admin, {
               source: "mpesa_stk_callback_activate",
-              checkout_request_id: checkoutId,
+              checkoutRequestId: checkoutId,
               rawBody: rawBody.slice(0, 4000),
-              error_message: `activate_subscription_from_mpesa_stk: ${actErr.message}`.slice(0, 2000),
+              errorMessage: `activate_subscription_from_mpesa_stk: ${actErr.message}`.slice(0, 2000),
             });
             postDeveloperNotify({
               event: "stk_payment_received",
@@ -357,9 +415,9 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
       const admin = createClient(supabaseUrl, serviceKey);
       await insertPaymentWebhookFailure(admin, {
         source: "mpesa_stk_callback",
-        checkout_request_id: null,
+        checkoutRequestId: null,
         rawBody: rawBody.slice(0, 12000),
-        error_message: msg.slice(0, 2000),
+        errorMessage: msg.slice(0, 2000),
       });
     }
     return new Response(JSON.stringify({ ResultCode: 1, ResultDesc: "Error" }), {

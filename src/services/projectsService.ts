@@ -4,7 +4,7 @@ import type { CropStage, Project } from '@/types';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 import { logger } from "@/lib/logger";
-import { throwIfUpdateReturnedNoRows } from '@/lib/concurrentUpdate';
+import { ConcurrentUpdateConflictError, throwIfUpdateReturnedNoRows } from '@/lib/concurrentUpdate';
 
 type DbProjectRow = {
   id: string;
@@ -339,16 +339,19 @@ export async function updateProject(
 
   if (Object.keys(payload).length === 0) return;
 
+  const v = options?.expectedRowVersion;
+  if (v == null || !Number.isFinite(Number(v))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
+
   let q = db.projects()
     .from('projects')
     .update(payload)
     .eq('id', projectId)
-    .is('deleted_at', null);
-
-  const v = options?.expectedRowVersion;
-  if (v != null && Number.isFinite(Number(v))) {
-    q = q.eq('row_version', Number(v));
-  }
+    .is('deleted_at', null)
+    .eq('row_version', Number(v));
 
   const { data, error } = await q.select('id');
   throwIfUpdateReturnedNoRows(data, error);
@@ -364,16 +367,19 @@ export async function deleteProject(
   options?: { expectedRowVersion?: number | null },
 ): Promise<void> {
   const deletedAt = new Date().toISOString();
+  const v = options?.expectedRowVersion;
+  if (v == null || !Number.isFinite(Number(v))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
   let q = db
     .projects()
     .from('projects')
     .update({ deleted_at: deletedAt })
     .eq('id', projectId)
-    .is('deleted_at', null);
-  const v = options?.expectedRowVersion;
-  if (v != null && Number.isFinite(Number(v))) {
-    q = q.eq('row_version', Number(v));
-  }
+    .is('deleted_at', null)
+    .eq('row_version', Number(v));
   const { data, error } = await q.select('id');
   throwIfUpdateReturnedNoRows(data, error);
   captureEvent(AnalyticsEvents.PROJECT_ARCHIVED, {

@@ -395,25 +395,26 @@ export async function renameHarvestCollection(params: {
   if (!trimmed) throw new Error('Collection name cannot be empty');
   if (trimmed.length > 100) throw new Error('Collection name must be 100 characters or fewer');
 
-  let q = harvest()
+  const v = params.expectedRowVersion;
+  if (v == null || !Number.isFinite(Number(v))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
+
+  const q = harvest()
     .from('harvest_collections')
     .update({ notes: trimmed })
     .eq('id', params.collectionId)
     .eq('company_id', params.companyId)
-    .is('deleted_at', null);
-  const v = params.expectedRowVersion;
-  if (v != null && Number.isFinite(Number(v))) {
-    q = q.eq('row_version', Number(v));
-  }
+    .is('deleted_at', null)
+    .eq('row_version', Number(v));
 
   const { data, error } = await q.select('id, notes');
 
   if (error) throw error;
   if (!data?.length) {
-    if (v != null && Number.isFinite(Number(v))) {
-      throw new ConcurrentUpdateConflictError();
-    }
-    throw new Error('Rename failed');
+    throw new ConcurrentUpdateConflictError();
   }
   const row = data[0] as { id?: string };
   if (!row?.id) throw new Error('Rename failed');
@@ -510,23 +511,24 @@ export async function deleteHarvestCollection(params: {
   companyId: string;
   expectedRowVersion?: number | null;
 }): Promise<void> {
-  let q = harvest()
+  const v = params.expectedRowVersion;
+  if (v == null || !Number.isFinite(Number(v))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
+
+  const q = harvest()
     .from('harvest_collections')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', params.collectionId)
     .eq('company_id', params.companyId)
-    .is('deleted_at', null);
-  const v = params.expectedRowVersion;
-  if (v != null && Number.isFinite(Number(v))) {
-    q = q.eq('row_version', Number(v));
-  }
+    .is('deleted_at', null)
+    .eq('row_version', Number(v));
   const { data, error } = await q.select('id');
   if (error) throw error;
   if (!data?.length) {
-    if (v != null && Number.isFinite(Number(v))) {
-      throw new ConcurrentUpdateConflictError();
-    }
-    throw new Error('Could not delete collection');
+    throw new ConcurrentUpdateConflictError();
   }
 }
 

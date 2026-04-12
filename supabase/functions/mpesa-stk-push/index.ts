@@ -19,6 +19,7 @@ import {
   serveFarmVaultEdge,
   type FarmVaultEdgeContext,
 } from "../_shared/withEdgeLogging.ts";
+import { insertPaymentWebhookFailure } from "../_shared/paymentWebhookFailure.ts";
 
 /** Merge CORS + JSON content type for successful / business-logic responses. */
 function corsJsonHeaders(): Headers {
@@ -36,6 +37,33 @@ function jsonOk(body: object): Response {
     status: 200,
     headers: corsJsonHeaders(),
   });
+}
+
+async function logMpesaOrphanAttempt(
+  admin: ReturnType<typeof createClient>,
+  row: {
+    mpesa_payment_id?: string | null;
+    checkout_request_id?: string | null;
+    idempotency_key?: string | null;
+    company_id?: string | null;
+    error_message: string;
+    detail?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    const { error } = await admin.from("mpesa_orphan_attempts").insert({
+      edge_function: "mpesa-stk-push",
+      mpesa_payment_id: row.mpesa_payment_id ?? null,
+      checkout_request_id: row.checkout_request_id ?? null,
+      idempotency_key: row.idempotency_key ?? null,
+      company_id: row.company_id ?? null,
+      error_message: row.error_message.slice(0, 2000),
+      detail: row.detail ?? null,
+    });
+    if (error) console.error("[mpesa-stk-push] mpesa_orphan_attempts insert failed", error.message);
+  } catch (e) {
+    console.error("[mpesa-stk-push] logMpesaOrphanAttempt", e);
+  }
 }
 
 function logStk(level: "info" | "error", msg: string, extra?: Record<string, unknown>) {
@@ -272,24 +300,52 @@ export default async function handler(
     if (idempotencyKey) {
       const { data: prior, error: idLookErr } = await admin
         .from("mpesa_payments")
-        .select("checkout_request_id, status")
+        .select("id, checkout_request_id, status, created_at, merchant_request_id")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (idLookErr) {
         logStk("error", "idempotency_lookup_failed", { detail: idLookErr.message });
-      } else if (prior && (prior as { checkout_request_id?: string }).checkout_request_id) {
-        const ck = String((prior as { checkout_request_id: string }).checkout_request_id);
-        const cfgEarly = loadMpesaConfig();
-        logStk("info", "idempotent_replay", { idempotencyKey });
-        return jsonOk({
-          success: true,
-          ok: true,
-          checkoutRequestId: ck,
-          idempotentReplay: true,
-          amountKes: amountRounded,
-          mpesaEnv: cfgEarly.env,
-          developerStkTest: isDeveloperPayload,
-        });
+      } else if (prior) {
+        const ckRaw = (prior as { checkout_request_id?: string | null }).checkout_request_id;
+        const ckTrim = ckRaw != null ? String(ckRaw).trim() : "";
+        if (ckTrim !== "") {
+          const cfgEarly = loadMpesaConfig();
+          logStk("info", "idempotent_replay", { idempotencyKey });
+          return jsonOk({
+            success: true,
+            ok: true,
+            checkoutRequestId: ckTrim,
+            idempotentReplay: true,
+            amountKes: amountRounded,
+            mpesaEnv: cfgEarly.env,
+            developerStkTest: isDeveloperPayload,
+          });
+        }
+        const createdAt = (prior as { created_at?: string }).created_at;
+        const ageMs = createdAt ? Date.now() - new Date(createdAt).getTime() : 999999;
+        const merchantSet = !!(prior as { merchant_request_id?: string | null }).merchant_request_id?.trim();
+        if (ageMs < 180_000) {
+          return jsonOk({
+            success: false,
+            error: "Payment initiation is still in progress.",
+            code: "STK_IN_PROGRESS",
+            detail: "Wait up to 3 minutes before retrying the same checkout.",
+          });
+        }
+        if (!merchantSet && ageMs >= 300_000 && (prior as { id?: string }).id) {
+          await admin.from("mpesa_payments").delete().eq("id", (prior as { id: string }).id).eq(
+            "status",
+            "PENDING",
+          );
+          logStk("info", "idempotency_abandoned_reservation_cleared", { idempotencyKey });
+        } else if (merchantSet) {
+          return jsonOk({
+            success: false,
+            error: "Previous payment initiation could not be confirmed. Support can recover it automatically.",
+            code: "STK_BIND_STALE",
+            detail: "If you were charged, use Billing → verify payment or contact support with your phone number and time.",
+          });
+        }
       }
     }
 
@@ -393,6 +449,79 @@ export default async function handler(
 
     assertMpesaEnvForStk();
 
+    const billingRefForRow: string | null = isDeveloperPayload
+      ? (accountReferenceForStk ?? null)
+      : resolvedBillingReference;
+
+    const reservationPayload = {
+      checkout_request_id: null as string | null,
+      company_id: paymentCompanyId,
+      billing_reference: billingRefForRow,
+      plan: billingPlan,
+      billing_cycle: billingCycleStored,
+      amount: amountKes,
+      phone: normalizedPhone,
+      status: "PENDING",
+      subscription_activated: false,
+      success_processed: false,
+      result_code: null,
+      idempotency_key: idempotencyKey || null,
+    };
+
+    const { data: reserved, error: resErr } = await admin
+      .from("mpesa_payments")
+      .insert(reservationPayload)
+      .select("id")
+      .maybeSingle();
+
+    if (resErr) {
+      if (resErr.code === "23505" && idempotencyKey) {
+        const { data: row } = await admin
+          .from("mpesa_payments")
+          .select("checkout_request_id")
+          .eq("idempotency_key", idempotencyKey)
+          .maybeSingle();
+        const ck = row && (row as { checkout_request_id?: string | null }).checkout_request_id
+          ? String((row as { checkout_request_id: string }).checkout_request_id).trim()
+          : "";
+        if (ck) {
+          logStk("info", "idempotent_replay_after_race", { idempotencyKey });
+          return jsonOk({
+            success: true,
+            ok: true,
+            checkoutRequestId: ck,
+            idempotentReplay: true,
+            amountKes,
+            mpesaEnv: loadMpesaConfig().env,
+            developerStkTest: isDeveloperPayload,
+          });
+        }
+      }
+      await logMpesaOrphanAttempt(admin, {
+        company_id: paymentCompanyId,
+        idempotency_key: idempotencyKey || null,
+        error_message: resErr.message,
+        detail: { phase: "reservation_insert", code: resErr.code },
+      });
+      logStk("error", "mpesa_payments_reservation_failed", { detail: resErr.message });
+      return jsonOk({
+        success: false,
+        error: "Could not reserve payment record. Please try again.",
+        detail: resErr.message,
+      });
+    }
+
+    const paymentRowId = (reserved as { id?: string })?.id;
+    if (!paymentRowId) {
+      await logMpesaOrphanAttempt(admin, {
+        company_id: paymentCompanyId,
+        idempotency_key: idempotencyKey || null,
+        error_message: "Reservation insert returned no id",
+        detail: { phase: "reservation_insert" },
+      });
+      return jsonOk({ success: false, error: "Could not reserve payment record." });
+    }
+
     const cfg = loadMpesaConfig();
     logStk("info", "mpesa_stk_debug", {
       MPESA_ENV: cfg.env,
@@ -404,6 +533,10 @@ export default async function handler(
     try {
       accessToken = await fetchMpesaAccessToken(cfg);
     } catch (e) {
+      await admin.from("mpesa_payments").update({
+        status: "FAILED",
+        result_desc: `OAuth failed before STK: ${String(e)}`.slice(0, 2000),
+      }).eq("id", paymentRowId);
       logStk("error", "mpesa_oauth_failed", { detail: String(e) });
       throw e;
     }
@@ -417,7 +550,19 @@ export default async function handler(
         transactionDesc: transactionDescForStk,
       });
     } catch (e) {
-      logStk("error", "mpesa_stk_push_failed", { detail: String(e) });
+      const msg = String(e);
+      await admin.from("mpesa_payments").update({
+        status: "FAILED",
+        result_desc: `STK initiation failed: ${msg}`.slice(0, 2000),
+      }).eq("id", paymentRowId);
+      await logMpesaOrphanAttempt(admin, {
+        mpesa_payment_id: paymentRowId,
+        company_id: paymentCompanyId,
+        idempotency_key: idempotencyKey || null,
+        error_message: msg.slice(0, 2000),
+        detail: { phase: "daraja_stk_push" },
+      });
+      logStk("error", "mpesa_stk_push_failed", { detail: msg });
       throw e;
     }
 
@@ -427,48 +572,28 @@ export default async function handler(
       developerTest: isDeveloperPayload,
     });
 
-    const billingRefForRow: string | null = isDeveloperPayload
-      ? (accountReferenceForStk ?? null)
-      : resolvedBillingReference;
-
-    const { error: payInsErr } = await admin.from("mpesa_payments").insert({
+    const { error: bindErr } = await admin.from("mpesa_payments").update({
       checkout_request_id: stk.checkoutRequestId,
-      company_id: paymentCompanyId,
-      billing_reference: billingRefForRow,
-      plan: billingPlan,
-      billing_cycle: billingCycleStored,
-      amount: amountKes,
-      phone: normalizedPhone,
-      status: "PENDING",
-      subscription_activated: false,
-      success_processed: false,
-      result_code: null,
-      idempotency_key: idempotencyKey || null,
-    });
-    if (payInsErr) {
-      if (payInsErr.code === "23505") {
-        if (idempotencyKey) {
-          const { data: row } = await admin
-            .from("mpesa_payments")
-            .select("checkout_request_id")
-            .eq("idempotency_key", idempotencyKey)
-            .maybeSingle();
-          const ck = row && (row as { checkout_request_id?: string }).checkout_request_id
-            ? String((row as { checkout_request_id: string }).checkout_request_id)
-            : null;
-          if (ck) {
-            logStk("info", "idempotent_replay_after_race", { idempotencyKey });
-            return jsonOk({
-              success: true,
-              ok: true,
-              checkoutRequestId: ck,
-              idempotentReplay: true,
-              amountKes,
-              mpesaEnv: loadMpesaConfig().env,
-              developerStkTest: isDeveloperPayload,
-            });
-          }
-        }
+      merchant_request_id: stk.merchantRequestId ?? null,
+    }).eq("id", paymentRowId);
+
+    if (bindErr) {
+      await logMpesaOrphanAttempt(admin, {
+        mpesa_payment_id: paymentRowId,
+        checkout_request_id: stk.checkoutRequestId,
+        company_id: paymentCompanyId,
+        idempotency_key: idempotencyKey || null,
+        error_message: bindErr.message,
+        detail: { phase: "checkout_bind_update", code: bindErr.code },
+      });
+      await insertPaymentWebhookFailure(admin, {
+        source: "mpesa_stk_push_checkout_bind",
+        checkoutRequestId: stk.checkoutRequestId,
+        rawBody: JSON.stringify({ paymentRowId, bindError: bindErr.message, idempotencyKey }),
+        errorMessage: bindErr.message,
+      });
+      logStk("error", "mpesa_payments_checkout_bind_failed", { detail: bindErr.message });
+      if (bindErr.code === "23505") {
         const { data: byCk } = await admin
           .from("mpesa_payments")
           .select("checkout_request_id")
@@ -487,21 +612,18 @@ export default async function handler(
             checkoutRequestId: ckDup,
             idempotentReplay: true,
             amountKes,
-            mpesaEnv: loadMpesaConfig().env,
+            mpesaEnv: cfg.env,
             developerStkTest: isDeveloperPayload,
           });
         }
       }
-      console.error("Failed to insert mpesa_payments:", payInsErr);
-      logStk("error", "mpesa_payments_insert_failed", { detail: payInsErr.message });
-      return jsonResponse(
-        {
-          success: false,
-          message: "Failed to initiate payment. Please try again.",
-          error: payInsErr.message,
-        },
-        500,
-      );
+      return jsonOk({
+        success: false,
+        error:
+          "Payment was sent to your phone, but we could not save the checkout reference. If you complete payment, it will be recovered automatically.",
+        detail: bindErr.message,
+        checkoutReferenceIssuedByDaraja: stk.checkoutRequestId,
+      });
     }
 
     return jsonOk({

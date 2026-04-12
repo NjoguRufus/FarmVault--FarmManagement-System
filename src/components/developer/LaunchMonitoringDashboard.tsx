@@ -1,261 +1,272 @@
 import React, { useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { RefreshCw, ExternalLink } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Loader2, Play, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useLaunchMetrics } from '@/hooks/developer/useLaunchMetrics';
-import {
-  launchMetricTone,
-  type LaunchHealthTone,
-  type LaunchMonitoringMetrics,
-} from '@/services/launchMonitoringService';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+  useRunSystemHealthCheck,
+  useSystemHealthLogs,
+  useSystemHealthSnapshot,
+} from '@/hooks/developer/useSystemHealth';
+import { overallTone, type SystemHealthIssue, type SystemHealthLogRow } from '@/services/systemHealthService';
+import { useToast } from '@/hooks/use-toast';
 
-type MetricDef = {
-  id: keyof LaunchMonitoringMetrics;
-  title: string;
-  subtitle?: string;
-  detailHref?: string;
-  detailLabel?: string;
-};
-
-const SECTIONS: { heading: string; metrics: MetricDef[] }[] = [
-  {
-    heading: 'Payments health',
-    metrics: [
-      {
-        id: 'pending_stk_payments',
-        title: 'Pending STK payments',
-        subtitle: 'All time · mpesa_payments = PENDING',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-      {
-        id: 'failed_payments_24h',
-        title: 'Failed STK (24h)',
-        subtitle: 'mpesa_payments = FAILED',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-      {
-        id: 'successful_payments_24h',
-        title: 'Successful STK (24h)',
-        subtitle: 'mpesa_payments = SUCCESS',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-      {
-        id: 'orphan_stk_callbacks',
-        title: 'Orphan STK callbacks',
-        subtitle: 'Callbacks with no matching mpesa_payments row',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-      {
-        id: 'pending_manual_approvals',
-        title: 'Pending manual approvals',
-        subtitle: 'subscription_payments · pending_verification',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-    ],
-  },
-  {
-    heading: 'System errors',
-    metrics: [
-      {
-        id: 'payment_webhook_failures_24h',
-        title: 'Payment webhook failures (24h)',
-        subtitle: 'payment_webhook_failures',
-        detailHref: '/developer/code-red',
-        detailLabel: 'Code Red',
-      },
-      {
-        id: 'reconciliation_errors_24h',
-        title: 'Reconciliation issues (24h)',
-        subtitle: 'payment_reconciliation_log · action_taken ILIKE %error%',
-        detailHref: '/developer/code-red',
-        detailLabel: 'Code Red',
-      },
-    ],
-  },
-  {
-    heading: 'Data integrity',
-    metrics: [
-      {
-        id: 'duplicate_transaction_codes_24h',
-        title: 'Duplicate transaction codes (24h)',
-        subtitle: 'Distinct M-Pesa codes appearing more than once',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-      {
-        id: 'stuck_pending_stk_over_10m',
-        title: 'Stuck pending STK (>10 min)',
-        subtitle: 'PENDING and created_at older than 10 minutes',
-        detailHref: '/developer/billing-confirmation',
-        detailLabel: 'Billing console',
-      },
-    ],
-  },
-  {
-    heading: 'User activity',
-    metrics: [
-      {
-        id: 'active_companies_projects_24h',
-        title: 'Active companies (projects)',
-        subtitle: 'Distinct company_id on projects updated in 24h',
-        detailHref: '/developer/companies',
-        detailLabel: 'Companies',
-      },
-      {
-        id: 'new_companies_24h',
-        title: 'New companies (24h)',
-        subtitle: 'core.companies created in 24h',
-        detailHref: '/developer/companies',
-        detailLabel: 'Companies',
-      },
-    ],
-  },
-];
-
-function toneClasses(tone: LaunchHealthTone): { card: string; value: string; bar: string } {
-  switch (tone) {
-    case 'critical':
-      return {
-        card: 'border-red-500/45 bg-red-500/[0.06]',
-        value: 'text-red-700 dark:text-red-300',
-        bar: 'bg-red-500',
-      };
-    case 'warning':
-      return {
-        card: 'border-amber-500/45 bg-amber-500/[0.07]',
-        value: 'text-amber-800 dark:text-amber-200',
-        bar: 'bg-amber-500',
-      };
-    default:
-      return {
-        card: 'border-emerald-500/35 bg-emerald-500/[0.05]',
-        value: 'text-emerald-800 dark:text-emerald-200',
-        bar: 'bg-emerald-500',
-      };
-  }
+function StatusPill({ tone }: { tone: 'healthy' | 'warning' | 'critical' }) {
+  const cfg = {
+    healthy: {
+      label: 'OK',
+      className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+      icon: CheckCircle2,
+    },
+    warning: {
+      label: 'Warning',
+      className: 'border-amber-500/45 bg-amber-500/10 text-amber-900 dark:text-amber-100',
+      icon: AlertTriangle,
+    },
+    critical: {
+      label: 'Critical',
+      className: 'border-red-500/45 bg-red-500/10 text-red-800 dark:text-red-200',
+      icon: AlertTriangle,
+    },
+  }[tone];
+  const Icon = cfg.icon;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide',
+        cfg.className,
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {cfg.label}
+    </span>
+  );
 }
 
-function MetricCard({
-  title,
-  subtitle,
+function MetricBox({
+  label,
   value,
-  tone,
-  detailHref,
-  detailLabel,
-  loading,
+  sub,
 }: {
-  title: string;
-  subtitle?: string;
-  value: number;
-  tone: LaunchHealthTone;
-  detailHref?: string;
-  detailLabel?: string;
-  loading: boolean;
+  label: string;
+  value: string | number;
+  sub?: string;
 }) {
-  const t = toneClasses(tone);
-
   return (
-    <div className={cn('fv-card relative overflow-hidden border', t.card)}>
-      <div className={cn('absolute left-0 top-0 h-full w-1', t.bar)} aria-hidden />
-      <div className="space-y-2 pl-2">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-          {subtitle ? <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{subtitle}</p> : null}
-        </div>
-        <p className={cn('font-heading text-3xl font-bold tabular-nums tracking-tight', t.value)}>
-          {loading ? '—' : value.toLocaleString()}
-        </p>
-        {detailHref && detailLabel ? (
-          <Link
-            to={detailHref}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-          >
-            {detailLabel}
-            <ExternalLink className="h-3 w-3 opacity-70" />
-          </Link>
-        ) : null}
-      </div>
+    <div className="fv-card space-y-1 border-border/60 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="font-heading text-2xl font-bold tabular-nums">{value}</p>
+      {sub ? <p className="text-[11px] text-muted-foreground">{sub}</p> : null}
+    </div>
+  );
+}
+
+function IssuesList({ issues }: { issues: SystemHealthIssue[] }) {
+  if (!issues.length) {
+    return <p className="text-sm text-muted-foreground">No open issues detected for this snapshot.</p>;
+  }
+  return (
+    <ul className="space-y-2 text-sm">
+      {issues.map((i, idx) => (
+        <li
+          key={`${i.type}-${idx}`}
+          className={cn(
+            'rounded-lg border px-3 py-2',
+            i.severity === 'critical'
+              ? 'border-red-500/35 bg-red-500/[0.04]'
+              : 'border-amber-500/35 bg-amber-500/[0.04]',
+          )}
+        >
+          <span className="font-medium text-foreground">{i.type}</span>
+          {i.count > 0 ? <span className="text-muted-foreground"> · {i.count.toLocaleString()}</span> : null}
+          <p className="mt-0.5 text-muted-foreground">{i.message}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LogTable({ rows }: { rows: SystemHealthLogRow[] }) {
+  if (!rows.length) {
+    return <p className="text-xs text-muted-foreground">No logged runs yet. Use “Run health check” or wait for cron.</p>;
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border/60">
+      <table className="w-full text-left text-xs">
+        <thead className="bg-muted/40 text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-medium">Time</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 font-medium">Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className="border-t border-border/50">
+              <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                {new Date(r.created_at).toLocaleString()}
+              </td>
+              <td className="px-3 py-2 font-medium capitalize">{r.status}</td>
+              <td className="px-3 py-2 text-muted-foreground">{r.message ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 export function LaunchMonitoringDashboard() {
   const { isDeveloper } = useAuth();
-  const { data, isLoading, isFetching, error, refetch, isError } = useLaunchMetrics({
-    enabled: isDeveloper === true,
-  });
+  const { toast } = useToast();
+  const enabled = isDeveloper === true;
 
-  const metrics = data ?? null;
+  const snapshotQ = useSystemHealthSnapshot({ enabled });
+  const logsQ = useSystemHealthLogs(15, { enabled });
+  const runMutation = useRunSystemHealthCheck();
 
-  const cards = useMemo(() => {
-    return SECTIONS.map((section) => ({
-      heading: section.heading,
-      items: section.metrics.map((m) => ({
-        ...m,
-        value: metrics ? metrics[m.id] : 0,
-        tone: metrics ? launchMetricTone(m.id, metrics[m.id]) : ('healthy' as LaunchHealthTone),
-      })),
-    }));
-  }, [metrics]);
+  const tone = useMemo(() => {
+    if (!snapshotQ.data) return 'healthy' as const;
+    return overallTone(snapshotQ.data.status);
+  }, [snapshotQ.data]);
+
+  const handleRun = () => {
+    runMutation.mutate(undefined, {
+      onSuccess: (res) => {
+        if (!res.ok) {
+          toast({ variant: 'destructive', title: 'Health check failed', description: res.detail ?? res.error });
+          return;
+        }
+        toast({
+          title: 'Health check complete',
+          description: `Status: ${res.snapshot.status.toUpperCase()}${res.emailSent ? ' · Alert email sent' : ''}`,
+        });
+      },
+      onError: (e: Error) => {
+        toast({ variant: 'destructive', title: 'Health check failed', description: e.message });
+      },
+    });
+  };
 
   if (!isDeveloper) return null;
 
+  const snap = snapshotQ.data;
+  const metrics = snap?.metrics;
+
   return (
     <section className="space-y-4" aria-label="Launch monitoring dashboard">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
           <h2 className="text-sm font-semibold text-foreground">Launch Monitoring Dashboard</h2>
           <p className="text-xs text-muted-foreground max-w-prose">
-            Read-only platform pulse for launch week. Refreshes automatically about every 45 seconds; use refresh for
-            an immediate pull.
+            Read-only payment pipeline checks. Logs append to <code className="text-[11px]">system_health_logs</code>.
+            Alerts email on warning/critical via <code className="text-[11px]">send-farmvault-email</code> (cron or manual
+            run).
           </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0 gap-2 self-start sm:self-auto"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-        >
-          <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
-          Refresh metrics
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="gap-2"
+            onClick={() => handleRun()}
+            disabled={runMutation.isPending}
+          >
+            {runMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            Run health check
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => void snapshotQ.refetch()}
+            disabled={snapshotQ.isFetching}
+          >
+            <RefreshCw className={cn('h-4 w-4', snapshotQ.isFetching && 'animate-spin')} />
+            Refresh snapshot
+          </Button>
+        </div>
       </div>
 
-      {isError && (
+      {snapshotQ.isError && (
         <div className="fv-card border-destructive/40 bg-destructive/5 text-destructive text-sm">
-          {(error as Error)?.message ?? 'Failed to load launch metrics. Deploy migration dev_launch_monitoring_metrics.'}
+          {(snapshotQ.error as Error)?.message ??
+            'Failed to load health snapshot. Apply migration system_health_logs_v1 and deploy system-health-check.'}
         </div>
       )}
 
-      {!isError &&
-        cards.map((section) => (
-          <div key={section.heading} className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{section.heading}</h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {section.items.map((item) => (
-                <MetricCard
-                  key={item.id}
-                  title={item.title}
-                  subtitle={item.subtitle}
-                  value={item.value}
-                  tone={item.tone}
-                  detailHref={item.detailHref}
-                  detailLabel={item.detailLabel}
-                  loading={isLoading && !metrics}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs font-medium text-muted-foreground">Current status</span>
+        <StatusPill tone={tone} />
+        {snap?.checked_at ? (
+          <span className="text-[11px] text-muted-foreground">
+            Checked {typeof snap.checked_at === 'string' ? new Date(snap.checked_at).toLocaleString() : '—'}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <MetricBox
+          label="Stuck payments"
+          value={metrics?.stuck_payments?.toLocaleString() ?? '—'}
+          sub="Pending &gt; 10 min"
+        />
+        <MetricBox
+          label="Orphan payments"
+          value={metrics?.orphan_payments?.toLocaleString() ?? '—'}
+          sub="Paid, not activated"
+        />
+        <MetricBox
+          label="Failed callbacks"
+          value={metrics?.failed_callbacks?.toLocaleString() ?? '—'}
+          sub="Unresolved webhook rows"
+        />
+        <MetricBox
+          label="Manual stale"
+          value={metrics?.manual_pending_over_1h?.toLocaleString() ?? '—'}
+          sub="pending_verification &gt; 1h"
+        />
+      </div>
+
+      <div className="fv-card space-y-2 border-border/60 p-4">
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+          <Activity className="h-4 w-4 text-muted-foreground" />
+          Pipeline activity (24h)
+        </div>
+        <p className="text-sm">
+          {metrics === undefined
+            ? '—'
+            : metrics.pipeline_active_24h
+              ? 'Receiving recent payment or callback events.'
+              : 'No payment pipeline events in the last 24 hours (warning when historical data exists).'}
+        </p>
+      </div>
+
+      <div className="fv-card space-y-3 border-border/60 p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Active issues</h3>
+        {snapshotQ.isLoading && !snap ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <IssuesList issues={snap?.issues ?? []} />
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent log entries</h3>
+        {logsQ.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading logs…</p>
+        ) : logsQ.isError ? (
+          <p className="text-sm text-destructive">{(logsQ.error as Error).message}</p>
+        ) : (
+          <LogTable rows={logsQ.data ?? []} />
+        )}
+      </div>
     </section>
   );
 }

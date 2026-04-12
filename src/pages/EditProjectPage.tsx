@@ -91,7 +91,7 @@ export default function EditProjectPage() {
 
     setSaving(true);
     try {
-      await updateProject(projectId, patch, { expectedRowVersion: project.rowVersion ?? null });
+      await updateProject(projectId, patch, { expectedRowVersion: project.rowVersion ?? 1 });
       await queryClient.invalidateQueries({ queryKey: ['project', projectId, companyId] });
       await queryClient.invalidateQueries({ queryKey: ['projects', companyId] });
       toast.success('Project updated.');

@@ -206,23 +206,24 @@ export async function updateFinanceExpense(params: {
   if (params.projectId !== undefined) patch.project_id = params.projectId;
   if (Object.keys(patch).length === 0) return;
 
-  let q = db
+  const v = params.expectedRowVersion;
+  if (v == null || !Number.isFinite(Number(v))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
+
+  const q = db
     .finance()
     .from('expenses')
     .update(patch)
     .eq('id', params.id)
     .eq('company_id', tenant)
-    .is('deleted_at', null);
-  const v = params.expectedRowVersion;
-  if (v != null && Number.isFinite(Number(v))) {
-    q = q.eq('row_version', Number(v));
-  }
+    .is('deleted_at', null)
+    .eq('row_version', Number(v));
   const { data, error } = await q.select('id').maybeSingle();
   if (error) throw error;
   if (!data) {
-    if (v != null && Number.isFinite(Number(v))) {
-      throw new ConcurrentUpdateConflictError();
-    }
-    throw new Error('Expense not found or could not be updated');
+    throw new ConcurrentUpdateConflictError();
   }
 }

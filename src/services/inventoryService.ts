@@ -458,7 +458,14 @@ export async function updateInventoryItem(
     return existing;
   }
 
-  let uq = db
+  const ev = input.expectedRowVersion;
+  if (ev == null || !Number.isFinite(Number(ev))) {
+    throw new ConcurrentUpdateConflictError(
+      'Record updated by another user. Please refresh the page and try again.',
+    );
+  }
+
+  const uq = db
     .inventory()
     .from(ITEMS_TABLE)
     .update({
@@ -466,21 +473,15 @@ export async function updateInventoryItem(
       last_updated: new Date().toISOString(),
     })
     .eq('company_id', companyId)
-    .eq('id', input.id);
-  const ev = input.expectedRowVersion;
-  if (ev != null && Number.isFinite(Number(ev))) {
-    uq = uq.eq('row_version', Number(ev));
-  }
+    .eq('id', input.id)
+    .eq('row_version', Number(ev));
   const { data, error } = await uq.select('*').maybeSingle<DbInventoryItemRow>();
 
   if (error) {
     throw error;
   }
   if (!data) {
-    if (ev != null && Number.isFinite(Number(ev))) {
-      throw new ConcurrentUpdateConflictError();
-    }
-    throw new Error('Inventory item not found');
+    throw new ConcurrentUpdateConflictError();
   }
 
   await logAuditEvent({

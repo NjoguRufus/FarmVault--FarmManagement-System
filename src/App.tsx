@@ -114,6 +114,7 @@ import PendingApprovalPage from "@/pages/PendingApprovalPage";
 import StartFreshPage from "@/pages/StartFreshPage";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { RequireOnboarding } from "@/components/auth/RequireOnboarding";
+import { RequireBillingAccess } from "@/components/auth/RequireBillingAccess";
 import { RequireDeveloper } from "@/components/auth/RequireDeveloper";
 import { DeveloperRoute } from "@/components/auth/DeveloperRoute";
 import { DevRoute } from "@/components/auth/DevRoute";
@@ -370,7 +371,16 @@ const AppRoutesWithLock = () => (
         <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />
         <Route path="/employees/:employeeId" element={<PermissionRoute module="employees"><EmployeeProfilePage /></PermissionRoute>} />
         <Route path="/reports" element={<PermissionRoute module="reports"><ReportsPage /></PermissionRoute>} />
-        <Route path="/billing" element={<PermissionRoute module="settings"><BillingPage /></PermissionRoute>} />
+        <Route
+          path="/billing"
+          element={
+            <PermissionRoute module="settings">
+              <RequireBillingAccess>
+                <BillingPage />
+              </RequireBillingAccess>
+            </PermissionRoute>
+          }
+        />
         <Route path="/profile" element={<Navigate to="/settings" replace />} />
         <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
         <Route path="/support" element={<SupportPage />} />
