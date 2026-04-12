@@ -510,7 +510,7 @@ export default function HarvestCollectionsPage() {
         oldName: renameTargetCollection.name ?? null,
         newName: nextName,
         actorUserId: user?.id ?? null,
-        expectedRowVersion: renameTargetCollection.rowVersion ?? null,
+        expectedRowVersion: renameTargetCollection.rowVersion ?? 1,
       });
 
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });
@@ -552,7 +552,7 @@ export default function HarvestCollectionsPage() {
       await deleteHarvestCollection({
         collectionId: deleteCollectionConfirm.id,
         companyId,
-        expectedRowVersion: deleteCollectionConfirm.rowVersion ?? null,
+        expectedRowVersion: deleteCollectionConfirm.rowVersion ?? 1,
       });
       // Refresh list + clear selection if needed.
       queryClient.invalidateQueries({ queryKey: ['harvestCollections', companyId, effectiveProjectId] });

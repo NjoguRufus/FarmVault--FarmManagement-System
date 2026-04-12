@@ -97,3 +97,7 @@ verify_jwt = false
 # pg_cron → hourly launch monitoring email (Bearer LAUNCH_MONITORING_REPORT_SECRET).
 [functions.launch-monitoring-report]
 verify_jwt = false
+
+# Cron or developer-triggered system health (Bearer SYSTEM_HEALTH_CHECK_SECRET or Clerk + is_developer).
+[functions.system-health-check]
+verify_jwt = false

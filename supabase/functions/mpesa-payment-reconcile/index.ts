@@ -112,6 +112,66 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
   let orphanExamined = 0;
   let orphanPaymentsInserted = 0;
   let orphanSubscriptionsActivated = 0;
+  let orphanBindingsRepaired = 0;
+
+  const { data: bindRows, error: bindListErr } = await admin
+    .from("mpesa_orphan_attempts")
+    .select("id, mpesa_payment_id, checkout_request_id")
+    .eq("resolved", false)
+    .not("mpesa_payment_id", "is", null)
+    .not("checkout_request_id", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (bindListErr) {
+    console.error("[mpesa-payment-reconcile] orphan binding list failed", bindListErr.message);
+    errors++;
+  } else {
+    for (const br of bindRows ?? []) {
+      const pid = String((br as { mpesa_payment_id?: string }).mpesa_payment_id ?? "").trim();
+      const ck = String((br as { checkout_request_id?: string }).checkout_request_id ?? "").trim();
+      const bid = String((br as { id?: string }).id ?? "").trim();
+      if (!pid || !ck || !bid) {
+        skipped++;
+        continue;
+      }
+      const { data: pr } = await admin
+        .from("mpesa_payments")
+        .select("id, checkout_request_id")
+        .eq("id", pid)
+        .maybeSingle();
+      const curCk = pr && (pr as { checkout_request_id?: string | null }).checkout_request_id != null
+        ? String((pr as { checkout_request_id: string | null }).checkout_request_id).trim()
+        : "";
+      if (!pr) {
+        await admin.from("mpesa_orphan_attempts").update({ resolved: true }).eq("id", bid);
+        skipped++;
+        continue;
+      }
+      if (curCk !== "") {
+        await admin.from("mpesa_orphan_attempts").update({ resolved: true }).eq("id", bid);
+        skipped++;
+        continue;
+      }
+      const { error: bindUpdErr } = await admin.from("mpesa_payments").update({
+        checkout_request_id: ck,
+      }).eq("id", pid);
+      await admin.from("payment_reconciliation_log").insert({
+        checkout_request_id: ck,
+        db_status: "orphan_attempt_bind",
+        daraja_result_code: null,
+        daraja_result_desc: "bind_checkout_from_orphan_attempts",
+        action_taken: bindUpdErr ? "orphan_bind_failed" : "orphan_bind_applied",
+      });
+      if (bindUpdErr) {
+        errors++;
+        console.error("[mpesa-payment-reconcile] orphan bind update failed", ck, bindUpdErr.message);
+      } else {
+        orphanBindingsRepaired++;
+        await admin.from("mpesa_orphan_attempts").update({ resolved: true }).eq("id", bid);
+      }
+    }
+  }
 
   const { data: orphanCallbacks, error: orphanListErr } = await admin.rpc(
     "list_mpesa_stk_callbacks_without_payment",
@@ -257,9 +317,10 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
 
   const { data: pendingRows, error: qErr } = await admin
     .from("mpesa_payments")
-    .select("id, checkout_request_id, company_id, status, created_at")
+    .select("id, checkout_request_id, company_id, status, created_at, reconcile_attempts")
     .in("status", ["PENDING", "PENDING_VERIFICATION"])
     .not("checkout_request_id", "is", null)
+    .or("reconcile_attempts.is.null,reconcile_attempts.lt.3")
     .lt("created_at", cutoff)
     .order("created_at", { ascending: true })
     .limit(limit);
@@ -274,6 +335,7 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
     checkout_request_id: string;
     company_id: string | null;
     status: string;
+    reconcile_attempts?: number | null;
   }>;
 
   for (const row of rows) {
@@ -283,6 +345,23 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
       skipped++;
       continue;
     }
+
+    const attempts = Number(row.reconcile_attempts ?? 0);
+    if (Number.isFinite(attempts) && attempts >= 3) {
+      await admin.from("payment_reconciliation_log").insert({
+        checkout_request_id: checkoutId,
+        db_status: row.status,
+        daraja_result_code: null,
+        daraja_result_desc: "max_auto_reconcile_attempts",
+        action_taken: "pending_skip_max_retries",
+      });
+      skipped++;
+      continue;
+    }
+
+    await admin.from("mpesa_payments").update({
+      reconcile_attempts: attempts + 1,
+    }).eq("id", row.id);
 
     let q: Awaited<ReturnType<typeof queryStkPush>>;
     try {
@@ -370,11 +449,14 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
   // Phase 2: DB shows paid (SUCCESS / result_code=0) but subscription never activated — run RPC without Daraja query.
   const { data: stuckRows, error: stuckErr } = await admin
     .from("mpesa_payments")
-    .select("id, checkout_request_id, company_id, status, result_code, subscription_activated, created_at")
+    .select(
+      "id, checkout_request_id, company_id, status, result_code, subscription_activated, created_at, reconcile_attempts",
+    )
     .eq("subscription_activated", false)
     .eq("status", "SUCCESS")
     .not("company_id", "is", null)
     .not("checkout_request_id", "is", null)
+    .or("reconcile_attempts.is.null,reconcile_attempts.lt.3")
     .lt("created_at", cutoff)
     .order("created_at", { ascending: true })
     .limit(limit);
@@ -383,8 +465,10 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
     console.error("[mpesa-payment-reconcile] stuck-success select failed", stuckErr.message);
   } else {
     const stuck = (stuckRows ?? []) as Array<{
+      id: string;
       checkout_request_id: string;
       company_id: string | null;
+      reconcile_attempts?: number | null;
     }>;
     for (const row of stuck) {
       stuckSuccessExamined++;
@@ -397,6 +481,23 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
         skipped++;
         continue;
       }
+
+      const sAttempts = Number(row.reconcile_attempts ?? 0);
+      if (Number.isFinite(sAttempts) && sAttempts >= 3) {
+        await admin.from("payment_reconciliation_log").insert({
+          checkout_request_id: checkoutId,
+          db_status: "SUCCESS_UNACTIVATED",
+          daraja_result_code: null,
+          daraja_result_desc: "max_auto_reconcile_attempts",
+          action_taken: "stuck_success_skip_max_retries",
+        });
+        skipped++;
+        continue;
+      }
+
+      await admin.from("mpesa_payments").update({
+        reconcile_attempts: sAttempts + 1,
+      }).eq("id", row.id);
 
       await admin.from("payment_reconciliation_log").insert({
         checkout_request_id: checkoutId,
@@ -441,8 +542,37 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
     }
   }
 
+  const scanned =
+    orphanExamined +
+    examined +
+    stuckSuccessExamined +
+    (bindListErr ? 0 : (bindRows?.length ?? 0));
+  const fixed =
+    activated +
+    stuckSuccessActivated +
+    orphanPaymentsInserted +
+    orphanSubscriptionsActivated +
+    orphanBindingsRepaired;
+
+  await admin.from("payment_reconciliation_log").insert({
+    checkout_request_id: null,
+    db_status: "reconcile_job",
+    daraja_result_code: null,
+    daraja_result_desc: JSON.stringify({
+      scanned,
+      fixed,
+      failed: errors,
+      minAgeMinutes,
+      limit,
+    }).slice(0, 500),
+    action_taken: "reconcile_job_completed",
+  });
+
   return json({
     ok: true,
+    scanned,
+    fixed,
+    failed: errors,
     examined,
     activated,
     skipped,
@@ -452,6 +582,7 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
     orphanExamined,
     orphanPaymentsInserted,
     orphanSubscriptionsActivated,
+    orphanBindingsRepaired,
     minAgeMinutes,
     limit,
   });

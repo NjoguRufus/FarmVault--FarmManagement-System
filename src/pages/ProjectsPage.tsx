@@ -326,7 +326,7 @@ export default function ProjectsPage() {
     );
 
     try {
-      await updateProject(target.id, { status: 'closed' }, { expectedRowVersion: target.rowVersion ?? null });
+      await updateProject(target.id, { status: 'closed' }, { expectedRowVersion: target.rowVersion ?? 1 });
       toast.success('Project closed', {
         description: 'It’s in Closed Projects whenever you need to look it up.',
       });
@@ -364,7 +364,7 @@ export default function ProjectsPage() {
     );
 
     try {
-      await updateProject(target.id, { status: 'active' }, { expectedRowVersion: target.rowVersion ?? null });
+      await updateProject(target.id, { status: 'active' }, { expectedRowVersion: target.rowVersion ?? 1 });
       toast.success('Project reopened', {
         description: 'It’s back with your ongoing farms.',
       });

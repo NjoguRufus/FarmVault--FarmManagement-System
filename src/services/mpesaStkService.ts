@@ -55,12 +55,17 @@ type StkEdgeBody = {
   error?: string;
   detail?: string;
   message?: string;
+  code?: string;
 };
 
 function formatStkEdgeError(data: StkEdgeBody): string {
   const err = typeof data.error === 'string' ? data.error : '';
   const det = typeof data.detail === 'string' ? data.detail : '';
   const msg = typeof data.message === 'string' ? data.message : '';
+  const code = typeof data.code === 'string' ? data.code : '';
+  if (code === 'STK_IN_PROGRESS' || code === 'STK_BIND_STALE') {
+    return det || err || msg || 'M-Pesa checkout is still processing. Please wait or refresh Billing.';
+  }
   if (err && det && det !== err) return `${err}: ${det}`;
   return err || det || msg || 'STK Push failed';
 }
