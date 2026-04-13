@@ -91,6 +91,13 @@ export default function ProjectDetailsPage() {
     });
   }, [project?.id, project?.name, project?.cropType, project?.cropTypeKey, companyId]);
 
+  useEffect(() => {
+    if (!project?.id || isProjectClosed(project)) return;
+    if (!isDeveloper && companyId && project.companyId !== companyId) return;
+    if (activeProject?.id === project.id) return;
+    setActiveProject(project);
+  }, [project, companyId, isDeveloper, setActiveProject, activeProject?.id]);
+
   if (import.meta.env.DEV && projectId && !projectsLoading && project) {
     logger.log('[ProjectDetailsPage] project details loaded', { projectId, name: project.name });
   }

@@ -118,7 +118,7 @@ export function CompanyDashboard() {
   /** When navbar is “All Projects”, clicking a row in Your Farm Progress scopes the four financial stat cards to this project (toggle off by clicking again or Show All). */
   const [dashboardFocusProjectId, setDashboardFocusProjectId] = useState<string | null>(null);
   const [farmProgressDashboardFilter, setFarmProgressDashboardFilter] =
-    useState<FarmProgressDashboardFilter>('all');
+    useState<FarmProgressDashboardFilter>('ongoing');
   const { startTour } = useTour();
   const isMobile = useIsMobile();
   const { crops: cropCatalog } = useCropCatalog(queryCompanyId ?? undefined);
