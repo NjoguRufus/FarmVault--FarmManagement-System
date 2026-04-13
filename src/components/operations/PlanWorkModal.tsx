@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar as CalendarIcon, User, Briefcase, MapPin } from 'lucide-react';
 import {
   Dialog,
@@ -30,6 +30,7 @@ import { listEmployees } from '@/services/employeesSupabaseService';
 import { createWorkCard } from '@/services/operationsWorkCardService';
 import type { Employee } from '@/types';
 import { logger } from "@/lib/logger";
+import { isProjectClosed } from '@/lib/projectClosed';
 
 interface PlanWorkModalProps {
   open: boolean;
@@ -65,6 +66,11 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
   });
 
   // Filter employees who have operations.view or operations.recordDailyWork permission
+  const openProjects = useMemo(
+    () => projects.filter((p) => !isProjectClosed(p)),
+    [projects],
+  );
+
   const operationsEmployees = useMemo(() => {
     const filtered = employees.filter(emp => {
       if (emp.status !== 'active') return false;
@@ -90,7 +96,7 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
 
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
-    projectId: activeProject?.id ?? '',
+    projectId: '',
     workTitle: '',
     workCategory: '',
     plannedDate: new Date(),
@@ -99,6 +105,19 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
     allocatedManagerId: '',
     notes: '',
   });
+
+  useEffect(() => {
+    if (!open) return;
+    setFormData((prev) => {
+      const stillValid = openProjects.some((p) => p.id === prev.projectId);
+      if (stillValid) return prev;
+      const preferred =
+        activeProject && openProjects.some((p) => p.id === activeProject.id)
+          ? activeProject.id
+          : openProjects[0]?.id ?? '';
+      return { ...prev, projectId: preferred };
+    });
+  }, [open, openProjects, activeProject?.id]);
 
   const selectedEmployee = useMemo(() => {
     return operationsEmployees.find(e => e.id === formData.allocatedManagerId);
@@ -142,8 +161,14 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
       toast.success('Work card created successfully');
       
       // Reset form
+      const nextProjectId =
+        activeProject &&
+        !isProjectClosed(activeProject) &&
+        openProjects.some((p) => p.id === activeProject.id)
+          ? activeProject.id
+          : openProjects[0]?.id ?? '';
       setFormData({
-        projectId: activeProject?.id ?? '',
+        projectId: nextProjectId,
         workTitle: '',
         workCategory: '',
         plannedDate: new Date(),
@@ -184,7 +209,7 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
                 <SelectValue placeholder="Select project" />
               </SelectTrigger>
               <SelectContent>
-                {projects.map((p) => (
+                {openProjects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground" />
