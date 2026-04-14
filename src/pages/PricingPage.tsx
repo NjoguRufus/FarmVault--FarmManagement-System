@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     question: "How does billing work?",
-    answer: "FarmVault offers monthly and annual billing options. Annual plans give you significant savings (up to 2 months free). All prices are in KES (Kenyan Shillings) and you can pay via M-Pesa or card.",
+    answer: "FarmVault offers monthly and annual billing options. Annual plans give you significant savings (up to 2 months free). You can pay via M-Pesa or card.",
   },
   {
     question: "Can I change my plan later?",
@@ -32,7 +32,7 @@ const faqs = [
   },
   {
     question: "What payment methods do you accept?",
-    answer: "We accept M-Pesa, Visa, Mastercard, and other major payment methods. M-Pesa is the most popular choice for Kenyan farmers.",
+    answer: "We accept M-Pesa, Visa, Mastercard, and other major payment methods used in real farm operations.",
   },
   {
     question: "Is there a contract or commitment?",
@@ -51,7 +51,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-background font-body">
       <SeoHead
         title="Pricing - FarmVault Farm Management Software | Affordable Plans for Every Farm"
-        description="FarmVault pricing plans for Kenyan farmers. Start free, upgrade when ready. Monthly and annual options. M-Pesa accepted. Affordable farm management software."
+        description="FarmVault pricing plans for real farm operations. Start free, upgrade when ready. Monthly and annual options. M-Pesa accepted. Affordable farm management software."
         canonical={SEO_ROUTES.pricing}
         jsonLd={[
           getOrganizationSchema(),
@@ -88,7 +88,7 @@ export default function PricingPage() {
               Simple, <span className="text-gradient-gold">Transparent</span> Pricing
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed">
-              Choose the plan that fits your farm. Start free and upgrade as you grow. All prices in KES with M-Pesa and card payments accepted.
+              Choose the plan that fits your farm. Start free and upgrade as you grow. Built from real farm experience and designed for real operations across different regions.
             </p>
           </motion.div>
         </div>

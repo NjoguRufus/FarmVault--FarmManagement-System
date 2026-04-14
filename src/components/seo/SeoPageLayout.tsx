@@ -27,7 +27,7 @@ export function SeoPageLayout({ children, showCta = true }: SeoPageLayoutProps) 
               Ready to manage your farm smarter?
             </h2>
             <p className="text-muted-foreground mb-8 max-w-lg mx-auto">
-              Join Kenyan farmers using FarmVault for crop monitoring, budgets, inventory and harvest logistics.
+              Join farmers using FarmVault for crop monitoring, budgets, inventory and harvest logistics in real farm operations.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground rounded-xl">

@@ -5,7 +5,6 @@ import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
 import { PostOnboardingProjectWelcomeBanner } from './PostOnboardingProjectWelcomeBanner';
-import { AIChatButton } from '@/components/ai/AIChatButton';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -161,7 +160,6 @@ export function MainLayout() {
       </main>
 
       <BottomNav />
-      <AIChatButton />
       {!subscriptionLoading && trialExpiredNeedsPlan && isCompanyAdmin && <PostTrialPlanModal open />}
     </div>
   );

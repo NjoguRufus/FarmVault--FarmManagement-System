@@ -23,8 +23,8 @@ export default function FarmManagementLearnMasterPage() {
   return (
     <SeoPageLayout>
       <SeoHead
-        title="Farm management hub | Guides for Kenya & Africa | FarmVault"
-        description="Complete index of FarmVault learn guides: crop management, workers, harvest, expenses, inventory, multi-farm operations, analytics, and Kenyan crop playbooks."
+        title="Farm management hub | Guides for real farm operations | FarmVault"
+        description="Complete index of FarmVault learn guides: crop management, workers, harvest, expenses, inventory, multi-farm operations, analytics, and practical crop playbooks."
         canonical={LEARN_MASTER_PATH}
         jsonLd={[getBreadcrumbSchema(breadcrumbs)]}
       />
@@ -43,7 +43,7 @@ export default function FarmManagementLearnMasterPage() {
 
         <h1 className="text-4xl font-bold text-foreground mb-4 tracking-tight">Farm management knowledge hub</h1>
         <p className="text-lg text-muted-foreground leading-relaxed mb-10">
-          Every guide below is written for farmers and agribusiness teams in Kenya and similar African systems. Each page explains the topic, adds local context, and shows how{" "}
+          Every guide below is written for farmers and agribusiness teams in practical farm environments. Each page explains the topic, adds field context, and shows how{" "}
           <Link to={SEO_ROUTES.features} className="text-primary font-medium hover:underline">
             FarmVault
           </Link>{" "}

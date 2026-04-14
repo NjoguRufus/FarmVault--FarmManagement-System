@@ -239,7 +239,7 @@ export default function FeaturesPage() {
             </h2>
             <div className="prose prose-neutral dark:prose-invert max-w-none">
               <p className="text-lg text-muted-foreground leading-relaxed mb-6">
-                FarmVault is built specifically for African farmers and local farming conditions. Unlike generic farm software designed for large Western farms, FarmVault understands the unique challenges of farming in Kenya and across Africa.
+                Built from real farm experience, FarmVault is designed for real operations across different regions. Unlike generic farm software designed for corporate-only use, FarmVault is grounded in practical farm environments.
               </p>
               <ul className="space-y-4 text-muted-foreground">
                 <li className="flex items-start gap-3">
@@ -252,11 +252,11 @@ export default function FeaturesPage() {
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong>M-Pesa Integration:</strong> Pay for subscriptions and track payments using M-Pesa, the way Kenyans do business.</span>
+                  <span><strong>Flexible Payments:</strong> Pay subscriptions and track payments using practical payment methods your operation already uses.</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong>Local Crop Support:</strong> Built-in guidance for tomatoes, maize, French beans, capsicum, and other popular Kenyan crops.</span>
+                  <span><strong>Practical Crop Support:</strong> Built-in guidance for tomatoes, maize, French beans, capsicum, and other widely grown crops.</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
@@ -264,7 +264,7 @@ export default function FeaturesPage() {
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong>Local Support:</strong> Get help from a team that understands Kenyan agriculture.</span>
+                  <span><strong>Real-World Support:</strong> Get help from a team that understands real farm operations.</span>
                 </li>
               </ul>
             </div>
@@ -286,7 +286,7 @@ export default function FeaturesPage() {
               Ready to Transform Your Farm?
             </h2>
             <p className="text-lg text-muted-foreground mb-8 leading-relaxed">
-              Join thousands of farmers across Kenya who use FarmVault to run more profitable operations. Start your free trial today.
+              Join thousands of farmers who use FarmVault to run more profitable operations across different regions. Start your free trial today.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-14 text-base font-semibold">

@@ -67,7 +67,7 @@ export default function LearnTopicPage() {
             ))}
             <p className="text-sm text-muted-foreground mt-4 mb-0">
               <Link to={SEO_ROUTES.pricing} className="text-primary font-medium hover:underline">
-                View pricing in KES
+                View pricing
               </Link>
               {" · "}
               <Link to={SEO_ROUTES.features} className="text-primary font-medium hover:underline">

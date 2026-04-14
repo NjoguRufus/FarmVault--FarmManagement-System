@@ -29,7 +29,7 @@ const values = [
   {
     icon: Globe,
     title: "Impact",
-    description: "From smallholder farms to cooperatives and agribusinesses, FarmVault helps digitize and scale operations sustainably across Kenya and East Africa.",
+    description: "From smallholder farms to cooperatives and agribusinesses, FarmVault helps digitize and scale operations sustainably across different regions.",
   },
   {
     icon: Lightbulb,
@@ -59,8 +59,8 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-background font-body">
       <SeoHead
-        title="About FarmVault | Kenyan agricultural software platform"
-        description="FarmVault is a Kenyan agricultural software platform helping farmers manage operations—workers, harvest, expenses, inventory, and analytics."
+        title="About FarmVault | Agricultural software platform"
+        description="FarmVault is an agricultural software platform built from real farm experience to help farmers and agribusinesses manage daily operations with structured digital records."
         canonical={SEO_ROUTES.about}
         jsonLd={[
           getOrganizationSchema(),
@@ -98,7 +98,10 @@ export default function AboutPage() {
               by People Who Care
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed">
-              FarmVault is a Kenyan agricultural software platform helping farmers manage operations. We combine crop planning, workers, harvest, inventory, expenses, and analytics so you can run the farm with clarity—from smallholdings to growing agribusinesses.
+              FarmVault is an agricultural software platform built from real farm experience to help farmers and agribusinesses manage daily operations with structured digital records.
+            </p>
+            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed">
+              FarmVault is built to work across different regions, crops, and farming systems — without changing how farmers already operate.
             </p>
           </motion.div>
         </div>
@@ -145,10 +148,10 @@ export default function AboutPage() {
                   FarmVault was born from a simple observation: while the rest of the world was going digital, most African farmers were still using paper notebooks and memory to run their farms. Important records got lost, expenses went untracked, and farmers had no clear picture of their true profitability.
                 </p>
                 <p className="text-muted-foreground leading-relaxed mb-6">
-                  We set out to change that. Working closely with farmers across Kenya, we built a farm management system that actually works for African conditions—one that runs on mobile phones, works offline in the field, accepts M-Pesa payments, and understands local crops and farming practices.
+                  We set out to change that. Working closely with farmers in practical farm environments, we built a farm management system that actually works in real farm operations—one that runs on mobile phones, works offline in the field, supports practical payment workflows, and adapts to local crops and farming practices.
                 </p>
                 <p className="text-muted-foreground leading-relaxed mb-6">
-                  Today, FarmVault helps thousands of farmers manage their operations with clarity and confidence. From smallholder tomato farmers in Nakuru to large horticultural exporters in Naivasha, our users represent the full spectrum of Kenyan agriculture.
+                  Today, FarmVault helps thousands of farmers manage their operations with clarity and confidence. Used on real farms, the platform supports the full spectrum of agriculture from smallholder growers to large commercial operations.
                 </p>
                 <p className="text-muted-foreground leading-relaxed">
                   But we're just getting started. Our vision is to become the operating system for African agriculture—helping farmers not just record data, but use it to make better decisions, access finance, and connect with markets.
@@ -234,7 +237,7 @@ export default function AboutPage() {
                   </li>
                 </ul>
                 <p className="text-muted-foreground leading-relaxed mt-6">
-                  Whether you farm tomatoes in Nakuru, maize in Eldoret, French beans in Naivasha, or rice in Mwea, FarmVault has the tools you need to run a more profitable operation.
+                  Whether you farm tomatoes, maize, French beans, capsicum, rice, or mixed crops, FarmVault has the tools you need to run a more profitable operation across different regions.
                 </p>
               </div>
             </motion.div>
@@ -256,7 +259,7 @@ export default function AboutPage() {
               Join the FarmVault Community
             </h2>
             <p className="text-lg text-muted-foreground mb-8 leading-relaxed">
-              Thousands of farmers across Kenya trust FarmVault to run their operations. Start your journey to smarter farming today.
+              Thousands of farmers and agribusinesses trust FarmVault to run their operations. Start your journey to smarter farming today.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-8 h-14 text-base font-semibold">

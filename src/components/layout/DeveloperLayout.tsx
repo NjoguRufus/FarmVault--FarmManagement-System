@@ -4,7 +4,6 @@ import { AppSidebar } from './AppSidebar';
 import { BottomNav } from './BottomNav';
 import { TopNavbar } from './TopNavbar';
 import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
-import { AIChatButton } from '@/components/ai/AIChatButton';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
@@ -95,7 +94,6 @@ export function DeveloperLayout() {
       </main>
 
       <BottomNav />
-      <AIChatButton />
     </div>
   );
 }

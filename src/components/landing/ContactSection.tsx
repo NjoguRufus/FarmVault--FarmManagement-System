@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 const contactItems = [
   { icon: Phone, label: "Phone", value: "0714 748299" },
   { icon: Mail, label: "Email", value: "hello@farmvault.africa" },
-  { icon: MapPin, label: "Office", value: "Nairobi, Kenya" },
+  { icon: MapPin, label: "Coverage", value: "Support across different regions" },
 ];
 
 export function ContactSection() {
