@@ -24,7 +24,7 @@ export const SUBSCRIPTION_PLANS: PlanOption[] = [
     description: 'For single farms that want clear records and simple tracking.',
     features: [
       'Max 2 active projects',
-      'Max 3 employees',
+      'Max 2 employees',
       'Crop stage tracking',
       'Season budget tracking',
       'Expense recording',

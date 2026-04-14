@@ -48,7 +48,7 @@ export default function LearnHubPage() {
     <SeoPageLayout>
       <SeoHead
         title="Farm management guides & agriculture topics | FarmVault Learn"
-        description="Free guides on crop management, workers, harvest, expenses, inventory, analytics, and Kenyan farming—plus how FarmVault helps."
+        description="Free guides on crop management, workers, harvest, expenses, inventory, analytics, and practical farming systems—plus how FarmVault helps."
         canonical={LEARN_HUB_PATH}
         jsonLd={jsonLd}
       />
@@ -63,13 +63,13 @@ export default function LearnHubPage() {
 
         <h1 className="text-4xl font-bold text-foreground mb-4 tracking-tight">FarmVault Learn</h1>
         <p className="text-lg text-muted-foreground leading-relaxed mb-10">
-          Practical farm management topics for Kenya and Africa—operations, economics, and how digital records improve decisions. Start with the{" "}
+          Practical farm management topics for real farm operations across different regions—operations, economics, and how digital records improve decisions. Start with the{" "}
           <Link to={LEARN_MASTER_PATH} className="text-primary font-medium hover:underline">
             master farm management hub
           </Link>{" "}
           or browse by category below. FarmVault is agriculture SaaS with{" "}
           <Link to={SEO_ROUTES.pricing} className="text-primary font-medium hover:underline">
-            pricing in KES
+            practical pricing plans
           </Link>
           .
         </p>

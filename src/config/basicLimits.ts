@@ -1,5 +1,5 @@
 export const BASIC_LIMITS = {
   maxActiveProjects: 2,
-  maxEmployees: 3,
+  maxEmployees: 2,
 } as const;
 

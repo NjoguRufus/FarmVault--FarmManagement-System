@@ -16,7 +16,7 @@ export function HomeFaqSection() {
             Frequently Asked Questions
           </h2>
           <p className="text-muted-foreground">
-            Quick answers about FarmVault and farm management in Kenya.
+            Quick answers about FarmVault and practical farm management.
           </p>
         </div>
         <Accordion type="single" collapsible className="max-w-3xl mx-auto">

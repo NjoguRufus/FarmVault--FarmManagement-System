@@ -10,8 +10,8 @@ const footerLinks = [
   { label: "About", href: "/about" },
   { label: "Blog", href: "/blog" },
   { label: "What is FarmVault", href: "/what-is-farmvault" },
-  { label: "Farm Management Software Kenya", href: "/farm-management-software-kenya" },
-  { label: "Agriculture Software Kenya", href: "/agriculture-software-kenya" },
+  { label: "Farm Management Software", href: "/farm-management-software-kenya" },
+  { label: "Agriculture Software", href: "/agriculture-software-kenya" },
   { label: "Crop Guides", href: "/crop-guides" },
   { label: "Farm Calculators", href: "/farm-calculators" },
   { label: "Contact", href: "/#contact" },
@@ -80,7 +80,7 @@ export function Footer() {
                 <div className="w-8 h-8 rounded-lg bg-[#2c3b30] flex items-center justify-center">
                   <MapPin className="h-3.5 w-3.5 text-[#D8B980]" />
                 </div>
-                Nairobi, Kenya
+                Remote support across regions
               </li>
             </ul>
           </div>

@@ -30,7 +30,7 @@ export function HomeTestimonialsSection() {
             What Farmers Say About FarmVault
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
-            Kenyan farmers use FarmVault to plan crops, track costs and manage harvests. Here’s what they say.
+            Used on real farms, FarmVault helps farmers plan crops, track costs and manage harvests. Here’s what they say.
           </p>
         </div>
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">

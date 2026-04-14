@@ -24,8 +24,8 @@ export default function FaqPage() {
   return (
     <div className="landing-page min-h-screen bg-background font-body">
       <SeoHead
-        title="FarmVault FAQ | Farm management software Kenya"
-        description="Answers about FarmVault: workers, crop yield, multiple farms, and availability in Kenya. Agriculture SaaS with KES pricing."
+        title="FarmVault FAQ | Farm management software"
+        description="Answers about FarmVault: workers, crop yield, multiple farms, and practical operations. Agriculture SaaS built from real farm experience."
         canonical="/faq"
         jsonLd={[getBreadcrumbSchema(breadcrumbs), getFAQSchema(faqForSchema)]}
       />
@@ -41,7 +41,7 @@ export default function FaqPage() {
           </nav>
           <h1 className="text-4xl font-bold text-foreground mb-4 tracking-tight">Frequently asked questions</h1>
           <p className="text-muted-foreground leading-relaxed mb-10">
-            Quick answers about FarmVault for Kenyan farmers and agribusinesses. For step-by-step guides, visit{" "}
+            Quick answers about FarmVault for farmers and agribusinesses across different regions. For step-by-step guides, visit{" "}
             <Link to={LEARN_HUB_PATH} className="text-primary font-medium hover:underline">
               Learn
             </Link>{" "}
