@@ -996,6 +996,7 @@ export async function getTodayInventoryUsage(companyId: string): Promise<{
     .ops()
     .from(INVENTORY_USAGE_TABLE)
     .select('inventory_item_id, inventory_item_name, quantity, unit')
+    .eq('company_id', companyId)
     .gte('recorded_at', `${today}T00:00:00`);
 
   if (error) {

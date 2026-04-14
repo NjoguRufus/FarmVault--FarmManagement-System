@@ -147,6 +147,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TourProvider } from "@/tour/TourProvider";
 import { OnboardingModalPriorityProvider } from "@/contexts/OnboardingModalPriorityContext";
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
+import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { DomainGuard } from "@/components/routing/DomainGuard";
@@ -557,6 +558,7 @@ const App = () => (
                   <HelmetProvider>
                     <DomainGuard />
                     <SignedInAuthEscape />
+                    <ScrollToTop />
                     <RoutePersistence />
                     <PosthogAnalytics />
                     <OneSignalBootstrap />

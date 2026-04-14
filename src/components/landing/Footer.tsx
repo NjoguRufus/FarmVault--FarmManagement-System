@@ -1,4 +1,4 @@
-import { Shield, Mail, Phone, MapPin, ArrowUpRight } from "lucide-react";
+import { Mail, Phone, MapPin } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const footerLinks = [
@@ -19,39 +19,38 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="bg-foreground relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_hsl(145_63%_22%_/_0.08),_transparent_60%)]" />
-
-      <div className="container mx-auto px-4 lg:px-8 relative">
+    <footer className="border-t border-[#D8B980]/35 bg-[#1f2c23]">
+      <div className="container mx-auto px-4 lg:px-8">
         <div className="py-16 grid md:grid-cols-12 gap-12">
           <div className="md:col-span-5">
             <div className="flex items-center gap-2.5 mb-5">
-              <div className="gradient-primary rounded-xl p-2">
-                <Shield className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <span className="font-semibold text-xl text-primary-foreground">FarmVault</span>
+              <img
+                src="/Logo/FarmVault_Logo dark mode.png"
+                alt="FarmVault"
+                className="h-8 w-auto rounded-md object-contain"
+              />
+              <span className="font-semibold text-xl text-zinc-100">Farm<span className="text-[#D8B980]">Vault</span></span>
             </div>
-            <h2 className="text-base font-semibold text-primary-foreground mb-3">
-              Farm Management System in Africa
+            <h2 className="text-base font-semibold text-zinc-100 mb-3">
+              <span className="text-[#D8B980]">Farm Management</span> System in Africa
             </h2>
-            <p className="text-sm text-primary-foreground/50 leading-relaxed max-w-sm font-light">
-              Track harvest, labor, inventory, and expenses with a modern farm management system built for African farmers.
+            <p className="max-w-sm text-sm leading-relaxed text-zinc-300">
+              Built for farmers, farm managers, and agribusinesses handling real farm operations and money.
             </p>
           </div>
 
           <div className="md:col-span-3">
-            <h4 className="font-bold text-primary-foreground mb-5 text-sm tracking-wide uppercase">
-              Quick Links
+            <h4 className="mb-5 text-sm font-bold uppercase tracking-wide text-zinc-100">
+              Pages
             </h4>
             <ul className="space-y-3">
               {footerLinks.map((l) => (
                 <li key={l.label}>
                   <Link
                     to={l.href}
-                    className="text-sm text-primary-foreground/50 hover:text-primary-foreground transition-colors duration-200 flex items-center gap-1 group"
+                    className="text-sm text-zinc-300 transition-colors duration-200 hover:text-[#D8B980]"
                   >
                     {l.label}
-                    <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </Link>
                 </li>
               ))}
@@ -59,27 +58,27 @@ export function Footer() {
           </div>
 
           <div className="md:col-span-4">
-            <h4 className="font-bold text-primary-foreground mb-5 text-sm tracking-wide uppercase">
-              Contact Us
+            <h4 className="mb-5 text-sm font-bold uppercase tracking-wide text-zinc-100">
+              Contact
             </h4>
             <ul className="space-y-3">
-              <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
-                <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
-                  <Phone className="h-3.5 w-3.5 text-primary-foreground/60" />
+              <li className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="w-8 h-8 rounded-lg bg-[#2c3b30] flex items-center justify-center">
+                  <Phone className="h-3.5 w-3.5 text-[#D8B980]" />
                 </div>
-                <a href="tel:+254714748299" className="hover:text-primary-foreground transition-colors">0714 748299</a>
+                <a href="tel:+254714748299" className="transition-colors hover:text-white">0714 748299</a>
               </li>
-              <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
-                <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
-                  <Mail className="h-3.5 w-3.5 text-primary-foreground/60" />
+              <li className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="w-8 h-8 rounded-lg bg-[#2c3b30] flex items-center justify-center">
+                  <Mail className="h-3.5 w-3.5 text-[#D8B980]" />
                 </div>
-                <a href="mailto:hello@farmvault.africa" className="hover:text-primary-foreground transition-colors">
+                <a href="mailto:hello@farmvault.africa" className="transition-colors hover:text-white">
                   hello@farmvault.africa
                 </a>
               </li>
-              <li className="flex items-center gap-3 text-sm text-primary-foreground/50">
-                <div className="w-8 h-8 rounded-lg bg-primary-foreground/5 flex items-center justify-center">
-                  <MapPin className="h-3.5 w-3.5 text-primary-foreground/60" />
+              <li className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="w-8 h-8 rounded-lg bg-[#2c3b30] flex items-center justify-center">
+                  <MapPin className="h-3.5 w-3.5 text-[#D8B980]" />
                 </div>
                 Nairobi, Kenya
               </li>
@@ -87,18 +86,18 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="border-t border-primary-foreground/8 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-primary-foreground/30">
-            © {new Date().getFullYear()} FarmVault. Smart Farm Management for Africa.
+        <div className="flex flex-col items-center justify-between gap-4 border-t border-[#D8B980]/25 py-6 md:flex-row">
+          <p className="text-xs text-zinc-400">
+            © {new Date().getFullYear()} FarmVault. Farm management system.
           </p>
           <div className="flex gap-6">
-            <Link to="/terms" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+            <Link to="/terms" className="text-xs text-zinc-400 transition-colors hover:text-white">
               Terms &amp; Conditions
             </Link>
-            <Link to="/privacy" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+            <Link to="/privacy" className="text-xs text-zinc-400 transition-colors hover:text-white">
               Privacy Policy
             </Link>
-            <Link to="/refund" className="text-xs text-primary-foreground/30 hover:text-primary-foreground/60 transition-colors">
+            <Link to="/refund" className="text-xs text-zinc-400 transition-colors hover:text-white">
               Refund Policy
             </Link>
           </div>
