@@ -56,7 +56,7 @@ export function HeroSection() {
               </Button>
             </div>
             <ul className="mt-8 space-y-2 text-sm leading-6 text-zinc-300/70">
-              <li>Used by farmers and agribusiness teams in Kenya and across Africa</li>
+              <li>Used by farmers and agribusiness in Kenya and across Africa</li>
             </ul>
             <div className="mt-4 hidden h-px w-40 bg-white/25 md:block" aria-hidden="true" />
           </div>
