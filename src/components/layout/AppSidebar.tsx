@@ -97,18 +97,15 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
         }}
       >
       {/* Logo Section */}
-      <div className="flex h-16 shrink-0 items-center justify-between px-4 border-b border-sidebar-border/30">
-        <div className="flex items-center gap-3">
+      <div className="flex h-16 shrink-0 items-center px-4 border-b border-sidebar-border/30">
+        <div className="flex w-full flex-col items-start justify-center">
           <img
-            src="/Logo/FarmVault_Logo dark mode.png"
+            src={collapsed ? "/Logo/FarmVault_Logo dark mode.png" : "/Logo/fv.png"}
             alt="FarmVault logo"
-            className="h-8 w-auto rounded-md object-contain bg-sidebar-primary/10 p-1"
+            className="h-8 w-auto rounded-md object-contain"
           />
           {!collapsed && (
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-sidebar-foreground">FarmVault</span>
-              <span className="text-xs text-sidebar-muted">Management</span>
-            </div>
+            <span className="mt-1 text-xs text-sidebar-muted">Smart Farm Management</span>
           )}
         </div>
       </div>

@@ -1,77 +1,72 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Check, ArrowRight, Zap } from "lucide-react";
-import { motion } from "framer-motion";
+import { Check, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from "@/config/plans";
 import { BillingModeSelector } from "@/components/subscription/BillingModeSelector";
 
 export function PricingSection() {
-  const [billingMode, setBillingMode] = useState<BillingMode>('monthly');
+  const [billingMode, setBillingMode] = useState<BillingMode>("monthly");
 
   return (
-    <section id="pricing" className="py-24 lg:py-32 bg-secondary/50 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(145_63%_22%_/_0.03),_transparent_70%)]" />
-      <div className="container mx-auto px-4 lg:px-8 relative">
-        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-100px" }} transition={{ duration: 0.6 }} className="text-center mb-10 md:mb-14">
-          <span className="inline-block text-xs font-semibold tracking-widest uppercase text-primary mb-4">Pricing</span>
-          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-5 tracking-tight">Simple, <span className="text-gradient-gold">Transparent</span> Pricing</h2>
-          <p className="text-muted-foreground max-w-xl mx-auto text-base font-light leading-relaxed">Same plans as in the app. Choose one to get started.</p>
-        </motion.div>
+    <section id="pricing" className="bg-white py-16 md:py-24">
+      <div className="container mx-auto px-4 lg:px-8">
+        <div className="mb-10 text-center">
+          <h2 className="text-3xl font-bold tracking-tight text-[#1f3a2d] md:text-4xl">
+            Pricing in <span className="text-[#D8B980]">KES</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-[#5f6f63]">
+            Choose the plan that fits your farm size. Billing and features match what you get inside FarmVault.
+          </p>
+        </div>
+
         <div className="flex justify-center mb-10">
           <BillingModeSelector mode={billingMode} onChange={setBillingMode} />
         </div>
-        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {SUBSCRIPTION_PLANS.map((plan, i) => (
-            <motion.div key={plan.value} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-60px" }} transition={{ delay: i * 0.1, duration: 0.5 }} className={"rounded-3xl p-8 transition-all duration-500 relative " + (plan.popular ? "bg-card shadow-luxury-hover border-2 border-primary/20" : "bg-card shadow-luxury border border-border")}>
-              {(() => {
-                const amount = getPlanPrice(plan.value, billingMode);
-                const durationLabel = getBillingModeDurationLabel(billingMode);
-                return (
+        <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
+          {SUBSCRIPTION_PLANS.map((plan) => (
+            <article
+              key={plan.value}
+              className={`rounded-xl border p-6 ${plan.popular ? "border-[#D8B980] bg-[#fffdf9]" : "border-[#d8b980]/40 bg-white"}`}
+            >
+              <h3 className="text-xl font-bold text-[#1f3a2d]">{plan.name}</h3>
+              <p className="mt-1 text-sm text-[#5f6f63]">{plan.description}</p>
+              {plan.popular && (
+                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[#D8B980]">
+                  Most selected
+                </p>
+              )}
+
+              <div className="mt-5">
+                {getPlanPrice(plan.value, billingMode) != null ? (
                   <>
-                    {plan.popular && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary px-3 py-1 text-xs font-semibold">
-                          <Zap className="h-3 w-3" /> Most Popular
-                        </span>
-                      </div>
-                    )}
-                    <h3 className="text-xl font-bold text-foreground mb-1 tracking-tight">{plan.name}</h3>
-                    <p className="text-sm text-muted-foreground mb-6 font-light">{plan.description}</p>
-                    <div className="mb-3">
-                      {amount != null ? (
-                        <>
-                          <div className="flex items-baseline gap-1">
-                            <span className="text-3xl font-bold text-foreground">
-                              KES {amount.toLocaleString()}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">{durationLabel}</p>
-                          {billingMode === 'annual' && (
-                            <p className="text-[11px] text-emerald-700 mt-1">
-                              Save more with annual billing.
-                            </p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-sm font-medium text-muted-foreground">Talk to us for pricing.</p>
-                      )}
-                    </div>
+                    <p className="text-3xl font-bold text-[#1f3a2d]">
+                      KES {getPlanPrice(plan.value, billingMode)?.toLocaleString()}
+                    </p>
+                    <p className="mt-1 text-xs text-[#5f6f63]">
+                      {getBillingModeDurationLabel(billingMode)}
+                    </p>
                   </>
-                );
-              })()}
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <div className="gradient-primary rounded-full p-0.5 shrink-0"><Check className="h-3.5 w-3.5 text-primary-foreground" /></div>
-                    {f}
+                ) : (
+                  <p className="text-sm text-[#5f6f63]">Contact us for pricing.</p>
+                )}
+              </div>
+
+              <ul className="mt-6 space-y-3">
+                {plan.features.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2 text-sm text-[#5f6f63]">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#D8B980]" />
+                    <span>{feature}</span>
                   </li>
                 ))}
               </ul>
-              <Button size="lg" asChild className={plan.popular ? "gradient-primary text-primary-foreground btn-luxury rounded-2xl w-full h-12" : "rounded-2xl w-full h-12 border-2 border-primary text-primary hover:bg-primary/5"}>
-                <a href="/sign-up" className="inline-flex items-center justify-center">Get Started <ArrowRight className="ml-2 h-4 w-4" /></a>
+
+              <Button size="lg" asChild className="mt-6 h-11 w-full rounded-md bg-[#D8B980] text-black hover:bg-[#c9aa74]">
+                <a href="/sign-up" className="inline-flex items-center justify-center">
+                  Start free Trial
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </a>
               </Button>
-            </motion.div>
+            </article>
           ))}
         </div>
       </div>

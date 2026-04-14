@@ -1,112 +1,37 @@
-import { useState } from "react";
-import { Play, ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { motion } from "framer-motion";
-import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { getAppAuthUrl } from "@/lib/urls/domains";
 
 export function CtaSection() {
-  const [isDemoOpen, setIsDemoOpen] = useState(false);
-  const demoVideoSrc = "/landing/demo/farmvault-demo.mp4";
-
   return (
-    <>
-      <section className="relative py-28 lg:py-36 overflow-hidden">
-        <div className="absolute inset-0">
-          <OptimizedImage
-          src="/landing/cta-bg.jpg"
-          webpSrc="/landing/cta-bg.webp"
-          alt=""
-          className="w-full h-full object-cover"
-        />
-          <div className="absolute inset-0 gradient-cta-overlay" />
-          <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-primary/10 rounded-full blur-[80px] animate-pulse-glow" />
-          <div className="absolute bottom-1/4 right-1/3 w-48 h-48 bg-gold/10 rounded-full blur-[60px] animate-pulse-glow" style={{ animationDelay: "2s" }} />
-        </div>
-
-        <div className="container mx-auto px-4 lg:px-8 relative z-10 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-80px" }}
-            transition={{ duration: 0.7 }}
-          >
-            <div className="glass-dark inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8">
-              <Sparkles className="h-3.5 w-3.5 text-gold" />
-              <span className="text-xs font-medium text-primary-foreground/80 tracking-wide uppercase">
-                Start Free Today
-              </span>
-            </div>
-
-            <h2 className="text-3xl md:text-5xl lg:text-6xl font-bold text-primary-foreground mb-6 tracking-tight leading-tight">
-              Start Managing Your Farm
-              <br />
-              <span className="text-gradient-gold">Smarter Today</span>
-            </h2>
-
-            <p className="text-primary-foreground/70 text-lg mb-6 max-w-xl mx-auto font-light leading-relaxed">
-              Stop relying on guesswork and manual records.
-            </p>
-            
-            <p className="text-primary-foreground/60 text-base mb-12 max-w-md mx-auto font-light leading-relaxed">
-              Use FarmVault to track, manage, and grow your farm with confidence.
-            </p>
-
-            <div className="flex flex-wrap justify-center gap-4">
-              <Button size="lg" asChild className="gradient-primary text-primary-foreground btn-luxury rounded-2xl px-10 h-14 text-base font-semibold">
-                <a href={getAppAuthUrl("sign-up")} className="inline-flex items-center">
-                  Get Started Now
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </a>
-              </Button>
-              <Button
-                size="lg"
-                variant="ghost"
-                type="button"
-                onClick={() => setIsDemoOpen(true)}
-                className="glass-dark text-primary-foreground hover:bg-primary-foreground/10 rounded-2xl px-8 h-14 text-base font-medium"
-              >
-                <span className="inline-flex items-center">
-                  <span className="gradient-primary rounded-full p-2 mr-3 inline-flex">
-                    <Play className="h-3 w-3 fill-primary-foreground text-primary-foreground" />
-                  </span>
-                  Watch Demo
-                </span>
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-      </section>
-
-      <Dialog open={isDemoOpen} onOpenChange={setIsDemoOpen}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden">
-          <div className="bg-background">
-            <DialogHeader className="px-6 pt-6 pb-2">
-              <DialogTitle>FarmVault Demo</DialogTitle>
-              <DialogDescription>
-                Watch how the system is used from setup to daily farm operations.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="px-6 pb-6">
-              <video
-                controls
-                preload="metadata"
-                className="w-full rounded-xl border bg-black max-h-[70vh]"
-              >
-                <source src={demoVideoSrc} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
-            </div>
+    <section id="cta" className="bg-white py-16 md:py-24">
+      <div className="container mx-auto px-4 lg:px-8">
+        <div className="rounded-xl border border-[#d8b980]/45 bg-white p-8 text-center md:p-12">
+          <h2 className="text-3xl font-bold leading-tight text-[#1f3a2d] md:text-4xl">
+            Start With This <span className="text-[#D8B980]">Season</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-[#5f6f63]">
+            Add your projects, log expenses in KES, record harvest, and track worker activity. FarmVault will show your season performance and profit clearly.
+          </p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Button size="lg" asChild className="h-12 rounded-md bg-[#D8B980] px-6 text-black hover:bg-[#c9aa74]">
+              <a href={getAppAuthUrl("sign-up")} className="inline-flex items-center">
+                Create account
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </a>
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              asChild
+              className="h-12 rounded-md border-[#1f3a2d]/30 bg-transparent px-6 text-[#1f3a2d] hover:bg-[#f7f8f6]"
+            >
+              <a href={getAppAuthUrl("sign-in")}>Sign in</a>
+            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
+        </div>
+      </div>
+    </section>
+
   );
 }

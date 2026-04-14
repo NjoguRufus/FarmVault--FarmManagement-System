@@ -1,19 +1,12 @@
 import React from "react";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { HeroSection } from "@/components/landing/HeroSection";
-import { WhatIsFarmVaultSection } from "@/components/landing/WhatIsFarmVaultSection";
-import { ProblemSection } from "@/components/landing/ProblemSection";
 import { SolutionSection } from "@/components/landing/SolutionSection";
 import { FeaturesSection } from "@/components/landing/FeaturesSection";
-import { RealWorldSection } from "@/components/landing/RealWorldSection";
-import { HowItWorksSection } from "@/components/landing/HowItWorksSection";
 import { WhyFarmVault } from "@/components/landing/WhyFarmVault";
+import { ProductTransitionSection } from "@/components/landing/ProductTransitionSection";
 import { PricingSection } from "@/components/landing/PricingSection";
-import { AboutSection } from "@/components/landing/AboutSection";
-import { ContactSection } from "@/components/landing/ContactSection";
 import { CtaSection } from "@/components/landing/CtaSection";
-import { HomeFaqSection } from "@/components/landing/HomeFaqSection";
-import { HomeTestimonialsSection } from "@/components/landing/HomeTestimonialsSection";
 import { PersistentCtaBar } from "@/components/landing/PersistentCtaBar";
 import { Footer } from "@/components/landing/Footer";
 import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
@@ -23,10 +16,10 @@ import { FAQ_PRIMARY_ITEMS } from "@/data/faqContent";
 
 const Index = () => {
   return (
-    <div className="landing-page min-h-screen bg-background font-body">
+    <div className="landing-page min-h-screen bg-white text-[#5f6f63] font-sans">
       <SeoHead
-        title="FarmVault – Farm Management Software in Africa"
-        description="FarmVault helps farmers manage workers, harvests, expenses, and farm operations."
+        title="FarmVault - Farm Management System in Africa"
+        description="Track expenses in KES, record harvests, manage workers, and monitor farm profit in one system."
         keywords="farm management software kenya, agriculture software kenya, farm ERP kenya"
         canonical="/"
         jsonLd={[
@@ -40,19 +33,12 @@ const Index = () => {
       <LandingNavbar />
       <main id="main-content">
         <HeroSection />
-        <WhatIsFarmVaultSection />
-        <ProblemSection />
         <SolutionSection />
-        <FeaturesSection />
-        <RealWorldSection />
-        <HowItWorksSection />
-        <PricingSection />
         <WhyFarmVault />
-        <AboutSection />
-        <HomeTestimonialsSection />
-        <ContactSection />
+        <FeaturesSection />
+        <ProductTransitionSection />
+        <PricingSection />
         <CtaSection />
-        <HomeFaqSection />
         <div className="container mx-auto px-4 lg:px-8 max-w-4xl pb-8">
           <SeoInternalLinks />
         </div>

@@ -1,75 +1,44 @@
-import { Layers, BarChart3, Smartphone, ShieldCheck } from "lucide-react";
-import { motion } from "framer-motion";
-
-const reasons = [
-  {
-    icon: Layers,
-    title: "All-in-One System",
-    description: "Crops, tasks, inventory, expenses, and sales in a single platform.",
-    gradient: "from-primary to-primary-light",
-  },
-  {
-    icon: BarChart3,
-    title: "Data-Driven Decisions",
-    description: "Real-time reports and analytics to maximize your farm's productivity.",
-    gradient: "from-primary-light to-primary-glow",
-  },
-  {
-    icon: Smartphone,
-    title: "Mobile-First Design",
-    description: "Access your farm data anywhere, anytime from your phone.",
-    gradient: "from-gold to-gold-light",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Secure Cloud-Based",
-    description: "Your data is encrypted and safely stored in the cloud.",
-    gradient: "from-primary to-primary-glow",
-  },
-];
-
 export function WhyFarmVault() {
   return (
-    <section className="py-24 lg:py-32 bg-secondary/50 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(145_63%_22%_/_0.03),_transparent_70%)]" />
-
-      <div className="container mx-auto px-4 lg:px-8 relative">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.6 }}
-          className="text-center mb-20"
-        >
-          <span className="inline-block text-xs font-semibold tracking-widest uppercase text-primary mb-4">
-            Why FarmVault
-          </span>
-          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-5 tracking-tight">
-            Why Farmers Choose{" "}
-            <span className="text-gradient-gold">FarmVault</span>
+    <section id="trust" className="bg-[#fafaf7] py-16 md:py-24">
+      <div className="container mx-auto px-4 lg:px-8">
+        <div className="mb-10 max-w-3xl">
+          <h2 className="text-3xl font-bold leading-tight text-[#1f3a2d] md:text-4xl">
+            Built for how farms actually run in Africa
           </h2>
-          <p className="text-muted-foreground max-w-lg mx-auto text-base font-light">
-            Trusted by thousands of farmers across Africa.
+          <p className="mt-4 text-base leading-7 text-[#5f6f63]">
+            FarmVault is used on real farms where records affect cash flow, worker payments, and harvest planning.
           </p>
-        </motion.div>
+        </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {reasons.map((reason, i) => (
-            <motion.div
-              key={reason.title}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ delay: i * 0.1, duration: 0.5 }}
-              whileHover={{ y: -6, transition: { duration: 0.3 } }}
-              className="bg-card rounded-3xl p-7 text-center shadow-luxury hover:shadow-luxury-hover transition-all duration-500 group"
-            >
-              <div className={`bg-gradient-to-br ${reason.gradient} w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-glow-green group-hover:scale-110 transition-transform duration-300`}>
-                <reason.icon className="h-7 w-7 text-primary-foreground" />
-              </div>
-              <h3 className="text-lg font-bold text-foreground mb-2 tracking-tight">{reason.title}</h3>
-              <p className="text-sm text-muted-foreground font-light leading-relaxed">{reason.description}</p>
-            </motion.div>
+        <div className="max-w-3xl space-y-10 md:space-y-12">
+          {[
+            {
+              title: "Money moves every day",
+              description:
+                "From seed and fertilizer to transport and labor, expenses happen daily - not at the end of the month.",
+            },
+            {
+              title: "Workers need tracking",
+              description:
+                "Attendance, tasks, and payments must be recorded clearly to avoid confusion and loss.",
+            },
+            {
+              title: "Harvest determines everything",
+              description:
+                "What you harvest - and how much - affects your entire season’s outcome.",
+            },
+            {
+              title: "Profit is not always obvious",
+              description:
+                "Without proper records, it’s hard to know what your farm is actually making.",
+            },
+          ].map((item) => (
+            <article key={item.title} className="pl-4">
+              <div className="mb-3 h-0.5 w-10 bg-[#D4A937]" />
+              <h3 className="text-xl font-semibold leading-7 text-[#1f2937]">{item.title}</h3>
+              <p className="mt-2 text-base leading-7 text-[#4b5563]">{item.description}</p>
+            </article>
           ))}
         </div>
       </div>

@@ -135,67 +135,66 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
     setStep('enter');
   };
 
-  // Intro screen — premium glass + neumorphic card over blurred farm-green backdrop
+  const modalShellClass =
+    'w-full max-w-[400px] rounded-2xl border border-[#e5e7df] bg-[#fafaf7] p-8 shadow-[0_20px_40px_rgba(45,106,79,0.14)]';
+
+  const modalBackdropClass =
+    'fixed inset-0 z-50 flex items-center justify-center bg-[#fafaf7] p-4';
+
+  const iconWrapClass =
+    'mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#2D6A4F]/12';
+
+  // Intro screen
   if (step === 'intro') {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className={modalBackdropClass}
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-lock-intro-title"
         aria-describedby="app-lock-intro-desc"
       >
-        <div
-          className="fv-app-lock-backdrop absolute inset-0"
-          style={{
-            background:
-              'linear-gradient(165deg, hsl(150 38% 12% / 0.4) 0%, hsl(155 42% 8% / 0.38) 45%, hsl(160 45% 6% / 0.44) 100%)',
-            boxShadow: 'inset 0 0 120px rgba(0, 0, 0, 0.42), inset 0 0 60px rgba(0, 0, 0, 0.2)',
-          }}
-          aria-hidden
-        />
-        <div className="fv-app-lock-modal-shell relative z-[1] w-full max-w-[420px]">
-          <div className="fv-app-lock-glass-card p-7 space-y-6">
-            <div className="text-center space-y-5">
-              <div className="fv-app-lock-icon-bubble mx-auto flex h-[72px] w-[72px] items-center justify-center rounded-full">
-                <Shield className="relative z-[1] h-9 w-9 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)]" aria-hidden />
-              </div>
-              <div className="space-y-2">
-                <h1
-                  id="app-lock-intro-title"
-                  className="text-xl font-semibold tracking-[-0.02em] text-white"
-                >
-                  New Feature: App Lock
-                </h1>
-                <p
-                  id="app-lock-intro-desc"
-                  className="text-sm leading-[1.5] text-[rgba(255,255,255,0.75)]"
-                >
-                  Protect FarmVault on this device with a PIN.
-                </p>
-              </div>
+        <div className={cn(modalShellClass, 'animate-in zoom-in-95 duration-200')}>
+          <div className="space-y-6 text-center">
+            <div className={iconWrapClass}>
+              <Shield className="h-8 w-8 text-[#2D6A4F]" aria-hidden />
             </div>
 
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleStartSetup}
-                className="fv-app-lock-primary-btn text-sm"
+            <div className="space-y-2">
+              <h1
+                id="app-lock-intro-title"
+                className="text-2xl font-semibold tracking-tight text-[#1f3d2f]"
               >
-                <Lock className="relative z-[1] h-4 w-4 shrink-0" aria-hidden />
-                <span className="relative z-[1]">Create PIN</span>
-              </button>
-              <button
+                Protect your FarmVault
+              </h1>
+              <p
+                id="app-lock-intro-desc"
+                className="text-sm leading-relaxed text-[#5f6f63]"
+              >
+                Add a PIN to keep your farm records secure on this device.
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <Button
+                onClick={handleStartSetup}
+                autoFocus
+                className="h-11 w-full bg-[#2D6A4F] text-white shadow-sm transition-colors hover:bg-[#265943] focus-visible:ring-[#2D6A4F]"
+              >
+                Create PIN
+              </Button>
+              <Button
                 type="button"
                 onClick={handleSkip}
-                className="flex w-full items-center justify-center rounded-xl border border-transparent bg-white/[0.06] px-4 py-3 text-sm text-[rgba(255,255,255,0.55)] backdrop-blur-md transition-colors hover:bg-white/[0.1] hover:text-[rgba(255,255,255,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+                variant="outline"
+                className="h-11 w-full border-[#d7dccf] bg-transparent text-[#46594f] hover:bg-[#f2f4ec]"
               >
-                Skip
-              </button>
+                Skip for now
+              </Button>
             </div>
 
-            <p className="text-center text-xs leading-relaxed text-[rgba(255,255,255,0.5)]">
-              You can always enable this later in Settings
+            <p className="text-xs leading-relaxed text-[#7b877f]">
+              You can always enable this later in Settings.
             </p>
           </div>
         </div>
@@ -206,16 +205,15 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
   // Success screen
   if (step === 'success') {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
-        <div className="w-full max-w-sm space-y-6 text-center">
-          <div className="h-20 w-20 mx-auto rounded-full bg-green-500/10 flex items-center justify-center">
-            <Check className="h-10 w-10 text-green-500" />
+      <div className={modalBackdropClass}>
+        <div className={cn(modalShellClass, 'space-y-6 text-center')}>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#2D6A4F]/12">
+            <Check className="h-8 w-8 text-[#2D6A4F]" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-xl font-semibold text-foreground">PIN Set Successfully!</h1>
-            <p className="text-sm text-muted-foreground">
-              You can use this PIN to unlock FarmVault on this device. 
-              You can change or disable it anytime in Settings.
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1f3d2f]">PIN ready</h1>
+            <p className="text-sm leading-relaxed text-[#5f6f63]">
+              Your FarmVault is now protected on this device.
             </p>
           </div>
         </div>
@@ -226,18 +224,29 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
   // Error screen
   if (step === 'error') {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
-        <div className="w-full max-w-sm space-y-6 text-center">
-          <div className="h-20 w-20 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
-            <AlertCircle className="h-10 w-10 text-destructive" />
+      <div className={modalBackdropClass}>
+        <div className={cn(modalShellClass, 'space-y-6 text-center')}>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#D4A937]/15">
+            <AlertCircle className="h-8 w-8 text-[#D4A937]" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-xl font-semibold text-foreground">Something went wrong</h1>
-            <p className="text-sm text-muted-foreground">{error}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1f3d2f]">Setup failed</h1>
+            <p className="text-sm leading-relaxed text-[#5f6f63]">{error}</p>
           </div>
-          <div className="space-y-2">
-            <Button onClick={handleRetry} className="w-full">Try Again</Button>
-            <Button onClick={handleSkip} variant="ghost" className="w-full">Skip for now</Button>
+          <div className="space-y-3">
+            <Button
+              onClick={handleRetry}
+              className="h-11 w-full bg-[#2D6A4F] text-white shadow-sm transition-colors hover:bg-[#265943]"
+            >
+              Try again
+            </Button>
+            <Button
+              onClick={handleSkip}
+              variant="outline"
+              className="h-11 w-full border-[#d7dccf] bg-transparent text-[#46594f] hover:bg-[#f2f4ec]"
+            >
+              Skip for now
+            </Button>
           </div>
         </div>
       </div>
@@ -246,52 +255,48 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
 
   // PIN entry screens (enter / confirm)
   const currentPin = step === 'confirm' ? confirmPin : pin;
-  
+
   return (
-    <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          <div className="h-14 w-14 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
-            <Lock className="h-7 w-7 text-primary" />
+    <div className={modalBackdropClass}>
+      <div className={cn(modalShellClass, 'space-y-7')}>
+        <div className="space-y-3 text-center">
+          <div className={iconWrapClass}>
+            <Lock className="h-7 w-7 text-[#2D6A4F]" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground">
-            {step === 'enter' ? 'Create a 4-digit PIN' : 'Confirm your PIN'}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {step === 'enter' 
-              ? 'This PIN will unlock FarmVault on this device'
-              : 'Enter the same PIN again'}
-          </p>
+          <div className="space-y-1.5">
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1f3d2f]">
+              {step === 'enter' ? 'Create your 4-digit PIN' : 'Confirm your PIN'}
+            </h1>
+            <p className="text-sm leading-relaxed text-[#5f6f63]">
+              {step === 'enter'
+                ? 'Use a PIN you can remember to protect FarmVault on this device.'
+                : 'Enter the same PIN again to finish setup.'}
+            </p>
+          </div>
         </div>
 
-        {/* Error message */}
         {error && (
-          <div className="text-center text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
+          <div className="rounded-xl border border-[#D4A937]/30 bg-[#D4A937]/10 p-3 text-center text-sm text-[#7a611f]">
             {error}
           </div>
         )}
 
-        {/* PIN dots */}
-        <div className="flex justify-center gap-4">
+        <div className="flex justify-center gap-3">
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
               className={cn(
-                'h-4 w-4 rounded-full transition-all',
-                i < currentPin.length
-                  ? 'bg-primary scale-110'
-                  : 'bg-muted-foreground/30'
+                'h-3.5 w-3.5 rounded-full transition-all duration-150',
+                i < currentPin.length ? 'scale-110 bg-[#2D6A4F]' : 'bg-[#d4d9ce]'
               )}
             />
           ))}
         </div>
 
-        {/* Number pad */}
-        <div className="grid grid-cols-3 gap-3 select-none">
+        <div className="grid grid-cols-3 gap-2.5 select-none">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((key) => {
             if (key === '') {
-              return <div key="empty" className="h-16" />;
+              return <div key="empty" className="h-14" />;
             }
             if (key === 'del') {
               return (
@@ -306,12 +311,11 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
                   onMouseLeave={() => setPressedKey(null)}
                   disabled={saving || currentPin.length === 0}
                   className={cn(
-                    "h-16 rounded-xl flex items-center justify-center transition-all touch-manipulation",
-                    "text-muted-foreground disabled:opacity-30",
-                    pressedKey === 'del' ? "bg-muted scale-95" : "hover:bg-muted/50 active:bg-muted"
+                    'flex h-14 items-center justify-center rounded-xl border border-[#d7dccf] text-[#66756d] transition-all touch-manipulation disabled:cursor-not-allowed disabled:opacity-40',
+                    pressedKey === 'del' ? 'scale-95 bg-[#edf1e7]' : 'bg-[#f7f8f3] hover:bg-[#edf1e7]'
                   )}
                 >
-                  <X className="h-6 w-6" />
+                  <X className="h-5 w-5" />
                 </button>
               );
             }
@@ -327,10 +331,10 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
                 onMouseLeave={() => setPressedKey(null)}
                 disabled={saving}
                 className={cn(
-                  "h-16 rounded-xl text-2xl font-semibold text-foreground transition-all touch-manipulation",
-                  pressedKey === key 
-                    ? "bg-primary text-primary-foreground scale-95" 
-                    : "bg-muted/50 hover:bg-muted active:bg-primary active:text-primary-foreground"
+                  'h-14 rounded-xl border border-[#d7dccf] text-xl font-semibold text-[#2f3f36] transition-all touch-manipulation',
+                  pressedKey === key
+                    ? 'scale-95 bg-[#2D6A4F] text-white'
+                    : 'bg-[#f7f8f3] hover:bg-[#edf1e7]'
                 )}
               >
                 {key}
@@ -339,11 +343,10 @@ export function AppLockPrompt({ onComplete, onSkip }: AppLockPromptProps) {
           })}
         </div>
 
-        {/* Skip button */}
         <Button
           onClick={handleSkip}
-          variant="ghost"
-          className="w-full text-muted-foreground"
+          variant="outline"
+          className="h-11 w-full border-[#d7dccf] bg-transparent text-[#46594f] hover:bg-[#f2f4ec]"
           disabled={saving}
         >
           Skip for now
