@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Loader2, Play, RefreshCw } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Activity, AlertTriangle, CheckCircle2, Copy, Loader2, Play, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -86,7 +87,155 @@ function IssuesList({ issues }: { issues: SystemHealthIssue[] }) {
   );
 }
 
-function LogTable({ rows }: { rows: SystemHealthLogRow[] }) {
+function parseIssueItems(metadata: unknown): SystemHealthIssue[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const md = metadata as Record<string, unknown>;
+  const src = Array.isArray(md.issues)
+    ? md.issues
+    : md.metrics && typeof md.metrics === 'object' && Array.isArray((md.metrics as Record<string, unknown>).issues)
+      ? ((md.metrics as Record<string, unknown>).issues as unknown[])
+      : [];
+  const out: SystemHealthIssue[] = [];
+  for (const it of src) {
+    if (!it || typeof it !== 'object' || Array.isArray(it)) continue;
+    const r = it as Record<string, unknown>;
+    out.push({
+      type: typeof r.type === 'string' ? r.type : 'unknown',
+      count: typeof r.count === 'number' ? r.count : Number(r.count ?? 0),
+      message: typeof r.message === 'string' ? r.message : '',
+      severity: typeof r.severity === 'string' ? r.severity : undefined,
+    });
+  }
+  return out;
+}
+
+function parseMetricItems(metadata: unknown): Array<{ label: string; value: string }> {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const md = metadata as Record<string, unknown>;
+  const metricsObj =
+    md.metrics && typeof md.metrics === 'object' && !Array.isArray(md.metrics)
+      ? (md.metrics as Record<string, unknown>)
+      : md;
+  const keys = [
+    'stuck_payments',
+    'orphan_payments',
+    'failed_callbacks',
+    'manual_pending_over_1h',
+    'pipeline_active_24h',
+    'mpesa_reconcile_stale',
+    'last_reconcile_log_at',
+    'pipeline_active_7d',
+  ];
+  return keys
+    .filter((k) => k in metricsObj)
+    .map((k) => ({
+      label: k.replace(/_/g, ' '),
+      value: String(metricsObj[k]),
+    }));
+}
+
+function LogDetailDialog({
+  row,
+  open,
+  onOpenChange,
+  onCopyJson,
+}: {
+  row: SystemHealthLogRow | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCopyJson: (rawJson: string) => void;
+}) {
+  const issueItems = useMemo(() => parseIssueItems(row?.metadata), [row?.metadata]);
+  const metricItems = useMemo(() => parseMetricItems(row?.metadata), [row?.metadata]);
+  const rawMetadata = useMemo(() => JSON.stringify(row?.metadata ?? {}, null, 2), [row?.metadata]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Health log details</DialogTitle>
+        </DialogHeader>
+
+        {!row ? null : (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+              <div className="rounded border border-border/60 p-2">
+                <p className="text-muted-foreground">Time</p>
+                <p className="mt-1 text-foreground">{new Date(row.created_at).toLocaleString()}</p>
+              </div>
+              <div className="rounded border border-border/60 p-2">
+                <p className="text-muted-foreground">Status</p>
+                <p className="mt-1 font-medium capitalize text-foreground">{row.status}</p>
+              </div>
+              <div className="rounded border border-border/60 p-2">
+                <p className="text-muted-foreground">Type</p>
+                <p className="mt-1 text-foreground">{row.check_type}</p>
+              </div>
+            </div>
+
+            <div className="rounded border border-border/60 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</p>
+              <p className="mt-1 text-foreground">{row.message ?? '—'}</p>
+            </div>
+
+            {!!issueItems.length && (
+              <div className="space-y-2 rounded border border-border/60 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Detected issues</p>
+                <ul className="space-y-2">
+                  {issueItems.map((issue, idx) => (
+                    <li key={`${issue.type}-${idx}`} className="rounded border border-border/60 p-2">
+                      <p className="font-medium text-foreground">
+                        {issue.type}
+                        {issue.count > 0 ? ` · ${issue.count}` : ''}
+                        {issue.severity ? ` · ${issue.severity}` : ''}
+                      </p>
+                      <p className="text-muted-foreground">{issue.message || '—'}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {!!metricItems.length && (
+              <div className="space-y-2 rounded border border-border/60 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Metrics</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {metricItems.map((m) => (
+                    <div key={m.label} className="rounded border border-border/50 p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{m.label}</p>
+                      <p className="mt-0.5 text-foreground">{m.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2 rounded border border-border/60 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Raw metadata</p>
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-[11px]" onClick={() => onCopyJson(rawMetadata)}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy JSON
+                </Button>
+              </div>
+              <pre className="max-h-72 overflow-auto rounded bg-muted/40 p-3 text-[11px] leading-relaxed text-foreground">
+                {rawMetadata}
+              </pre>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LogTable({
+  rows,
+  onViewDetails,
+}: {
+  rows: SystemHealthLogRow[];
+  onViewDetails: (row: SystemHealthLogRow) => void;
+}) {
   if (!rows.length) {
     return <p className="text-xs text-muted-foreground">No logged runs yet. Use “Run health check” or wait for cron.</p>;
   }
@@ -98,6 +247,7 @@ function LogTable({ rows }: { rows: SystemHealthLogRow[] }) {
             <th className="px-3 py-2 font-medium">Time</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 font-medium">Message</th>
+            <th className="px-3 py-2 font-medium text-right">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -108,6 +258,11 @@ function LogTable({ rows }: { rows: SystemHealthLogRow[] }) {
               </td>
               <td className="px-3 py-2 font-medium capitalize">{r.status}</td>
               <td className="px-3 py-2 text-muted-foreground">{r.message ?? '—'}</td>
+              <td className="px-3 py-2 text-right">
+                <Button type="button" variant="ghost" size="sm" onClick={() => onViewDetails(r)}>
+                  View details
+                </Button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -124,6 +279,7 @@ export function LaunchMonitoringDashboard() {
   const snapshotQ = useSystemHealthSnapshot({ enabled });
   const logsQ = useSystemHealthLogs(15, { enabled });
   const runMutation = useRunSystemHealthCheck();
+  const [selectedLog, setSelectedLog] = useState<SystemHealthLogRow | null>(null);
 
   const tone = useMemo(() => {
     if (!snapshotQ.data) return 'healthy' as const;
@@ -146,6 +302,15 @@ export function LaunchMonitoringDashboard() {
         toast({ variant: 'destructive', title: 'Health check failed', description: e.message });
       },
     });
+  };
+
+  const handleCopyJson = async (rawJson: string) => {
+    try {
+      await navigator.clipboard.writeText(rawJson);
+      toast({ title: 'Copied', description: 'Log metadata JSON copied to clipboard.' });
+    } catch {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Could not copy metadata JSON.' });
+    }
   };
 
   if (!isDeveloper) return null;
@@ -264,9 +429,16 @@ export function LaunchMonitoringDashboard() {
         ) : logsQ.isError ? (
           <p className="text-sm text-destructive">{(logsQ.error as Error).message}</p>
         ) : (
-          <LogTable rows={logsQ.data ?? []} />
+          <LogTable rows={logsQ.data ?? []} onViewDetails={setSelectedLog} />
         )}
       </div>
+
+      <LogDetailDialog
+        row={selectedLog}
+        open={selectedLog !== null}
+        onOpenChange={(open) => !open && setSelectedLog(null)}
+        onCopyJson={handleCopyJson}
+      />
     </section>
   );
 }

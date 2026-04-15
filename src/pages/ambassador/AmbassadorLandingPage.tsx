@@ -4,6 +4,7 @@ import { useUser } from "@clerk/react";
 import { motion } from "framer-motion";
 import { ArrowRight, Banknote, Gift, Loader2, Repeat2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { OptimizedImage } from "@/components/ui/OptimizedImage";
 import { SeoHead } from "@/seo/SeoHead";
 import { AmbassadorLandingNavbar } from "@/components/landing/AmbassadorLandingNavbar";
 import { SEO_ROUTES } from "@/seo/routes";
@@ -17,21 +18,24 @@ import { setAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
 import { fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
 
 const cardClass =
-  "rounded-2xl border border-white/[0.1] bg-white/[0.04] backdrop-blur-md transition-all duration-300 " +
-  "hover:border-[#9DC3E6]/35 hover:shadow-[0_20px_50px_-24px_rgba(157,195,230,0.2)]";
+  "rounded-2xl border border-[hsl(var(--gold)/0.24)] bg-[hsl(var(--gold)/0.06)] backdrop-blur-md transition-all duration-300 " +
+  "hover:border-[hsl(var(--gold)/0.45)] hover:shadow-[0_20px_50px_-24px_hsl(var(--gold)/0.24)]";
+const softGoldCardClass =
+  "rounded-2xl border border-[hsl(var(--gold)/0.14)] bg-[hsl(var(--gold)/0.03)] backdrop-blur-md transition-all duration-300 " +
+  "hover:border-[hsl(var(--gold)/0.24)] hover:shadow-[0_20px_50px_-24px_hsl(var(--gold)/0.14)]";
 
 const gold = "#D8B980";
-const blue = "#9DC3E6";
+const emerald = "#8ED6AF";
 
 function SignedInRoutingLoader({ message }: { message: string }) {
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[#000] text-neutral-200"
+      className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[hsl(150_30%_7%)] text-neutral-100"
       role="status"
       aria-live="polite"
     >
-      <Loader2 className="h-10 w-10 animate-spin text-[#9DC3E6]" aria-hidden />
-      <p className="text-sm text-neutral-400">{message}</p>
+      <Loader2 className="h-10 w-10 animate-spin text-[hsl(var(--gold-light))]" aria-hidden />
+      <p className="text-sm text-foreground/80">{message}</p>
     </div>
   );
 }
@@ -142,20 +146,28 @@ export default function AmbassadorLandingPage() {
   ] as const;
 
   return (
-    <div className="landing-page min-h-screen font-body relative overflow-hidden bg-[#000] text-neutral-100 antialiased">
+    <div className="landing-page dark min-h-screen font-body relative overflow-hidden text-foreground antialiased">
       <SeoHead
         title="FarmVault Ambassadors — Earn with every paying farmer"
         description="Join FarmVault as an ambassador. Earn from successful farmer payments — not signups alone."
         canonical={SEO_ROUTES.ambassador}
       />
 
-      <div
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          backgroundImage: `radial-gradient(ellipse 80% 50% at 50% -20%, rgba(157,195,230,0.18), transparent), radial-gradient(circle at 90% 20%, rgba(216,185,128,0.08), transparent)`,
-        }}
-        aria-hidden
-      />
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+        <OptimizedImage
+          src="/landing/hero-bg.jpg"
+          webpSrc="/landing/hero-bg.webp"
+          priority
+          alt=""
+          className="h-full w-full min-h-[100vh] object-cover scale-110 blur-md opacity-90"
+        />
+        <div className="absolute inset-0 gradient-hero-overlay" />
+        <div
+          className="absolute inset-0 bg-gradient-to-b from-[hsl(150_32%_6%/0.88)] via-[hsl(150_28%_8%/0.78)] to-[hsl(150_30%_5%/0.92)]"
+          style={{ boxShadow: "inset 0 0 100px rgba(0,0,0,0.45), inset 0 -80px 120px rgba(0,0,0,0.35)" }}
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_90%_50%_at_70%_0%,hsl(45_50%_35%/0.12),transparent_55%)]" />
+      </div>
 
       <AmbassadorLandingNavbar />
 
@@ -167,13 +179,13 @@ export default function AmbassadorLandingPage() {
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
             className="mb-14 md:mb-20 max-w-3xl"
           >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] mb-4" style={{ color: blue }}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] mb-4" style={{ color: emerald }}>
               Ambassador program
             </p>
             <h1 className="font-extrabold tracking-tight text-3xl sm:text-4xl md:text-5xl lg:text-[3.1rem] leading-[1.08] max-w-[20ch] sm:max-w-none mb-6 text-white">
               Earn Monthly Income by Helping Farmers Grow
             </h1>
-            <p className="text-base md:text-lg text-neutral-400 max-w-xl leading-relaxed mb-10">
+            <p className="text-base md:text-lg text-foreground/90 max-w-xl leading-relaxed mb-10">
               Join FarmVault as an ambassador and earn real income for every farmer you onboard.
             </p>
             <div className="flex flex-col sm:flex-row flex-wrap gap-3">
@@ -196,7 +208,7 @@ export default function AmbassadorLandingPage() {
                 asChild
                 variant="outline"
                 size="lg"
-                className="rounded-xl h-12 px-8 text-base font-semibold border-white/20 bg-white/[0.03] text-neutral-100 hover:bg-white/[0.07] transition-colors"
+                className="rounded-xl h-12 px-8 text-base font-semibold border-[hsl(var(--gold)/0.35)] bg-transparent text-foreground hover:bg-[hsl(var(--gold)/0.08)] transition-colors"
               >
                 <a href="#how-you-earn">How you earn</a>
               </Button>
@@ -204,10 +216,10 @@ export default function AmbassadorLandingPage() {
           </motion.section>
 
           <section id="how-you-earn" className="scroll-mt-28 mb-16 md:mb-24" aria-labelledby="how-you-earn-heading">
-            <h2 id="how-you-earn-heading" className="text-2xl md:text-3xl font-bold text-white mb-2">
+            <h2 id="how-you-earn-heading" className="text-2xl md:text-3xl font-bold text-foreground mb-2">
               How you earn
             </h2>
-            <p className="text-sm text-neutral-500 mb-8 max-w-lg">
+            <p className="text-sm text-foreground/80 mb-8 max-w-lg">
               Three clear ways to build income — tied to real subscription revenue.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 lg:gap-6">
@@ -220,10 +232,10 @@ export default function AmbassadorLandingPage() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true, margin: "-40px" }}
                     transition={{ delay: i * 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-                    className={`${cardClass} p-6 md:p-7 flex flex-col`}
+                    className={`${softGoldCardClass} p-6 md:p-7 flex flex-col`}
                   >
                     <span
-                      className="mb-4 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06]"
+                      className="mb-4 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[hsl(var(--gold)/0.2)] bg-[hsl(var(--gold)/0.08)]"
                       aria-hidden
                     >
                       <Icon className="h-5 w-5" style={{ color: gold }} strokeWidth={1.75} />
@@ -231,41 +243,41 @@ export default function AmbassadorLandingPage() {
                     <p className="text-xl md:text-2xl font-bold tabular-nums mb-2" style={{ color: gold }}>
                       {item.amount}
                     </p>
-                    <p className="text-sm text-neutral-400 leading-relaxed">{item.text}</p>
+                    <p className="text-sm text-foreground/88 leading-relaxed">{item.text}</p>
                   </motion.article>
                 );
               })}
             </div>
-            <p className="mt-6 text-xs text-neutral-500 max-w-2xl">
+            <p className="mt-6 text-xs text-foreground/75 max-w-2xl">
               Earnings are only generated from successful farmer payments.
             </p>
           </section>
 
           <section id="income-potential" className="scroll-mt-28 mb-16 md:mb-24" aria-labelledby="income-potential-heading">
-            <h2 id="income-potential-heading" className="text-2xl md:text-3xl font-bold text-white mb-8">
+            <h2 id="income-potential-heading" className="text-2xl md:text-3xl font-bold text-foreground mb-8">
               Income potential
             </h2>
-            <div className={`${cardClass} overflow-hidden divide-y divide-white/[0.08]`}>
+            <div className={`${softGoldCardClass} overflow-hidden divide-y divide-white/[0.08]`}>
               {incomeRows.map((row) => (
                 <div key={row.farmers} className="flex items-center justify-between px-6 py-4 md:px-8 md:py-5">
-                  <span className="text-neutral-400 text-sm md:text-base">{row.farmers} farmers</span>
+                  <span className="text-foreground/85 text-sm md:text-base">{row.farmers} farmers</span>
                   <span className="text-lg md:text-xl font-bold tabular-nums" style={{ color: gold }}>
                     {row.monthly}/month
                   </span>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-neutral-500">Illustrative recurring share at KES 500 per active paying farmer per month.</p>
+            <p className="mt-3 text-xs text-foreground/75">Illustrative recurring share at KES 500 per active paying farmer per month.</p>
           </section>
 
           <section id="trust" className="scroll-mt-28 mb-16" aria-labelledby="trust-heading">
-            <h2 id="trust-heading" className="text-2xl font-bold text-white mb-6">
+            <h2 id="trust-heading" className="text-2xl font-bold text-foreground mb-6">
               Trust
             </h2>
             <ul className="grid sm:grid-cols-3 gap-4">
               {trust.map((line) => (
-                <li key={line} className={`${cardClass} px-5 py-4 text-sm text-neutral-300`}>
-                  <span className="font-semibold" style={{ color: blue }}>
+                <li key={line} className={`${cardClass} px-5 py-4 text-sm text-foreground/90`}>
+                  <span className="font-semibold" style={{ color: emerald }}>
                     ✓
                   </span>{" "}
                   {line}
@@ -280,8 +292,8 @@ export default function AmbassadorLandingPage() {
             viewport={{ once: true }}
             className={`${cardClass} p-8 md:p-10 text-center mt-8`}
           >
-            <p className="text-xl md:text-2xl font-bold text-white tracking-tight mb-3">Start Earning Today</p>
-            <p className="text-sm text-neutral-400 max-w-md mx-auto mb-8">
+            <p className="text-xl md:text-2xl font-bold text-foreground tracking-tight mb-3">Start Earning Today</p>
+            <p className="text-sm text-foreground/85 max-w-md mx-auto mb-8">
               Share your link, help farmers subscribe, and get paid when revenue is real.
             </p>
             <Button
@@ -299,17 +311,17 @@ export default function AmbassadorLandingPage() {
         </div>
       </main>
 
-      <footer className="relative z-10 border-t border-white/[0.08] bg-black/80 backdrop-blur-md">
-        <div className="container mx-auto px-5 sm:px-6 lg:px-8 max-w-5xl py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs text-neutral-500">
+      <footer className="relative z-10 border-t border-[hsl(var(--gold)/0.2)] bg-[hsl(150_32%_5%/0.85)] backdrop-blur-md">
+        <div className="container mx-auto px-5 sm:px-6 lg:px-8 max-w-5xl py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs text-foreground/75">
           <p>© 2026 FarmVault Ltd. Nairobi, Kenya.</p>
           <nav className="flex flex-wrap gap-6 justify-center sm:justify-end" aria-label="Legal">
-            <Link to="/terms" className="hover:text-neutral-300 transition-colors">
+            <Link to="/ambassador/terms" className="hover:text-foreground transition-colors">
               Terms
             </Link>
-            <Link to="/privacy" className="hover:text-neutral-300 transition-colors">
+            <Link to="/ambassador/privacy" className="hover:text-foreground transition-colors">
               Privacy
             </Link>
-            <Link to="/ambassador/terms" className="hover:text-neutral-300 transition-colors">
+            <Link to="/ambassador/terms" className="hover:text-foreground transition-colors">
               Ambassador terms
             </Link>
           </nav>

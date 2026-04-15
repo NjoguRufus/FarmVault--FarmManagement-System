@@ -1,15 +1,20 @@
 import { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
+import { AmbassadorLandingNavbar } from "@/components/landing/AmbassadorLandingNavbar";
 import { Footer } from "@/components/landing/Footer";
 
 export default function PrivacyPage() {
+  const location = useLocation();
+  const isAmbassadorRoute = location.pathname.startsWith("/ambassador");
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, []);
 
   return (
     <div className="min-h-screen bg-background font-body">
-      <LandingNavbar />
+      {isAmbassadorRoute ? <AmbassadorLandingNavbar /> : <LandingNavbar />}
 
       <main className="pt-28 pb-20">
         <div className="container mx-auto px-4 max-w-[900px]">
@@ -165,7 +170,30 @@ export default function PrivacyPage() {
         </div>
       </main>
 
-      <Footer />
+      {isAmbassadorRoute ? (
+        <footer className="relative z-10 border-t border-[hsl(var(--gold)/0.2)] bg-[hsl(150_32%_5%/0.85)] backdrop-blur-md">
+          <div className="container mx-auto px-5 sm:px-6 lg:px-8 max-w-[900px] py-8 md:py-10">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-primary-foreground/45 font-light text-center sm:text-left order-2 sm:order-1">
+                © {new Date().getFullYear()} FarmVault Ltd. Nairobi, Kenya.
+              </p>
+              <nav className="flex flex-wrap items-center justify-center gap-6 sm:justify-end order-1 sm:order-2" aria-label="Legal links">
+                <Link to="/ambassador/terms" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">
+                  Terms
+                </Link>
+                <Link to="/ambassador/privacy" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">
+                  Privacy
+                </Link>
+                <Link to="/ambassador" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">
+                  Ambassador Program
+                </Link>
+              </nav>
+            </div>
+          </div>
+        </footer>
+      ) : (
+        <Footer />
+      )}
     </div>
   );
 }

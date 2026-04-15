@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Menu, X } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { getAppAuthUrl } from "@/lib/urls/domains";
 
@@ -19,6 +19,8 @@ const navLinks: NavLink[] = [
 export function AmbassadorLandingNavbar() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const loginHref = getAppAuthUrl("sign-in");
 
@@ -30,6 +32,10 @@ export function AmbassadorLandingNavbar() {
 
   const handleAnchorClick = (href: string) => {
     setOpen(false);
+    if (location.pathname !== "/ambassador") {
+      navigate(`/ambassador${href}`);
+      return;
+    }
     const id = href.replace("#", "");
     const el = document.getElementById(id);
     if (el) {
@@ -37,64 +43,44 @@ export function AmbassadorLandingNavbar() {
     }
   };
 
-  const linkClass = (scrolled: boolean) =>
-    `text-sm font-medium transition-colors duration-200 hover:text-primary ${
-      scrolled
-        ? "text-muted-foreground"
-        : "text-primary-foreground/80 hover:text-primary-foreground"
-    }`;
+  const linkClass = "text-sm font-medium text-zinc-200 transition-colors hover:text-[#D8B980]";
 
   return (
-    <motion.nav
-      initial={{ y: -100 }}
-      animate={{ y: 0 }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
-        scrolled ? "glass-strong shadow-luxury py-2" : "bg-transparent py-4"
+    <nav
+      className={`fixed left-0 right-0 top-0 z-50 border-b border-[#D8B980]/35 bg-[#1f2c23]/95 transition-all ${
+        scrolled ? "py-2" : "py-3"
       }`}
     >
       <div className="container mx-auto flex items-center justify-between px-4 lg:px-8">
-        <Link to="/" className="flex items-center gap-2.5 group">
+        <Link to="/ambassador" className="flex items-center gap-2.5">
           <img
-            src="/Logo/FarmVault_Logo dark mode.png"
+            src="/Logo/fv.png"
             alt="FarmVault"
-            className="h-8 w-auto rounded-md object-contain transition-transform duration-300 group-hover:scale-105"
+            className="h-8 w-auto rounded-md object-contain"
           />
-          <span
-            className={`font-semibold text-xl tracking-tight transition-colors ${
-              scrolled ? "text-foreground" : "text-primary-foreground"
-            }`}
-          >
-            FarmVault
-          </span>
         </Link>
 
         {/* Desktop nav */}
         <ul className="hidden lg:flex items-center gap-8">
-          {navLinks.map((link, i) => (
-            <motion.li
-              key={link.name}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 * i + 0.3, duration: 0.4 }}
-            >
+          {navLinks.map((link) => (
+            <li key={link.name}>
               {link.type === "route" ? (
-                <Link to={link.to} className={linkClass(scrolled)}>
+                <Link to={link.to} className={linkClass}>
                   {link.name}
                 </Link>
               ) : (
                 <a
-                  href={link.href}
+                  href={location.pathname === "/ambassador" ? link.href : `/ambassador${link.href}`}
                   onClick={(e) => {
                     e.preventDefault();
                     handleAnchorClick(link.href);
                   }}
-                  className={linkClass(scrolled)}
+                  className={linkClass}
                 >
                   {link.name}
                 </a>
               )}
-            </motion.li>
+            </li>
           ))}
         </ul>
 
@@ -104,18 +90,14 @@ export function AmbassadorLandingNavbar() {
             variant="ghost"
             size="sm"
             asChild
-            className={
-              scrolled
-                ? "text-foreground hover:text-primary hover:bg-primary/5 font-medium"
-                : "text-primary-foreground/90 hover:text-primary-foreground hover:bg-primary-foreground/10 font-medium"
-            }
+            className="font-medium text-zinc-100 hover:bg-white/15 hover:text-zinc-100"
           >
             <a href={loginHref}>Login</a>
           </Button>
           <Button
             size="sm"
             asChild
-            className="rounded-xl px-6 font-semibold border-0 text-[hsl(150_35%_12%)] bg-gradient-to-br from-[hsl(var(--gold))] to-[hsl(var(--gold-light))] hover:opacity-[0.96] transition-opacity shadow-[0_4px_16px_-2px_hsl(var(--gold)/0.4)]"
+            className="rounded-md bg-[#D8B980] px-4 font-semibold text-black hover:bg-[#c9aa74]"
           >
             <Link to="/ambassador/signup">Become Ambassador</Link>
           </Button>
@@ -124,9 +106,7 @@ export function AmbassadorLandingNavbar() {
         {/* Mobile hamburger */}
         <button
           type="button"
-          className={`lg:hidden transition-colors ${
-            scrolled ? "text-foreground" : "text-primary-foreground"
-          }`}
+          className="text-zinc-100 transition-colors lg:hidden"
           onClick={() => setOpen(!open)}
           aria-label="Toggle menu"
         >
@@ -134,62 +114,46 @@ export function AmbassadorLandingNavbar() {
         </button>
       </div>
 
-      {/* Mobile menu */}
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="lg:hidden glass-strong overflow-hidden mx-4 mt-2 rounded-2xl"
-          >
-            <div className="p-6">
-              <ul className="flex flex-col gap-4 mb-6">
-                {navLinks.map((link) => (
-                  <li key={link.name}>
-                    {link.type === "route" ? (
-                      <Link
-                        to={link.to}
-                        className="text-sm font-medium text-foreground hover:text-primary transition-colors"
-                        onClick={() => setOpen(false)}
-                      >
-                        {link.name}
-                      </Link>
-                    ) : (
-                      <a
-                        href={link.href}
-                        className="text-sm font-medium text-foreground hover:text-primary transition-colors"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleAnchorClick(link.href);
-                        }}
-                      >
-                        {link.name}
-                      </a>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <div className="flex gap-3">
-                <Button variant="outline" size="sm" asChild className="flex-1 rounded-xl">
-                  <a href={loginHref} onClick={() => setOpen(false)}>
-                    Login
-                  </a>
-                </Button>
-                <Button
-                  size="sm"
-                  asChild
-                  className="flex-1 rounded-xl border-0 text-[hsl(150_35%_12%)] bg-gradient-to-br from-[hsl(var(--gold))] to-[hsl(var(--gold-light))] hover:opacity-[0.96] transition-opacity"
-                >
-                  <Link to="/ambassador/signup" onClick={() => setOpen(false)}>
-                    Become Ambassador
-                  </Link>
-                </Button>
-              </div>
+      {open && (
+        <div className="mx-4 mt-2 overflow-hidden rounded-xl border border-[#D8B980]/35 bg-[#263126] lg:hidden">
+          <div className="p-5">
+            <ul className="mb-5 flex flex-col gap-4">
+              {navLinks.map((link) => (
+                <li key={link.name}>
+                  {link.type === "route" ? (
+                    <Link
+                      to={link.to}
+                      className="text-sm font-medium text-zinc-200 transition-colors hover:text-[#D8B980]"
+                      onClick={() => setOpen(false)}
+                    >
+                      {link.name}
+                    </Link>
+                  ) : (
+                    <a
+                      href={location.pathname === "/ambassador" ? link.href : `/ambassador${link.href}`}
+                      className="text-sm font-medium text-zinc-200 transition-colors hover:text-[#D8B980]"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleAnchorClick(link.href);
+                      }}
+                    >
+                      {link.name}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-3">
+              <Button variant="outline" size="sm" asChild className="flex-1 rounded-md border-zinc-700 bg-transparent text-zinc-200">
+                <a href={loginHref} onClick={() => setOpen(false)}>Login</a>
+              </Button>
+              <Button size="sm" asChild className="flex-1 rounded-md bg-[#D8B980] font-semibold text-black hover:bg-[#c9aa74]">
+                <Link to="/ambassador/signup" onClick={() => setOpen(false)}>Become Ambassador</Link>
+              </Button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.nav>
+          </div>
+        </div>
+      )}
+    </nav>
   );
 }

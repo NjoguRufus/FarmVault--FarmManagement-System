@@ -288,6 +288,7 @@ const AppRoutesWithLock = () => (
       <Route path="/ambassador" element={<AmbassadorLandingPage />} />
       <Route path="/ambassador/signup" element={<AmbassadorSignupPage />} />
       <Route path="/ambassador/terms" element={<AmbassadorTermsPage />} />
+      <Route path="/ambassador/privacy" element={<PrivacyPage />} />
       <Route path="/ambassador/onboarding" element={<AmbassadorOnboardingPage />} />
       <Route path="/ambassador/learn" element={<AmbassadorLearnPage />} />
       <Route path="/ambassador/refer" element={<Navigate to="/ambassador/console/refer" replace />} />

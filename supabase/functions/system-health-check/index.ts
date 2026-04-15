@@ -15,6 +15,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
+import { getFarmvaultDeveloperInboxEmail } from "../_shared/farmvaultDeveloperInbox.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -49,6 +50,12 @@ type HealthPayload = {
   issues: HealthIssue[];
   metrics?: Record<string, unknown>;
   checked_at?: string;
+};
+
+type HealthLogEntry = {
+  created_at: string;
+  status: string;
+  message: string | null;
 };
 
 function parsePayload(raw: unknown): HealthPayload | null {
@@ -91,14 +98,14 @@ function resolveClerkBearer(req: Request): string | null {
 
 async function verifyDeveloper(
   supabaseUrl: string,
-  anonKey: string,
+  apikey: string,
   clerkAuthHeader: string,
 ): Promise<boolean> {
-  const userClient = createClient(supabaseUrl, anonKey, {
+  const userClient = createClient(supabaseUrl, apikey, {
     global: {
       headers: {
-        Authorization: `Bearer ${anonKey}`,
-        "X-FarmVault-Clerk-Authorization": clerkAuthHeader,
+        Authorization: clerkAuthHeader,
+        apikey,
       },
     },
   });
@@ -117,6 +124,7 @@ async function sendHealthEmail(
   to: string,
   status: "critical" | "warning",
   payload: HealthPayload,
+  recentLogs: HealthLogEntry[],
 ): Promise<{ ok: boolean; error?: string }> {
   const subject = status === "critical"
     ? "🚨 FarmVault Critical Alert"
@@ -127,11 +135,39 @@ async function sendHealthEmail(
     ? payload.issues.map((i) => `• ${escapeHtml(i.message)}`).join("<br />")
     : "• No specific issue rows (see metadata).";
 
+  const recentRows = recentLogs.length
+    ? recentLogs
+      .map((r) =>
+        `<tr>
+          <td style="padding:6px 8px;border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;">${escapeHtml(
+          String(r.created_at ?? ""),
+        )}</td>
+          <td style="padding:6px 8px;border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111827;">${escapeHtml(
+          String(r.status ?? ""),
+        )}</td>
+          <td style="padding:6px 8px;border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111827;">${escapeHtml(
+          String(r.message ?? ""),
+        )}</td>
+        </tr>`
+      )
+      .join("")
+    : `<tr><td colspan="3" style="padding:6px 8px;border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;">No recent log entries</td></tr>`;
+
+  const recentTable =
+    `<p style="margin:16px 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;"><strong>Recent log entries</strong></p>` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;max-width:720px;">` +
+    `<thead><tr>` +
+    `<th style="text-align:left;padding:6px 8px;border:1px solid #e5e7eb;background:#f9fafb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;">Time</th>` +
+    `<th style="text-align:left;padding:6px 8px;border:1px solid #e5e7eb;background:#f9fafb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;">Status</th>` +
+    `<th style="text-align:left;padding:6px 8px;border:1px solid #e5e7eb;background:#f9fafb;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;">Message</th>` +
+    `</tr></thead><tbody>${recentRows}</tbody></table>`;
+
   const html =
     `<p style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#1f2937;"><strong>FarmVault System Health Report</strong></p>` +
     `<p style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1f2937;"><strong>Status:</strong> ${escapeHtml(status.toUpperCase())}</p>` +
     `<p style="margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;"><strong>Issues:</strong></p>` +
     `<div style="margin:0 0 16px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;">${lines}</div>` +
+    recentTable +
     `<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;"><strong>Time:</strong> ${escapeHtml(ts)}</p>`;
 
   const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/send-farmvault-email`;
@@ -184,9 +220,15 @@ serveFarmVaultEdge("system-health-check", async (req: Request, _ctx) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
   const cronSecret = Deno.env.get("SYSTEM_HEALTH_CHECK_SECRET")?.trim();
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim() || serviceKey;
+  const envAnonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+  const requestApiKey = req.headers.get("apikey")?.trim() || "";
+  // For developer auth checks, never fall back to service-role key.
+  const verifyKey = envAnonKey || requestApiKey;
+  // For gateway calls to other Edge Functions, anon is preferred; service key is last-resort fallback.
+  const gatewayKey = envAnonKey || serviceKey;
   const emailSecret = Deno.env.get("FARMVAULT_EMAIL_INTERNAL_SECRET")?.trim();
   const to = alertEmail();
+  const devInbox = getFarmvaultDeveloperInboxEmail();
 
   if (!supabaseUrl || !serviceKey) {
     return json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500);
@@ -200,8 +242,8 @@ serveFarmVaultEdge("system-health-check", async (req: Request, _ctx) => {
     authorized = true;
   } else {
     const clerk = resolveClerkBearer(req);
-    if (clerk && anonKey) {
-      authorized = await verifyDeveloper(supabaseUrl, anonKey, clerk);
+    if (clerk && verifyKey) {
+      authorized = await verifyDeveloper(supabaseUrl, verifyKey, clerk);
     }
   }
 
@@ -230,22 +272,38 @@ serveFarmVaultEdge("system-health-check", async (req: Request, _ctx) => {
   let emailSent = false;
   let emailError: string | null = null;
 
-  if ((payload.status === "critical" || payload.status === "warning") && emailSecret && to) {
-    const r = await sendHealthEmail(
-      supabaseUrl,
-      anonKey,
-      emailSecret,
-      to,
-      payload.status as "critical" | "warning",
-      payload,
-    );
-    emailSent = r.ok;
-    emailError = r.error ?? null;
-    if (!r.ok) {
+  if ((payload.status === "critical" || payload.status === "warning") && emailSecret && (to || devInbox)) {
+    const { data: recentRows } = await admin
+      .from("system_health_logs")
+      .select("created_at,status,message")
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const recentLogs = (recentRows ?? []) as HealthLogEntry[];
+    const recipients = [...new Set([to, devInbox].map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean))];
+    const errors: string[] = [];
+    let sentAny = false;
+    for (const recipient of recipients) {
+      const r = await sendHealthEmail(
+        supabaseUrl,
+        gatewayKey,
+        emailSecret,
+        recipient,
+        payload.status as "critical" | "warning",
+        payload,
+        recentLogs,
+      );
+      sentAny = sentAny || r.ok;
+      if (!r.ok) {
+        errors.push(`${recipient}: ${r.error ?? "send failed"}`);
+      }
+    }
+    emailSent = sentAny;
+    emailError = errors.length ? errors.join(" | ") : null;
+    if (errors.length) {
       console.error("[system-health-check] email failed", emailError);
     }
   } else if (payload.status === "critical" || payload.status === "warning") {
-    emailError = "Missing FARMVAULT_EMAIL_INTERNAL_SECRET or SYSTEM_HEALTH_ALERT_EMAIL";
+    emailError = "Missing FARMVAULT_EMAIL_INTERNAL_SECRET and/or alert recipients";
     console.warn("[system-health-check]", emailError);
   }
 

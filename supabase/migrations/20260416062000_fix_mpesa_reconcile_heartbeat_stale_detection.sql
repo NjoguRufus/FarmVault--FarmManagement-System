@@ -24,7 +24,8 @@ declare
   v_reconcile_stale boolean := false;
 begin
   if coalesce(auth.role()::text, '') is distinct from 'service_role'
-     and not coalesce(public.is_developer(), false) then
+     and not coalesce(public.is_developer(), false)
+     and current_user not in ('postgres', 'supabase_admin') then
     raise exception 'not authorized' using errcode = '42501';
   end if;
 

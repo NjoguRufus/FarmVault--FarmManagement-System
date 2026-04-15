@@ -89,11 +89,11 @@ export default function AmbassadorSignupPage() {
                 />
                 <label htmlFor="amb-signup-terms" className="text-sm text-emerald-100/85 cursor-pointer leading-relaxed">
                   I agree to FarmVault's{" "}
-                  <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
+                  <Link to="/ambassador/terms" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
                     Terms &amp; Conditions
                   </Link>
                   ,{" "}
-                  <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
+                  <Link to="/ambassador/privacy" target="_blank" rel="noopener noreferrer" className="text-lime-300 underline-offset-2 hover:underline font-medium">
                     Privacy Policy
                   </Link>
                   , and{" "}
