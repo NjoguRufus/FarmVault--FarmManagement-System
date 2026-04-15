@@ -10,12 +10,13 @@ const QUERY_KEY_BASE = 'ops.workCards';
 
 export function useWorkCardsForCompany(
   companyId: string | null | undefined,
-  options?: { projectId?: string | null; enabled?: boolean }
+  options?: { farmId?: string | null; projectId?: string | null; enabled?: boolean }
 ) {
   const enabled = Boolean(companyId) && (options?.enabled ?? true);
+  const farmId = options?.farmId ?? null;
   const projectId = options?.projectId ?? null;
 
-  const queryKey = [QUERY_KEY_BASE, 'company', companyId ?? 'none', projectId ?? 'all'];
+  const queryKey = [QUERY_KEY_BASE, 'company', companyId ?? 'none', farmId ?? 'all-farms', projectId ?? 'all-projects'];
 
   const query = useQuery<WorkCard[]>({
     queryKey,
@@ -23,6 +24,7 @@ export function useWorkCardsForCompany(
     queryFn: () =>
       getWorkCardsForCompany({
         companyId: companyId as string,
+        farmId,
         projectId,
       }),
   });
@@ -38,10 +40,11 @@ export function useWorkCardsForCompany(
 export function useWorkCardsForManager(
   companyId: string | null | undefined,
   managerId: string | null | undefined,
-  options?: { projectId?: string | null; enabled?: boolean }
+  options?: { farmId?: string | null; projectId?: string | null; enabled?: boolean }
 ) {
   const enabled =
     Boolean(companyId) && Boolean(managerId) && (options?.enabled ?? true);
+  const farmId = options?.farmId ?? null;
   const projectId = options?.projectId ?? null;
 
   const queryKey = [
@@ -49,6 +52,7 @@ export function useWorkCardsForManager(
     'manager',
     companyId ?? 'none',
     managerId ?? 'none',
+    farmId ?? 'all-farms',
     projectId ?? 'all',
   ];
 
@@ -59,6 +63,7 @@ export function useWorkCardsForManager(
       getWorkCardsForManager({
         companyId: companyId as string,
         managerId: managerId as string,
+        farmId,
         projectId,
       }),
   });

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar as CalendarIcon, User, Briefcase, MapPin } from 'lucide-react';
+import { Calendar as CalendarIcon, User, Briefcase } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -28,6 +28,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
 import { listEmployees } from '@/services/employeesSupabaseService';
 import { createWorkCard } from '@/services/operationsWorkCardService';
+import { listFarmsByCompany } from '@/services/farmsService';
 import type { Employee } from '@/types';
 import { logger } from "@/lib/logger";
 import { isProjectClosed } from '@/lib/projectClosed';
@@ -36,6 +37,8 @@ interface PlanWorkModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  initialFarmId?: string | null;
+  initialProjectId?: string | null;
 }
 
 const WORK_TYPES = [
@@ -53,9 +56,15 @@ const WORK_TYPES = [
   'Other',
 ];
 
-export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalProps) {
+export function PlanWorkModal({
+  open,
+  onOpenChange,
+  onSuccess,
+  initialFarmId = null,
+  initialProjectId = null,
+}: PlanWorkModalProps) {
   const { user } = useAuth();
-  const { projects, activeProject } = useProject();
+  const { projects, activeProject, activeFarmId } = useProject();
   const companyId = user?.companyId ?? null;
 
   // Fetch employees from Supabase
@@ -64,6 +73,23 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
     queryFn: () => listEmployees(companyId!),
     enabled: !!companyId,
   });
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms', companyId ?? ''],
+    queryFn: () => listFarmsByCompany(companyId),
+    enabled: Boolean(companyId),
+  });
+  const selectorFarms = useMemo(
+    () =>
+      farms.filter(
+        (f) =>
+          f.status !== 'closed' &&
+          !(
+            f.name.trim().toLowerCase() === 'legacy farm' &&
+            f.location.trim().toLowerCase() === 'unspecified'
+          ),
+      ),
+    [farms],
+  );
 
   // Filter employees who have operations.view or operations.recordDailyWork permission
   const openProjects = useMemo(
@@ -95,7 +121,9 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
   }, [employees]);
 
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState<1 | 2>(1);
   const [formData, setFormData] = useState({
+    farmId: '',
     projectId: '',
     workTitle: '',
     workCategory: '',
@@ -108,34 +136,71 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
 
   useEffect(() => {
     if (!open) return;
+    setStep(1);
     setFormData((prev) => {
-      const stillValid = openProjects.some((p) => p.id === prev.projectId);
-      if (stillValid) return prev;
-      const preferred =
-        activeProject && openProjects.some((p) => p.id === activeProject.id)
-          ? activeProject.id
-          : openProjects[0]?.id ?? '';
-      return { ...prev, projectId: preferred };
+      const preferredFarmId =
+        (initialFarmId ??
+          activeProject?.farmId ??
+          activeFarmId ??
+          prev.farmId) ||
+        selectorFarms[0]?.id ||
+        '';
+      const projectsForFarm = openProjects.filter((p) => p.farmId === preferredFarmId);
+      const preferredProjectId =
+        initialProjectId ??
+        (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
+        (projectsForFarm.some((p) => p.id === prev.projectId) ? prev.projectId : null) ??
+        '';
+      return { ...prev, farmId: preferredFarmId, projectId: preferredProjectId };
     });
-  }, [open, openProjects, activeProject?.id]);
+  }, [
+    open,
+    openProjects,
+    activeProject?.id,
+    activeProject?.farmId,
+    activeFarmId,
+    selectorFarms,
+    initialFarmId,
+    initialProjectId,
+  ]);
 
   const selectedEmployee = useMemo(() => {
     return operationsEmployees.find(e => e.id === formData.allocatedManagerId);
   }, [operationsEmployees, formData.allocatedManagerId]);
+  const projectsForSelectedFarm = useMemo(
+    () => openProjects.filter((p) => p.farmId === formData.farmId),
+    [openProjects, formData.farmId],
+  );
+  const selectedProject = useMemo(
+    () => projectsForSelectedFarm.find((p) => p.id === formData.projectId) ?? null,
+    [projectsForSelectedFarm, formData.projectId],
+  );
 
   const plannedTotal = formData.plannedWorkers * formData.plannedRatePerPerson;
 
-  const handleSubmit = async () => {
-    if (!formData.projectId) {
-      toast.error('Please select a project');
-      return;
+  const validateStepOne = () => {
+    if (!formData.farmId) {
+      toast.error('Please select a farm');
+      return false;
     }
     if (!formData.workTitle.trim()) {
       toast.error('Please enter a work name');
-      return;
+      return false;
     }
     if (!formData.workCategory) {
       toast.error('Please select a work type');
+      return false;
+    }
+    return true;
+  };
+
+  const handleNextStep = () => {
+    if (!validateStepOne()) return;
+    setStep(2);
+  };
+
+  const handleSubmit = async () => {
+    if (!validateStepOne()) {
       return;
     }
 
@@ -143,7 +208,8 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
     try {
       await createWorkCard({
         companyId: companyId!,
-        projectId: formData.projectId,
+        farmId: selectedProject?.farmId ?? formData.farmId,
+        projectId: formData.projectId || null,
         workTitle: formData.workTitle.trim(),
         workCategory: formData.workCategory,
         plannedDate: format(formData.plannedDate, 'yyyy-MM-dd'),
@@ -164,10 +230,11 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
       const nextProjectId =
         activeProject &&
         !isProjectClosed(activeProject) &&
-        openProjects.some((p) => p.id === activeProject.id)
+        projectsForSelectedFarm.some((p) => p.id === activeProject.id)
           ? activeProject.id
-          : openProjects[0]?.id ?? '';
+          : '';
       setFormData({
+        farmId: formData.farmId,
         projectId: nextProjectId,
         workTitle: '',
         workCategory: '',
@@ -177,6 +244,7 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
         allocatedManagerId: '',
         notes: '',
       });
+      setStep(1);
 
       onSuccess?.();
     } catch (error) {
@@ -197,171 +265,212 @@ export function PlanWorkModal({ open, onOpenChange, onSuccess }: PlanWorkModalPr
           </DialogTitle>
         </DialogHeader>
 
+        <div className="flex items-center justify-between text-xs text-muted-foreground px-1 pt-2">
+          <span>Step {step} of 2</span>
+          <span>{step === 1 ? 'Work details' : 'Staffing and notes'}</span>
+        </div>
+
         <div className="space-y-4 py-4">
-          {/* Project Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="project">Farm / Project *</Label>
-            <Select
-              value={formData.projectId}
-              onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {openProjects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      {p.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Work Name */}
-          <div className="space-y-2">
-            <Label htmlFor="workTitle">Work Name *</Label>
-            <Input
-              id="workTitle"
-              placeholder="e.g., Apply DAP fertilizer to Field A"
-              value={formData.workTitle}
-              onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
-            />
-          </div>
-
-          {/* Work Type */}
-          <div className="space-y-2">
-            <Label htmlFor="workCategory">Work Type *</Label>
-            <Select
-              value={formData.workCategory}
-              onValueChange={(v) => setFormData(prev => ({ ...prev, workCategory: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select work type" />
-              </SelectTrigger>
-              <SelectContent>
-                {WORK_TYPES.map((type) => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Date */}
-          <div className="space-y-2">
-            <Label>Date *</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    'w-full justify-start text-left font-normal',
-                    !formData.plannedDate && 'text-muted-foreground'
-                  )}
+          {step === 1 ? (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="farm">Farm *</Label>
+                <Select
+                  value={formData.farmId || 'none'}
+                  onValueChange={(v) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      farmId: v === 'none' ? '' : v,
+                      projectId: '',
+                    }))
+                  }
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {formData.plannedDate ? format(formData.plannedDate, 'PPP') : 'Pick a date'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={formData.plannedDate}
-                  onSelect={(date) => date && setFormData(prev => ({ ...prev, plannedDate: date }))}
-                  initialFocus
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select farm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select farm</SelectItem>
+                    {selectorFarms.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="project">Project (optional)</Label>
+                <Select
+                  value={formData.projectId || 'none'}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v === 'none' ? '' : v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No project (farm-only)</SelectItem>
+                    {projectsForSelectedFarm.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        <div className="flex items-center gap-2">
+                          <Briefcase className="h-4 w-4 text-muted-foreground" />
+                          {p.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="workTitle">Work Name *</Label>
+                <Input
+                  id="workTitle"
+                  placeholder="e.g., Apply DAP fertilizer to Field A"
+                  value={formData.workTitle}
+                  onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
                 />
-              </PopoverContent>
-            </Popover>
-          </div>
+              </div>
 
-          {/* Workers and Rate */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="plannedWorkers">Planned Workers</Label>
-              <Input
-                id="plannedWorkers"
-                type="number"
-                min={1}
-                value={formData.plannedWorkers}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  plannedWorkers: parseInt(e.target.value) || 1 
-                }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="plannedRate">Rate per Person (KSh)</Label>
-              <Input
-                id="plannedRate"
-                type="number"
-                min={0}
-                value={formData.plannedRatePerPerson}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  plannedRatePerPerson: parseFloat(e.target.value) || 0 
-                }))}
-              />
-            </div>
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="workCategory">Work Type *</Label>
+                <Select
+                  value={formData.workCategory}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, workCategory: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select work type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WORK_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {/* Planned Total */}
-          {plannedTotal > 0 && (
-            <div className="p-3 rounded-lg bg-muted/50 text-center">
-              <p className="text-sm text-muted-foreground">Planned Total</p>
-              <p className="text-xl font-semibold">KSh {plannedTotal.toLocaleString()}</p>
-            </div>
+              <div className="space-y-2">
+                <Label>Date *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full justify-start text-left font-normal',
+                        !formData.plannedDate && 'text-muted-foreground'
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.plannedDate ? format(formData.plannedDate, 'PPP') : 'Pick a date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={formData.plannedDate}
+                      onSelect={(date) => date && setFormData(prev => ({ ...prev, plannedDate: date }))}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="plannedWorkers">Planned Workers</Label>
+                  <Input
+                    id="plannedWorkers"
+                    type="number"
+                    min={1}
+                    value={formData.plannedWorkers}
+                    onChange={(e) => setFormData(prev => ({
+                      ...prev,
+                      plannedWorkers: parseInt(e.target.value) || 1
+                    }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="plannedRate">Rate per Person (KSh)</Label>
+                  <Input
+                    id="plannedRate"
+                    type="number"
+                    min={0}
+                    value={formData.plannedRatePerPerson}
+                    onChange={(e) => setFormData(prev => ({
+                      ...prev,
+                      plannedRatePerPerson: parseFloat(e.target.value) || 0
+                    }))}
+                  />
+                </div>
+              </div>
+
+              {plannedTotal > 0 && (
+                <div className="p-3 rounded-lg bg-muted/50 text-center">
+                  <p className="text-sm text-muted-foreground">Planned Total</p>
+                  <p className="text-xl font-semibold">KSh {plannedTotal.toLocaleString()}</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="allocatedWorker">Allocate Worker</Label>
+                <Select
+                  value={formData.allocatedManagerId || 'none'}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, allocatedManagerId: v === 'none' ? '' : v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select worker (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No assignment</SelectItem>
+                    {operationsEmployees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          {emp.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only employees with Operations permission are shown
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Additional instructions or notes..."
+                  value={formData.notes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+            </>
           )}
-
-          {/* Allocate Worker */}
-          <div className="space-y-2">
-            <Label htmlFor="allocatedWorker">Allocate Worker</Label>
-            <Select
-              value={formData.allocatedManagerId || 'none'}
-              onValueChange={(v) => setFormData(prev => ({ ...prev, allocatedManagerId: v === 'none' ? '' : v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select worker (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No assignment</SelectItem>
-                {operationsEmployees.map((emp) => (
-                  <SelectItem key={emp.id} value={emp.id}>
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-muted-foreground" />
-                      {emp.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Only employees with Operations permission are shown
-            </p>
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              placeholder="Additional instructions or notes..."
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={3}
-            />
-          </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? 'Creating...' : 'Create Work Card'}
-          </Button>
+          {step === 1 ? (
+            <Button type="button" onClick={handleNextStep} disabled={saving}>
+              Next
+            </Button>
+          ) : (
+            <>
+              <Button type="button" variant="secondary" onClick={() => setStep(1)} disabled={saving}>
+                Back
+              </Button>
+              <Button onClick={handleSubmit} disabled={saving}>
+                {saving ? 'Creating...' : 'Create Work Card'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -399,6 +399,7 @@ export default function OperationsPage() {
         : (cardPlannedDate as Date)?.toISOString?.()?.split('T')[0] ?? null;
       const created = await createWorkCard({
         companyId: selectedProjectForCard.companyId,
+        farmId: selectedProjectForCard.farmId ?? '',
         projectId: selectedProjectForCard.id,
         stageId: stage?.id ?? null,
         stageIndex: (stage as { stageIndex?: number; order?: number })?.stageIndex ?? (stage as { order?: number })?.order ?? null,

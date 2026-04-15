@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { createBudgetPool, getBudgetPoolsByCompany } from '@/services/budgetPoolService';
 import { getChallengeTemplates } from '@/services/challengeTemplatesService';
 import { createProject } from '@/services/projectsService';
+import { listFarmsByCompany } from '@/services/farmsService';
 import {
   cropSupportsEnvironment,
   findCropKnowledgeByTypeKey,
@@ -44,10 +45,24 @@ import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
 import { ProBadge } from '@/components/subscription';
 import { logger } from "@/lib/logger";
+import { FarmFormModal } from '@/components/farms/FarmFormModal';
+import type { Farm, Project } from '@/types';
+import { countUnlinkedFarmActivities, linkUnlinkedFarmActivitiesToProject } from '@/services/hybridActivityLinkingService';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface NewProjectFormProps {
   onCancel: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (project?: Project) => void;
+  initialFarmId?: string | null;
 }
 
 type WizardStep = 1 | 2 | 3;
@@ -55,12 +70,13 @@ type StageConfidence = 'high' | 'medium' | 'low';
 type BudgetType = 'separate' | 'pool';
 
 type ProjectFormState = {
+  farmId: string;
   projectName: string;
   cropTypeKey: string;
   environmentType: EnvironmentType;
   plantingDate: Date | undefined;
   currentStage: string;
-  location: string;
+  notes: string;
   acreage: string;
   budget: string;
 };
@@ -92,15 +108,15 @@ function StepIndicator({ step }: { step: WizardStep }) {
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-sm">
         <div className={cn('font-medium', step === 1 ? 'text-emerald-600 font-semibold' : 'text-muted-foreground')}>
-          1 Crop
+          1 Farm
         </div>
         <div className="h-px flex-1 bg-border/70" />
         <div className={cn('font-medium', step === 2 ? 'text-emerald-600 font-semibold' : 'text-muted-foreground')}>
-          2 Blocks & date
+          2 Crop
         </div>
         <div className="h-px flex-1 bg-border/70" />
         <div className={cn('font-medium', step === 3 ? 'text-emerald-600 font-semibold' : 'text-muted-foreground')}>
-          3 Details
+          3 Project details
         </div>
       </div>
       <div className="h-1 w-full rounded-full bg-muted">
@@ -113,7 +129,7 @@ function StepIndicator({ step }: { step: WizardStep }) {
   );
 }
 
-export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
+export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: NewProjectFormProps) {
   const { user } = useAuth();
   const { setActiveProject, projects } = useProject();
   const queryClient = useQueryClient();
@@ -123,15 +139,18 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
   const [step, setStep] = useState<WizardStep>(1);
   const [form, setForm] = useState<ProjectFormState>({
+    farmId: initialFarmId ?? '',
     projectName: '',
     cropTypeKey: 'tomatoes',
     environmentType: 'open_field',
     plantingDate: new Date(),
     currentStage: '',
-    location: '',
+    notes: '',
     acreage: '',
     budget: '',
   });
+  const [farmSearch, setFarmSearch] = useState('');
+  const [farmModalOpen, setFarmModalOpen] = useState(false);
   const [manualStageOverride, setManualStageOverride] = useState(false);
   const [stepOneError, setStepOneError] = useState('');
   const [stepTwoReadyToSubmit, setStepTwoReadyToSubmit] = useState(false);
@@ -144,6 +163,10 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const [createPoolAmount, setCreatePoolAmount] = useState('');
   const [creatingPool, setCreatingPool] = useState(false);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
+  const [linkPromptOpen, setLinkPromptOpen] = useState(false);
+  const [linkingOldActivities, setLinkingOldActivities] = useState(false);
+  const [pendingCreatedProject, setPendingCreatedProject] = useState<Project | null>(null);
+  const [pendingLinkCounts, setPendingLinkCounts] = useState<{ expenses: number; operations: number; total: number } | null>(null);
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
@@ -201,6 +224,12 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     enabled: Boolean(user?.companyId),
     staleTime: 30_000,
   });
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms', user?.companyId ?? ''],
+    queryFn: () => listFarmsByCompany(user?.companyId ?? null),
+    enabled: Boolean(user?.companyId),
+    staleTime: 30_000,
+  });
 
   const stageOptions = selectedCrop?.stages ?? [];
   const resolvedEnvironmentType = getEffectiveEnvironmentForCrop(selectedCrop, form.environmentType);
@@ -242,6 +271,12 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   const stageTooltipText = selectedCrop && autoStageRule
     ? `FarmVault auto-detected this stage because ${selectedCrop.displayName} is typically in '${autoStageRule.label}' between day ${autoStageRule.baseDayStart}-${autoStageRule.baseDayEnd} after planting. You can change it if your farm conditions differ.`
     : 'FarmVault needs a valid crop and planting date to auto-detect the stage.';
+
+  useEffect(() => {
+    if (initialFarmId && !form.farmId) {
+      setForm((prev) => ({ ...prev, farmId: initialFarmId }));
+    }
+  }, [initialFarmId, form.farmId]);
 
   useEffect(() => {
     if (!selectedCrop && cropCatalog.length > 0) {
@@ -295,8 +330,8 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
   const handleContinue = () => {
     if (step === 1) {
-      if (!form.projectName.trim() || !selectedCrop) {
-        setStepOneError('Project name and crop are required.');
+      if (!form.farmId.trim() || !form.projectName.trim() || !selectedCrop) {
+        setStepOneError('Farm, project name, and crop are required.');
         return;
       }
       setStepOneError('');
@@ -318,6 +353,41 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     }
   };
 
+  const finishProjectCreation = (project: Project) => {
+    setActiveProject(project);
+    onSuccess?.(project);
+  };
+
+  const handleLinkDecision = async (shouldLink: boolean) => {
+    if (!pendingCreatedProject || !user?.companyId) return;
+    if (!shouldLink) {
+      setLinkPromptOpen(false);
+      setPendingLinkCounts(null);
+      finishProjectCreation(pendingCreatedProject);
+      setPendingCreatedProject(null);
+      return;
+    }
+
+    setLinkingOldActivities(true);
+    try {
+      const result = await linkUnlinkedFarmActivitiesToProject({
+        companyId: user.companyId,
+        farmId: pendingCreatedProject.farmId ?? '',
+        projectId: pendingCreatedProject.id,
+      });
+      toast.success(`Linked ${result.totalLinked} previous farm records to this project.`);
+      setLinkPromptOpen(false);
+      setPendingLinkCounts(null);
+      finishProjectCreation(pendingCreatedProject);
+      setPendingCreatedProject(null);
+    } catch (error) {
+      console.error('[Link farm records error]', error);
+      toast.error('Could not link previous farm records. You can continue and link later.');
+    } finally {
+      setLinkingOldActivities(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (step === 1 || step === 2) {
@@ -330,6 +400,10 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
     }
     if (!stepTwoReadyToSubmit) return;
     if (!user || saving || !selectedCrop) return;
+    if (!form.farmId) {
+      toast.error('Select a farm before creating a project.');
+      return;
+    }
     if (!user.companyId) {
       toast.error('No active company selected. Please select a company before creating a project.');
       return;
@@ -425,6 +499,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
       const project = await createProject({
         companyId: user.companyId,
         createdBy: user.id,
+        farmId: form.farmId,
         name: form.projectName.trim(),
         cropType: projectCropType,
         plantingDate: plantingDateStr,
@@ -433,7 +508,7 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         expectedEndDate: null,
         fieldSize: Number(form.acreage || '0') || null,
         fieldUnit: 'acres',
-        notes: form.location || null,
+        notes: form.notes || null,
         budget: poolId ? 0 : separateBudget,
         budgetPoolId: poolId,
       });
@@ -445,8 +520,22 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
 
       await queryClient.invalidateQueries({ queryKey: ['projects', user.companyId] });
       await queryClient.invalidateQueries({ queryKey: ['budget-pools', user.companyId] });
-      setActiveProject(project);
-      onSuccess?.();
+      const farmId = project.farmId ?? form.farmId;
+      if (!farmId) {
+        finishProjectCreation(project);
+        return;
+      }
+      const unlinkedCounts = await countUnlinkedFarmActivities({
+        companyId: user.companyId,
+        farmId,
+      });
+      if (unlinkedCounts.total > 0) {
+        setPendingCreatedProject(project);
+        setPendingLinkCounts(unlinkedCounts);
+        setLinkPromptOpen(true);
+        return;
+      }
+      finishProjectCreation(project);
     } catch (e) {
       console.error('[Project Create Error]', e);
       toast.error('Failed to create project. Please try again.');
@@ -456,11 +545,41 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
   };
 
   const cropSetupSummary = [
+    `Farm: ${farms.find((farm) => farm.id === form.farmId)?.name ?? 'Not selected'}`,
     `Project: ${form.projectName || 'Not set'}`,
     `Crop: ${selectedCrop?.displayName ?? 'Not selected'} | ${environmentLabel}`,
     enableBlockManagement ? `${blocks.length} block(s)` : `Stage: ${currentStageRule?.label ?? 'Not selected'}`,
     enableBlockManagement ? '' : `Planting: ${formatDateLabel(form.plantingDate)}`,
   ].filter(Boolean);
+  const selectableFarms = useMemo(
+    () =>
+      farms.filter(
+        (farm) =>
+          !(
+            farm.name.trim().toLowerCase() === 'legacy farm' &&
+            farm.location.trim().toLowerCase() === 'unspecified'
+          ),
+      ),
+    [farms],
+  );
+  const filteredFarms = useMemo(() => {
+    const q = farmSearch.trim().toLowerCase();
+    if (!q) return selectableFarms;
+    return selectableFarms.filter(
+      (farm) =>
+        farm.name.toLowerCase().includes(q) || farm.location.toLowerCase().includes(q),
+    );
+  }, [selectableFarms, farmSearch]);
+  const canCreateFarmFromSearch =
+    farmSearch.trim().length > 1 &&
+    !selectableFarms.some((farm) => farm.name.toLowerCase() === farmSearch.trim().toLowerCase());
+  const showFarmSuggestions = farmSearch.trim().length > 0;
+
+  useEffect(() => {
+    if (!form.farmId || farmSearch.trim()) return;
+    const selectedFarm = farms.find((farm) => farm.id === form.farmId);
+    if (selectedFarm) setFarmSearch(selectedFarm.name);
+  }, [form.farmId, farmSearch, farms]);
 
   const stageChangePill = (className?: string) => (
     <Select
@@ -494,14 +613,14 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Sprout className="h-5 w-5 text-primary" />
-            {step === 1 ? 'Project name & crop' : step === 2 ? 'Blocks & planting date' : 'Details & save'}
+            {step === 1 ? 'Farm selection' : step === 2 ? 'Blocks & planting date' : 'Project details & save'}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {step === 1
-              ? 'Set project name, crop type, and environment.'
+              ? 'Select a farm first, then set project basics.'
               : step === 2
                 ? 'Enable block management or set a single planting date.'
-                : 'Add location, budget, and finish.'}
+                : 'Add notes, budget, and finish.'}
           </p>
         </div>
         <StepIndicator step={step} />
@@ -511,6 +630,52 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         <div className="flex-1 space-y-4 overflow-y-auto pr-1">
           {step === 1 ? (
             <>
+              <div className="space-y-2 rounded-lg border border-border/70 p-3">
+                <label className="text-sm font-medium text-foreground">Farm (required)</label>
+                <input
+                  className="fv-input"
+                  value={farmSearch}
+                  onChange={(e) => {
+                    setFarmSearch(e.target.value);
+                    setForm((prev) => ({ ...prev, farmId: '' }));
+                  }}
+                  placeholder="Search farms by name or location"
+                />
+                {showFarmSuggestions && (
+                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
+                    {filteredFarms.map((farm) => (
+                      <button
+                        key={farm.id}
+                        type="button"
+                        className={cn(
+                          'w-full rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted/60',
+                          form.farmId === farm.id && 'bg-emerald-50 text-emerald-900',
+                        )}
+                        onClick={() => {
+                          setForm((prev) => ({ ...prev, farmId: farm.id }));
+                          setFarmSearch(farm.name);
+                        }}
+                      >
+                        <span className="font-medium">{farm.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{farm.location}</span>
+                      </button>
+                    ))}
+                    {filteredFarms.length === 0 && (
+                      <p className="px-2 py-1 text-xs text-muted-foreground">No farm match found.</p>
+                    )}
+                  </div>
+                )}
+                {showFarmSuggestions && canCreateFarmFromSearch && (
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
+                    onClick={() => setFarmModalOpen(true)}
+                  >
+                    + Add New Farm
+                  </button>
+                )}
+              </div>
+
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Project Name</label>
                 <input
@@ -851,12 +1016,12 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
               )}
 
               <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Location</label>
+                <label className="text-sm font-medium text-foreground">Notes (optional)</label>
                 <input
                   className="fv-input"
-                  value={form.location}
-                  onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
-                  placeholder="North Field"
+                  value={form.notes}
+                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Any important setup notes"
                 />
               </div>
 
@@ -1032,6 +1197,35 @@ export function NewProjectForm({ onCancel, onSuccess }: NewProjectFormProps) {
         daysRemaining={daysRemaining}
         workspaceCompanyId={user?.companyId ?? null}
       />
+      <FarmFormModal
+        open={farmModalOpen}
+        onOpenChange={setFarmModalOpen}
+        initialName={farmSearch.trim()}
+        onCreated={(farm: Farm) => {
+          setForm((prev) => ({ ...prev, farmId: farm.id }));
+          setFarmSearch(farm.name);
+        }}
+      />
+      <AlertDialog open={linkPromptOpen} onOpenChange={(next) => !linkingOldActivities && setLinkPromptOpen(next)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Link previous farm activities to this project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              We found {pendingLinkCounts?.total ?? 0} farm records before this project
+              ({pendingLinkCounts?.expenses ?? 0} expenses, {pendingLinkCounts?.operations ?? 0} operations).
+              Would you like to include them in this project?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={linkingOldActivities} onClick={() => void handleLinkDecision(false)}>
+              No, start fresh
+            </AlertDialogCancel>
+            <AlertDialogAction disabled={linkingOldActivities} onClick={() => void handleLinkDecision(true)}>
+              {linkingOldActivities ? 'Linking...' : 'Yes, link them'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

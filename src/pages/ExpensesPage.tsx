@@ -10,6 +10,7 @@ import { FeatureGate } from '@/components/subscription';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { getFinanceExpenses, createFinanceExpense } from '@/services/financeExpenseService';
+import { listFarmsByCompany } from '@/services/farmsService';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
@@ -57,6 +58,7 @@ import { formatKes } from '@/components/reports/analyticsFormat';
 import { renderReport } from '@/lib/pdf/renderReport';
 import { printHtmlReport } from '@/lib/pdf/printHtmlReport';
 import { getCompany } from '@/services/companyService';
+import { AddExpenseModal } from '@/components/expenses/AddExpenseModal';
 
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
@@ -155,7 +157,7 @@ function PickerPaymentDetailContent({
 }
 
 export default function ExpensesPage() {
-  const { activeProject } = useProject();
+  const { activeProject, activeFarmId } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
@@ -164,10 +166,37 @@ export default function ExpensesPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date } | undefined>();
-  const { data: allExpenses = [], isLoading } = useQuery({
-    queryKey: ['financeExpenses', companyId ?? '', activeProject?.id ?? ''],
-    queryFn: () => getFinanceExpenses(companyId ?? '', activeProject?.id ?? null),
+  const [selectedFarmId, setSelectedFarmId] = useState<string>('');
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms', companyId ?? ''],
+    queryFn: () => listFarmsByCompany(companyId),
     enabled: Boolean(companyId),
+  });
+  useEffect(() => {
+    const visibleFarms = farms.filter(
+      (farm) =>
+        !(farm.name.trim().toLowerCase() === 'legacy farm' && farm.location.trim().toLowerCase() === 'unspecified'),
+    );
+    if (activeProject?.farmId) {
+      setSelectedFarmId(activeProject.farmId);
+      return;
+    }
+    if (activeFarmId && visibleFarms.some((f) => f.id === activeFarmId)) {
+      setSelectedFarmId(activeFarmId);
+      return;
+    }
+    if (!selectedFarmId && visibleFarms.length > 0) {
+      setSelectedFarmId(visibleFarms[0].id);
+    }
+  }, [activeProject?.farmId, activeFarmId, farms, selectedFarmId]);
+  const { data: allExpenses = [], isLoading } = useQuery({
+    queryKey: ['financeExpenses', companyId ?? '', selectedFarmId ?? '', activeProject?.id ?? ''],
+    queryFn: () =>
+      getFinanceExpenses(companyId ?? '', {
+        farmId: (selectedFarmId || activeProject?.farmId) ?? null,
+        projectId: activeProject?.id ?? null,
+      }),
+    enabled: Boolean(companyId && (selectedFarmId || activeProject?.farmId)),
   });
 
   useEffect(() => {
@@ -459,7 +488,11 @@ export default function ExpensesPage() {
       toast.error('Permission denied', { description: 'You cannot create expenses.' });
       return;
     }
-    if (!activeProject) return;
+    const farmId = activeProject?.farmId ?? selectedFarmId;
+    if (!farmId) {
+      toast.error('Select a farm first.');
+      return;
+    }
     setSaving(true);
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
     setAddOpen(false);
@@ -471,8 +504,9 @@ export default function ExpensesPage() {
       const amountNum = Number(amount || '0');
 
       await createFinanceExpense({
-        companyId: activeProject.companyId,
-        projectId: activeProject.id,
+        companyId: activeProject?.companyId ?? companyId ?? '',
+        farmId,
+        projectId: activeProject?.id ?? null,
         category: categoryToSave,
         amount: amountNum,
         note: description || null,
@@ -507,11 +541,16 @@ export default function ExpensesPage() {
       return;
     }
     if (!activeProject || !user || !log.id || !log.totalPrice) return;
+    if (!activeProject.farmId) {
+      toast.error('Active project is missing farm information.');
+      return;
+    }
     setMarkingPaid(log.id);
     try {
       // Create labour expense in Supabase
       await createFinanceExpense({
         companyId: activeProject.companyId,
+        farmId: activeProject.farmId,
         projectId: activeProject.id,
         category: 'labour',
         amount: log.totalPrice,
@@ -669,9 +708,9 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold text-foreground">Expenses</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {activeProject ? (
-              <>Tracking expenses for <span className="font-medium">{activeProject.name}</span></>
+              <>Project View: tracking expenses for <span className="font-medium">{activeProject.name}</span></>
             ) : (
-              'Track and manage all expenses'
+              'Farm View: track expenses before or without a project'
             )}
           </p>
         </div>
@@ -783,101 +822,24 @@ export default function ExpensesPage() {
             </>
           )}
           {canCreateExpense && (
-          <Dialog
-            open={addOpen}
-            onOpenChange={(open) => {
-              setAddOpen(open);
-              if (!open) setCustomCategory('');
-            }}
-          >
-            <DialogTrigger asChild>
-              <button
-                className="fv-btn fv-btn--primary"
-                data-tour="staff-expenses-add"
-              >
+            <>
+              <button className="fv-btn fv-btn--primary" data-tour="staff-expenses-add" onClick={() => setAddOpen(true)}>
                 <Plus className="h-4 w-4" />
                 Add Expense
               </button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Expense</DialogTitle>
-              </DialogHeader>
-              {!activeProject ? (
-                <p className="text-sm text-muted-foreground">
-                  Select a project first to add an expense.
-                </p>
-              ) : (
-                <form onSubmit={handleAddExpense} className="space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Description</label>
-                    <input
-                      className="fv-input"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Amount (KES)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      className="fv-input"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-foreground">Category</label>
-                    <Select value={category} onValueChange={(val) => setCategory(val as ExpenseCategory)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="labour">Labour</SelectItem>
-                        <SelectItem value="fertilizer">Fertilizer</SelectItem>
-                        <SelectItem value="chemical">Chemical</SelectItem>
-                        <SelectItem value="fuel">Fuel</SelectItem>
-                        <SelectItem value="other">Custom / Not listed</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {category === 'other' && (
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Custom category</label>
-                      <input
-                        className="fv-input"
-                        placeholder="e.g. Seeds, Equipment, Transport"
-                        value={customCategory}
-                        onChange={(e) => setCustomCategory(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Type the category name; it will be saved with this expense.
-                      </p>
-                    </div>
-                  )}
-                  <DialogFooter>
-                    <button
-                      type="button"
-                      className="fv-btn fv-btn--secondary"
-                      onClick={() => setAddOpen(false)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="fv-btn fv-btn--primary"
-                    >
-                      {saving ? 'Saving…' : 'Save Expense'}
-                    </button>
-                  </DialogFooter>
-                </form>
-              )}
-            </DialogContent>
-          </Dialog>
+              <AddExpenseModal
+                open={addOpen}
+                onOpenChange={setAddOpen}
+                companyId={companyId}
+                farmId={activeProject?.farmId ?? selectedFarmId ?? null}
+                projectId={activeProject?.id ?? null}
+                createdBy={user?.id ?? null}
+                onSaved={async () => {
+                  await queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
+                  await queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+                }}
+              />
+            </>
           )}
         </div>
       </div>

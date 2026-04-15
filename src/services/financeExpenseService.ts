@@ -14,6 +14,7 @@ const LARGE_EXPENSE_KES = 50_000;
 export type FinanceExpenseRow = {
   id: string;
   company_id: string;
+  farm_id: string;
   project_id: string | null;
   category: string;
   amount: number;
@@ -29,6 +30,7 @@ export type FinanceExpenseRow = {
 export type ExpenseLike = {
   id: string;
   companyId: string;
+  farmId: string;
   projectId?: string;
   category: string;
   description: string;
@@ -47,17 +49,22 @@ export type ExpenseLike = {
  */
 export async function getFinanceExpenses(
   companyId: string,
-  projectId?: string | null,
+  options?: { farmId?: string | null; projectId?: string | null },
 ): Promise<ExpenseLike[]> {
   if (!companyId) return [];
+  const farmId = options?.farmId ?? null;
+  const projectId = options?.projectId ?? null;
   let q = db
     .finance()
     .from('expenses')
-    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
+    .select('id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .order('expense_date', { ascending: false });
 
+  if (farmId) {
+    q = q.eq('farm_id', farmId);
+  }
   if (projectId) {
     q = q.eq('project_id', projectId);
   }
@@ -92,6 +99,7 @@ export async function getFinanceExpenses(
     return {
       id: row.id,
       companyId: row.company_id,
+      farmId: row.farm_id,
       projectId: row.project_id ?? undefined,
       category: row.category,
       description,
@@ -108,6 +116,7 @@ export async function getFinanceExpenses(
 
 export interface CreateExpenseInput {
   companyId: string;
+  farmId: string;
   projectId?: string | null;
   category: string;
   amount: number;
@@ -129,6 +138,7 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
     .from('expenses')
     .insert({
       company_id: tenant,
+      farm_id: input.farmId,
       project_id: input.projectId ?? null,
       category: input.category,
       amount: input.amount,
@@ -137,7 +147,7 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
       note: input.note ?? null,
       created_by: input.createdBy ?? null,
     })
-    .select('id,company_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
+    .select('id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
     .single();
 
   if (error) throw error;
@@ -175,6 +185,7 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
   return {
     id: row.id,
     companyId: row.company_id,
+    farmId: row.farm_id,
     projectId: row.project_id ?? undefined,
     category: row.category,
     description: (row.note || row.category || 'Expense').trim() || 'Expense',
@@ -195,6 +206,7 @@ export async function updateFinanceExpense(params: {
   note?: string | null;
   expenseDate?: string | null;
   category?: string;
+  farmId?: string;
   projectId?: string | null;
 }): Promise<void> {
   const tenant = requireCompanyId(params.companyId);
@@ -203,6 +215,7 @@ export async function updateFinanceExpense(params: {
   if (params.note !== undefined) patch.note = params.note;
   if (params.expenseDate !== undefined) patch.expense_date = params.expenseDate;
   if (params.category !== undefined) patch.category = params.category;
+  if (params.farmId !== undefined) patch.farm_id = params.farmId;
   if (params.projectId !== undefined) patch.project_id = params.projectId;
   if (Object.keys(patch).length === 0) return;
 
@@ -226,4 +239,40 @@ export async function updateFinanceExpense(params: {
   if (!data) {
     throw new ConcurrentUpdateConflictError();
   }
+}
+
+export async function countUnlinkedFarmExpenses(params: {
+  companyId: string;
+  farmId: string;
+}): Promise<number> {
+  const tenant = requireCompanyId(params.companyId);
+  const { count, error } = await db
+    .finance()
+    .from('expenses')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', tenant)
+    .eq('farm_id', params.farmId)
+    .is('project_id', null)
+    .is('deleted_at', null);
+  if (error) throw error;
+  return Number(count ?? 0);
+}
+
+export async function linkFarmExpensesToProject(params: {
+  companyId: string;
+  farmId: string;
+  projectId: string;
+}): Promise<number> {
+  const tenant = requireCompanyId(params.companyId);
+  const { data, error } = await db
+    .finance()
+    .from('expenses')
+    .update({ project_id: params.projectId })
+    .eq('company_id', tenant)
+    .eq('farm_id', params.farmId)
+    .is('project_id', null)
+    .is('deleted_at', null)
+    .select('id');
+  if (error) throw error;
+  return (data ?? []).length;
 }

@@ -17,6 +17,7 @@ import { DriverDashboard } from "@/pages/dashboard/DriverDashboard";
 import { StaffLayout } from "@/components/layout/StaffLayout";
 import { StaffDashboard } from "@/pages/dashboard/StaffDashboard";
 import ProjectsPage from "@/pages/ProjectsPage";
+import FarmDetailsPage from "@/pages/FarmDetailsPage";
 import ProjectDetailsPage from "@/pages/ProjectDetailsPage";
 import EditProjectPage from "@/pages/EditProjectPage";
 import ProjectPlanningPage from "@/pages/ProjectPlanningPage";
@@ -350,6 +351,7 @@ const AppRoutesWithLock = () => (
         <Route path="/app/*" element={<CompanyDashboardRoute />} />
         <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
         <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/farms/:farmId" element={<PermissionRoute module="projects"><RequireNotBroker><FarmDetailsPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><Navigate to="/projects?new=1" replace /></RequireNotBroker></PermissionRoute>} />
         <Route path="/projects/:projectId/edit" element={<PermissionRoute module="projects"><RequireNotBroker><EditProjectPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/projects/:projectId" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectDetailsPage /></RequireNotBroker></PermissionRoute>} />
@@ -444,6 +446,14 @@ const AppRoutesWithLock = () => (
           element={
             <PermissionRoute module="operations">
               <StaffOperationsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="farms/:farmId"
+          element={
+            <PermissionRoute module="projects">
+              <FarmDetailsPage />
             </PermissionRoute>
           }
         />

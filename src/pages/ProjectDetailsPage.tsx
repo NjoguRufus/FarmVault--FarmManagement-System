@@ -124,7 +124,7 @@ export default function ProjectDetailsPage() {
   });
   const { data: financeExpensesRaw = [] } = useQuery({
     queryKey: ['project-finance-expenses', companyId, projectId],
-    queryFn: () => getFinanceExpenses(companyId!, projectId!),
+    queryFn: () => getFinanceExpenses(companyId!, { projectId: projectId! }),
     enabled: Boolean(companyId && projectId),
   });
   const allChallenges = allChallengesFromHook;

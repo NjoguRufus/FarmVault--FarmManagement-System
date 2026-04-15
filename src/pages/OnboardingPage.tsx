@@ -24,6 +24,7 @@ import {
 } from '@/lib/onboardingSessionProgress';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
+import { createFarm } from '@/services/farmsService';
 import {
   setPostOnboardingFirstProjectWelcomeFlag,
   setPostOnboardingProTrialWelcome,
@@ -51,6 +52,7 @@ type EmailValidationResult = { ok: boolean; message?: string | null };
 const ONBOARDING_PROGRESS_STEPS = [
   { label: 'Company' },
   { label: 'Pro trial' },
+  { label: 'First farm' },
   { label: 'Project' },
   { label: 'Finish' },
 ] as const;
@@ -75,6 +77,13 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [firstFarmId, setFirstFarmId] = useState<string | null>(null);
+  const [farmName, setFarmName] = useState('');
+  const [farmLocation, setFarmLocation] = useState('');
+  const [ownershipType, setOwnershipType] = useState<'owned' | 'leased'>('owned');
+  const [leaseCost, setLeaseCost] = useState('');
+  const [leaseDuration, setLeaseDuration] = useState('');
+  const [leaseDurationType, setLeaseDurationType] = useState<'months' | 'years'>('months');
   const [skipConfirmOpen, setSkipConfirmOpen] = useState(false);
   const startedTracked = useRef(false);
   const onboardingRestoredRef = useRef(false);
@@ -152,7 +161,7 @@ export default function OnboardingPage() {
     if (exitingOnboardingRef.current || !clerkId || !isSignedIn) return;
     saveOnboardingSessionProgress({
       clerkUserId: clerkId,
-      step: step as 1 | 2 | 3 | 4,
+      step: step as 1 | 2 | 3 | 4 | 5,
       companyId,
       companyName: companyName.trim(),
       companyEmail: companyEmail.trim(),
@@ -420,12 +429,57 @@ export default function OnboardingPage() {
   }
 
   const goToFinishStep = () => {
-    setStep(4);
+    setStep(5);
   };
 
   const handleOnboardingProjectSuccess = () => {
     setPostOnboardingFirstProjectWelcomeFlag();
     goToFinishStep();
+  };
+
+  const handleStep3CreateFarm = async () => {
+    if (!companyId || !fvUser?.id) {
+      setError('Missing company or user session.');
+      return;
+    }
+    if (!farmName.trim() || !farmLocation.trim()) {
+      setError('Farm name and location are required.');
+      return;
+    }
+    if (
+      ownershipType === 'leased' &&
+      (!(Number(leaseCost) > 0) || !(Number(leaseDuration) > 0))
+    ) {
+      setError('Lease cost and duration are required for leased farms.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const farm = await createFarm({
+        companyId,
+        name: farmName.trim(),
+        location: farmLocation.trim(),
+        ownershipType,
+        leaseCost: ownershipType === 'leased' ? Number(leaseCost) : null,
+        leaseDuration: ownershipType === 'leased' ? Number(leaseDuration) : null,
+        leaseDurationType: ownershipType === 'leased' ? leaseDurationType : null,
+      });
+      setFirstFarmId(farm.id);
+      setStep(4);
+    } catch (e) {
+      const message =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string'
+            ? ((e as { message?: string }).message ?? 'Failed to create farm')
+            : 'Failed to create farm';
+      setError(message);
+      toast({ title: 'Farm creation failed', description: message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleStep4Finish = async () => {
@@ -497,7 +551,9 @@ export default function OnboardingPage() {
       : step === 2
         ? 'Activate Pro trial'
         : step === 3
-          ? 'Create your first project'
+          ? 'Create your first farm'
+          : step === 4
+            ? 'Create your first project'
           : "You're ready";
 
   const shellSubtitle =
@@ -506,7 +562,9 @@ export default function OnboardingPage() {
       : step === 2
         ? 'Your workspace starts on Basic until you activate your 7-day Pro trial — unlock full tracking next.'
         : step === 3
-          ? 'Add one project now so you can start tracking this season, or continue to the final step.'
+          ? 'Set up your first farm so project creation can use structured farm selection.'
+          : step === 4
+            ? 'Add one project now so you can start tracking this season, or continue to the final step.'
           : 'Confirm to open your dashboard. You can change plans anytime in billing.';
 
   return (
@@ -525,9 +583,13 @@ export default function OnboardingPage() {
         </div>
       }
       belowPanel={
-        step === 3 ? (
+        step === 4 ? (
           <div className="rounded-[18px] border border-white/22 bg-white/90 p-4 sm:p-6 shadow-[0_22px_60px_rgba(0,0,0,0.26)]">
-            <NewProjectForm onCancel={goToFinishStep} onSuccess={handleOnboardingProjectSuccess} />
+            <NewProjectForm
+              onCancel={goToFinishStep}
+              onSuccess={handleOnboardingProjectSuccess}
+              initialFarmId={firstFarmId}
+            />
           </div>
         ) : null
       }
@@ -664,12 +726,93 @@ export default function OnboardingPage() {
           </Button>
 
           <p className="mt-4 text-xs leading-relaxed text-white/65">
-            Next you&apos;ll create your first project, then confirm to open your dashboard.
+            Next you&apos;ll create your first farm, then your first project.
           </p>
         </div>
       )}
 
       {step === 3 && (
+        <div className="animate-in fade-in-0 duration-300">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-white/90">Farm name</Label>
+              <Input
+                value={farmName}
+                onChange={(e) => setFarmName(e.target.value)}
+                placeholder="e.g. North Block Farm"
+                className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-white/90">Location</Label>
+              <Input
+                value={farmLocation}
+                onChange={(e) => setFarmLocation(e.target.value)}
+                placeholder="e.g. Limuru, Kiambu"
+                className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-white/90">Ownership type</Label>
+              <div className="flex items-center gap-4 text-sm text-white">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={ownershipType === 'owned'}
+                    onChange={() => setOwnershipType('owned')}
+                  />
+                  Owned
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={ownershipType === 'leased'}
+                    onChange={() => setOwnershipType('leased')}
+                  />
+                  Leased
+                </label>
+              </div>
+            </div>
+            {ownershipType === 'leased' && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input
+                  type="number"
+                  min={0}
+                  value={leaseCost}
+                  onChange={(e) => setLeaseCost(e.target.value)}
+                  placeholder="Lease cost"
+                  className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111]"
+                />
+                <Input
+                  type="number"
+                  min={1}
+                  value={leaseDuration}
+                  onChange={(e) => setLeaseDuration(e.target.value)}
+                  placeholder="Duration"
+                  className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111]"
+                />
+                <select
+                  className="h-12 rounded-xl border border-white/18 bg-white/85 px-4 text-[#111111]"
+                  value={leaseDurationType}
+                  onChange={(e) => setLeaseDurationType(e.target.value as 'months' | 'years')}
+                >
+                  <option value="months">Months</option>
+                  <option value="years">Years</option>
+                </select>
+              </div>
+            )}
+          </div>
+          <Button
+            className="mt-6 h-12 w-full rounded-full bg-[#1F3D2B] text-white"
+            onClick={() => void handleStep3CreateFarm()}
+            disabled={loading}
+          >
+            {loading ? 'Saving…' : 'Save & Continue'}
+          </Button>
+        </div>
+      )}
+
+      {step === 4 && (
         <div className="animate-in fade-in-0 duration-300">
           <div className="mt-6 space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -691,7 +834,7 @@ export default function OnboardingPage() {
         </div>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <div className="animate-in fade-in-0 duration-300">
           <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 px-4 py-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 text-white shadow-sm">

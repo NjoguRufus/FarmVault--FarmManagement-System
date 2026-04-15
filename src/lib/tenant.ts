@@ -1,6 +1,23 @@
 import { supabase } from '@/lib/supabase';
 import { logger } from "@/lib/logger";
 
+function looksLikeClerkUserId(value: string | null): boolean {
+  if (!value) return false;
+  return value.startsWith('user_');
+}
+
+async function resolveCompanyIdFromWorkspaceStatusRpc(): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc('get_my_company_workspace_status');
+    if (error) return null;
+    const row = Array.isArray(data) ? data[0] : data;
+    const companyId = row && typeof row === 'object' ? String((row as { company_id?: unknown }).company_id ?? '').trim() : '';
+    return companyId || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolve the effective company_id for Supabase writes using the authenticated user context.
  *
@@ -13,6 +30,7 @@ export async function resolveCompanyIdForWrite(
   callerCompanyId?: string | null,
 ): Promise<string> {
   const caller = (callerCompanyId ?? '').trim() || null;
+  const callerLooksLikeUserId = looksLikeClerkUserId(caller);
 
   let profileCompanyId: string | null = null;
   try {
@@ -34,11 +52,18 @@ export async function resolveCompanyIdForWrite(
     }
   }
 
+  let workspaceCompanyId: string | null = null;
+  if (!profileCompanyId && callerLooksLikeUserId) {
+    workspaceCompanyId = await resolveCompanyIdFromWorkspaceStatusRpc();
+  }
+
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     logger.log('[tenant] resolveCompanyIdForWrite', {
       profileCompanyId,
+      workspaceCompanyId,
       callerCompanyId: caller,
+      callerLooksLikeUserId,
     });
   }
 
@@ -54,7 +79,7 @@ export async function resolveCompanyIdForWrite(
     throw new Error(msg);
   }
 
-  const resolved = profileCompanyId ?? caller;
+  const resolved = profileCompanyId ?? workspaceCompanyId ?? (callerLooksLikeUserId ? null : caller);
   if (!resolved) {
     throw new Error(
       'No active company found for this session. Please select a farm or sign in again.',

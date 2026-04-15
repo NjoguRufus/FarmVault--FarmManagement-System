@@ -85,7 +85,7 @@ export function DeveloperProjectDetailsSheet({ open, onOpenChange, companyId, pr
 
   const { data: financeExpensesRaw = [] } = useQuery({
     queryKey: ['developer-project-finance-expenses', companyId, projectId],
-    queryFn: () => getFinanceExpenses(companyId, projectId),
+    queryFn: () => getFinanceExpenses(companyId, { projectId }),
     enabled: open && Boolean(companyId && projectId),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
