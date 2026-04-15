@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { LandingNavbar } from "@/components/landing/LandingNavbar";
+import { AmbassadorLandingNavbar } from "@/components/landing/AmbassadorLandingNavbar";
 
 /** Soft outer lift + inner bevel glass — matches ambassador landing aesthetic */
 const neuGlass =
@@ -16,7 +16,7 @@ export default function AmbassadorTermsPage() {
     <div className="min-h-screen font-body relative overflow-hidden text-primary-foreground"
       style={{ background: "linear-gradient(to bottom, hsl(150 32% 6%), hsl(150 28% 9%), hsl(150 30% 5%))" }}
     >
-      <LandingNavbar />
+      <AmbassadorLandingNavbar />
 
       <main className="relative z-10 pt-28 pb-20">
         <div className="container mx-auto px-5 sm:px-6 lg:px-8 max-w-[900px]">
@@ -40,9 +40,9 @@ export default function AmbassadorTermsPage() {
                 commissions by referring farmers and agricultural businesses to FarmVault's farm management
                 platform. By applying for or participating in the Program, you agree to these Ambassador Terms,
                 which are in addition to FarmVault's general{" "}
-                <Link to="/terms" className="text-primary-foreground/90 underline-offset-2 hover:underline font-medium">Terms &amp; Conditions</Link>{" "}
+                <Link to="/ambassador/terms" className="text-primary-foreground/90 underline-offset-2 hover:underline font-medium">Terms &amp; Conditions</Link>{" "}
                 and{" "}
-                <Link to="/privacy" className="text-primary-foreground/90 underline-offset-2 hover:underline font-medium">Privacy Policy</Link>.
+                <Link to="/ambassador/privacy" className="text-primary-foreground/90 underline-offset-2 hover:underline font-medium">Privacy Policy</Link>.
               </p>
             </section>
 
@@ -202,8 +202,8 @@ export default function AmbassadorTermsPage() {
               className="flex flex-wrap items-center justify-center gap-6 sm:justify-end order-1 sm:order-2"
               aria-label="Legal links"
             >
-              <Link to="/terms" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">Terms</Link>
-              <Link to="/privacy" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">Privacy</Link>
+              <Link to="/ambassador/terms" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">Terms</Link>
+              <Link to="/ambassador/privacy" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">Privacy</Link>
               <Link to="/ambassador/terms" className="text-xs font-medium text-primary-foreground/55 hover:text-primary-foreground transition-colors">Ambassador Terms</Link>
             </nav>
           </div>

@@ -127,6 +127,7 @@ export function BillingReceiptsManager({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewImageSaving, setPreviewImageSaving] = useState(false);
+  const [showTemplate, setShowTemplate] = useState(false);
   const initialHandledRef = useRef(false);
 
   /** Developer: fill template from latest approved payment for this company (confirmed). */
@@ -433,9 +434,16 @@ export function BillingReceiptsManager({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start">
-        {/* Template designer / preview — always visible */}
-        <div className="space-y-2 lg:sticky lg:top-4">
+      <div className="flex justify-end">
+        <Button type="button" variant="outline" size="sm" onClick={() => setShowTemplate((v) => !v)}>
+          {showTemplate ? 'Hide template' : 'Show template'}
+        </Button>
+      </div>
+
+      <div className={cn('grid gap-6', showTemplate ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start' : 'grid-cols-1')}>
+        {/* Template designer / preview — hidden by default */}
+        {showTemplate ? (
+          <div className="space-y-2 lg:sticky lg:top-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Receipt template</h3>
@@ -506,10 +514,11 @@ export function BillingReceiptsManager({
             </div>
           </div>
           <BillingReceiptTemplatePreview model={templateModel} />
-        </div>
+          </div>
+        ) : null}
 
         <div className="space-y-3">
-          {mode === 'developer' ? (
+          {mode === 'developer' && showTemplate ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground">Confirmed company (template)</Label>
@@ -559,11 +568,17 @@ export function BillingReceiptsManager({
             </div>
           ) : (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:max-w-xl">
-                {latestTenantApproved
-                  ? 'Template is filled from your latest confirmed payment. Use Pin on a row below to mirror an issued receipt.'
-                  : 'No confirmed payment yet — template shows sample values. After payment is approved, details appear here automatically.'}
-              </div>
+              {mode === 'tenant' ? (
+                <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:max-w-xl">
+                  {latestTenantApproved
+                    ? 'Template is filled from your latest confirmed payment. Use Pin on a row below to mirror an issued receipt.'
+                    : 'No confirmed payment yet — template shows sample values. After payment is approved, details appear here automatically.'}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:max-w-xl">
+                  Template is hidden. Use “Show template” to open the live receipt designer.
+                </div>
+              )}
               <div className="w-full space-y-1.5 sm:w-52">
                 <Label className="text-xs font-medium text-muted-foreground">Receipt status</Label>
                 <Select
