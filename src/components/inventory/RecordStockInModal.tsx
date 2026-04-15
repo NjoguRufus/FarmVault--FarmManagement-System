@@ -6,9 +6,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 import type { Supplier } from '@/types';
 import { recordInventoryStockIn, logInventoryAuditEvent } from '@/services/inventoryReadModelService';
+import { createFinanceExpense } from '@/services/financeExpenseService';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { useProject } from '@/contexts/ProjectContext';
 
 interface RecordStockInModalProps {
   open: boolean;
@@ -16,6 +18,8 @@ interface RecordStockInModalProps {
   companyId: string;
   item?: InventoryStockRow | null;
   suppliers: Supplier[];
+  farmId?: string | null;
+  projectId?: string | null;
   onRecorded?: () => void;
 }
 
@@ -25,9 +29,12 @@ export function RecordStockInModal({
   companyId,
   item,
   suppliers,
+  farmId,
+  projectId,
   onRecorded,
 }: RecordStockInModalProps) {
   const { user } = useAuth();
+  const { activeProject, activeFarmId } = useProject();
   const { addNotification } = useNotifications();
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
@@ -64,6 +71,10 @@ export function RecordStockInModal({
     }
     setSaving(true);
     try {
+      const totalCost = qty * cost;
+      const resolvedFarmId = farmId ?? activeProject?.farmId ?? activeFarmId ?? null;
+      const resolvedProjectId = projectId ?? activeProject?.id ?? null;
+
       await recordInventoryStockIn({
         companyId,
         itemId: item.id,
@@ -88,9 +99,26 @@ export function RecordStockInModal({
         metadata: { 
           transactionType, 
           unitCost: cost,
-          totalCost: qty * cost,
+          totalCost,
         },
       });
+
+      if (transactionType.toLowerCase() === 'purchase' && totalCost > 0) {
+        if (resolvedFarmId) {
+          await createFinanceExpense({
+            companyId,
+            farmId: resolvedFarmId,
+            projectId: resolvedProjectId,
+            category: 'inventory_purchase',
+            amount: totalCost,
+            note: `Inventory stock-in: ${item.name} (${qty} ${item.unit || 'units'} @ KES ${cost.toLocaleString()})`,
+            expenseDate: date || new Date().toISOString().slice(0, 10),
+            createdBy: user?.id ?? null,
+          });
+        } else {
+          toast.warning('Stock recorded, but no active farm selected so expense was not auto-created.');
+        }
+      }
 
       addNotification({
         title: 'Stock Added',

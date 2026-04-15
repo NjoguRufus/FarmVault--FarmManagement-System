@@ -168,6 +168,7 @@ export function InventoryItemDrawer({
   const [isEditingCost, setIsEditingCost] = useState(false);
   const [editCostValue, setEditCostValue] = useState('');
   const [savingCost, setSavingCost] = useState(false);
+  const [historyView, setHistoryView] = useState<'usage' | 'transactions'>('usage');
 
   useEffect(() => {
     if (item) {
@@ -181,6 +182,7 @@ export function InventoryItemDrawer({
       setEditCostValue(
         item.average_cost != null && Number.isFinite(item.average_cost) ? String(item.average_cost) : '',
       );
+      setHistoryView('usage');
     }
   }, [item]);
 
@@ -463,7 +465,7 @@ export function InventoryItemDrawer({
         </DrawerHeader>
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          <Tabs defaultValue="summary" className="w-full">
+          <Tabs defaultValue="history" className="w-full">
             <TabsList className="w-full grid grid-cols-3 mb-4">
               <TabsTrigger value="summary" className="text-xs sm:text-sm">Summary</TabsTrigger>
               <TabsTrigger value="history" className="text-xs sm:text-sm">History</TabsTrigger>
@@ -578,25 +580,37 @@ export function InventoryItemDrawer({
             </TabsContent>
 
             <TabsContent value="history" className="space-y-4 mt-0">
-              {/* Transaction Timeline */}
-              <div>
-                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                  Transaction Timeline
-                </h4>
-                <div className="max-h-[200px] overflow-y-auto border border-border/50 rounded-lg p-2">
-                  <InventoryTransactionTimeline
-                    transactions={transactions}
-                    isLoading={txLoading}
-                  />
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHistoryView('usage')}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    historyView === 'usage'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  Usage
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryView('transactions')}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    historyView === 'transactions'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  Transactions
+                </button>
               </div>
 
-              {/* Usage History */}
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Usage History</h4>
-                <div className="max-h-[200px] overflow-y-auto border border-border/50 rounded-lg p-2">
+              <div className="max-h-[300px] overflow-auto rounded-lg border border-border/60 bg-background p-3 select-text">
+                {historyView === 'usage' ? (
                   <InventoryUsageTable usage={usage} isLoading={usageLoading} />
-                </div>
+                ) : (
+                  <InventoryTransactionTimeline transactions={transactions} isLoading={txLoading} />
+                )}
               </div>
             </TabsContent>
 

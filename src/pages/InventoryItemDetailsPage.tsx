@@ -111,8 +111,8 @@ export default function InventoryItemDetailsPage() {
   const companyId = user?.companyId ?? activeProject?.companyId ?? null;
 
   const { item, isLoading: itemLoading, refetch: refetchItem } = useInventoryItemStock(companyId, itemId ?? null);
-  const { transactions, isLoading: txLoading } = useInventoryTransactions(companyId, itemId ?? null, 50);
-  const { usage, isLoading: usageLoading } = useInventoryUsage(companyId, itemId ?? null, 50);
+  const { transactions, isLoading: txLoading } = useInventoryTransactions(companyId, itemId ?? null, 30);
+  const { usage, isLoading: usageLoading } = useInventoryUsage(companyId, itemId ?? null, 30);
 
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId ?? 'none'],
@@ -123,6 +123,7 @@ export default function InventoryItemDetailsPage() {
 
   const [stockInOpen, setStockInOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [historyView, setHistoryView] = useState<'usage' | 'transactions'>('usage');
 
   const handleRecorded = () => {
     refetchItem();
@@ -305,19 +306,38 @@ export default function InventoryItemDetailsPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-        <div className="fv-card p-4 sm:p-5">
-          <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-            Transaction Timeline
-          </h3>
-          <InventoryTransactionTimeline
-            transactions={transactions}
-            isLoading={txLoading}
-          />
+      <div className="fv-card p-4 sm:p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setHistoryView('usage')}
+            className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              historyView === 'usage'
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+            }`}
+          >
+            Usage
+          </button>
+          <button
+            type="button"
+            onClick={() => setHistoryView('transactions')}
+            className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              historyView === 'transactions'
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+            }`}
+          >
+            Transactions
+          </button>
         </div>
-        <div className="fv-card p-4 sm:p-5">
-          <h3 className="text-base font-semibold mb-3">Usage History</h3>
-          <InventoryUsageTable usage={usage} isLoading={usageLoading} />
+
+        <div className="max-h-[340px] overflow-auto rounded-lg border border-border/60 bg-background p-2 sm:p-3">
+          {historyView === 'usage' ? (
+            <InventoryUsageTable usage={usage} isLoading={usageLoading} />
+          ) : (
+            <InventoryTransactionTimeline transactions={transactions} isLoading={txLoading} />
+          )}
         </div>
       </div>
 

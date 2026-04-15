@@ -52,9 +52,29 @@ export async function resolveCompanyIdForWrite(
     }
   }
 
+  if (looksLikeClerkUserId(profileCompanyId)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[tenant] current_company_id returned Clerk user id; ignoring invalid value', {
+        profileCompanyId,
+      });
+    }
+    profileCompanyId = null;
+  }
+
   let workspaceCompanyId: string | null = null;
   if (!profileCompanyId && callerLooksLikeUserId) {
     workspaceCompanyId = await resolveCompanyIdFromWorkspaceStatusRpc();
+  }
+
+  if (looksLikeClerkUserId(workspaceCompanyId)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[tenant] get_my_company_workspace_status returned Clerk user id; ignoring invalid value', {
+        workspaceCompanyId,
+      });
+    }
+    workspaceCompanyId = null;
   }
 
   if (import.meta.env.DEV) {
@@ -80,6 +100,11 @@ export async function resolveCompanyIdForWrite(
   }
 
   const resolved = profileCompanyId ?? workspaceCompanyId ?? (callerLooksLikeUserId ? null : caller);
+  if (looksLikeClerkUserId(resolved)) {
+    throw new Error(
+      'Invalid company context detected (received a user ID instead of company ID). Please refresh and select your workspace again.',
+    );
+  }
   if (!resolved) {
     throw new Error(
       'No active company found for this session. Please select a farm or sign in again.',

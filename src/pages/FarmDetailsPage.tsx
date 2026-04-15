@@ -38,7 +38,7 @@ export default function FarmDetailsPage() {
   const companyId = user?.companyId ?? null;
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
   const [projectFilterId, setProjectFilterId] = useState<string>('all');
-  const [projectSearch, setProjectSearch] = useState('');
+  const [projectListFilterId, setProjectListFilterId] = useState<string>('all');
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const [addOperationOpen, setAddOperationOpen] = useState(false);
   const [planWorkOpen, setPlanWorkOpen] = useState(false);
@@ -67,22 +67,10 @@ export default function FarmDetailsPage() {
     () => projects.filter((project) => project.farmId === farmId),
     [projects, farmId],
   );
-  const farmName = farm?.name ?? '';
-  const farmLocation = farm?.location ?? '';
   const filteredFarmProjects = useMemo(() => {
-    const query = projectSearch.trim().toLowerCase();
-    if (!query) return farmProjects;
-    const matchesFarmName =
-      farmName.toLowerCase().includes(query) || farmLocation.toLowerCase().includes(query);
-    if (matchesFarmName) return farmProjects;
-    return farmProjects.filter((project) => {
-      return (
-        project.name.toLowerCase().includes(query) ||
-        project.cropType.toLowerCase().includes(query) ||
-        project.location.toLowerCase().includes(query)
-      );
-    });
-  }, [projectSearch, farmName, farmLocation, farmProjects]);
+    if (projectListFilterId === 'all') return farmProjects;
+    return farmProjects.filter((project) => project.id === projectListFilterId);
+  }, [farmProjects, projectListFilterId]);
   const isStaffRoute = location.pathname.startsWith('/staff/');
   const backPath = isStaffRoute ? '/staff/staff-dashboard' : '/projects?view=farms';
 
@@ -245,16 +233,28 @@ export default function FarmDetailsPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Projects on this farm</h2>
-        <Input
-          value={projectSearch}
-          onChange={(e) => setProjectSearch(e.target.value)}
-          placeholder="Search by project, crop, location, or this farm name..."
-          className="max-w-md"
-        />
+        <div className="max-w-md space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Project dropdown
+          </label>
+          <Select value={projectListFilterId} onValueChange={setProjectListFilterId}>
+            <SelectTrigger>
+              <SelectValue placeholder="All projects on this farm" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All projects on this farm</SelectItem>
+              {farmProjects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {cropTypeKeyEmoji(project.cropType)} {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {farmProjects.length === 0 ? (
           <p className="text-sm text-muted-foreground">No projects yet on this farm.</p>
         ) : filteredFarmProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No matching projects found for this search.</p>
+          <p className="text-sm text-muted-foreground">No projects match this selection.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {filteredFarmProjects.map((project) => (
@@ -299,7 +299,7 @@ export default function FarmDetailsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All projects + farm-level</SelectItem>
-              {filteredFarmProjects.map((project) => (
+              {farmProjects.map((project) => (
                 <SelectItem key={project.id} value={project.id}>
                   {project.name}
                 </SelectItem>

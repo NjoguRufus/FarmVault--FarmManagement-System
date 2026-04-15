@@ -17,7 +17,7 @@ export function InventoryUsageTable({ usage, isLoading }: InventoryUsageTablePro
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto select-text">
       <table className="fv-table min-w-full">
         <thead>
           <tr>
@@ -31,7 +31,7 @@ export function InventoryUsageTable({ usage, isLoading }: InventoryUsageTablePro
         <tbody>
           {usage.map((row) => (
             <tr key={row.id}>
-              <td className="text-sm text-muted-foreground">
+              <td className="text-sm text-foreground">
                 {formatDate(row.used_on)}
               </td>
               <td className="text-sm hidden md:table-cell">
@@ -43,7 +43,7 @@ export function InventoryUsageTable({ usage, isLoading }: InventoryUsageTablePro
               <td className="text-right text-sm font-medium whitespace-nowrap">
                 {row.quantity.toLocaleString()} {row.unit}
               </td>
-              <td className="text-sm">
+              <td className="text-sm text-foreground">
                 {row.purpose || row.notes || '—'}
               </td>
             </tr>

@@ -151,6 +151,7 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
   });
   const [farmSearch, setFarmSearch] = useState('');
   const [farmModalOpen, setFarmModalOpen] = useState(false);
+  const [farmInputFocused, setFarmInputFocused] = useState(false);
   const [manualStageOverride, setManualStageOverride] = useState(false);
   const [stepOneError, setStepOneError] = useState('');
   const [stepTwoReadyToSubmit, setStepTwoReadyToSubmit] = useState(false);
@@ -630,50 +631,68 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
         <div className="flex-1 space-y-4 overflow-y-auto pr-1">
           {step === 1 ? (
             <>
-              <div className="space-y-2 rounded-lg border border-border/70 p-3">
+              <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Farm (required)</label>
-                <input
-                  className="fv-input"
-                  value={farmSearch}
-                  onChange={(e) => {
-                    setFarmSearch(e.target.value);
-                    setForm((prev) => ({ ...prev, farmId: '' }));
-                  }}
-                  placeholder="Search farms by name or location"
-                />
-                {showFarmSuggestions && (
-                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
-                    {filteredFarms.map((farm) => (
-                      <button
-                        key={farm.id}
-                        type="button"
-                        className={cn(
-                          'w-full rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted/60',
-                          form.farmId === farm.id && 'bg-emerald-50 text-emerald-900',
+                <div className="relative">
+                  <input
+                    className="fv-input pr-8"
+                    value={farmSearch}
+                    onFocus={() => setFarmInputFocused(true)}
+                    onBlur={() => {
+                      // allow click handlers on dropdown options to fire before hiding
+                      window.setTimeout(() => setFarmInputFocused(false), 120);
+                    }}
+                    onChange={(e) => {
+                      setFarmSearch(e.target.value);
+                      setForm((prev) => ({ ...prev, farmId: '' }));
+                    }}
+                    placeholder="Search farms by name or location"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                    ▼
+                  </span>
+                  {farmInputFocused && showFarmSuggestions && (
+                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 rounded-md border border-border/60 bg-popover p-2 shadow-md">
+                      <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border/60 p-1.5">
+                        {filteredFarms.map((farm) => (
+                          <button
+                            key={farm.id}
+                            type="button"
+                            className={cn(
+                              'w-full rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted/60',
+                              form.farmId === farm.id && 'bg-emerald-50 text-emerald-900',
+                            )}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setForm((prev) => ({ ...prev, farmId: farm.id }));
+                              setFarmSearch(farm.name);
+                              setFarmInputFocused(false);
+                            }}
+                          >
+                            <span className="font-medium">{farm.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{farm.location}</span>
+                          </button>
+                        ))}
+                        {filteredFarms.length === 0 && (
+                          <p className="px-2 py-1 text-xs text-muted-foreground">No farm match found.</p>
                         )}
-                        onClick={() => {
-                          setForm((prev) => ({ ...prev, farmId: farm.id }));
-                          setFarmSearch(farm.name);
-                        }}
-                      >
-                        <span className="font-medium">{farm.name}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">{farm.location}</span>
-                      </button>
-                    ))}
-                    {filteredFarms.length === 0 && (
-                      <p className="px-2 py-1 text-xs text-muted-foreground">No farm match found.</p>
-                    )}
-                  </div>
-                )}
-                {showFarmSuggestions && canCreateFarmFromSearch && (
-                  <button
-                    type="button"
-                    className="inline-flex h-10 items-center rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
-                    onClick={() => setFarmModalOpen(true)}
-                  >
-                    + Add New Farm
-                  </button>
-                )}
+                      </div>
+                      {canCreateFarmFromSearch && (
+                        <button
+                          type="button"
+                          className="mt-2 inline-flex h-10 items-center rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setFarmInputFocused(false);
+                            setFarmModalOpen(true);
+                          }}
+                        >
+                          + Add New Farm
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -1015,16 +1034,6 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                 </div>
               )}
 
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Notes (optional)</label>
-                <input
-                  className="fv-input"
-                  value={form.notes}
-                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Any important setup notes"
-                />
-              </div>
-
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Budget Type</Label>
                 <div className="flex gap-4">
@@ -1046,13 +1055,13 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                       onChange={() => setBudgetType('pool')}
                       className="rounded-full border-border"
                     />
-                    <span className="text-sm">Link to Budget Pool</span>
+                    <span className="text-sm">Multiple Farms Budget</span>
                   </label>
                 </div>
               </div>
               {budgetType === 'pool' && (
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">Budget Pool</Label>
+                  <Label className="text-sm font-medium">Multiple Farms Budget</Label>
                   {budgetPools.length > 0 && (
                     <Select value={budgetPoolId || '_none'} onValueChange={(v) => setBudgetPoolId(v === '_none' ? '' : v)}>
                       <SelectTrigger className="w-full">
@@ -1071,8 +1080,8 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                   <div className="rounded-lg border border-border/70 p-3 space-y-2 bg-muted/30">
                     <p className="text-xs text-muted-foreground">
                       {budgetPools.length > 0
-                        ? 'Need another pool? Create one here ÔÇö it will be selected for this project.'
-                        : 'No budget pools yet. Create one below.'}
+                        ? 'Need another Multiple Farms Budget? Add one here — it will be selected for this project.'
+                        : 'No Multiple Farms Budget yet. Add one below.'}
                     </p>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <input
@@ -1122,14 +1131,14 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                         }
                       }}
                     >
-                      {creatingPool ? 'CreatingÔÇª' : 'Create pool'}
+                      {creatingPool ? 'Creating...' : 'Add Farms Budgets'}
                     </Button>
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Acreage (acres)</label>
+              <div className="grid grid-cols-5 gap-3">
+                <div className={cn('space-y-1', budgetType === 'separate' ? 'col-span-2' : 'col-span-5')}>
+                  <label className="text-sm font-medium text-foreground">Acres)</label>
                   <input
                     className="fv-input"
                     type="number"
@@ -1148,7 +1157,7 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                   )}
                 </div>
                 {budgetType === 'separate' && (
-                  <div className="space-y-1">
+                  <div className="col-span-3 space-y-1">
                     <label className="text-sm font-medium text-foreground">Budget (KES)</label>
                     <input
                       className="fv-input"
@@ -1159,6 +1168,15 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
                     />
                   </div>
                 )}
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-foreground">Notes (optional)</label>
+                <input
+                  className="fv-input"
+                  value={form.notes}
+                  onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Any important setup notes"
+                />
               </div>
             </>
           )}
