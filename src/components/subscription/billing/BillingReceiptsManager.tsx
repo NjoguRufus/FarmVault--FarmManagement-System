@@ -301,11 +301,25 @@ export function BillingReceiptsManager({
     return r;
   }, [rows, mode, previewCompanyKey, receiptStatusFilter]);
 
+  const ensureLatestReceiptPdf = useCallback(
+    async (row: BillingReceiptRow): Promise<void> => {
+      try {
+        await regenerateBillingReceipt(row.id, { sendEmail: false }, getAccessToken);
+        await queryClient.invalidateQueries({ queryKey: ['billing-receipts'] });
+      } catch (e) {
+        // Non-blocking: if regenerate fails, still attempt to open current PDF.
+        console.warn('[BillingReceiptsManager] preview regenerate skipped:', e);
+      }
+    },
+    [getAccessToken, queryClient],
+  );
+
   const openPreview = useCallback(async (row: BillingReceiptRow) => {
     setPreview(row);
     setPreviewUrl(null);
     setPreviewLoading(true);
     try {
+      await ensureLatestReceiptPdf(row);
       const url = await createReceiptPdfSignedUrl(row.pdf_storage_path, 600);
       setPreviewUrl(url);
     } catch (e) {
@@ -315,7 +329,7 @@ export function BillingReceiptsManager({
     } finally {
       setPreviewLoading(false);
     }
-  }, [toast]);
+  }, [ensureLatestReceiptPdf, toast]);
 
   useEffect(() => {
     if (!initialReceiptId || initialHandledRef.current) return;
@@ -678,6 +692,7 @@ export function BillingReceiptsManager({
                               onClick={() =>
                                 void (async () => {
                                   try {
+                                    await ensureLatestReceiptPdf(r);
                                     const url = await createReceiptPdfSignedUrl(r.pdf_storage_path, 600);
                                     window.open(url, '_blank', 'noopener,noreferrer');
                                   } catch (e) {
@@ -701,6 +716,7 @@ export function BillingReceiptsManager({
                               onClick={() =>
                                 void (async () => {
                                   try {
+                                    await ensureLatestReceiptPdf(r);
                                     const url = await createReceiptPdfSignedUrl(r.pdf_storage_path, 600);
                                     const w = window.open(url, '_blank', 'noopener,noreferrer');
                                     w?.addEventListener('load', () => w.print(), { once: true });

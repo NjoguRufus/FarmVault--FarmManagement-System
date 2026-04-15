@@ -1,6 +1,8 @@
 /**
- * A4 FarmVault-branded payment receipt (pdf-lib).
- * Colors: primary #0b3d2e, secondary #0f5b3f, gold #D8B980, success #16a34a.
+ * FarmVault – Premium A4 Payment Receipt (pdf-lib)
+ * Colors: primary #0b3d2e | secondary #0f5b3f | gold #D8B980 | success #16a34a
+ *
+ * Drop-in replacement — same exported types & function signature.
  */
 import {
   PDFDocument,
@@ -10,6 +12,8 @@ import {
   degrees,
   rgb,
 } from "https://esm.sh/pdf-lib@1.17.1";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ReceiptLineItem = {
   description: string;
@@ -44,128 +48,216 @@ export type BillingReceiptPdfModel = {
   footerTimestampIso: string;
 };
 
-const PRIMARY = rgb(11 / 255, 61 / 255, 46 / 255);
-const SECONDARY = rgb(15 / 255, 91 / 255, 63 / 255);
-const GOLD = rgb(216 / 255, 185 / 255, 128 / 255);
-const SUCCESS = rgb(22 / 255, 163 / 255, 74 / 255);
-const WHITE = rgb(1, 1, 1);
-const MUTED = rgb(0.35, 0.35, 0.35);
-const BORDER = rgb(0.88, 0.88, 0.88);
-const WM = rgb(0.94, 0.94, 0.94);
+// ─── Palette ──────────────────────────────────────────────────────────────────
 
-/**
- * pdf-lib StandardFonts use WinAnsi — no Unicode arrows, em dashes, ellipsis, etc.
- */
-function pdfWinAnsiSafe(raw: string): string {
-  let s = raw
-    .replace(/\u2192/g, "->") // →
-    .replace(/\u2014/g, "-") // —
-    .replace(/\u2013/g, "-") // –
-    .replace(/\u2212/g, "-") // −
-    .replace(/\u2026/g, "...") // …
-    .replace(/\u00B7/g, " ") // ·
-    .replace(/\u2018|\u2019/g, "'")
-    .replace(/\u201C|\u201D/g, '"');
-  // Remaining non WinAnsi-safe → drop to '?', keep ASCII + Latin-1
-  let out = "";
-  for (const ch of s) {
-    const c = ch.codePointAt(0) ?? 0;
-    if (c === 0x9 || c === 0xa || c === 0xd) {
-      out += ch;
-      continue;
-    }
-    if (c >= 0x20 && c <= 0x7e) {
-      out += ch;
-      continue;
-    }
-    if (c >= 0xa0 && c <= 0xff) {
-      out += ch;
-      continue;
-    }
-    out += "?";
-  }
-  return out;
+const C = {
+  primary: rgb(0.043, 0.239, 0.180), // #0b3d2e
+  secondary: rgb(0.059, 0.357, 0.247), // #0f5b3f
+  gold: rgb(0.847, 0.725, 0.502), // #D8B980
+  goldLight: rgb(0.996, 0.973, 0.918), // #fef9ea
+  success: rgb(0.086, 0.639, 0.290), // #16a34a
+  successBg: rgb(0.933, 0.988, 0.949), // #eefbf2
+  white: rgb(1, 1, 1),
+  offWhite: rgb(0.976, 0.980, 0.980), // #f9fafa
+  border: rgb(0.882, 0.898, 0.914), // #e1e5e9
+  muted: rgb(0.420, 0.451, 0.502), // #6b7380
+  textDark: rgb(0.067, 0.075, 0.094), // #111318
+  textMid: rgb(0.216, 0.255, 0.318), // #374151
+  dividerGold: rgb(0.847, 0.725, 0.502), // reuse gold for accent lines
+  shadowRow: rgb(0.953, 0.961, 0.957), // #f3f5f4 – alternate row
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function safe(raw: string): string {
+  return raw
+    .replace(/\u2192/g, "->").replace(/\u2014/g, "-").replace(/\u2013/g, "-")
+    .replace(/\u2212/g, "-").replace(/\u2026/g, "...").replace(/\u00B7/g, " ")
+    .replace(/\u2018|\u2019/g, "'").replace(/\u201C|\u201D/g, '"')
+    .split("").map((ch) => {
+      const c = ch.codePointAt(0) ?? 0;
+      if (c === 9 || c === 10 || c === 13) return ch;
+      if (c >= 0x20 && c <= 0x7e) return ch;
+      if (c >= 0xa0 && c <= 0xff) return ch;
+      return "?";
+    }).join("");
 }
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "-";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toISOString().slice(0, 10);
+  return Number.isNaN(d.getTime()) ? "-" : d.toISOString().slice(0, 10);
 }
 
-function fmtMoney(n: number, currency: string): string {
-  const abs = Math.abs(n);
-  const s = abs.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  return `${currency} ${n < 0 ? "-" : ""}${s}`;
+function fmtMoney(n: number, cur: string): string {
+  const s = Math.abs(n).toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return `${cur} ${n < 0 ? "-" : ""}${s}`;
 }
 
-function drawHeaderBand(page: PDFPage, width: number, height: number) {
+function clip(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "..." : s;
+}
+
+// ─── Drawing primitives ───────────────────────────────────────────────────────
+
+function rect(page: PDFPage, x: number, y: number, w: number, h: number, opts: {
+  fill?: Parameters<typeof rgb>[0] extends number ? ReturnType<typeof rgb> : any;
+  fillColor?: ReturnType<typeof rgb>;
+  borderColor?: ReturnType<typeof rgb>;
+  borderWidth?: number;
+  opacity?: number;
+}) {
   page.drawRectangle({
-    x: 0,
-    y: height - 118,
-    width,
-    height: 118,
-    color: PRIMARY,
-  });
-  page.drawRectangle({
-    x: 0,
-    y: height - 118,
-    width,
-    height: 36,
-    color: SECONDARY,
+    x,
+    y,
+    width: w,
+    height: h,
+    color: opts.fillColor,
+    borderColor: opts.borderColor,
+    borderWidth: opts.borderWidth,
+    opacity: opts.opacity,
   });
 }
 
-function drawWatermark(page: PDFPage, width: number, height: number, font: PDFFont, text: string) {
-  const size = 56;
-  const tw = font.widthOfTextAtSize(text, size);
-  page.drawText(text, {
-    x: (width - tw) / 2,
-    y: height / 2 - 40,
-    size,
-    font,
-    color: WM,
-    rotate: degrees(-32),
+function roundedRectPath(x: number, y: number, w: number, h: number, r: number): string {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  const x2 = x + w;
+  const y2 = y + h;
+  return [
+    `M ${x + rr} ${y}`,
+    `L ${x2 - rr} ${y}`,
+    `Q ${x2} ${y} ${x2} ${y + rr}`,
+    `L ${x2} ${y2 - rr}`,
+    `Q ${x2} ${y2} ${x2 - rr} ${y2}`,
+    `L ${x + rr} ${y2}`,
+    `Q ${x} ${y2} ${x} ${y2 - rr}`,
+    `L ${x} ${y + rr}`,
+    `Q ${x} ${y} ${x + rr} ${y}`,
+    "Z",
+  ].join(" ");
+}
+
+function roundedRect(
+  page: PDFPage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  opts: {
+    fillColor?: ReturnType<typeof rgb>;
+    borderColor?: ReturnType<typeof rgb>;
+    borderWidth?: number;
+    opacity?: number;
+  },
+) {
+  page.drawSvgPath(roundedRectPath(x, y, w, h, r), {
+    color: opts.fillColor,
+    borderColor: opts.borderColor,
+    borderWidth: opts.borderWidth,
+    opacity: opts.opacity,
   });
 }
 
-export async function buildBillingReceiptPdf(model: BillingReceiptPdfModel): Promise<Uint8Array> {
+function hline(page: PDFPage, x: number, y: number, w: number, color: ReturnType<typeof rgb>, thickness = 0.5) {
+  page.drawLine({ start: { x, y }, end: { x: x + w, y }, thickness, color });
+}
+
+function text(
+  page: PDFPage,
+  s: string,
+  x: number,
+  y: number,
+  font: PDFFont,
+  size: number,
+  color: ReturnType<typeof rgb>,
+  opts?: { maxWidth?: number; lineHeight?: number },
+) {
+  page.drawText(s, { x, y, size, font, color });
+}
+
+function textRight(
+  page: PDFPage,
+  s: string,
+  rightEdge: number,
+  y: number,
+  font: PDFFont,
+  size: number,
+  color: ReturnType<typeof rgb>,
+) {
+  const tw = font.widthOfTextAtSize(s, size);
+  page.drawText(s, { x: rightEdge - tw, y, size, font, color });
+}
+
+function textCenter(
+  page: PDFPage,
+  s: string,
+  cx: number,
+  y: number,
+  font: PDFFont,
+  size: number,
+  color: ReturnType<typeof rgb>,
+) {
+  const tw = font.widthOfTextAtSize(s, size);
+  page.drawText(s, { x: cx - tw / 2, y, size, font, color });
+}
+
+// ─── Main export ──────────────────────────────────────────────────────────────
+
+export async function buildBillingReceiptPdf(
+  model: BillingReceiptPdfModel,
+): Promise<Uint8Array> {
+  // Sanitise all strings
   const m: BillingReceiptPdfModel = {
     ...model,
-    receiptNumber: pdfWinAnsiSafe(model.receiptNumber),
-    statusLabel: pdfWinAnsiSafe(model.statusLabel),
-    transactionReference: pdfWinAnsiSafe(model.transactionReference),
-    companyName: pdfWinAnsiSafe(model.companyName),
-    adminName: pdfWinAnsiSafe(model.adminName),
-    email: pdfWinAnsiSafe(model.email),
-    phone: pdfWinAnsiSafe(model.phone),
-    workspaceName: pdfWinAnsiSafe(model.workspaceName),
-    paymentModeLabel: pdfWinAnsiSafe(model.paymentModeLabel),
-    currency: pdfWinAnsiSafe(model.currency),
-    planLabel: pdfWinAnsiSafe(model.planLabel),
-    billingPeriod: pdfWinAnsiSafe(model.billingPeriod),
-    lineItems: model.lineItems.map((row) => ({
-      ...row,
-      description: pdfWinAnsiSafe(row.description),
-    })),
-    planTier: pdfWinAnsiSafe(model.planTier),
-    paymentCycle: pdfWinAnsiSafe(model.paymentCycle),
-    footerTimestampIso: pdfWinAnsiSafe(model.footerTimestampIso),
+    receiptNumber: safe(model.receiptNumber),
+    statusLabel: safe(model.statusLabel),
+    transactionReference: safe(model.transactionReference),
+    companyName: safe(model.companyName),
+    adminName: safe(model.adminName),
+    email: safe(model.email),
+    phone: safe(model.phone),
+    workspaceName: safe(model.workspaceName),
+    paymentModeLabel: safe(model.paymentModeLabel),
+    currency: safe(model.currency),
+    planLabel: safe(model.planLabel),
+    billingPeriod: safe(model.billingPeriod),
+    lineItems: model.lineItems.map((r) => ({ ...r, description: safe(r.description) })),
+    planTier: safe(model.planTier),
+    paymentCycle: safe(model.paymentCycle),
+    footerTimestampIso: safe(model.footerTimestampIso),
   };
 
   const doc = await PDFDocument.create();
   const page = doc.addPage([595.28, 841.89]);
-  const { width, height } = page.getSize();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { width: W, height: H } = page.getSize();
+  const R = await doc.embedFont(StandardFonts.Helvetica);
+  const B = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  drawHeaderBand(page, width, height);
+  const MX = 38; // margin x
+  const BW = W - MX * 2; // body width
 
+  // ── 1. HEADER ──────────────────────────────────────────────────────────────
+  const HDR_H = 120;
+
+  // Main dark band
+  rect(page, 0, H - HDR_H, W, HDR_H, { fillColor: C.primary });
+
+  // Subtle secondary overlay at the very top (3 px depth-line)
+  rect(page, 0, H - 3, W, 3, { fillColor: C.gold });
+
+  // Gold accent rule below header
+  rect(page, 0, H - HDR_H, W, 2.5, { fillColor: C.gold });
+
+  // Fine geometric detail — vertical gold bar left of logo area
+  rect(page, MX - 8, H - HDR_H + 18, 2, 68, { fillColor: C.gold, opacity: 0.35 });
+
+  // ── Logo (kept from original code logic) ───────────────────────────────────
   const logoUrl =
-    Deno.env.get("FARMVAULT_RECEIPT_LOGO_URL")?.trim() ??
+    (typeof Deno !== "undefined" && Deno.env.get("FARMVAULT_RECEIPT_LOGO_URL")?.trim()) ??
     "https://farmvault.africa/Logo/FarmVault_Logo%20dark%20mode.png";
-  let textColX = 42;
+
+  let textColX = MX;
   try {
     const res = await fetch(logoUrl);
     if (res.ok) {
@@ -173,11 +265,9 @@ export async function buildBillingReceiptPdf(model: BillingReceiptPdfModel): Pro
       const ct = res.headers.get("content-type")?.toLowerCase() ?? "";
       let img;
       try {
-        if (ct.includes("jpeg") || ct.includes("jpg")) {
-          img = await doc.embedJpg(bytes);
-        } else {
-          img = await doc.embedPng(bytes);
-        }
+        img = (ct.includes("jpeg") || ct.includes("jpg"))
+          ? await doc.embedJpg(bytes)
+          : await doc.embedPng(bytes);
       } catch {
         try {
           img = await doc.embedPng(bytes);
@@ -185,261 +275,302 @@ export async function buildBillingReceiptPdf(model: BillingReceiptPdfModel): Pro
           img = await doc.embedJpg(bytes);
         }
       }
-      const imgH = 30;
-      const scale = imgH / img.height;
-      const imgW = img.width * scale;
-      page.drawImage(img, { x: 42, y: height - 54, width: imgW, height: imgH });
-      textColX = 42 + imgW + 12;
+      const imgH = 34;
+      const imgW = img.width * (imgH / img.height);
+      page.drawImage(img, { x: MX, y: H - 56, width: imgW, height: imgH });
+      textColX = MX + imgW + 14;
     }
   } catch {
-    /* optional branding */
+    /* branding optional */
   }
 
-  page.drawText("FarmVault", {
-    x: textColX,
-    y: height - 52,
-    size: 18,
-    font: fontBold,
-    color: GOLD,
-  });
-  page.drawText("PAYMENT RECEIPT", {
-    x: textColX,
-    y: height - 86,
-    size: 20,
-    font: fontBold,
-    color: WHITE,
-  });
+  // Brand name + tagline
+  text(page, "FarmVault", textColX, H - 46, B, 22, C.gold);
+  text(page, "Agricultural Management Platform", textColX, H - 59, R, 7.5,
+    rgb(1, 1, 1)); // white at 60% — approximate with near-white
 
-  const rightBlockX = width - 42 - 200;
-  page.drawText(`Receipt ${m.receiptNumber}`, {
-    x: rightBlockX,
-    y: height - 52,
-    size: 10,
-    font: fontBold,
-    color: GOLD,
-  });
-  page.drawText(`Issued ${fmtDate(m.issuedAtIso)}`, {
-    x: rightBlockX,
-    y: height - 66,
-    size: 9,
-    font,
-    color: WHITE,
-  });
-  page.drawRectangle({
-    x: rightBlockX,
-    y: height - 98,
-    width: 86,
-    height: 20,
-    color: SUCCESS,
-  });
-  page.drawText(m.statusLabel.toUpperCase(), {
-    x: rightBlockX + 10,
-    y: height - 92,
-    size: 9,
-    font: fontBold,
-    color: WHITE,
-  });
+  // "PAYMENT RECEIPT" label
+  text(page, "PAYMENT RECEIPT", MX, H - 88, B, 16, C.white);
 
-  let y = height - 138;
-  page.drawRectangle({ x: 36, y: y - 36, width: width - 72, height: 36, color: rgb(0.93, 0.98, 0.94) });
-  page.drawRectangle({ x: 36, y: y - 36, width: width - 72, height: 36, borderColor: SUCCESS, borderWidth: 1 });
-  const checkCx = 52;
-  const checkCy = y - 22;
-  page.drawLine({
-    start: { x: checkCx, y: checkCy - 2 },
-    end: { x: checkCx + 3.5, y: checkCy - 6 },
-    thickness: 2,
-    color: SUCCESS,
-  });
-  page.drawLine({
-    start: { x: checkCx + 3.5, y: checkCy - 6 },
-    end: { x: checkCx + 11, y: checkCy + 3 },
-    thickness: 2,
-    color: SUCCESS,
-  });
-  page.drawText("Payment Successfully Confirmed", {
-    x: 68,
-    y: y - 22,
-    size: 11,
-    font: fontBold,
-    color: rgb(0.05, 0.35, 0.15),
-  });
-  page.drawText(`Transaction date: ${fmtDate(m.transactionDateIso)}`, {
-    x: 48,
-    y: y - 34,
-    size: 9,
-    font,
-    color: MUTED,
-  });
-  page.drawText(`Reference: ${m.transactionReference || "-"}`, {
-    x: 320,
-    y: y - 34,
-    size: 9,
-    font,
-    color: MUTED,
-  });
-  y -= 52;
+  // Thin gold rule under the sub-heading
+  hline(page, MX, H - 95, 148, C.gold, 0.8);
 
-  const colGap = 24;
-  const colW = (width - 72 - colGap) / 2;
-  page.drawText("CUSTOMER DETAILS", {
-    x: 42,
-    y,
-    size: 9,
-    font: fontBold,
-    color: PRIMARY,
-  });
-  page.drawText("PAYMENT DETAILS", {
-    x: 42 + colW + colGap,
-    y,
-    size: 9,
-    font: fontBold,
-    color: PRIMARY,
-  });
-  y -= 16;
+  // ── Right block: receipt meta ────────────────────────────────────────────--
+  const RX = W - MX; // right edge
 
-  const leftLines = [
-    `Company: ${m.companyName}`,
-    `Admin: ${m.adminName}`,
-    `Email: ${m.email || "-"}`,
-    `Phone: ${m.phone || "-"}`,
-    `Workspace: ${m.workspaceName}`,
-  ];
-  const rightLines = [
-    `Mode: ${m.paymentModeLabel}`,
-    `Receipt: ${m.receiptNumber}`,
-    `Currency: ${m.currency}`,
-    `Plan: ${m.planLabel}`,
-    `Billing period: ${m.billingPeriod}`,
-    `Transaction ref: ${m.transactionReference || "-"}`,
-  ];
+  // PAID pill — filled rounded rect approximated with overlapping rects
+  const PILL_W = 64;
+  const PILL_H = 20;
+  const pillX = RX - PILL_W;
+  const pillY = H - 54;
+  rect(page, pillX, pillY, PILL_W, PILL_H, { fillColor: C.success });
+  rect(page, pillX, pillY, 8, PILL_H, { fillColor: C.success });
+  rect(page, pillX + PILL_W - 8, pillY, 8, PILL_H, { fillColor: C.success });
+  // Checkmark strokes
+  page.drawLine({ start: { x: pillX + 12, y: pillY + 9 }, end: { x: pillX + 16, y: pillY + 5 }, thickness: 1.6, color: C.white });
+  page.drawLine({ start: { x: pillX + 16, y: pillY + 5 }, end: { x: pillX + 24, y: pillY + 14 }, thickness: 1.6, color: C.white });
+  const statusStr = m.statusLabel.toUpperCase();
+  text(page, statusStr, pillX + 28, pillY + 7, B, 9, C.white);
 
-  const lh = 11;
-  let ly = y;
-  for (const line of leftLines) {
-    page.drawText(line.length > 52 ? `${line.slice(0, 49)}...` : line, {
-      x: 42,
-      y: ly,
-      size: 8.5,
-      font,
-      color: rgb(0.15, 0.15, 0.15),
+  textRight(page, `Receipt  ${m.receiptNumber}`, RX, H - 75, B, 9.5, C.gold);
+  textRight(page, `Issued: ${fmtDate(m.issuedAtIso)}`, RX, H - 89, R, 8, rgb(0.8, 0.85, 0.82));
+  textRight(page, `Ref: ${m.transactionReference}`, RX, H - 101, R, 7.5, rgb(0.65, 0.72, 0.68));
+
+  // ── 2. TRANSACTION CONFIRMED BANNER ────────────────────────────────────────
+  let Y = H - HDR_H - 18;
+  const BANNER_H = 42;
+
+  roundedRect(page, MX - 3, Y - BANNER_H - 3, BW + 6, BANNER_H + 6, 8, {
+    borderColor: C.border,
+    borderWidth: 1,
+  });
+  rect(page, MX, Y - BANNER_H, BW, BANNER_H, { fillColor: C.successBg, borderColor: C.success, borderWidth: 0.7 });
+
+  // Left accent bar
+  rect(page, MX, Y - BANNER_H, 4, BANNER_H, { fillColor: C.success });
+
+  // Check circle
+  const CC = { x: MX + 22, y: Y - BANNER_H / 2 };
+  for (let r2 = 0; r2 < 2; r2++) {
+    page.drawEllipse({
+      x: CC.x,
+      y: CC.y,
+      xScale: 9,
+      yScale: 9,
+      color: r2 === 0 ? C.success : undefined,
+      borderColor: r2 === 1 ? C.success : undefined,
+      borderWidth: 0,
     });
-    ly -= lh;
   }
-  let ry = y;
-  for (const line of rightLines) {
-    page.drawText(line.length > 58 ? `${line.slice(0, 55)}...` : line, {
-      x: 42 + colW + colGap,
-      y: ry,
-      size: 8.5,
-      font,
-      color: rgb(0.15, 0.15, 0.15),
-    });
-    ry -= lh;
+  page.drawLine({ start: { x: CC.x - 4, y: CC.y }, end: { x: CC.x - 1, y: CC.y - 4 }, thickness: 1.8, color: C.white });
+  page.drawLine({ start: { x: CC.x - 1, y: CC.y - 4 }, end: { x: CC.x + 5, y: CC.y + 4 }, thickness: 1.8, color: C.white });
+
+  text(page, "Payment Successfully Confirmed", MX + 38, Y - 16, B, 10.5, rgb(0.04, 0.32, 0.13));
+  text(page, `Transaction date: ${fmtDate(m.transactionDateIso)}   |   Reference: ${m.transactionReference}`,
+    MX + 38, Y - 29, R, 8, C.muted);
+
+  Y -= BANNER_H + 20;
+
+  // ── 3. TWO-COLUMN INFO CARDS ───────────────────────────────────────────────
+  const COL_GAP = 14;
+  const COL_W = (BW - COL_GAP) / 2;
+  const CARD_H = 108;
+  const HDR_STRIP = 20;
+
+  const cards: Array<{ title: string; rows: [string, string][] }> = [
+    {
+      title: "CUSTOMER DETAILS",
+      rows: [
+        ["Company", clip(m.companyName, 30)],
+        ["Admin", clip(m.adminName, 30)],
+        ["Email", clip(m.email || "-", 32)],
+        ["Phone", m.phone || "-"],
+        ["Workspace", clip(m.workspaceName, 28)],
+      ],
+    },
+    {
+      title: "PAYMENT DETAILS",
+      rows: [
+        ["Mode", clip(m.paymentModeLabel, 28)],
+        ["Currency", m.currency],
+        ["Plan", m.planLabel],
+        ["Period", clip(m.billingPeriod, 28)],
+        ["Ref", clip(m.transactionReference, 28)],
+      ],
+    },
+  ];
+  const cardsTopY = Y;
+  roundedRect(page, MX - 3, cardsTopY - CARD_H - 6, BW + 6, CARD_H + 12, 8, {
+    borderColor: C.border,
+    borderWidth: 1,
+  });
+
+  for (let i = 0; i < 2; i++) {
+    const card = cards[i];
+    const CX = MX + i * (COL_W + COL_GAP);
+
+    // Card shadow effect (offset rect)
+    rect(page, CX + 2, Y - CARD_H - 2, COL_W, CARD_H, { fillColor: C.border });
+
+    // Card body
+    rect(page, CX, Y - CARD_H, COL_W, CARD_H, { fillColor: C.white, borderColor: C.border, borderWidth: 0.6 });
+
+    // Card header strip
+    rect(page, CX, Y - HDR_STRIP, COL_W, HDR_STRIP, { fillColor: C.primary });
+
+    // Gold left accent on header
+    rect(page, CX, Y - HDR_STRIP, 3, HDR_STRIP, { fillColor: C.gold });
+
+    text(page, card.title, CX + 10, Y - 13, B, 7.5, C.gold);
+
+    // Rows
+    let ry = Y - HDR_STRIP - 14;
+    for (const [label, val] of card.rows) {
+      text(page, label, CX + 10, ry, R, 7.5, C.muted);
+      text(page, val, CX + 78, ry, B, 8, C.textDark);
+      ry -= 15;
+    }
   }
-  y = Math.min(ly, ry) - 18;
 
-  page.drawText("ITEMS", { x: 42, y, size: 9, font: fontBold, color: PRIMARY });
-  y -= 14;
+  Y -= CARD_H + 24;
 
-  const tableX = 42;
-  const cols = [0.46, 0.1, 0.22, 0.22];
-  const tw = width - 84;
-  const headers = ["Description", "Qty", "Unit", "Total"];
-  page.drawRectangle({ x: tableX, y: y - 2, width: tw, height: 16, color: rgb(0.96, 0.96, 0.96) });
-  let cx = tableX + 6;
+  // ── 4. ITEMS TABLE ─────────────────────────────────────────────────────────
+  const itemsTopY = Y + 8;
+
+  // Section heading with gold accent
+  rect(page, MX, Y + 2, 3, 16, { fillColor: C.gold });
+  text(page, "ITEMS", MX + 8, Y, B, 9.5, C.primary);
+  hline(page, MX, Y - 4, BW, C.border, 0.6);
+  Y -= 18;
+
+  // Column layout  [desc, qty, unit, total]
+  const COLS = [0.46, 0.08, 0.24, 0.22];
+  const TH = 20; // table header height
+  const TR = 22; // table row height
+
+  // Table header
+  rect(page, MX, Y - TH, BW, TH, { fillColor: C.primary });
+  rect(page, MX, Y - TH, BW, 2, { fillColor: C.gold }); // top accent
+
+  const headers = ["Description", "Qty", "Unit Price", "Total"];
+  let hx = MX + 8;
+  const qtyShiftLeft = 8;
+  const moneyShiftLeft = 16;
   for (let i = 0; i < 4; i++) {
-    page.drawText(headers[i], {
-      x: cx,
-      y: y - 12,
-      size: 8,
-      font: fontBold,
-      color: MUTED,
-    });
-    cx += tw * cols[i];
+    const colW = BW * COLS[i];
+    if (i === 0) {
+      text(page, headers[i], hx, Y - 13, B, 7.5, C.gold);
+    } else if (i === 1) {
+      textCenter(page, headers[i], hx + colW / 2 - qtyShiftLeft, Y - 13, B, 7.5, C.gold);
+    } else {
+      textRight(page, headers[i], hx + colW - 10 - moneyShiftLeft, Y - 13, B, 7.5, C.gold);
+    }
+    hx += colW;
   }
-  y -= 22;
+  Y -= TH;
 
-  for (const row of m.lineItems) {
-    if (y < 200) break;
-    page.drawRectangle({ x: tableX, y: y + 5.5, width: tw, height: 0.35, color: BORDER });
-    cx = tableX + 6;
-    const desc = row.description.length > 40 ? `${row.description.slice(0, 37)}...` : row.description;
-    page.drawText(desc, { x: cx, y: y - 8, size: 8.5, font });
-    cx += tw * cols[0];
-    page.drawText(String(row.quantity), { x: cx, y: y - 8, size: 8.5, font });
-    cx += tw * cols[1];
-    page.drawText(fmtMoney(row.unit_price, m.currency), { x: cx, y: y - 8, size: 8.5, font });
-    cx += tw * cols[2];
-    page.drawText(fmtMoney(row.total, m.currency), { x: cx, y: y - 8, size: 8.5, font: fontBold });
-    y -= 22;
+  // Row data
+  for (let ri = 0; ri < m.lineItems.length; ri++) {
+    const row = m.lineItems[ri];
+    if (Y < 190) break;
+
+    const rowBg = ri % 2 === 0 ? C.white : C.shadowRow;
+    rect(page, MX, Y - TR, BW, TR, { fillColor: rowBg });
+    hline(page, MX, Y - TR, BW, C.border, 0.35);
+
+    let rx2 = MX + 8;
+    const desc = clip(row.description, 46);
+    text(page, desc, rx2, Y - 14, R, 8.5, C.textDark);
+    rx2 += BW * COLS[0];
+
+    textCenter(page, String(row.quantity), rx2 + (BW * COLS[1]) / 2 - qtyShiftLeft, Y - 14, R, 8.5, C.textMid);
+    rx2 += BW * COLS[1];
+
+    textRight(page, fmtMoney(row.unit_price, m.currency),
+      rx2 + BW * COLS[2] - 10 - moneyShiftLeft, Y - 14, R, 8.5, C.textMid);
+    rx2 += BW * COLS[2];
+
+    textRight(page, fmtMoney(row.total, m.currency),
+      rx2 + BW * COLS[3] - 10 - moneyShiftLeft, Y - 14, B, 8.5, C.primary);
+
+    Y -= TR;
   }
 
-  const boxW = 200;
-  const boxX = width - 42 - boxW;
+  // Bottom border of table
+  hline(page, MX, Y, BW, C.primary, 0.8);
+  Y -= 20;
+
+  // ── 5. TOTALS BOX ──────────────────────────────────────────────────────────
+  const TOT_W = 210;
+  const TOT_X = W - MX - TOT_W;
   const vat = m.vatAmount ?? 0;
   const disc = m.discountAmount ?? 0;
-  page.drawRectangle({ x: boxX, y: y - 78, width: boxW, height: 78, borderColor: BORDER, borderWidth: 1 });
-  let ty = y - 14;
-  page.drawText("Subtotal", { x: boxX + 8, y: ty, size: 9, font, color: MUTED });
-  page.drawText(fmtMoney(m.subtotal, m.currency), {
-    x: boxX + boxW - 8 - font.widthOfTextAtSize(fmtMoney(m.subtotal, m.currency), 9),
-    y: ty,
-    size: 9,
-    font,
-  });
-  ty -= 14;
-  page.drawText("VAT", { x: boxX + 8, y: ty, size: 9, font, color: MUTED });
-  page.drawText(fmtMoney(vat, m.currency), {
-    x: boxX + boxW - 8 - font.widthOfTextAtSize(fmtMoney(vat, m.currency), 9),
-    y: ty,
-    size: 9,
-    font,
-  });
-  ty -= 14;
-  page.drawText("Discount", { x: boxX + 8, y: ty, size: 9, font, color: MUTED });
-  const discStr = fmtMoney(disc > 0 ? -disc : 0, m.currency);
-  page.drawText(discStr, {
-    x: boxX + boxW - 8 - font.widthOfTextAtSize(discStr, 9),
-    y: ty,
-    size: 9,
-    font,
-  });
-  ty -= 22;
-  page.drawRectangle({ x: boxX, y: ty - 6, width: boxW, height: 22, color: rgb(0.94, 0.99, 0.95) });
-  page.drawText("TOTAL PAID", { x: boxX + 8, y: ty - 2, size: 10, font: fontBold, color: PRIMARY });
-  const totalStr = fmtMoney(m.totalPaid, m.currency);
-  page.drawText(totalStr, {
-    x: boxX + boxW - 8 - fontBold.widthOfTextAtSize(totalStr, 10),
-    y: ty - 2,
-    size: 10,
-    font: fontBold,
-    color: PRIMARY,
-  });
-  y = ty - 36;
 
-  drawWatermark(page, width, height, fontBold, "PAID");
+  const totLines: [string, string][] = [
+    ["Subtotal", fmtMoney(m.subtotal, m.currency)],
+    ["VAT", fmtMoney(vat, m.currency)],
+    ["Discount", disc > 0 ? `-${fmtMoney(disc, m.currency)}` : fmtMoney(0, m.currency)],
+  ];
+  const TOT_INNER = totLines.length * 18 + 8;
+  const TOTAL_ROW = 28;
+  const BOX_H = TOT_INNER + TOTAL_ROW;
 
-  page.drawText("Payment Confirmed  |  M-Pesa Verified  |  Authorized by FarmVault", {
-    x: 42,
-    y: 86,
-    size: 8,
-    font,
-    color: MUTED,
-  });
-  page.drawText(`Generated ${m.footerTimestampIso}`, {
-    x: 42,
-    y: 72,
-    size: 8,
-    font,
-    color: MUTED,
+  // Outer card shadow
+  rect(page, TOT_X + 2, Y - BOX_H - 2, TOT_W, BOX_H, { fillColor: C.border });
+  // Card
+  rect(page, TOT_X, Y - BOX_H, TOT_W, BOX_H, { fillColor: C.white, borderColor: C.border, borderWidth: 0.7 });
+  // Gold top accent
+  rect(page, TOT_X, Y - 2, TOT_W, 2, { fillColor: C.gold });
+
+  let ty = Y - 14;
+  for (const [label, val] of totLines) {
+    text(page, label, TOT_X + 10, ty, R, 8.5, C.muted);
+    textRight(page, val, TOT_X + TOT_W - 10, ty, R, 8.5, C.textDark);
+    ty -= 18;
+  }
+
+  hline(page, TOT_X, ty + 6, TOT_W, C.border, 0.5);
+
+  // TOTAL PAID row
+  rect(page, TOT_X, ty - TOTAL_ROW + 10, TOT_W, TOTAL_ROW, { fillColor: C.primary });
+  text(page, "TOTAL PAID", TOT_X + 10, ty - 6, B, 10, C.white);
+  textRight(page, fmtMoney(m.totalPaid, m.currency), TOT_X + TOT_W - 10, ty - 6, B, 10.5, C.gold);
+  const itemsBottomY = ty - TOTAL_ROW + 4;
+  roundedRect(page, MX - 3, itemsBottomY - 7, BW + 6, itemsTopY - (itemsBottomY - 7), 8, {
+    borderColor: C.border,
+    borderWidth: 1,
   });
 
-  const strip =
-    `Customer since: ${fmtDate(m.customerSinceIso)}   |   Plan: ${m.planTier}   |   Workspace: ${m.workspaceName}   |   Cycle: ${m.paymentCycle}`;
-  const stripTrim = strip.length > 92 ? `${strip.slice(0, 89)}...` : strip;
-  page.drawRectangle({ x: 0, y: 0, width, height: 44, color: rgb(0.97, 0.97, 0.97) });
-  page.drawText(stripTrim, { x: 42, y: 26, size: 7.5, font, color: MUTED });
+  // ── 6. WATERMARK ───────────────────────────────────────────────────────────
+  const WM_SIZE = 80;
+  const wmStr = "PAID";
+  const wmW = B.widthOfTextAtSize(wmStr, WM_SIZE);
+  page.drawText(wmStr, {
+    x: (W - wmW * 0.7) / 2 + 10,
+    y: H / 2 - 40,
+    size: WM_SIZE,
+    font: B,
+    color: rgb(0.10, 0.38, 0.22),
+    rotate: degrees(-30),
+    opacity: 0.055,
+  });
+
+  // ── 7. SUPPORT / NOTE STRIP ────────────────────────────────────────────────
+  const NOTE_Y = 108;
+  const NOTE_H = 32;
+
+  rect(page, MX, NOTE_Y - NOTE_H, BW, NOTE_H,
+    { fillColor: C.goldLight, borderColor: C.gold, borderWidth: 0.55 });
+  rect(page, MX, NOTE_Y - NOTE_H, 3, NOTE_H, { fillColor: C.gold }); // left accent
+
+  text(page, "For receipt queries, contact us — we're happy to help.",
+    MX + 12, NOTE_Y - 11, B, 7.5, rgb(0.48, 0.36, 0.08));
+  text(page, "billing@farmvault.africa   |   +254 714 748 299",
+    MX + 12, NOTE_Y - 23, R, 7.5, rgb(0.35, 0.28, 0.06));
+
+  // ── 8. FOOTER ──────────────────────────────────────────────────────────────
+  const FTR_H = 46;
+
+  rect(page, 0, 0, W, FTR_H, { fillColor: C.primary });
+  rect(page, 0, FTR_H, W, 2, { fillColor: C.gold }); // gold top border
+
+  // Left: trust line
+  text(page, "Payment Confirmed  |  M-Pesa Verified  |  Authorized by FarmVault",
+    MX, 30, R, 7, rgb(0.75, 0.82, 0.78));
+
+  // Right: timestamp
+  textRight(page, `Generated: ${fmtDate(m.footerTimestampIso)}`,
+    W - MX, 30, R, 7, rgb(0.55, 0.65, 0.60));
+
+  // Bottom metadata strip
+  const strip = safe(
+    `Customer since: ${fmtDate(m.customerSinceIso)}   |   Plan: ${m.planTier}   |   ` +
+    `Workspace: ${m.workspaceName}   |   Cycle: ${m.paymentCycle}`,
+  );
+  text(page, clip(strip, 96), MX, 14, R, 7, rgb(0.50, 0.62, 0.56));
+
+  // Wordmark right-aligned in footer
+  textRight(page, "farmvault.africa", W - MX, 14, B, 7, C.gold);
 
   return doc.save();
 }

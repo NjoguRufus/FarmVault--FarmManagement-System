@@ -9,7 +9,8 @@ interface StatCardProps {
   change?: number;
   changeLabel?: string;
   icon?: React.ReactNode;
-  variant?: 'default' | 'primary' | 'gold' | 'warning';
+  variant?: 'default' | 'primary' | 'gold' | 'warning' | 'success' | 'destructive' | 'info';
+  valueVariant?: 'default' | 'primary' | 'success' | 'warning' | 'destructive' | 'info';
   compact?: boolean;
   responsive?: boolean;
   /** When true, title stays clear; value area is blurred with Pro overlay (set by FeatureGate). */
@@ -24,6 +25,7 @@ export function StatCard({
   changeLabel,
   icon,
   variant = 'default',
+  valueVariant = 'default',
   compact = false,
   responsive = true,
   proLocked = false,
@@ -36,7 +38,29 @@ export function StatCard({
     primary: 'bg-primary/15 text-primary',
     gold: 'bg-fv-gold-soft/60 text-fv-olive',
     warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+    success: 'bg-fv-success/15 text-fv-success',
+    destructive: 'bg-destructive/15 text-destructive',
+    info: 'bg-fv-info/15 text-fv-info',
     default: 'bg-muted/60 text-muted-foreground',
+  };
+
+  const cardTintClasses = {
+    default: '',
+    primary: '',
+    gold: '',
+    warning: '',
+    success: 'bg-fv-success/5 border-fv-success/30',
+    destructive: 'bg-destructive/5 border-destructive/35',
+    info: 'bg-fv-info/5 border-fv-info/30',
+  };
+
+  const valueColorClasses = {
+    default: '',
+    primary: 'text-primary',
+    success: 'text-fv-success',
+    warning: 'text-fv-warning',
+    destructive: 'text-destructive',
+    info: 'text-fv-info',
   };
 
   const cardBase =
@@ -49,7 +73,7 @@ export function StatCard({
 
   if (compact) {
     return (
-      <div className={cn(cardBase, padding, accent)}>
+      <div className={cn(cardBase, padding, accent, cardTintClasses[variant])}>
         <div className="mb-1 flex items-center justify-between">
           <span
             className={cn(
@@ -79,6 +103,7 @@ export function StatCard({
                     className={cn(
                       'font-heading font-bold tracking-tight',
                       responsive ? 'text-lg sm:text-xl' : 'text-lg',
+                      valueColorClasses[valueVariant],
                     )}
                   >
                     {value}
@@ -111,6 +136,7 @@ export function StatCard({
                   className={cn(
                     'font-heading font-bold tracking-tight',
                     responsive ? 'text-lg sm:text-xl' : 'text-lg',
+                    valueColorClasses[valueVariant],
                   )}
                 >
                   {value}
@@ -141,7 +167,7 @@ export function StatCard({
   }
 
   return (
-    <div className={cn(cardBase, padding, accent)}>
+    <div className={cn(cardBase, padding, accent, cardTintClasses[variant])}>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</span>
         {icon && (
@@ -160,7 +186,7 @@ export function StatCard({
           <>
             <div className="pointer-events-none select-none blur-md opacity-35">
               <div className="flex items-baseline gap-2">
-                <span className="font-heading text-xl font-bold tracking-tight">{value}</span>
+                <span className={cn('font-heading text-xl font-bold tracking-tight', valueColorClasses[valueVariant])}>{value}</span>
                 {change !== undefined && (
                   <span
                     className={cn(
@@ -183,7 +209,7 @@ export function StatCard({
         ) : (
           <>
             <div className="flex items-baseline gap-2">
-              <span className="font-heading text-xl font-bold tracking-tight">{value}</span>
+              <span className={cn('font-heading text-xl font-bold tracking-tight', valueColorClasses[valueVariant])}>{value}</span>
               {change !== undefined && (
                 <span
                   className={cn(

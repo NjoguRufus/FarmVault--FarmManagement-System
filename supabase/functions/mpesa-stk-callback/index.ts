@@ -303,6 +303,29 @@ serveFarmVaultEdge("mpesa-stk-callback", async (req, _ctx) => {
           });
         }
 
+        if (success && receipt && amountNum != null && amountNum > 0) {
+          const revenuePayload = {
+            source: "mpesa_stk",
+            amount: amountNum,
+            plan: payBefore?.plan != null ? String(payBefore.plan) : null,
+            customer_id: payBefore?.company_id != null ? String(payBefore.company_id) : null,
+            receipt_number: String(receipt),
+            date: new Date().toISOString().slice(0, 10),
+          };
+          const { error: revenueErr } = await admin
+            .from("company_revenue")
+            .upsert(revenuePayload, { onConflict: "receipt_number" });
+          if (revenueErr) {
+            console.error("[mpesa-stk-callback] company_revenue upsert failed", revenueErr.message);
+            await insertPaymentWebhookFailure(admin, {
+              source: "mpesa_stk_callback_company_revenue",
+              checkoutRequestId: checkoutId,
+              rawBody: rawBody.slice(0, 4000),
+              errorMessage: `company_revenue upsert: ${revenueErr.message}`.slice(0, 2000),
+            });
+          }
+        }
+
         const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
         const resendKey = Deno.env.get("RESEND_API_KEY")?.trim() ?? "";
         const appUrl = (Deno.env.get("FARMVAULT_PUBLIC_APP_URL") ?? "https://farmvault.africa").replace(/\/$/, "");

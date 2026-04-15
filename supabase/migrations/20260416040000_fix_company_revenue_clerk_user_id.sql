@@ -1,0 +1,101 @@
+begin;
+
+alter table if exists public.company_revenue
+  alter column user_id type text using user_id::text;
+
+alter table if exists public.company_revenue
+  alter column user_id set default core.current_user_id();
+
+drop policy if exists company_revenue_select_owner on public.company_revenue;
+create policy company_revenue_select_owner
+on public.company_revenue
+for select
+to authenticated
+using (public.is_developer() or coalesce(user_id::text, '') = core.current_user_id());
+
+drop policy if exists company_revenue_insert_owner on public.company_revenue;
+create policy company_revenue_insert_owner
+on public.company_revenue
+for insert
+to authenticated
+with check (public.is_developer() or coalesce(user_id::text, '') = core.current_user_id());
+
+drop policy if exists company_revenue_update_owner on public.company_revenue;
+create policy company_revenue_update_owner
+on public.company_revenue
+for update
+to authenticated
+using (public.is_developer() or coalesce(user_id::text, '') = core.current_user_id())
+with check (public.is_developer() or coalesce(user_id::text, '') = core.current_user_id());
+
+drop policy if exists company_revenue_delete_owner on public.company_revenue;
+create policy company_revenue_delete_owner
+on public.company_revenue
+for delete
+to authenticated
+using (public.is_developer() or coalesce(user_id::text, '') = core.current_user_id());
+
+create or replace function public.record_company_revenue(
+  p_user_id text,
+  p_source text,
+  p_amount numeric,
+  p_plan text default null,
+  p_customer_id uuid default null,
+  p_receipt_number text default null,
+  p_date date default current_date
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_receipt text;
+  v_id uuid;
+begin
+  if coalesce(trim(p_source), '') = '' then
+    raise exception 'Revenue source is required';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'Revenue amount must be greater than zero';
+  end if;
+
+  v_receipt := nullif(trim(coalesce(p_receipt_number, '')), '');
+  if v_receipt is null then
+    v_receipt := format('auto:%s:%s', lower(trim(p_source)), gen_random_uuid()::text);
+  end if;
+
+  insert into public.company_revenue (
+    user_id,
+    source,
+    amount,
+    plan,
+    customer_id,
+    receipt_number,
+    date
+  )
+  values (
+    coalesce(nullif(trim(p_user_id), ''), core.current_user_id()),
+    lower(trim(p_source)),
+    round(p_amount, 2),
+    nullif(trim(coalesce(p_plan, '')), ''),
+    p_customer_id,
+    v_receipt,
+    coalesce(p_date, current_date)
+  )
+  on conflict (receipt_number)
+  do update set
+    amount = excluded.amount,
+    source = excluded.source,
+    plan = excluded.plan,
+    customer_id = excluded.customer_id,
+    date = excluded.date
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+commit;
+
+notify pgrst, 'reload schema';

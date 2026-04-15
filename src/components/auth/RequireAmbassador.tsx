@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useUser } from '@clerk/react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAmbassadorAccess } from '@/contexts/AmbassadorAccessContext';
 import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { hasAmbassadorRowForCurrentUser } from '@/services/ambassadorService';
 
@@ -10,18 +12,19 @@ interface RequireAmbassadorProps {
 
 /**
  * Route guard for ambassador-only pages inside /ambassador/console/*.
- * Uses profile user_type first; falls back to a single ambassador row check (no dashboard switcher RPC).
+ * Dual-role users (company + ambassador) must have workspace mode "ambassador" to enter the console.
  */
 export function RequireAmbassador({ children }: RequireAmbassadorProps) {
   const { authReady, user } = useAuth();
+  const { isLoaded: clerkLoaded } = useUser();
+  const { workspaceMode } = useAmbassadorAccess();
   const [fallbackOk, setFallbackOk] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!authReady || !user) return;
+    if (!authReady || !user || !clerkLoaded) return;
 
     const pt = user.profileUserType;
     if (pt === 'ambassador' || pt === 'both') {
-      setFallbackOk(true);
       return;
     }
 
@@ -40,16 +43,26 @@ export function RequireAmbassador({ children }: RequireAmbassadorProps) {
     return () => {
       cancelled = true;
     };
-  }, [authReady, user?.id, user?.profileUserType]);
+  }, [authReady, user?.id, user?.profileUserType, clerkLoaded]);
 
-  if (!authReady) return null;
+  if (!authReady || !clerkLoaded) {
+    return <AuthLoadingScreen message="Loading…" />;
+  }
 
   if (!user) {
     return <Navigate to="/sign-in" replace />;
   }
 
   const pt = user.profileUserType;
-  if (pt === 'ambassador' || pt === 'both') {
+
+  if (pt === 'ambassador') {
+    return <>{children}</>;
+  }
+
+  if (pt === 'both') {
+    if (workspaceMode === 'company') {
+      return <Navigate to="/dashboard" replace />;
+    }
     return <>{children}</>;
   }
 

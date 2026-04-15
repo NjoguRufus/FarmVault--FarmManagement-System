@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { fetchDevAmbassadorPayouts, reviewAmbassadorPayout, type AmbassadorPayoutRow } from "@/services/ambassadorService";
 
 export type DevGlobalReferralStats = {
   total_ambassadors: number;
@@ -52,6 +53,8 @@ export type DevAmbassadorEarningRow = {
   description: string | null;
   created_at: string;
 };
+
+export type DevAmbassadorPayoutRow = AmbassadorPayoutRow;
 
 export async function fetchDevGlobalReferralStats(): Promise<DevGlobalReferralStats> {
   const { data, error } = await supabase.from("dev_global_referral_stats").select("*").maybeSingle();
@@ -182,4 +185,19 @@ export async function markAmbassadorEarningsPaid(ambassadorId: string): Promise<
     throw new Error(err);
   }
   return Number(row.updated ?? 0);
+}
+
+export async function fetchDevPayouts(ambassadorId?: string): Promise<DevAmbassadorPayoutRow[]> {
+  const res = await fetchDevAmbassadorPayouts(ambassadorId);
+  if (!res.ok) throw new Error(res.error);
+  return res.rows;
+}
+
+export async function updateDevPayoutStatus(
+  withdrawalId: string,
+  action: "approve" | "reject" | "mark_paid",
+): Promise<number> {
+  const res = await reviewAmbassadorPayout(withdrawalId, action);
+  if (!res.ok) throw new Error(res.error);
+  return Number(res.updated ?? 0);
 }

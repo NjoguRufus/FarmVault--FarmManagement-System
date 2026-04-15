@@ -31,8 +31,6 @@ export interface ManualPaymentModalProps {
   amountKes: number | null;
 }
 
-const FALLBACK_MPESA_NAME = 'M-Pesa customer';
-
 function mapSubmitError(raw: string): string {
   const t = raw.toLowerCase();
   if (
@@ -80,8 +78,13 @@ export function ManualPaymentModal({
       if (finalTx.length < 8) {
         throw new Error('Enter a valid M-Pesa confirmation code (at least 8 characters).');
       }
-      const fromSms = extractMpesaNameFromPastedMessage(raw);
-      const mpesaName = fromSms.trim().length >= 2 ? fromSms.trim() : FALLBACK_MPESA_NAME;
+      const fromSms = extractMpesaNameFromPastedMessage(raw).trim();
+      const accountNameFallback =
+        user?.name?.trim() ||
+        user?.fullName?.trim() ||
+        user?.email?.split('@')[0]?.trim() ||
+        'Customer';
+      const mpesaName = fromSms.length >= 2 ? fromSms : accountNameFallback;
       const client = await getAuthedSupabase(clerkSupabaseToken);
       return createPaymentSubmission(
         {

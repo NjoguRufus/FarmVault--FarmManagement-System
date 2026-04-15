@@ -5,17 +5,15 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { awardSubscriptionCommission } from "./awardSubscriptionCommission.ts";
 import { normalizeCompanyIdForUuid } from "./companyBillingContactEmail.ts";
-import { buildAdminPaymentConfirmedEmail, buildPaymentSuccessfulEmail } from "./farmvault-email/paymentSuccessfulTemplate.ts";
+import { buildAdminPaymentConfirmedEmail } from "./farmvault-email/paymentSuccessfulTemplate.ts";
 import { getFarmvaultDeveloperInboxEmail } from "./farmvaultDeveloperInbox.ts";
 import { getFarmVaultEmailFrom } from "./farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "./resendSendLogged.ts";
-import { resolveBillingRecipient } from "./billingRecipientResolve.ts";
-import { sendCompanyEmail } from "./sendCompanyEmail.ts";
+import { sendCompanyPaymentReceipt } from "./sendCompanyPaymentReceipt.ts";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const EMAIL_TYPE_COMPANY = "company_payment_successful";
 const EMAIL_TYPE_ADMIN = "developer_payment_confirmed";
 
 export type PaymentSuccessHandlerResult =
@@ -111,76 +109,47 @@ export async function handleSuccessfulPayment(
 
   const amountNum = Number(row.amount ?? 0);
   const currency = String(row.currency ?? "KES").toUpperCase();
-  const amountKesFormatted = Number.isFinite(amountNum) ? amountNum.toLocaleString("en-KE") : String(row.amount ?? "—");
   const amountLabel = `${currency} ${Number.isFinite(amountNum) ? amountNum.toLocaleString("en-KE") : String(row.amount ?? "—")}`;
   const receiptDisplay = String(row.transaction_code ?? "").trim() || "—";
-  const planRaw = String(row.plan_id ?? "basic");
 
   if (row.success_email_sent !== true) {
-    const dedupeKey = `payment_successful:${subPayId}`;
-    const { data: prior } = await input.admin
-      .from("email_logs")
-      .select("id")
-      .eq("email_type", EMAIL_TYPE_COMPANY)
-      .eq("status", "sent")
-      .contains("metadata", { dedupe_key: dedupeKey })
-      .limit(1)
-      .maybeSingle();
-    if ((prior as { id?: string } | null)?.id) {
-      await input.admin
-        .from("subscription_payments")
-        .update({ success_email_sent: true, approved_email_sent: true })
-        .eq("id", subPayId);
-    } else {
-      const resolved = await resolveBillingRecipient(input.admin, companyId, { subscriptionPaymentId: subPayId });
-      if (!resolved) {
-        console.error("[handleSuccessfulPayment] no billing recipient", { subPayId, companyId, source });
-        return { ok: false, error: "No billing contact email found", status: 400 };
-      }
-
-      console.log("Sending success email to:", resolved.to);
-      if (snapshotCompanyEmail) {
-        console.log("[handleSuccessfulPayment] core.companies.email (from sync RPC):", snapshotCompanyEmail);
-      }
-
-      const built = buildPaymentSuccessfulEmail({
-        companyName: resolved.companyName,
-        planName: planRaw,
-        amountKesFormatted,
-        receiptNumber:
-          receiptDisplay !== "—"
-            ? receiptDisplay
-            : receiptForCommission(subPayId, row.transaction_code as string | undefined),
-      });
-
-      const send = await sendCompanyEmail({
-        to: resolved.to,
-        subject: built.subject,
-        html: built.html,
-        type: "billing",
-        admin: input.logAdmin,
-        resendKey: input.resendKey,
-        companyId,
-        companyName: resolved.companyName,
-        email_type: EMAIL_TYPE_COMPANY,
-        metadata: {
-          dedupe_key: dedupeKey,
-          kind: "payment_successful",
-          source: "handleSuccessfulPayment",
-          subscription_payment_id: subPayId,
-          correlation: source,
-        },
-      });
-      if (!send.ok) {
-        console.error("[handleSuccessfulPayment] company email failed", send.error, { subPayId, source });
-        return { ok: false, error: send.error, status: 500 };
-      }
-
-      await input.admin
-        .from("subscription_payments")
-        .update({ success_email_sent: true, approved_email_sent: true, received_email_sent: true })
-        .eq("id", subPayId);
+    if (snapshotCompanyEmail) {
+      console.log("[handleSuccessfulPayment] core.companies.email (from sync RPC):", snapshotCompanyEmail);
     }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.error("[handleSuccessfulPayment] missing Supabase env for billing-receipt-issue", {
+        hasUrl: Boolean(supabaseUrl),
+        hasServiceRole: Boolean(serviceRoleKey),
+        subPayId,
+        source,
+      });
+      return { ok: false, error: "Server misconfiguration", status: 500 };
+    }
+
+    const receiptSend = await sendCompanyPaymentReceipt({
+      supabaseUrl,
+      serviceRoleKey,
+      anonKey: anonKey ?? undefined,
+      subscriptionPaymentId: subPayId,
+      sendEmail: true,
+    });
+    if (!receiptSend.ok) {
+      console.error("[handleSuccessfulPayment] receipt email failed", receiptSend.error, {
+        subPayId,
+        source,
+        status: receiptSend.status,
+      });
+      return { ok: false, error: receiptSend.error ?? "receipt_email_failed", status: 500 };
+    }
+
+    await input.admin
+      .from("subscription_payments")
+      .update({ success_email_sent: true, approved_email_sent: true, received_email_sent: true })
+      .eq("id", subPayId);
   }
 
   const adminTo = getFarmvaultDeveloperInboxEmail();

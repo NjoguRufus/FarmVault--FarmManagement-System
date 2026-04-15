@@ -76,7 +76,7 @@ const MODULES: ModuleDef[] = [
   {
     id: "earn",
     title: "Referral & commission",
-    description: "Your link, bonuses, and monthly earnings.",
+    description: "Your link, first-payment commission, recurring income, welcome bonus.",
     icon: Gift,
   },
 ];
@@ -336,8 +336,8 @@ export function AmbassadorLearnDashboard() {
         <div id="learn-referral" className="scroll-mt-28 space-y-2">
           <h3 className="text-base font-bold">Referral basics</h3>
           <p className="text-sm text-foreground/95 leading-relaxed">
-            Share your personal ambassador link from the console. When a farmer signs up and subscribes
-            through your link, referrals count toward your commissions and bonuses.
+            Share your personal ambassador link from the console. Commissions are earned when referred farmers
+            complete successful subscription payments — not from signups alone.
           </p>
         </div>
 
@@ -360,16 +360,16 @@ export function AmbassadorLearnDashboard() {
           </div>
           <div className="flex flex-wrap gap-x-8 gap-y-3 text-sm">
             <div>
-              <p className="text-xl font-bold tabular-nums text-gold-light">KES 200</p>
-              <p className="text-foreground/90">welcome bonus</p>
-            </div>
-            <div>
               <p className="text-xl font-bold tabular-nums text-gold-light">KES 600</p>
-              <p className="text-foreground/90">per farmer signup</p>
+              <p className="text-foreground/90">first farmer payment</p>
             </div>
             <div>
-              <p className="text-xl font-bold tabular-nums text-foreground">KES 400</p>
-              <p className="text-foreground/90">monthly recurring</p>
+              <p className="text-xl font-bold tabular-nums text-foreground">KES 500</p>
+              <p className="text-foreground/90">monthly per active payer (from next month)</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold tabular-nums text-gold-light">KES 300</p>
+              <p className="text-foreground/90">welcome bonus (unlocks after first farmer payment)</p>
             </div>
           </div>
         </div>

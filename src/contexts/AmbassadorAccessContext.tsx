@@ -4,16 +4,25 @@ import {
   readAmbassadorAccessIntent,
   setAmbassadorAccessIntent as persistAmbassadorAccessIntent,
 } from "@/lib/ambassador/accessIntent";
+import {
+  readWorkspaceMode,
+  subscribeWorkspaceMode,
+  writeWorkspaceMode,
+  type WorkspaceMode,
+} from "@/lib/ambassador/workspaceMode";
 
 type AmbassadorAccessContextValue = {
   isAccessingAmbassador: boolean;
   setIsAccessingAmbassador: (value: boolean) => void;
+  workspaceMode: WorkspaceMode;
+  setWorkspaceMode: (mode: WorkspaceMode) => void;
 };
 
 const AmbassadorAccessContext = createContext<AmbassadorAccessContextValue | null>(null);
 
 export function AmbassadorAccessProvider({ children }: { children: React.ReactNode }) {
   const [isAccessingAmbassador, setState] = useState(() => readAmbassadorAccessIntent());
+  const [workspaceMode, setWorkspaceModeState] = useState<WorkspaceMode>(() => readWorkspaceMode());
 
   useEffect(() => {
     const sync = () => setState(readAmbassadorAccessIntent());
@@ -28,14 +37,32 @@ export function AmbassadorAccessProvider({ children }: { children: React.ReactNo
     };
   }, []);
 
+  useEffect(() => {
+    return subscribeWorkspaceMode(() => setWorkspaceModeState(readWorkspaceMode()));
+  }, []);
+
+  const setWorkspaceMode = useCallback((mode: WorkspaceMode) => {
+    writeWorkspaceMode(mode);
+    setWorkspaceModeState(mode);
+  }, []);
+
   const setIsAccessingAmbassador = useCallback((value: boolean) => {
     persistAmbassadorAccessIntent(value);
     setState(value);
+    if (value) {
+      writeWorkspaceMode("ambassador");
+      setWorkspaceModeState("ambassador");
+    }
   }, []);
 
   const value = useMemo(
-    () => ({ isAccessingAmbassador, setIsAccessingAmbassador }),
-    [isAccessingAmbassador, setIsAccessingAmbassador],
+    () => ({
+      isAccessingAmbassador,
+      setIsAccessingAmbassador,
+      workspaceMode,
+      setWorkspaceMode,
+    }),
+    [isAccessingAmbassador, setIsAccessingAmbassador, workspaceMode, setWorkspaceMode],
   );
 
   return (
