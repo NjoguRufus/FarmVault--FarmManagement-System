@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Calendar as CalendarIcon, Plus, Trash2, Package, MapPin, Briefcase, AlertCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Trash2, MapPin, Briefcase, AlertCircle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -27,11 +27,12 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
-import { listInventoryStock } from '@/services/inventoryReadModelService';
+import { listInventoryStock, recordInventoryUsage as recordInventoryUsageRpc } from '@/services/inventoryReadModelService';
 import { createWorkCard, recordWork, recordInventoryUsageForWorkCard } from '@/services/operationsWorkCardService';
 import { listFarmsByCompany } from '@/services/farmsService';
-import { recordInventoryUsage } from '@/services/inventoryService';
 import { createAdminAlert } from '@/services/adminAlertService';
+import { listSuppliers } from '@/services/suppliersService';
+import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import type { InputUsed } from '@/types';
 
 interface LogWorkModalProps {
@@ -73,12 +74,43 @@ const WORK_TYPE_CATEGORY_FILTER: Record<string, string[] | null> = {
   'Harvesting': ['tying', 'rope', 'sack'],
 };
 
+function resolvePackageLabel(packagingType: string | null | undefined, itemName: string | null | undefined) {
+  if (packagingType === 'sack') return 'sacks';
+  if (packagingType === 'bottle') {
+    return (itemName ?? '').toLowerCase().includes('drum') ? 'drums' : 'bottles';
+  }
+  if (packagingType === 'box') return 'boxes';
+  if (packagingType === 'pack') {
+    // Merged with chemical/pesticide handling so pack uses bottle/drum workflow.
+    return (itemName ?? '').toLowerCase().includes('drum') ? 'drums' : 'bottles';
+  }
+  return 'units';
+}
+
+function resolvePackageEmoji(packageLabel: string) {
+  if (packageLabel === 'sacks') return '/icons/fertscac.png';
+  if (packageLabel === 'bottles') return '🧴';
+  if (packageLabel === 'drums') return '🛢️';
+  if (packageLabel === 'packages') return '📦';
+  if (packageLabel === 'boxes') return '📦';
+  return '📌';
+}
+
+function isLiquidPackage(packageLabel: string) {
+  return packageLabel === 'bottles' || packageLabel === 'drums';
+}
+
 interface InputItem {
   itemId: string;
   itemName: string;
-  quantity: number;
+  packageCount: number;
+  baseQuantity: number;
+  drumsSprayed: number;
   unit: string;
   currentStock: number;
+  packageSize: number;
+  packageUnitLabel: string;
+  packageLabel: string;
 }
 
 export function LogWorkModal({
@@ -93,6 +125,10 @@ export function LogWorkModal({
   const companyId = user?.companyId ?? null;
 
   const [saving, setSaving] = useState(false);
+  const [workTypeQuery, setWorkTypeQuery] = useState('');
+  const [workTypeMenuOpen, setWorkTypeMenuOpen] = useState(false);
+  const [stockInOpen, setStockInOpen] = useState(false);
+  const [stockInItemId, setStockInItemId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     farmId: '',
     projectId: activeProject?.id ?? '',
@@ -131,6 +167,11 @@ export function LogWorkModal({
     () => projectsForSelectedFarm.find((p) => p.id === formData.projectId) ?? null,
     [projectsForSelectedFarm, formData.projectId],
   );
+  const filteredWorkTypes = useMemo(() => {
+    const q = workTypeQuery.trim().toLowerCase();
+    if (!q) return WORK_TYPES;
+    return WORK_TYPES.filter((type) => type.toLowerCase().includes(q));
+  }, [workTypeQuery]);
   React.useEffect(() => {
     if (!open) return;
     const preferredFarmId =
@@ -145,6 +186,8 @@ export function LogWorkModal({
       (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
       '';
     setFormData((prev) => ({ ...prev, farmId: preferredFarmId, projectId: preferredProjectId ?? '' }));
+    setWorkTypeQuery((prev) => prev || formData.workCategory || '');
+    setWorkTypeMenuOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     open,
@@ -157,10 +200,15 @@ export function LogWorkModal({
   ]);
 
   // Fetch inventory items for input selection
-  const { data: inventoryItems = [] } = useQuery({
+  const { data: inventoryItems = [], refetch: refetchInventoryItems } = useQuery({
     queryKey: ['inventory-stock', companyId],
     queryFn: () => listInventoryStock({ companyId: companyId! }),
     enabled: !!companyId,
+  });
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers', companyId ?? 'none'],
+    queryFn: () => listSuppliers(companyId ?? ''),
+    enabled: Boolean(companyId),
   });
 
   // Filter inventory items based on selected work type
@@ -183,7 +231,9 @@ export function LogWorkModal({
   // When work type changes, clear any previously selected inputs
   // since they may no longer match the new category filter
   const handleWorkCategoryChange = useCallback((value: string) => {
-    setFormData(prev => ({ ...prev, workCategory: value }));
+    setFormData(prev => ({ ...prev, workCategory: value, workTitle: value }));
+    setWorkTypeQuery(value);
+    setWorkTypeMenuOpen(false);
     setInputs(prev =>
       prev.map(input => ({
         ...input,
@@ -191,13 +241,36 @@ export function LogWorkModal({
         itemName: '',
         unit: '',
         currentStock: 0,
-        quantity: 0,
+        packageCount: 0,
+        baseQuantity: 0,
+        drumsSprayed: 0,
+        packageSize: 1,
+        packageUnitLabel: '',
+        packageLabel: 'units',
       }))
     );
   }, []);
 
+  const selectWorkType = useCallback((value: string) => {
+    handleWorkCategoryChange(value);
+  }, [handleWorkCategoryChange]);
+
   const addInput = () => {
-    setInputs(prev => [...prev, { itemId: '', itemName: '', quantity: 0, unit: '', currentStock: 0 }]);
+    setInputs(prev => [
+      ...prev,
+      {
+        itemId: '',
+        itemName: '',
+        packageCount: 0,
+        baseQuantity: 0,
+        drumsSprayed: 0,
+        unit: '',
+        currentStock: 0,
+        packageSize: 1,
+        packageUnitLabel: '',
+        packageLabel: 'units',
+      },
+    ]);
   };
 
   const removeInput = (index: number) => {
@@ -210,21 +283,42 @@ export function LogWorkModal({
       
       if (field === 'itemId') {
         const item = inventoryItems.find(inv => inv.id === value);
+        const packageLabel = resolvePackageLabel(item?.packaging_type, item?.name);
+        const packageSize = Number(item?.unit_size ?? 1) > 0 ? Number(item?.unit_size) : 1;
+        const packageUnitLabel = (item?.unit_size_label ?? item?.unit ?? '').trim();
         return {
           ...input,
           itemId: value as string,
           itemName: item?.name ?? '',
           unit: item?.unit ?? '',
           currentStock: item?.current_stock ?? 0,
+          packageSize,
+          packageUnitLabel,
+          packageLabel,
+          packageCount: 0,
+          baseQuantity: 0,
+          drumsSprayed: 0,
         };
       }
-      
+      if (field === 'packageCount') {
+        const packageCount = Number(value) || 0;
+        const baseQuantity = packageCount * (input.packageSize || 1);
+        return { ...input, packageCount, baseQuantity };
+      }
+      if (field === 'drumsSprayed') {
+        return { ...input, drumsSprayed: Number(value) || 0 };
+      }
+
       return { ...input, [field]: value };
     }));
   };
 
   const hasLowStockWarning = inputs.some(input => 
-    input.itemId && input.quantity > input.currentStock
+    input.itemId && input.baseQuantity > input.currentStock
+  );
+  const stockInItem = useMemo(
+    () => inventoryItems.find((item) => item.id === stockInItemId) ?? null,
+    [inventoryItems, stockInItemId],
   );
 
   const handleSubmit = async () => {
@@ -232,27 +326,19 @@ export function LogWorkModal({
       toast.error('Please select a farm');
       return;
     }
-    if (!formData.workTitle.trim()) {
-      toast.error('Please enter a work name');
-      return;
-    }
     if (!formData.workCategory) {
       toast.error('Please select a work type');
       return;
     }
-    if (!formData.workDone.trim()) {
-      toast.error('Please describe the work done');
-      return;
-    }
-
     setSaving(true);
     try {
       // Step 1: Create the work card in "planned" status
+      const effectiveWorkTitle = formData.workTitle.trim() || formData.workCategory;
       const workCard = await createWorkCard({
         companyId: companyId!,
         farmId: selectedProject?.farmId ?? formData.farmId,
         projectId: formData.projectId || null,
-        workTitle: formData.workTitle.trim(),
+        workTitle: effectiveWorkTitle,
         workCategory: formData.workCategory,
         plannedDate: format(formData.workDate, 'yyyy-MM-dd'),
         plannedWorkers: formData.actualWorkers,
@@ -268,11 +354,11 @@ export function LogWorkModal({
 
       // Step 2: Immediately record the work (move to "logged" status)
       const inputsUsed: InputUsed[] = inputs
-        .filter(i => i.itemId && i.quantity > 0)
+        .filter(i => i.itemId && i.baseQuantity > 0)
         .map(i => ({
           itemId: i.itemId,
           itemName: i.itemName,
-          quantity: i.quantity,
+          quantity: i.baseQuantity,
           unit: i.unit,
         }));
 
@@ -291,18 +377,20 @@ export function LogWorkModal({
       });
 
       // Step 3: Record inventory usage for each input
+      const failedUsageItems: string[] = [];
       for (const input of inputsUsed) {
         try {
-          await recordInventoryUsage({
+          await recordInventoryUsageRpc({
             companyId: companyId!,
             itemId: input.itemId,
             quantity: input.quantity,
-            reason: `Work: ${formData.workTitle}`,
             projectId: formData.projectId || null,
-            actorUserId: user?.id ?? '',
-            actorUserName: user?.name ?? null,
+            usedOn: format(formData.workDate, 'yyyy-MM-dd'),
+            purpose: effectiveWorkTitle,
+            notes: `Work: ${effectiveWorkTitle}`,
           });
         } catch (err) {
+          failedUsageItems.push(input.itemName || 'Unknown item');
           console.warn('[LogWorkModal] Failed to record inventory usage for', input.itemName, err);
         }
       }
@@ -317,22 +405,26 @@ export function LogWorkModal({
           actorUserName: user?.name ?? null,
         });
       }
+      await refetchInventoryItems();
 
       // Step 5: Create admin alert
       await createAdminAlert({
         companyId: companyId!,
         type: 'work_logged',
         title: 'Work Logged',
-        message: `${user?.name ?? 'Employee'} logged work: ${formData.workTitle}`,
+        message: `${user?.name ?? 'Employee'} logged work: ${effectiveWorkTitle}`,
         severity: 'info',
         metadata: {
           workCardId: workCard.id,
-          workTitle: formData.workTitle,
+          workTitle: effectiveWorkTitle,
           loggedBy: user?.name,
         },
       });
 
       toast.success('Work logged successfully');
+      if (failedUsageItems.length > 0) {
+        toast.warning(`Some inventory deductions failed: ${failedUsageItems.join(', ')}`);
+      }
       
       // Reset form
       setFormData({
@@ -358,7 +450,8 @@ export function LogWorkModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -369,7 +462,7 @@ export function LogWorkModal({
 
         <div className="space-y-4 py-4">
           {/* Row 1: Farm + Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="farm">Farm *</Label>
               <Select
@@ -443,32 +536,57 @@ export function LogWorkModal({
             </Select>
           </div>
 
-          {/* Row 2: Work Name + Work Type */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="workTitle">Work Name *</Label>
+          {/* Row 2: Work Type */}
+          <div className="space-y-2">
+            <Label htmlFor="workCategory">Work Type *</Label>
+            <div className="relative">
               <Input
-                id="workTitle"
-                placeholder="e.g., Applied DAP fertilizer"
-                value={formData.workTitle}
-                onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
+                id="workCategory"
+                value={workTypeQuery}
+                placeholder="Type to search work type"
+                onFocus={() => setWorkTypeMenuOpen(true)}
+                onBlur={() => window.setTimeout(() => setWorkTypeMenuOpen(false), 120)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setWorkTypeQuery(value);
+                  const exact = WORK_TYPES.find((type) => type.toLowerCase() === value.trim().toLowerCase());
+                  setFormData((prev) => ({
+                    ...prev,
+                    workCategory: exact ?? '',
+                    workTitle: exact ?? prev.workTitle,
+                  }));
+                  setWorkTypeMenuOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filteredWorkTypes.length > 0) {
+                    e.preventDefault();
+                    selectWorkType(filteredWorkTypes[0]);
+                    const workDoneInput = document.getElementById('workDone') as HTMLInputElement | null;
+                    workDoneInput?.focus();
+                  }
+                }}
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="workCategory">Work Type *</Label>
-              <Select
-                value={formData.workCategory}
-                onValueChange={handleWorkCategoryChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select work type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {WORK_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
+              {workTypeMenuOpen && (
+                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-44 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                  {filteredWorkTypes.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className={cn(
+                        'w-full rounded-md px-2 py-2 text-left text-sm hover:bg-muted/60',
+                        formData.workCategory === type && 'bg-muted',
+                      )}
+                      onMouseDown={(ev) => ev.preventDefault()}
+                      onClick={() => selectWorkType(type)}
+                    >
+                      {type}
+                    </button>
                   ))}
-                </SelectContent>
-              </Select>
+                  {filteredWorkTypes.length === 0 && (
+                    <p className="px-2 py-2 text-xs text-muted-foreground">No work type matches.</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -536,8 +654,32 @@ export function LogWorkModal({
                         filteredInventoryItems.map((item) => (
                           <SelectItem key={item.id} value={item.id}>
                             <div className="flex items-center gap-2">
-                              <Package className="h-4 w-4 text-muted-foreground" />
-                              {item.name} ({item.current_stock} {item.unit})
+                              {resolvePackageLabel(item.packaging_type, item.name) === 'sacks' ? (
+                                <img
+                                  src={resolvePackageEmoji('sacks')}
+                                  alt=""
+                                  aria-hidden
+                                  className="h-4 w-4 rounded-sm object-contain"
+                                />
+                              ) : (
+                                <span className="text-base leading-none" aria-hidden>
+                                  {resolvePackageEmoji(resolvePackageLabel(item.packaging_type, item.name))}
+                                </span>
+                              )}
+                              <span>
+                                {item.name} -{' '}
+                                {(() => {
+                                  const packageLabel = resolvePackageLabel(item.packaging_type, item.name);
+                                  const packageSize = Number(item.unit_size ?? 1) > 0 ? Number(item.unit_size) : 1;
+                                  const packageUnitLabel = (item.unit_size_label ?? item.unit ?? '').trim();
+                                  const availablePackages = item.current_stock / packageSize;
+                                  const packageCountText =
+                                    Number.isInteger(availablePackages)
+                                      ? String(Math.floor(availablePackages))
+                                      : availablePackages.toFixed(1).replace(/\.0$/, '');
+                                  return `${packageCountText} ${packageLabel} available`;
+                                })()}
+                              </span>
                             </div>
                           </SelectItem>
                         ))
@@ -549,24 +691,68 @@ export function LogWorkModal({
                       )}
                     </SelectContent>
                   </Select>
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      placeholder="Qty"
-                      value={input.quantity || ''}
-                      onChange={(e) => updateInput(index, 'quantity', parseFloat(e.target.value) || 0)}
-                      className="w-24"
-                    />
-                    <span className="text-sm text-muted-foreground self-center">
-                      {input.unit || 'unit'}
-                    </span>
+                  <div className={cn('grid gap-2', isLiquidPackage(input.packageLabel) ? 'grid-cols-2' : 'grid-cols-1')}>
+                    <div className="space-y-1">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="1"
+                        placeholder="Qty"
+                        value={input.packageCount || ''}
+                        onChange={(e) => updateInput(index, 'packageCount', parseFloat(e.target.value) || 0)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Qty
+                        {' '}
+                        {input.packageLabel === 'sacks' ? (
+                          <img
+                            src={resolvePackageEmoji('sacks')}
+                            alt=""
+                            aria-hidden
+                            className="mx-1 inline-block h-4 w-4 rounded-sm object-contain align-text-bottom"
+                          />
+                        ) : (
+                          `${resolvePackageEmoji(input.packageLabel)} `
+                        )}
+                        {input.packageCount > 0 && (
+                          <span>
+                            {' '}
+                            ({input.baseQuantity.toLocaleString()} {input.packageUnitLabel || input.unit || 'units'})
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    {isLiquidPackage(input.packageLabel) && (
+                      <div className="space-y-1">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="1"
+                          placeholder="Drums sprayed"
+                          value={input.drumsSprayed || ''}
+                          onChange={(e) => updateInput(index, 'drumsSprayed', parseFloat(e.target.value) || 0)}
+                        />
+                        <p className="text-xs text-muted-foreground">Number of drums sprayed</p>
+                      </div>
+                    )}
                   </div>
-                  {input.itemId && input.quantity > input.currentStock && (
-                    <p className="text-xs text-amber-600">
-                      Low stock: only {input.currentStock} {input.unit} available
-                    </p>
+                  {input.itemId && input.baseQuantity > input.currentStock && (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-amber-600">
+                        Low stock: only {input.currentStock} {input.unit} available.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setStockInItemId(input.itemId);
+                          setStockInOpen(true);
+                        }}
+                      >
+                        Add Stock
+                      </Button>
+                    </div>
                   )}
                 </div>
                 <Button
@@ -582,17 +768,9 @@ export function LogWorkModal({
             ))}
           </div>
 
-          {hasLowStockWarning && (
-            <Alert variant="default" className="border-amber-300 bg-amber-50">
-              <AlertDescription className="text-amber-800">
-                Some items have low stock. The work will still be logged.
-              </AlertDescription>
-            </Alert>
-          )}
-
           {/* Row 5: Work Done */}
           <div className="space-y-2">
-            <Label htmlFor="workDone">Work Done *</Label>
+            <Label htmlFor="workDone">Work Done</Label>
             <Textarea
               id="workDone"
               placeholder="Describe what was accomplished..."
@@ -612,6 +790,17 @@ export function LogWorkModal({
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      <RecordStockInModal
+        open={stockInOpen}
+        onOpenChange={setStockInOpen}
+        companyId={companyId ?? ''}
+        item={stockInItem}
+        suppliers={suppliers}
+        onRecorded={() => {
+          void refetchInventoryItems();
+        }}
+      />
+    </>
   );
 }

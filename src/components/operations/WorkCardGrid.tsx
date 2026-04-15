@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, CheckCircle, Edit, Banknote, Calendar, User, MapPin, Package } from 'lucide-react';
+import { Clock, CheckCircle, Edit, Banknote, Calendar, User, Package, Cloud, Droplets, Bug, Tractor, Leaf, Wrench } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,6 +21,19 @@ interface WorkCardGridProps {
 }
 
 export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: WorkCardGridProps) {
+  const getWorkCategoryIcon = (category: string) => {
+    const normalized = (category || '').toLowerCase();
+    if (normalized.includes('spray')) return Cloud;
+    if (normalized.includes('fertilizer') || normalized.includes('fertiliser')) return Leaf;
+    if (normalized.includes('water')) return Droplets;
+    if (normalized.includes('weed')) return Tractor;
+    if (normalized.includes('land preparation') || normalized.includes('land prep')) return Tractor;
+    if (normalized.includes('plant')) return Leaf;
+    if (normalized.includes('harvest')) return Package;
+    if (normalized.includes('pest')) return Bug;
+    return Wrench;
+  };
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -69,6 +82,7 @@ export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: Wo
         const config = statusConfig[card.status];
         const hasInputs = card.inputsUsed && card.inputsUsed.length > 0;
         const isEdited = card.status === 'edited' || (card.editHistory && card.editHistory.length > 0);
+        const CategoryIcon = getWorkCategoryIcon(card.workCategory);
 
         return (
           <Card
@@ -94,7 +108,8 @@ export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: Wo
                   <h3 className="font-semibold text-base line-clamp-1 pr-16">
                     {card.workTitle}
                   </h3>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <CategoryIcon className="h-3.5 w-3.5" />
                     {card.workCategory}
                   </p>
                 </div>

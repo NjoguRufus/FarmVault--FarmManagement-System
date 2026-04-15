@@ -22,6 +22,9 @@ import { ArchiveConfirmDialog } from '@/components/inventory/ArchiveConfirmDialo
 import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer';
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
+import { listInventoryTransactions, listInventoryUsage } from '@/services/inventoryReadModelService';
+import { INVENTORY_TRANSACTIONS_QUERY_KEY, INVENTORY_USAGE_QUERY_KEY } from '@/hooks/useInventoryReadModels';
+import { useQueryClient } from '@tanstack/react-query';
 import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { logger } from "@/lib/logger";
@@ -30,6 +33,7 @@ export default function InventoryPage() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const { can, permissions } = usePermissions();
+  const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   // Add Item: support both permission keys - "addItem" (PermissionEditor/rolePresetDefaults) and "create" (Access & Permissions / accessControl PERMISSION_KEYS)
   const canAddByAddItem = can('inventory', 'addItem');
@@ -238,9 +242,29 @@ export default function InventoryPage() {
 
   const isLoading = stockLoading || categoriesLoading || suppliersLoading || allStockLoading;
 
+  const prefetchItemHistory = useCallback(
+    (prefetchItemId: string) => {
+      if (!companyId || !prefetchItemId) return;
+      const txKey = [INVENTORY_TRANSACTIONS_QUERY_KEY, companyId, prefetchItemId, 30] as const;
+      const usageKey = [INVENTORY_USAGE_QUERY_KEY, companyId, prefetchItemId, 30] as const;
+      void queryClient.prefetchQuery({
+        queryKey: txKey,
+        queryFn: () => listInventoryTransactions({ companyId, itemId: prefetchItemId, limit: 30 }),
+        staleTime: 5 * 60_000,
+      });
+      void queryClient.prefetchQuery({
+        queryKey: usageKey,
+        queryFn: () => listInventoryUsage({ companyId, itemId: prefetchItemId, limit: 30 }),
+        staleTime: 5 * 60_000,
+      });
+    },
+    [companyId, queryClient],
+  );
+
   const handleViewDetails = (itemId: string) => {
     const item = stockItems.find(i => i.id === itemId);
     if (item) {
+      prefetchItemHistory(item.id);
       setSelectedItemForDetails(item);
       setDetailsDrawerOpen(true);
     }
@@ -332,6 +356,7 @@ export default function InventoryPage() {
         items={stockItems}
         isLoading={isLoading}
         onViewDetails={handleViewDetails}
+        onPrefetchItem={prefetchItemHistory}
         onRecordStockIn={(item) => {
           setSelectedItemForStock(item);
           setStockInOpen(true);

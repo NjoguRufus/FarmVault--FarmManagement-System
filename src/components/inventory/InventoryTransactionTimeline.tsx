@@ -24,7 +24,7 @@ export function InventoryTransactionTimeline({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 select-text">
       {transactions.map((tx) => {
         const isIn = (tx.transaction_type ?? '').toLowerCase().includes('in');
         const Icon = isIn ? ArrowDownCircle : ArrowUpCircle;
@@ -45,7 +45,7 @@ export function InventoryTransactionTimeline({
                   <p className="text-sm font-medium text-foreground">
                     {tx.transaction_type ?? (isIn ? 'Stock In' : 'Stock Out')}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-foreground/80">
                     {formatDate(tx.occurred_at)} • {quantityLabel}
                     {tx.balance_after != null &&
                       ` • Balance: ${tx.balance_after.toLocaleString()}`}
@@ -58,14 +58,14 @@ export function InventoryTransactionTimeline({
                     </p>
                   )}
                   {tx.unit_cost != null && (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-foreground/80">
                       {formatCurrency(tx.unit_cost)}/unit
                     </p>
                   )}
                 </div>
               </div>
               {(tx.notes || tx.reference || tx.created_by_name) && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-foreground/80">
                   {tx.reference && <span className="font-medium">{tx.reference}</span>}
                   {tx.reference && (tx.notes || tx.created_by_name) ? ' • ' : ''}
                   {tx.notes}

@@ -134,7 +134,10 @@ export function useInventoryTransactions(companyId: string | null, itemId: strin
         limit,
       }),
     enabled: Boolean(companyId && itemId),
-    staleTime: 30_000,
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 
   return {
@@ -154,7 +157,10 @@ export function useInventoryUsage(companyId: string | null, itemId: string | nul
         limit,
       }),
     enabled: Boolean(companyId && itemId),
-    staleTime: 30_000,
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 
   return {

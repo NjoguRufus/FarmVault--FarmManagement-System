@@ -37,10 +37,70 @@ export function RecordUsageModal({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const resolvePackageLabel = (packagingType: string | null | undefined, itemName: string | null | undefined) => {
+    if (packagingType === 'sack') return 'sacks';
+    if (packagingType === 'bottle') {
+      return (itemName ?? '').toLowerCase().includes('drum') ? 'drums' : 'bottles';
+    }
+    if (packagingType === 'box') return 'boxes';
+    if (packagingType === 'pack') return 'bottles';
+    return 'items';
+  };
+
+  const toSingular = (label: string) => {
+    if (label === 'bottles') return 'bottle';
+    if (label === 'drums') return 'drum';
+    if (label === 'sacks') return 'sack';
+    if (label === 'boxes') return 'box';
+    return 'item';
+  };
+
+  const availableStock = Number(item?.current_stock ?? 0);
+  const quantityNumber = Number(quantity);
+  const exceedsAvailableStock = Number.isFinite(quantityNumber) && quantityNumber > availableStock;
+  const packageSize = Number(item?.unit_size ?? 1) > 0 ? Number(item?.unit_size) : 1;
+  const packageUnitLabel = (item?.unit_size_label ?? item?.unit ?? 'units').trim();
+  const packageLabel = resolvePackageLabel(item?.packaging_type, item?.name);
+  const packageLabelSingular = toSingular(packageLabel);
+  const availablePackageCount = packageSize > 0 ? availableStock / packageSize : 0;
+  const availablePackageCountText = Number.isInteger(availablePackageCount)
+    ? String(Math.floor(availablePackageCount))
+    : availablePackageCount.toFixed(1).replace(/\.0$/, '');
+
+  const normalizeStageLabel = (raw?: string | null) => {
+    const value = (raw ?? '').trim();
+    if (!value) return '';
+    // Handles values like "t • Nursery/Seedling" from progress widgets.
+    if (value.includes('•')) {
+      const parts = value.split('•').map((p) => p.trim()).filter(Boolean);
+      return parts[parts.length - 1] ?? value;
+    }
+    return value;
+  };
+
+  const resolveProjectStage = (project?: Project | null) => {
+    if (!project) return '';
+    return (
+      normalizeStageLabel(project.currentStage) ||
+      normalizeStageLabel(project.stageSelected) ||
+      normalizeStageLabel(project.stageAutoDetected) ||
+      ''
+    );
+  };
+
   useEffect(() => {
     if (open) {
       const today = new Date().toISOString().slice(0, 10);
       setUsedOn(today);
+      const selectedProject = projects.find((p) => p.id === projectId);
+      if (selectedProject) {
+        setCropStage(resolveProjectStage(selectedProject));
+      } else if (!projectId && projects.length === 1) {
+        // When there is only one relevant project, preselect and autofill stage.
+        const onlyProject = projects[0];
+        setProjectId(onlyProject.id);
+        setCropStage(resolveProjectStage(onlyProject));
+      }
     } else {
       setQuantity('');
       setProjectId('');
@@ -50,12 +110,28 @@ export function RecordUsageModal({
     }
   }, [open]);
 
+  useEffect(() => {
+    const effectiveProjectId = projectId === '__none__' ? '' : projectId;
+    const selectedProject = projects.find((p) => p.id === effectiveProjectId);
+    if (!selectedProject) {
+      if (projectId === '__none__' || !projectId) {
+        setCropStage('');
+      }
+      return;
+    }
+    setCropStage(resolveProjectStage(selectedProject));
+  }, [projectId, projects]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!item) return;
     const qty = Number(quantity);
     if (!qty || qty <= 0) {
       toast.error('Quantity must be greater than zero.');
+      return;
+    }
+    if (qty > availableStock) {
+      toast.error(`Usage cannot exceed available stock (${availableStock.toLocaleString()} ${item.unit || 'units'}).`);
       return;
     }
     setSaving(true);
@@ -125,15 +201,26 @@ export function RecordUsageModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-sm font-medium text-foreground">Quantity</label>
+                <label className="text-sm font-medium text-foreground">Quantity (number of items)</label>
                 <Input
                   type="number"
                   className="fv-input"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
                   min={0}
+                  max={Math.max(0, Number(item.current_stock ?? 0))}
                   required
                 />
+                {packageSize > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    1 {packageLabelSingular} = {packageSize.toLocaleString()} {packageUnitLabel}
+                  </p>
+                )}
+                {exceedsAvailableStock && (
+                  <p className="text-xs text-destructive">
+                    Usage cannot exceed available stock ({availablePackageCountText} {packageLabel} available).
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Used On</label>

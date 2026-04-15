@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Wrench, Clock, CheckCircle, Edit, Banknote, Users, Package, AlertTriangle, Activity, Filter } from 'lucide-react';
+import { Plus, Search, Wrench, Clock, CheckCircle, Edit, Banknote, Users, Package, Activity, Filter } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -16,12 +16,12 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { format, isToday, parseISO } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import {
   getWorkCardsForCompany,
-  getTodayWorkCards,
   getTodayInventoryUsage,
   getRecentAuditLogs,
   type WorkCard,
@@ -29,12 +29,11 @@ import {
   type WorkCardAuditLog,
 } from '@/services/operationsWorkCardService';
 import { PlanWorkModal } from '@/components/operations/PlanWorkModal';
+import { LogWorkModal } from '@/components/operations/LogWorkModal';
 import { WorkCardDrawer } from '@/components/operations/WorkCardDrawer';
 import { TodayActivityFeed } from '@/components/operations/TodayActivityFeed';
 import { WorkCardGrid } from '@/components/operations/WorkCardGrid';
 import { InventoryUsedToday } from '@/components/operations/InventoryUsedToday';
-import { OperationsAlerts } from '@/components/operations/OperationsAlerts';
-import { ActiveWorkersToday } from '@/components/operations/ActiveWorkersToday';
 
 const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon: React.ReactNode }> = {
   planned: { label: 'Planned', color: 'bg-blue-100 text-blue-800', icon: <Clock className="h-4 w-4" /> },
@@ -55,7 +54,9 @@ export default function AdminOperationsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<WorkCardStatus | 'all'>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [showPlanWorkModal, setShowPlanWorkModal] = useState(false);
+  const [showLogWorkModal, setShowLogWorkModal] = useState(false);
   const [selectedWorkCard, setSelectedWorkCard] = useState<WorkCard | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
 
@@ -63,13 +64,6 @@ export default function AdminOperationsPage() {
   const { data: workCards = [], isLoading: cardsLoading, refetch: refetchCards } = useQuery({
     queryKey: ['work-cards', companyId],
     queryFn: () => getWorkCardsForCompany({ companyId: companyId! }),
-    enabled: !!companyId,
-  });
-
-  // Fetch today's work cards
-  const { data: todayCards = [] } = useQuery({
-    queryKey: ['today-work-cards', companyId],
-    queryFn: () => getTodayWorkCards(companyId!),
     enabled: !!companyId,
   });
 
@@ -166,10 +160,16 @@ export default function AdminOperationsPage() {
             <p className="text-muted-foreground">Manage work cards, track activity, and monitor inventory usage</p>
           </div>
           {canCreateWorkCard && (
-            <Button onClick={() => setShowPlanWorkModal(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Plan Work
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => setShowLogWorkModal(true)} className="gap-2">
+                <Wrench className="h-4 w-4" />
+                Record Work
+              </Button>
+              <Button onClick={() => setShowPlanWorkModal(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Plan Work
+              </Button>
+            </div>
           )}
         </div>
 
@@ -201,58 +201,67 @@ export default function AdminOperationsPage() {
           />
         </div>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Activity Feed & Alerts */}
-          <div className="lg:col-span-1 space-y-6">
-            <TodayActivityFeed logs={recentLogs} />
-            <OperationsAlerts workCards={workCards} inventoryUsage={todayInventoryUsage} />
-            <ActiveWorkersToday workCards={todayCards} />
-          </div>
-
-          {/* Right Column - Work Cards & Inventory */}
-          <div className="lg:col-span-2 space-y-6">
+        {/* Main Content */}
+        {isMobile ? (
+          <div className="space-y-6">
             {/* Filters */}
-            <Card>
-              <CardContent className="pt-4">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search work cards..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="pl-9"
-                    />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search work cards..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Popover open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-background px-3 text-foreground transition-colors hover:bg-muted/50"
+                    aria-label="Open filters"
+                  >
+                    <Filter className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={8} className="w-72 p-3 sm:hidden">
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</label>
+                      <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as WorkCardStatus | 'all')}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="planned">Planned</SelectItem>
+                          <SelectItem value="logged">Logged</SelectItem>
+                          <SelectItem value="edited">Edited</SelectItem>
+                          <SelectItem value="paid">Paid</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Project</label>
+                      <Select value={projectFilter} onValueChange={setProjectFilter}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Project" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Projects</SelectItem>
+                          {projects.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as WorkCardStatus | 'all')}>
-                    <SelectTrigger className="w-full sm:w-[150px]">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="planned">Planned</SelectItem>
-                      <SelectItem value="logged">Logged</SelectItem>
-                      <SelectItem value="edited">Edited</SelectItem>
-                      <SelectItem value="paid">Paid</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={projectFilter} onValueChange={setProjectFilter}>
-                    <SelectTrigger className="w-full sm:w-[180px]">
-                      <SelectValue placeholder="Project" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Projects</SelectItem>
-                      {projects.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
+                </PopoverContent>
+              </Popover>
+            </div>
 
-            {/* Work Cards Grid */}
+            {/* 1) Work cards first */}
             <WorkCardGrid
               cards={filteredCards}
               isLoading={cardsLoading}
@@ -260,10 +269,73 @@ export default function AdminOperationsPage() {
               statusConfig={STATUS_CONFIG}
             />
 
-            {/* Inventory Used Today */}
+            {/* 2) Inventory + Today's activity together */}
             <InventoryUsedToday usage={todayInventoryUsage} />
+            <TodayActivityFeed logs={recentLogs} />
+
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Activity Feed & Alerts */}
+            <div className="lg:col-span-1 space-y-6">
+              <TodayActivityFeed logs={recentLogs} />
+            </div>
+
+            {/* Right Column - Work Cards & Inventory */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Filters */}
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search work cards..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as WorkCardStatus | 'all')}>
+                      <SelectTrigger className="w-full sm:w-[150px]">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="planned">Planned</SelectItem>
+                        <SelectItem value="logged">Logged</SelectItem>
+                        <SelectItem value="edited">Edited</SelectItem>
+                        <SelectItem value="paid">Paid</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={projectFilter} onValueChange={setProjectFilter}>
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue placeholder="Project" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Projects</SelectItem>
+                        {projects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Work Cards Grid */}
+              <WorkCardGrid
+                cards={filteredCards}
+                isLoading={cardsLoading}
+                onCardClick={handleCardClick}
+                statusConfig={STATUS_CONFIG}
+              />
+
+              {/* Inventory Used Today */}
+              <InventoryUsedToday usage={todayInventoryUsage} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Plan Work Modal */}
@@ -274,6 +346,17 @@ export default function AdminOperationsPage() {
         initialProjectId={activeProject?.id ?? null}
         onSuccess={() => {
           setShowPlanWorkModal(false);
+          refetchCards();
+        }}
+      />
+
+      <LogWorkModal
+        open={showLogWorkModal}
+        onOpenChange={setShowLogWorkModal}
+        initialFarmId={activeProject?.farmId ?? activeFarmId ?? null}
+        initialProjectId={activeProject?.id ?? null}
+        onSuccess={() => {
+          setShowLogWorkModal(false);
           refetchCards();
         }}
       />

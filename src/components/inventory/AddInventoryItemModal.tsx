@@ -159,6 +159,8 @@ const packagingConfig: Record<
   },
 };
 
+const packagingOptions: PackagingType[] = ['single', 'sack', 'box', 'bottle', 'other'];
+
 interface AddInventoryItemModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -448,7 +450,8 @@ export function AddInventoryItemModal({
     setName(d.name ?? '');
     setCategoryId(d.categoryId ?? '');
     setNewCategoryName(d.newCategoryName ?? '');
-    setPackagingType((d.packagingType as PackagingType) ?? 'single');
+    const draftPackaging = (d.packagingType as PackagingType) ?? 'single';
+    setPackagingType(draftPackaging === 'pack' ? 'bottle' : draftPackaging);
     setUnit((d.unit as UnitType) ?? 'kg');
     setAmount(d.amount ?? '');
     setNumberOfPacks(d.numberOfPacks ?? '');
@@ -957,14 +960,17 @@ export function AddInventoryItemModal({
                           <SelectValue placeholder="How is it packaged?" />
                         </SelectTrigger>
                         <SelectContent>
-                          {Object.entries(packagingConfig).map(([key, config]) => (
+                          {packagingOptions.map((key) => {
+                            const config = packagingConfig[key];
+                            return (
                             <SelectItem key={key} value={key}>
                               <span className="flex items-center gap-2">
                                 <config.icon className={`h-4 w-4 ${config.color}`} />
                                 {config.label}
                               </span>
                             </SelectItem>
-                          ))}
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>

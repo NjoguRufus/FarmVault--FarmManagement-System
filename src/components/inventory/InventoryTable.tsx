@@ -29,6 +29,7 @@ interface InventoryTableProps {
   items: InventoryStockRow[];
   isLoading?: boolean;
   onViewDetails?: (itemId: string) => void;
+  onPrefetchItem?: (itemId: string) => void;
   onRecordStockIn?: (item: InventoryStockRow) => void;
   onRecordUsage?: (item: InventoryStockRow) => void;
   onEditItem?: (item: InventoryStockRow) => void;
@@ -249,6 +250,7 @@ function ItemIcon({ item, size = 'md' }: { item: InventoryStockRow; size?: 'sm' 
 function ListView({ 
   items, 
   onViewDetails, 
+  onPrefetchItem,
   onRecordStockIn, 
   onRecordUsage,
   onEditItem,
@@ -287,6 +289,7 @@ function ListView({
                 <tr
                   key={item.id}
                   className={`${rowBg} cursor-pointer hover:bg-primary/5 transition-colors border-b border-border/40 last:border-b-0`}
+                  onMouseEnter={() => onPrefetchItem?.(item.id)}
                   onClick={() => onViewDetails?.(item.id)}
                 >
                   {/* Name Column - full width, no truncation */}
@@ -389,6 +392,7 @@ function ListView({
 function CardView({ 
   items, 
   onViewDetails, 
+  onPrefetchItem,
   onRecordStockIn, 
   onRecordUsage,
   onEditItem,
@@ -405,6 +409,7 @@ function CardView({
           <div
             key={item.id}
             className="bg-card rounded-xl border border-border/50 p-3 cursor-pointer hover:shadow-md hover:border-primary/20 transition-all relative group"
+            onMouseEnter={() => onPrefetchItem?.(item.id)}
             onClick={() => onViewDetails?.(item.id)}
           >
             {/* Actions Menu - top right, always visible on mobile */}
@@ -504,6 +509,7 @@ export function InventoryTable({
   items,
   isLoading,
   onViewDetails,
+  onPrefetchItem,
   onRecordStockIn,
   onRecordUsage,
   onEditItem,
@@ -573,6 +579,7 @@ export function InventoryTable({
         <ListView
           items={items}
           onViewDetails={onViewDetails}
+          onPrefetchItem={onPrefetchItem}
           onRecordStockIn={onRecordStockIn}
           onRecordUsage={onRecordUsage}
           onEditItem={onEditItem}
@@ -583,6 +590,7 @@ export function InventoryTable({
         <CardView
           items={items}
           onViewDetails={onViewDetails}
+          onPrefetchItem={onPrefetchItem}
           onRecordStockIn={onRecordStockIn}
           onRecordUsage={onRecordUsage}
           onEditItem={onEditItem}

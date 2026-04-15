@@ -122,6 +122,8 @@ export function PlanWorkModal({
 
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
+  const [workTypeQuery, setWorkTypeQuery] = useState('');
+  const [workTypeMenuOpen, setWorkTypeMenuOpen] = useState(false);
   const [formData, setFormData] = useState({
     farmId: '',
     projectId: '',
@@ -153,6 +155,8 @@ export function PlanWorkModal({
         '';
       return { ...prev, farmId: preferredFarmId, projectId: preferredProjectId };
     });
+    setWorkTypeQuery((prev) => prev || formData.workCategory || '');
+    setWorkTypeMenuOpen(false);
   }, [
     open,
     openProjects,
@@ -175,16 +179,23 @@ export function PlanWorkModal({
     () => projectsForSelectedFarm.find((p) => p.id === formData.projectId) ?? null,
     [projectsForSelectedFarm, formData.projectId],
   );
+  const filteredWorkTypes = useMemo(() => {
+    const q = workTypeQuery.trim().toLowerCase();
+    if (!q) return WORK_TYPES;
+    return WORK_TYPES.filter((type) => type.toLowerCase().includes(q));
+  }, [workTypeQuery]);
+
+  const selectWorkType = (value: string) => {
+    setFormData((prev) => ({ ...prev, workCategory: value, workTitle: value }));
+    setWorkTypeQuery(value);
+    setWorkTypeMenuOpen(false);
+  };
 
   const plannedTotal = formData.plannedWorkers * formData.plannedRatePerPerson;
 
   const validateStepOne = () => {
     if (!formData.farmId) {
       toast.error('Please select a farm');
-      return false;
-    }
-    if (!formData.workTitle.trim()) {
-      toast.error('Please enter a work name');
       return false;
     }
     if (!formData.workCategory) {
@@ -206,11 +217,12 @@ export function PlanWorkModal({
 
     setSaving(true);
     try {
+      const effectiveWorkTitle = formData.workTitle.trim() || formData.workCategory;
       await createWorkCard({
         companyId: companyId!,
         farmId: selectedProject?.farmId ?? formData.farmId,
         projectId: formData.projectId || null,
-        workTitle: formData.workTitle.trim(),
+        workTitle: effectiveWorkTitle,
         workCategory: formData.workCategory,
         plannedDate: format(formData.plannedDate, 'yyyy-MM-dd'),
         plannedWorkers: formData.plannedWorkers,
@@ -244,6 +256,7 @@ export function PlanWorkModal({
         allocatedManagerId: '',
         notes: '',
       });
+      setWorkTypeQuery('');
       setStep(1);
 
       onSuccess?.();
@@ -323,30 +336,54 @@ export function PlanWorkModal({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="workTitle">Work Name *</Label>
-                <Input
-                  id="workTitle"
-                  placeholder="e.g., Apply DAP fertilizer to Field A"
-                  value={formData.workTitle}
-                  onChange={(e) => setFormData(prev => ({ ...prev, workTitle: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="workCategory">Work Type *</Label>
-                <Select
-                  value={formData.workCategory}
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, workCategory: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select work type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WORK_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                  <Input
+                    id="workCategory"
+                    value={workTypeQuery}
+                    placeholder="Type to search work type"
+                    onFocus={() => setWorkTypeMenuOpen(true)}
+                    onBlur={() => window.setTimeout(() => setWorkTypeMenuOpen(false), 120)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setWorkTypeQuery(value);
+                      const exact = WORK_TYPES.find((type) => type.toLowerCase() === value.trim().toLowerCase());
+                      setFormData((prev) => ({
+                        ...prev,
+                        workCategory: exact ?? '',
+                        workTitle: exact ?? prev.workTitle,
+                      }));
+                      setWorkTypeMenuOpen(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && filteredWorkTypes.length > 0) {
+                        e.preventDefault();
+                        selectWorkType(filteredWorkTypes[0]);
+                      }
+                    }}
+                  />
+                  {workTypeMenuOpen && (
+                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-44 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                      {filteredWorkTypes.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          className={cn(
+                            'w-full rounded-md px-2 py-2 text-left text-sm hover:bg-muted/60',
+                            formData.workCategory === type && 'bg-muted',
+                          )}
+                          onMouseDown={(ev) => ev.preventDefault()}
+                          onClick={() => selectWorkType(type)}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                      {filteredWorkTypes.length === 0 && (
+                        <p className="px-2 py-2 text-xs text-muted-foreground">No work type matches.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">
