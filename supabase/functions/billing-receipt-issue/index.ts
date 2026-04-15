@@ -20,6 +20,7 @@ import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
 import { getServiceRoleClientForEmailLogs } from "../_shared/emailLogs.ts";
 import { getCompanyEmailAndName } from "../_shared/companyEmailPipeline.ts";
 import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
+import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { sendCompanyPaymentEmail } from "../_shared/companyTenantEmailOnboarding.ts";
 import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
@@ -136,6 +137,11 @@ function formatPaymentDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso).trim();
   return `${d.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
+function isLikelyEmail(s: string | null | undefined): boolean {
+  const e = String(s ?? "").trim();
+  return e.includes("@") && e.includes(".");
 }
 
 /** Customer payment receipt email (STK / billing-receipt-issue). Brand: primary #0F6D4D, accent #D4AF37, light #F8FAF9. */
@@ -651,6 +657,178 @@ function buildModel(ctx: LoadedContext, receiptNumber: string, issuedAt: string)
   return { model, lineItems };
 }
 
+function buildModelFromReceiptRow(rec: Record<string, unknown>): {
+  model: BillingReceiptPdfModel;
+  lineItems: ReceiptLineItem[];
+  receiptNumber: string;
+  issuedAt: string;
+} {
+  const receiptNumber = String(rec.receipt_number ?? "").trim();
+  const issuedAtRaw = String(rec.issued_at ?? "").trim();
+  const issuedAt = issuedAtRaw || new Date().toISOString();
+  const currency = String(rec.currency ?? "KES");
+  const rawLineItems = rec.line_items;
+  const lineItemsRaw = Array.isArray(rawLineItems)
+    ? rawLineItems
+    : typeof rawLineItems === "string"
+      ? (() => {
+        try {
+          const parsed = JSON.parse(rawLineItems);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })()
+      : [];
+  const lineItems: ReceiptLineItem[] = lineItemsRaw
+    .map((row) => {
+      const r = (row ?? {}) as Record<string, unknown>;
+      return {
+        description: String(r.description ?? "FarmVault Subscription"),
+        quantity: Number(r.quantity ?? 1) || 1,
+        unit_price: Number(r.unit_price ?? r.total ?? rec.amount ?? 0) || 0,
+        total: Number(r.total ?? r.unit_price ?? rec.amount ?? 0) || 0,
+      };
+    })
+    .filter((r) => r.quantity > 0);
+
+  const fallbackLineItems =
+    lineItems.length > 0
+      ? lineItems
+      : [
+        {
+          description: `FarmVault ${String(rec.plan ?? "Subscription")} Subscription`,
+          quantity: 1,
+          unit_price: Number(rec.amount ?? 0),
+          total: Number(rec.amount ?? 0),
+        },
+      ];
+
+  const model: BillingReceiptPdfModel = {
+    receiptNumber,
+    issuedAtIso: issuedAt,
+    statusLabel: String(rec.status ?? "Paid"),
+    transactionDateIso: String(rec.issued_at ?? issuedAt),
+    transactionReference: String(rec.transaction_reference ?? "—"),
+    companyName: String(rec.company_name_snapshot ?? "Workspace"),
+    adminName: String(rec.admin_name_snapshot ?? "Customer"),
+    email: String(rec.customer_email ?? ""),
+    phone: String(rec.customer_phone ?? ""),
+    workspaceName: String(rec.workspace_name_snapshot ?? rec.company_name_snapshot ?? "Workspace"),
+    paymentModeLabel:
+      String(rec.payment_method ?? "").toLowerCase().includes("stk")
+        ? "M-Pesa (STK Push)"
+        : "M-Pesa (Manual)",
+    currency,
+    planLabel: String(rec.plan ?? "BASIC"),
+    billingPeriod: String(rec.billing_period ?? "—"),
+    lineItems: fallbackLineItems,
+    subtotal: Number(rec.subtotal ?? rec.amount ?? 0),
+    vatAmount: rec.vat_amount == null ? null : Number(rec.vat_amount ?? 0),
+    discountAmount: rec.discount_amount == null ? null : Number(rec.discount_amount ?? 0),
+    totalPaid: Number(rec.amount ?? 0),
+    customerSinceIso: rec.customer_since != null ? String(rec.customer_since) : null,
+    planTier: String(rec.plan ?? "BASIC"),
+    paymentCycle: String(rec.payment_cycle ?? "monthly"),
+    footerTimestampIso: new Date().toISOString(),
+  };
+  return { model, lineItems: fallbackLineItems, receiptNumber, issuedAt };
+}
+
+async function buildNewestPdfBytesForReceipt(
+  admin: SupabaseClient,
+  rec: Record<string, unknown>,
+): Promise<{ ok: true; pdfBytes: Uint8Array; refreshedCtx: boolean } | { ok: false }> {
+  const refreshed = await regenerateExistingReceiptPdf(admin, rec);
+  if (refreshed.ok && refreshed.pdfBytes) {
+    return { ok: true, pdfBytes: refreshed.pdfBytes, refreshedCtx: true };
+  }
+  try {
+    const fromRow = buildModelFromReceiptRow(rec);
+    const rebuilt = await buildBillingReceiptPdf(fromRow.model);
+    const path = String(rec.pdf_storage_path ?? "").trim();
+    if (path) {
+      const { error } = await admin.storage.from("billing-receipts").upload(path, rebuilt, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+      if (error) {
+        console.error("[billing-receipt-issue] row rebuild upload failed", error.message);
+      }
+    }
+    return { ok: true, pdfBytes: rebuilt, refreshedCtx: false };
+  } catch (e) {
+    console.error("[billing-receipt-issue] buildNewestPdfBytesForReceipt failed", e);
+    return { ok: false };
+  }
+}
+
+async function regenerateExistingReceiptPdf(
+  admin: SupabaseClient,
+  rec: Record<string, unknown>,
+): Promise<{
+  ok: boolean;
+  pdfBytes?: Uint8Array;
+  ctx?: LoadedContext;
+  model?: BillingReceiptPdfModel;
+  receiptNumber?: string;
+  issuedAt?: string;
+}> {
+  try {
+    const subPayId = String(rec.subscription_payment_id ?? "").trim();
+    const receiptNumber = String(rec.receipt_number ?? "").trim();
+    const storagePath = String(rec.pdf_storage_path ?? "").trim();
+    const receiptId = String(rec.id ?? "").trim();
+    if (!subPayId || !receiptNumber || !storagePath || !receiptId) {
+      return { ok: false };
+    }
+
+    const ctx = await loadIssueContext(admin, subPayId);
+    if (!ctx) return { ok: false };
+
+    const issuedAtRaw = String(rec.issued_at ?? "").trim();
+    const issuedAt = issuedAtRaw || new Date().toISOString();
+    const { model, lineItems } = buildModel(ctx, receiptNumber, issuedAt);
+    const pdfBytes = await buildBillingReceiptPdf(model);
+    const issueInbox = await tryGetCompanyInbox(admin, ctx.companyId);
+    const billingTo = issueInbox?.email ?? "";
+
+    const { error: upErr } = await admin.storage.from("billing-receipts").upload(storagePath, pdfBytes, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+    if (upErr) {
+      console.error("[billing-receipt-issue] regenerate existing upload", upErr.message);
+      return { ok: false };
+    }
+
+    await admin
+      .from("receipts")
+      .update({
+        amount: Number(ctx.pay.amount ?? 0),
+        line_items: lineItems,
+        billing_period: model.billingPeriod,
+        subtotal: model.subtotal,
+        vat_amount: model.vatAmount,
+        discount_amount: model.discountAmount,
+        company_name_snapshot: ctx.companyName,
+        workspace_name_snapshot: ctx.companyName,
+        admin_name_snapshot: ctx.adminName,
+        customer_email: billingTo || ctx.adminEmail || null,
+        customer_phone: ctx.adminPhone || null,
+        customer_since: ctx.companyCreatedAt,
+        payment_cycle: model.paymentCycle,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", receiptId);
+
+    return { ok: true, pdfBytes, ctx, model, receiptNumber, issuedAt };
+  } catch (e) {
+    console.error("[billing-receipt-issue] regenerateExistingReceiptPdf failed", e);
+    return { ok: false };
+  }
+}
+
 async function receiptEmailFromPaymentContext(
   admin: SupabaseClient,
   input: {
@@ -783,16 +961,29 @@ serveFarmVaultEdge("billing-receipt-issue", async (req, _ctx) => {
       const { data: rec, error: re } = await admin.from("receipts").select("*").eq("id", receiptId).maybeSingle();
       if (re || !rec) return jsonResponse({ error: "Receipt not found" }, 404);
 
-      const path = String((rec as { pdf_storage_path?: string }).pdf_storage_path ?? "");
-      if (!path) return jsonResponse({ error: "PDF missing" }, 400);
-
-      const { data: file, error: dlErr } = await admin.storage.from("billing-receipts").download(path);
-      if (dlErr || !file) {
-        console.error("[billing-receipt-issue] download", dlErr?.message);
-        return jsonResponse({ error: "Failed to read PDF" }, 500);
+      const recObj = rec as Record<string, unknown>;
+      let b64 = "";
+      const newestPdf = await buildNewestPdfBytesForReceipt(admin, recObj);
+      if (newestPdf.ok) {
+        b64 = bytesToBase64(newestPdf.pdfBytes);
+      } else {
+        const path = String((rec as { pdf_storage_path?: string }).pdf_storage_path ?? "").trim();
+        if (path) {
+          const { data: file } = await admin.storage.from("billing-receipts").download(path);
+          if (file) {
+            const buf = new Uint8Array(await file.arrayBuffer());
+            b64 = bytesToBase64(buf);
+          }
+        }
       }
-      const buf = new Uint8Array(await file.arrayBuffer());
-      const b64 = bytesToBase64(buf);
+      if (!b64) {
+        return successResponse({
+          ok: true,
+          receipt_id: receiptId,
+          emailed: false,
+          warning: "PDF generation unavailable; resend skipped",
+        });
+      }
 
       const companyIdResend = String((rec as { company_id?: string }).company_id ?? "").trim();
       if (!companyIdResend) {
@@ -817,7 +1008,40 @@ serveFarmVaultEdge("billing-receipt-issue", async (req, _ctx) => {
       });
 
       if (!send.ok) {
-        return jsonResponse({ error: send.error }, 500);
+        const fallbackTo = String((rec as { customer_email?: string }).customer_email ?? "").trim();
+        if (!isLikelyEmail(fallbackTo)) {
+          return successResponse({
+            ok: true,
+            receipt_id: receiptId,
+            emailed: false,
+            warning: send.error,
+          });
+        }
+        const fallback = await sendResendWithEmailLog({
+          admin: logClient,
+          resendKey,
+          from: getFarmVaultEmailFromForEmailType("billing_receipt"),
+          to: fallbackTo,
+          subject: RECEIPT_EMAIL_SUBJECT,
+          html,
+          email_type: "billing_receipt",
+          company_id: companyIdResend,
+          company_name: String((rec as { company_name_snapshot?: string }).company_name_snapshot ?? "Workspace"),
+          metadata: {
+            receipt_id: receiptId,
+            action: "resend_email_fallback_customer_email",
+            fallback_reason: send.error,
+          },
+          attachments: [{ filename: `${receiptNumber}.pdf`, content: b64 }],
+        });
+        if (!fallback.ok) {
+          return successResponse({
+            ok: true,
+            receipt_id: receiptId,
+            emailed: false,
+            warning: fallback.error,
+          });
+        }
       }
 
       await admin
@@ -954,20 +1178,44 @@ serveFarmVaultEdge("billing-receipt-issue", async (req, _ctx) => {
       const receiptNumberDedup = String((existing as { receipt_number?: string }).receipt_number ?? "");
       let emailedDedup = false;
       const wantEmailOnDedupe = body.send_email !== false;
+      const { data: recRow } = await admin.from("receipts").select("*").eq("id", existingId).maybeSingle();
+      const r = recRow as Record<string, unknown> | null;
+      const refreshedDedup = r ? await regenerateExistingReceiptPdf(admin, r) : { ok: false as const };
       if (wantEmailOnDedupe) {
-        const { data: recRow } = await admin.from("receipts").select("*").eq("id", existingId).maybeSingle();
-        const r = recRow as Record<string, unknown> | null;
         const sentAt = r?.email_sent_at;
         const pdfPath = String(r?.pdf_storage_path ?? "");
         if (r && !sentAt && pdfPath) {
           const resendKey = Deno.env.get("RESEND_API_KEY")?.trim();
           if (resendKey) {
             await maybeSendPaymentFlowDiagnosticTest(resendKey);
-            const { data: file, error: dlErr } = await admin.storage.from("billing-receipts").download(pdfPath);
-            if (!dlErr && file) {
-              const buf = new Uint8Array(await file.arrayBuffer());
-              const b64 = bytesToBase64(buf);
-              const html = receiptEmailFromReceiptRow(r, existingId, appUrl, receiptLogoUrl);
+            let b64 = "";
+            if (refreshedDedup.ok && refreshedDedup.pdfBytes) {
+              b64 = bytesToBase64(refreshedDedup.pdfBytes);
+            } else {
+              // Ensure deduped sends still use the latest PDF template by rebuilding from row snapshot.
+              const fromRow = buildModelFromReceiptRow(r);
+              const rebuilt = await buildBillingReceiptPdf(fromRow.model);
+              const { error: upErr } = await admin.storage.from("billing-receipts").upload(pdfPath, rebuilt, {
+                contentType: "application/pdf",
+                upsert: true,
+              });
+              if (upErr) {
+                console.error("[billing-receipt-issue] dedupe rebuild upload failed", upErr.message);
+              }
+              b64 = bytesToBase64(rebuilt);
+            }
+            if (b64) {
+              const html =
+                refreshedDedup.ok && refreshedDedup.ctx && refreshedDedup.model
+                  ? await receiptEmailFromPaymentContext(admin, {
+                    ctx: refreshedDedup.ctx,
+                    model: refreshedDedup.model,
+                    receiptNumber: refreshedDedup.receiptNumber ?? receiptNumberDedup,
+                    receiptId: existingId,
+                    appUrl,
+                    logoUrl: receiptLogoUrl,
+                  })
+                  : receiptEmailFromReceiptRow(r, existingId, appUrl, receiptLogoUrl);
               const send = await sendCompanyPaymentEmail({
                 admin: logClient,
                 resendKey,

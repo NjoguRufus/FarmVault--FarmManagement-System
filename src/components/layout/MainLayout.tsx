@@ -15,10 +15,12 @@ import { PostTrialPlanModal } from '@/components/subscription/PostTrialPlanModal
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
 import { logger } from "@/lib/logger";
+import { useAmbassadorAccess } from '@/contexts/AmbassadorAccessContext';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user, isEmergencySession, effectiveAccess } = useAuth();
+  const { workspaceMode } = useAmbassadorAccess();
   const { trialExpiredNeedsPlan, isLoading: subscriptionLoading } = useSubscriptionStatus();
   const isDeveloper = user?.role === 'developer';
   useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId && !isDeveloper));
@@ -47,6 +49,15 @@ export function MainLayout() {
     if (emergencyRedirectTarget) return emergencyRedirectTarget;
     if (!user) return null;
     const path = location.pathname;
+
+    if (
+      user.profileUserType === 'both' &&
+      user.companyId &&
+      workspaceMode === 'ambassador' &&
+      !path.startsWith('/ambassador')
+    ) {
+      return '/ambassador/console/dashboard';
+    }
 
     const isCompanyAdmin =
       user.role === 'company-admin' || (user as any).role === 'company_admin';
@@ -91,7 +102,7 @@ export function MainLayout() {
     }
 
     return null;
-  }, [user, location.pathname, emergencyRedirectTarget, effectiveAccess.landingPage]);
+  }, [user, location.pathname, emergencyRedirectTarget, effectiveAccess.landingPage, workspaceMode]);
 
   // Use useEffect to handle navigation instead of conditional rendering
   // This prevents infinite loops by only redirecting when the target actually changes

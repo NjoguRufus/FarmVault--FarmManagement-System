@@ -57,6 +57,105 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
     return can(module, 'view');
   });
 
+  const isDeveloperShell = Boolean(user?.role === 'developer');
+  const isCompanyAdminShell = Boolean(user?.role === 'company-admin' || user?.role === 'company_admin');
+
+  const developerSectionOrder = [
+    'Platform Overview',
+    'Workspace Management',
+    'Finance & Billing',
+    'Operations & Monitoring',
+    'Communication',
+    'Security, Compliance & Data',
+  ] as const;
+  const companySectionOrder = [
+    'Farm Overview',
+    'Farm Operations',
+    'Team & Partners',
+    'Insights & Records',
+    'Finance & Subscription',
+    'Settings & Help',
+  ] as const;
+
+  const getDeveloperSection = (path: string) => {
+    switch (path) {
+      case '/developer':
+        return 'Platform Overview';
+      case '/developer/companies':
+      case '/developer/users':
+      case '/developer/settings':
+      case '/developer/integrations':
+      case '/developer/company-migrations':
+        return 'Workspace Management';
+      case '/developer/finances':
+      case '/developer/subscription-analytics':
+      case '/developer/farmvault-expenses':
+      case '/developer/billing-confirmation':
+        return 'Finance & Billing';
+      case '/developer/qr':
+      case '/developer/records':
+      case '/developer/code-red':
+      case '/developer/backups':
+        return 'Operations & Monitoring';
+      case '/developer/email-center':
+      case '/developer/feedback-inbox':
+        return 'Communication';
+      case '/developer/audit-logs':
+      case '/developer/documents':
+        return 'Security, Compliance & Data';
+      default:
+        return 'Workspace Management';
+    }
+  };
+
+  const getCompanySection = (path: string) => {
+    switch (path) {
+      case '/dashboard':
+        return 'Farm Overview';
+      case '/projects':
+      case '/operations':
+      case '/inventory':
+      case '/crop-stages':
+      case '/harvest':
+      case '/season-challenges':
+        return 'Farm Operations';
+      case '/employees':
+      case '/suppliers':
+        return 'Team & Partners';
+      case '/records':
+      case '/reports':
+        return 'Insights & Records';
+      case '/expenses':
+      case '/billing':
+        return 'Finance & Subscription';
+      case '/settings':
+      case '/support':
+      case '/feedback':
+        return 'Settings & Help';
+      default:
+        return 'Farm Operations';
+    }
+  };
+
+  const groupedNavItems = useMemo(() => {
+    if (!isDeveloperShell && !isCompanyAdminShell) return [{ title: null, items: navItems }];
+
+    const sectionOrder = isDeveloperShell ? developerSectionOrder : companySectionOrder;
+    const sectionForPath = isDeveloperShell ? getDeveloperSection : getCompanySection;
+    const buckets = new Map<string, typeof navItems>();
+    sectionOrder.forEach((title) => buckets.set(title, []));
+
+    navItems.forEach((item) => {
+      const section = sectionForPath(item.path.replace(/\/+/g, '/'));
+      const bucket = buckets.get(section);
+      if (bucket) bucket.push(item);
+    });
+
+    return sectionOrder
+      .map((title) => ({ title, items: buckets.get(title) ?? [] }))
+      .filter((group) => group.items.length > 0);
+  }, [isDeveloperShell, isCompanyAdminShell, navItems]);
+
   const currentTier: SubscriptionTier =
     isDeveloper || plan === 'enterprise' || isOverride ? 'pro' : plan === 'pro' ? 'pro' : 'basic';
 
@@ -113,7 +212,16 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       {/* Navigation */}
       <nav className="min-h-0 flex-1 overflow-y-auto py-4 px-3 scrollbar-thin">
         <ul className="space-y-1">
-          {navItems.map((item) => {
+          {groupedNavItems.map((group, groupIndex) => (
+            <React.Fragment key={group.title ?? `default-${groupIndex}`}>
+              {!collapsed && group.title ? (
+                <li className={cn('pt-2', groupIndex === 0 && 'pt-0')}>
+                  <p className="px-3 pb-1 text-[11px] uppercase tracking-[0.14em] text-sidebar-muted/90">
+                    {group.title}
+                  </p>
+                </li>
+              ) : null}
+              {group.items.map((item) => {
             const normalizedPath = normalizedCurrentPath;
             const itemPath = item.path.replace(/\/+/g, '/');
             const isActive = normalizedPath === itemPath || (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
@@ -150,46 +258,48 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
               </>
             );
 
-            return (
-              <li key={item.path}>
-                {item.external ? (
-                  <a
-                    href={itemPath}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={sharedClassName}
-                    onClick={() => { if (isMobile) onToggle(); }}
-                  >
-                    {sharedChildren}
-                  </a>
-                ) : (
-                  <Link
-                    to={itemPath}
-                    data-tour={getSidebarTourId(itemPath)}
-                    className={sharedClassName}
-                    aria-disabled={isLocked ? true : undefined}
-                    onMouseDown={(e) => {
-                      if (!isLocked) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                      if (!isLocked) {
-                        if (isMobile) onToggle();
-                        return;
-                      }
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openUpgradeModal({ checkoutPlan: 'pro' });
-                      if (isMobile) onToggle();
-                    }}
-                  >
-                    {sharedChildren}
-                  </Link>
-                )}
-              </li>
-            );
-          })}
+                return (
+                  <li key={item.path}>
+                    {item.external ? (
+                      <a
+                        href={itemPath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={sharedClassName}
+                        onClick={() => { if (isMobile) onToggle(); }}
+                      >
+                        {sharedChildren}
+                      </a>
+                    ) : (
+                      <Link
+                        to={itemPath}
+                        data-tour={getSidebarTourId(itemPath)}
+                        className={sharedClassName}
+                        aria-disabled={isLocked ? true : undefined}
+                        onMouseDown={(e) => {
+                          if (!isLocked) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                          if (!isLocked) {
+                            if (isMobile) onToggle();
+                            return;
+                          }
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openUpgradeModal({ checkoutPlan: 'pro' });
+                          if (isMobile) onToggle();
+                        }}
+                      >
+                        {sharedChildren}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </ul>
       </nav>
 

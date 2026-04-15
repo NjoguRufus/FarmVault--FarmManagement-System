@@ -11,11 +11,13 @@ import { getAmbassadorSignInPath } from "@/lib/ambassador/clerkAuth";
 import { clearAmbassadorAccessIntent, readAmbassadorAccessIntent } from "@/lib/ambassador/accessIntent";
 import { clearSignupType, isAmbassadorSignupType } from "@/lib/ambassador/signupType";
 import { assignMyAmbassadorProfileRole, fetchMyAmbassadorDashboardStats } from "@/services/ambassadorService";
+import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
 
 export default function AmbassadorAuthContinuePage() {
   const navigate = useNavigate();
   const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
   const { authReady } = useAuth();
+  const { setWorkspaceMode } = useAmbassadorAccess();
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -43,6 +45,7 @@ export default function AmbassadorAuthContinuePage() {
         const r = await fetchMyAmbassadorDashboardStats();
         if (cancelled) return;
         if (r.ok) {
+          setWorkspaceMode("ambassador");
           if (r.onboarding_complete) {
             clearAmbassadorAccessIntent();
             navigate("/ambassador/console/dashboard", { replace: true });
@@ -51,16 +54,20 @@ export default function AmbassadorAuthContinuePage() {
           }
           return;
         }
+        setWorkspaceMode("ambassador");
         navigate("/ambassador/onboarding", { replace: true });
       } catch {
-        if (!cancelled) navigate("/ambassador/onboarding", { replace: true });
+        if (!cancelled) {
+          setWorkspaceMode("ambassador");
+          navigate("/ambassador/onboarding", { replace: true });
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [clerkLoaded, clerkSignedIn, authReady, navigate]);
+  }, [clerkLoaded, clerkSignedIn, authReady, navigate, setWorkspaceMode]);
 
   if (!clerkLoaded) {
     return <AuthLoadingScreen message="Completing sign-in…" />;

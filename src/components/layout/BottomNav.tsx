@@ -11,6 +11,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
 import { logger } from "@/lib/logger";
 
+type DrawerGroup = { title: string; items: BottomNavItem[] };
+
 const ACTIVE_TAB_SCALE = 1.04;
 const NAV_ITEM_TRANSITION = {
   duration: 0.2,
@@ -119,6 +121,108 @@ export function BottomNav() {
     return Array.from(deduped.values());
   }, [mainItems, moreItems, visibleMainItems.length]);
 
+  const drawerGroups = useMemo<DrawerGroup[]>(() => {
+    if (!user) return [{ title: 'More', items: drawerItems }];
+
+    const isDeveloper = user.role === 'developer';
+    const isCompanyAdmin = user.role === 'company-admin' || user.role === 'company_admin';
+
+    if (!isDeveloper && !isCompanyAdmin) {
+      return [{ title: 'More', items: drawerItems }];
+    }
+
+    const developerOrder = [
+      'Platform Overview',
+      'Workspace Management',
+      'Finance & Billing',
+      'Operations & Monitoring',
+      'Communication',
+      'Security, Compliance & Data',
+    ] as const;
+    const companyOrder = [
+      'Farm Overview',
+      'Farm Operations',
+      'Team & Partners',
+      'Insights & Records',
+      'Finance & Subscription',
+      'Settings & Help',
+    ] as const;
+
+    const sectionForPath = (path: string) => {
+      const normalized = path.replace(/\/+/g, '/');
+      if (isDeveloper) {
+        switch (normalized) {
+          case '/developer':
+            return 'Platform Overview';
+          case '/developer/companies':
+          case '/developer/users':
+          case '/developer/settings':
+          case '/developer/integrations':
+          case '/developer/company-migrations':
+            return 'Workspace Management';
+          case '/developer/finances':
+          case '/developer/subscription-analytics':
+          case '/developer/farmvault-expenses':
+          case '/developer/billing-confirmation':
+            return 'Finance & Billing';
+          case '/developer/qr':
+          case '/developer/records':
+          case '/developer/code-red':
+          case '/developer/backups':
+            return 'Operations & Monitoring';
+          case '/developer/email-center':
+          case '/developer/feedback-inbox':
+            return 'Communication';
+          case '/developer/audit-logs':
+          case '/developer/documents':
+            return 'Security, Compliance & Data';
+          default:
+            return 'Workspace Management';
+        }
+      }
+
+      switch (normalized) {
+        case '/dashboard':
+          return 'Farm Overview';
+        case '/projects':
+        case '/operations':
+        case '/inventory':
+        case '/crop-stages':
+        case '/harvest':
+        case '/challenges':
+          return 'Farm Operations';
+        case '/employees':
+        case '/suppliers':
+          return 'Team & Partners';
+        case '/records':
+        case '/reports':
+          return 'Insights & Records';
+        case '/expenses':
+        case '/billing':
+          return 'Finance & Subscription';
+        case '/settings':
+        case '/support':
+        case '/feedback':
+          return 'Settings & Help';
+        default:
+          return 'Farm Operations';
+      }
+    };
+
+    const order = isDeveloper ? developerOrder : companyOrder;
+    const buckets = new Map<string, BottomNavItem[]>();
+    order.forEach((title) => buckets.set(title, []));
+    drawerItems.forEach((item) => {
+      const section = sectionForPath(item.path);
+      const bucket = buckets.get(section);
+      if (bucket) bucket.push(item);
+    });
+
+    return order
+      .map((title) => ({ title, items: buckets.get(title) ?? [] }))
+      .filter((group) => group.items.length > 0);
+  }, [drawerItems, user]);
+
   const tabs = useMemo(() => {
     const list = visibleMainItems.map((item) => ({
       ...item,
@@ -206,7 +310,7 @@ export function BottomNav() {
   return (
     <>
       {mounted ? createPortal(navNode, document.body) : null}
-      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={drawerItems} />
+      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={drawerItems} groups={drawerGroups} />
     </>
   );
 }

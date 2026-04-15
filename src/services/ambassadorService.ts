@@ -115,6 +115,14 @@ export type AmbassadorDashboardStats = {
   total_earned: number;
   paid: number;
   owed: number;
+  /** Non-withdrawable total: ledger lines in pending or locked (welcome KES 300 until first farmer payment, monthly lines before release, etc.). */
+  pending_earnings: number;
+  /** Balance that can be requested for a payout (minimum KES 1,200 per request in UI). */
+  available_balance: number;
+  /** Paying farmer workspaces (non-trial, active subscription). */
+  active_paying_farmers: number;
+  /** Run-rate: active paying farmers × KES 500 (monthly program). */
+  monthly_recurring_income_kes: number;
 };
 
 export type AmbassadorDashboardError = { ok: false; error: string };
@@ -186,6 +194,10 @@ function mapDashboardRpcPayload(data: unknown): AmbassadorDashboardStats | Ambas
     total_earned: Number(row.total_earned ?? 0),
     paid: Number(row.paid ?? 0),
     owed: Number(row.owed ?? 0),
+    pending_earnings: Number(row.pending_earnings ?? row.owed ?? 0),
+    available_balance: Number(row.available_balance ?? 0),
+    active_paying_farmers: Number(row.active_paying_farmers ?? 0),
+    monthly_recurring_income_kes: Number(row.monthly_recurring_income_kes ?? 0),
   };
 }
 
@@ -302,7 +314,8 @@ export type AmbassadorEarningTransactionRow = {
   description: string;
   type: string;
   amount: number;
-  status: "owed" | "paid";
+  status: "owed" | "paid" | "pending" | "available";
+  release_date?: string | null;
 };
 
 export type AmbassadorEarningsTransactionsResult =
@@ -323,7 +336,15 @@ function mapEarningsTransactionsPayload(data: unknown): AmbassadorEarningsTransa
   }
   const rows: AmbassadorEarningTransactionRow[] = rawRows.map((r) => {
     const o = r as Record<string, unknown>;
-    const st = o.status === "paid" ? "paid" : "owed";
+    const raw = String(o.status ?? "").toLowerCase();
+    const st: AmbassadorEarningTransactionRow["status"] =
+      raw === "paid"
+        ? "paid"
+        : raw === "available"
+          ? "available"
+          : raw === "pending" || raw === "held"
+            ? "pending"
+            : "owed";
     return {
       id: String(o.id ?? ""),
       created_at: typeof o.created_at === "string" ? o.created_at : String(o.created_at ?? ""),
@@ -331,6 +352,8 @@ function mapEarningsTransactionsPayload(data: unknown): AmbassadorEarningsTransa
       type: String(o.type ?? ""),
       amount: Number(o.amount ?? 0),
       status: st,
+      release_date:
+        typeof o.release_date === "string" || o.release_date === null ? (o.release_date as string | null) : undefined,
     };
   });
   return { ok: true, rows };
@@ -350,6 +373,101 @@ export async function fetchMyAmbassadorEarningsTransactions(): Promise<Ambassado
   const { data, error } = await supabase.rpc("fetch_my_ambassador_earnings_transactions");
   if (error) throw error;
   return mapEarningsTransactionsPayload(data);
+}
+
+export type AmbassadorPayoutRow = {
+  id: string;
+  ambassador_id?: string;
+  ambassador_name?: string;
+  created_at: string;
+  decided_at?: string | null;
+  amount: number;
+  status: string;
+  status_label?: string;
+  notes: string | null;
+};
+
+export type AmbassadorPayoutsResult =
+  | { ok: true; rows: AmbassadorPayoutRow[] }
+  | { ok: false; error: string };
+
+function mapPayoutsPayload(data: unknown): AmbassadorPayoutsResult {
+  if (!data || typeof data !== "object") {
+    return { ok: false, error: "invalid_response" };
+  }
+  const row = data as Record<string, unknown>;
+  if (row.ok !== true) {
+    return { ok: false, error: typeof row.error === "string" ? row.error : "unknown" };
+  }
+  const rawRows = row.rows;
+  if (!Array.isArray(rawRows)) {
+    return { ok: true, rows: [] };
+  }
+  const rows: AmbassadorPayoutRow[] = rawRows.map((r) => {
+    const o = r as Record<string, unknown>;
+    return {
+      id: String(o.id ?? ""),
+      ambassador_id: typeof o.ambassador_id === "string" ? o.ambassador_id : undefined,
+      ambassador_name: typeof o.ambassador_name === "string" ? o.ambassador_name : undefined,
+      created_at: typeof o.created_at === "string" ? o.created_at : String(o.created_at ?? ""),
+      decided_at: typeof o.decided_at === "string" || o.decided_at === null ? (o.decided_at as string | null) : null,
+      amount: Number(o.amount ?? 0),
+      status: String(o.status ?? ""),
+      status_label: typeof o.status_label === "string" ? o.status_label : undefined,
+      notes: typeof o.notes === "string" || o.notes === null ? (o.notes as string | null) : null,
+    };
+  });
+  return { ok: true, rows };
+}
+
+export async function fetchMyAmbassadorPayouts(): Promise<AmbassadorPayoutsResult> {
+  const { data, error } = await supabase.rpc("fetch_my_ambassador_withdrawals");
+  if (error) throw error;
+  return mapPayoutsPayload(data);
+}
+
+export type RequestAmbassadorPayoutResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Creates a pending payout request row (min KES 1,200; one pending request at a time). Uses Clerk session via RPC.
+ */
+export async function requestAmbassadorPayout(amount: number): Promise<RequestAmbassadorPayoutResult> {
+  const { data, error } = await supabase.rpc("ambassador_request_withdrawal", { p_amount: amount });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const row = data as Record<string, unknown> | null;
+  if (!row || row.ok !== true) {
+    const err = typeof row?.error === "string" ? row.error : "request_failed";
+    return { ok: false, error: err };
+  }
+  return { ok: true };
+}
+
+export async function fetchDevAmbassadorPayouts(
+  ambassadorId?: string,
+): Promise<AmbassadorPayoutsResult> {
+  const { data, error } = await supabase.rpc("dev_list_ambassador_payouts", {
+    p_ambassador_id: ambassadorId ?? null,
+  });
+  if (error) throw error;
+  return mapPayoutsPayload(data);
+}
+
+export async function reviewAmbassadorPayout(
+  withdrawalId: string,
+  action: "approve" | "reject" | "mark_paid",
+): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc("dev_review_ambassador_withdrawal", {
+    p_withdrawal_id: withdrawalId,
+    p_action: action,
+  });
+  if (error) throw error;
+  const row = data as Record<string, unknown> | null;
+  if (!row || row.ok !== true) {
+    return { ok: false, error: typeof row?.error === "string" ? row.error : "request_failed" };
+  }
+  return { ok: true, updated: Number(row.updated ?? 0) };
 }
 
 export type RegisterAmbassadorClerkResult = {

@@ -28,7 +28,7 @@ export default function AmbassadorTermsPage() {
             <h1 className="font-display text-3xl md:text-4xl font-extrabold tracking-tight text-primary-foreground mb-3">
               Ambassador Terms
             </h1>
-            <p className="text-sm text-primary-foreground/45">Last updated: April 4, 2026</p>
+            <p className="text-sm text-primary-foreground/45">Last updated: April 15, 2026</p>
           </header>
 
           <div className={`${neuGlass} p-8 md:p-10 space-y-10 text-primary-foreground/75 text-base leading-relaxed`}>
@@ -64,28 +64,29 @@ export default function AmbassadorTermsPage() {
             <section>
               <h2 className="text-xl font-bold text-primary-foreground mb-3">3. Commission Structure</h2>
               <p className="mb-3">
-                As an approved Ambassador, you are eligible to earn the following commissions:
+                As an approved Ambassador, you are eligible to earn the following commissions.{" "}
+                <strong className="text-primary-foreground">Earnings are only triggered by successful farmer payments</strong>
+                {" — "}not by signups alone.
               </p>
               <div className="space-y-3">
                 <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-5 py-4">
-                  <p className="font-bold text-primary-foreground">KES 600 — Signup Commission</p>
+                  <p className="font-bold text-primary-foreground">KES 600 — First payment commission</p>
                   <p className="text-sm mt-1">
-                    Earned when a farmer you referred creates a paid FarmVault account using your unique referral
-                    link and completes their first subscription payment.
+                    Earned when a referred farmer completes their <strong>first successful subscription payment</strong>{" "}
+                    after joining through your unique referral link.
                   </p>
                 </div>
                 <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-5 py-4">
-                  <p className="font-bold text-primary-foreground">KES 400 — Monthly Recurring Commission</p>
+                  <p className="font-bold text-primary-foreground">KES 500 — Monthly recurring commission</p>
                   <p className="text-sm mt-1">
-                    Earned each month that a referred farmer maintains an active paid subscription. Commissions
-                    continue as long as the referred user remains a paying customer.
+                    Earned each month for each referred farmer who remains an <strong>active paying subscriber</strong>.
+                    This stream starts the month <strong>after</strong> the farmer first becomes an active payer, as defined by FarmVault.
                   </p>
                 </div>
                 <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-5 py-4">
-                  <p className="font-bold text-primary-foreground">KES 150 — Network Bonus</p>
+                  <p className="font-bold text-primary-foreground">KES 300 — Ambassador welcome bonus</p>
                   <p className="text-sm mt-1">
-                    Earned when another ambassador you referred to the Program successfully refers a paying farmer.
-                    This is a one-time bonus per qualifying network referral.
+                    One-time bonus credited when a referred farmer completes a successful subscription payment.
                   </p>
                 </div>
               </div>
@@ -98,9 +99,10 @@ export default function AmbassadorTermsPage() {
             <section>
               <h2 className="text-xl font-bold text-primary-foreground mb-3">4. Welcome Bonus</h2>
               <p>
-                Upon completing your ambassador onboarding, you will receive a one-time welcome bonus of{" "}
-                <strong className="text-primary-foreground">KES 200</strong> credited to your ambassador
-                earnings balance. This bonus is paid out in your first monthly payment cycle.
+                The ambassador welcome bonus of{" "}
+                <strong className="text-primary-foreground">KES 300</strong> is a one-time credit tied to your first
+                successful referred-farmer payment. It is not paid on ambassador signup alone and does not apply to
+                ambassador-to-ambassador invite chains.
               </p>
             </section>
 
@@ -110,7 +112,7 @@ export default function AmbassadorTermsPage() {
                 <li>Commissions are credited to your FarmVault ambassador earnings balance.</li>
                 <li>Payouts are processed <strong>monthly</strong>, within the first 5 business days of each month for the prior month's earnings.</li>
                 <li>Payments are made via <strong>M-Pesa</strong> to your registered mobile number.</li>
-                <li>There is no minimum payout threshold — all accrued earnings are paid out each cycle.</li>
+                <li>Payout requests require a <strong>minimum of KES 1,200</strong> available balance unless FarmVault specifies otherwise for a given cycle.</li>
                 <li>You are responsible for any taxes applicable to ambassador income in your jurisdiction.</li>
                 <li>FarmVault reserves the right to withhold payment if there is reasonable suspicion of fraud or Terms violations pending investigation.</li>
               </ul>

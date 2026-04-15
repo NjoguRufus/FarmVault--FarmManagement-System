@@ -7,6 +7,7 @@ import {
   fetchMyAmbassadorDashboardStats,
   fetchMyAmbassadorEarningsTransactions,
   fetchMyAmbassadorReferralRows,
+  fetchMyAmbassadorPayouts,
   getAmbassadorSession,
 } from "@/services/ambassadorService";
 
@@ -19,6 +20,8 @@ export function useAmbassadorConsoleStatsQuery(enabled: boolean) {
   return useQuery({
     queryKey: ["ambassador", "console", "stats", user?.id ?? sessionIdKey()],
     enabled: isLoaded && enabled,
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async () => {
       if (user) {
         return fetchMyAmbassadorDashboardStats();
@@ -67,5 +70,14 @@ export function useAmbassadorEarningsTransactionsQuery(enabled: boolean) {
       }
       return fetchAmbassadorEarningsTransactions(s.id);
     },
+  });
+}
+
+export function useAmbassadorPayoutsQuery(enabled: boolean) {
+  const { user, isLoaded } = useUser();
+  return useQuery({
+    queryKey: ["ambassador", "console", "payouts", user?.id ?? sessionIdKey()],
+    enabled: isLoaded && enabled && Boolean(user),
+    queryFn: () => fetchMyAmbassadorPayouts(),
   });
 }

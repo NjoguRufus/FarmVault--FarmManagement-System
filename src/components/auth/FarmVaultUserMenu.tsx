@@ -2,11 +2,13 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useClerk, useUser } from "@clerk/react";
 import {
+  Building2,
   ChevronDown,
   Crown,
   HelpCircle,
   LogOut,
   Settings,
+  Sprout,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -19,6 +21,7 @@ import {
 import { UserAvatar } from "@/components/UserAvatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
 
 export type FarmVaultUserMenuProps = {
   /** Clerk redirect after sign-out */
@@ -54,6 +57,10 @@ export function FarmVaultUserMenu({
   const { signOut } = useClerk();
   const { user, isLoaded } = useUser();
   const { user: fvUser } = useAuth();
+  const { workspaceMode, setWorkspaceMode, setIsAccessingAmbassador } = useAmbassadorAccess();
+
+  const canSwitchCompanyAmbassador =
+    fvUser?.profileUserType === "both" && Boolean(fvUser.companyId);
 
   const displayName =
     (fvUser?.name && String(fvUser.name).trim()) ||
@@ -126,6 +133,37 @@ export function FarmVaultUserMenu({
             Support
           </DropdownMenuItem>
         ) : null}
+
+        {canSwitchCompanyAmbassador ? (
+          <>
+            <DropdownMenuSeparator />
+            {workspaceMode === "company" ? (
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  setWorkspaceMode("ambassador");
+                  setIsAccessingAmbassador(true);
+                  void navigate("/ambassador/console/dashboard");
+                }}
+              >
+                <Sprout className="mr-2 h-4 w-4" />
+                Ambassador dashboard
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  setWorkspaceMode("company");
+                  void navigate("/dashboard");
+                }}
+              >
+                <Building2 className="mr-2 h-4 w-4" />
+                Company dashboard
+              </DropdownMenuItem>
+            )}
+          </>
+        ) : null}
+
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive focus:text-destructive">
           <LogOut className="mr-2 h-4 w-4" />

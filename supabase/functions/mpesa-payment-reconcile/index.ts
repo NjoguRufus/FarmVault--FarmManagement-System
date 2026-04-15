@@ -114,6 +114,18 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
   let orphanSubscriptionsActivated = 0;
   let orphanBindingsRepaired = 0;
 
+  await admin.from("payment_reconciliation_log").insert({
+    checkout_request_id: null,
+    db_status: "reconcile_job",
+    daraja_result_code: null,
+    daraja_result_desc: JSON.stringify({
+      minAgeMinutes,
+      limit,
+      startedAt: new Date().toISOString(),
+    }).slice(0, 500),
+    action_taken: "reconcile_job_started",
+  });
+
   const { data: bindRows, error: bindListErr } = await admin
     .from("mpesa_orphan_attempts")
     .select("id, mpesa_payment_id, checkout_request_id")
@@ -327,6 +339,21 @@ serveFarmVaultEdge("mpesa-payment-reconcile", async (req: Request, _ctx) => {
 
   if (qErr) {
     console.error("[mpesa-payment-reconcile] select failed", qErr.message);
+    await admin.from("payment_reconciliation_log").insert({
+      checkout_request_id: null,
+      db_status: "reconcile_job",
+      daraja_result_code: null,
+      daraja_result_desc: JSON.stringify({
+        scanned: orphanExamined + (bindListErr ? 0 : (bindRows?.length ?? 0)),
+        fixed: orphanPaymentsInserted + orphanSubscriptionsActivated + orphanBindingsRepaired,
+        failed: errors + 1,
+        minAgeMinutes,
+        limit,
+        earlyExit: "pending_select_failed",
+        detail: qErr.message,
+      }).slice(0, 500),
+      action_taken: "reconcile_job_summary",
+    });
     return json({ ok: false, error: qErr.message }, 500);
   }
 

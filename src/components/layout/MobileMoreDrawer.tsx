@@ -21,6 +21,7 @@ interface MobileMoreDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: NavItem[];
+  groups?: Array<{ title: string; items: NavItem[] }>;
 }
 
 const BOTTOM_NAV_TOP_OFFSET_PX = 48;
@@ -33,6 +34,7 @@ export function MobileMoreDrawer({
   open,
   onOpenChange,
   items,
+  groups,
 }: MobileMoreDrawerProps) {
   const location = useLocation();
   const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
@@ -119,6 +121,9 @@ export function MobileMoreDrawer({
 
   if (items.length === 0) return null;
 
+  const displayGroups =
+    groups && groups.length > 0 ? groups.filter((group) => group.items.length > 0) : [{ title: '', items }];
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -153,7 +158,16 @@ export function MobileMoreDrawer({
           </SheetHeader>
           <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3">
             <ul className="space-y-0.5 py-2">
-              {items.map((item) => {
+              {displayGroups.map((group, groupIdx) => (
+                <React.Fragment key={`${group.title}-${groupIdx}`}>
+                  {group.title ? (
+                    <li className={cn('px-4 pb-1 pt-2', groupIdx === 0 && 'pt-0')}>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                        {group.title}
+                      </p>
+                    </li>
+                  ) : null}
+                  {group.items.map((item) => {
                 const itemPath = item.path.replace(/\/+/g, '/');
                 const path = normalizedCurrentPath;
                 const isActive =
@@ -170,46 +184,48 @@ export function MobileMoreDrawer({
                   !isDeveloper &&
                   !canAccessTier(requiredTier);
 
-                return (
-                  <li key={item.path}>
-                    <Link
-                      to={itemPath}
-                      onClick={(e) => {
-                        if (!isLocked) {
-                          onOpenChange(false);
-                          return;
-                        }
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openUpgradeModal({ checkoutPlan: 'pro' });
-                        onOpenChange(false);
-                      }}
-                      className={cn(
-                        'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
-                        isActive
-                          ? 'bg-primary/15 text-primary dark:bg-primary/20'
-                          : 'text-foreground hover:bg-muted/50'
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          'h-5 w-5 shrink-0',
-                          isActive ? 'text-primary' : 'text-muted-foreground'
-                        )}
-                      />
-                      <span className="min-w-0 flex-1 truncate flex items-center gap-2">
-                        <span className="truncate">{item.label}</span>
-                        {isLocked ? (
-                          <span className="inline-flex items-center gap-1 text-muted-foreground">
-                            <Lock className="h-3.5 w-3.5" />
-                            <ProBadge />
+                    return (
+                      <li key={item.path}>
+                        <Link
+                          to={itemPath}
+                          onClick={(e) => {
+                            if (!isLocked) {
+                              onOpenChange(false);
+                              return;
+                            }
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openUpgradeModal({ checkoutPlan: 'pro' });
+                            onOpenChange(false);
+                          }}
+                          className={cn(
+                            'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
+                            isActive
+                              ? 'bg-primary/15 text-primary dark:bg-primary/20'
+                              : 'text-foreground hover:bg-muted/50'
+                          )}
+                        >
+                          <Icon
+                            className={cn(
+                              'h-5 w-5 shrink-0',
+                              isActive ? 'text-primary' : 'text-muted-foreground'
+                            )}
+                          />
+                          <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+                            <span className="truncate">{item.label}</span>
+                            {isLocked ? (
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                <Lock className="h-3.5 w-3.5" />
+                                <ProBadge />
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </ul>
           </div>
         </div>

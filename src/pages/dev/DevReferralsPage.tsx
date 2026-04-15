@@ -9,7 +9,9 @@ import { Button } from "@/components/ui/button";
 import { useAmbassadorProgramRealtime } from "@/hooks/developer/useAmbassadorProgramRealtime";
 import {
   fetchDevGlobalReferralStats,
+  fetchDevPayouts,
   fetchDevReferralConversion,
+  type DevAmbassadorPayoutRow,
   type DevReferralConversionRow,
 } from "@/services/developerReferralService";
 import { cn } from "@/lib/utils";
@@ -46,15 +48,43 @@ export default function DevReferralsPage() {
     queryFn: fetchDevReferralConversion,
   });
 
+  const {
+    data: payoutRows = [],
+    isLoading: loadingPayouts,
+    error: payoutsError,
+    refetch: refetchPayouts,
+  } = useQuery({
+    queryKey: ["dev", "ambassador-payouts", "global"],
+    queryFn: () => fetchDevPayouts(),
+  });
+
   const refetchAll = useCallback(() => {
     void refetchStats();
     void refetchRows();
-  }, [refetchStats, refetchRows]);
+    void refetchPayouts();
+  }, [refetchStats, refetchRows, refetchPayouts]);
 
   useAmbassadorProgramRealtime(refetchAll);
 
   const loading = loadingStats || loadingRows;
-  const error = statsError ?? rowsError;
+  const error = statsError ?? rowsError ?? payoutsError;
+
+  function payoutStatusBadgeClass(status: string): string {
+    const s = status.toLowerCase();
+    if (s === "paid") return "border-emerald-500/40 text-emerald-700 dark:text-emerald-300";
+    if (s === "approved") return "border-amber-500/40 text-amber-700 dark:text-amber-300";
+    if (s === "rejected") return "border-destructive/40 text-destructive";
+    return "border-sky-500/40 text-sky-800 dark:text-sky-300";
+  }
+
+  function payoutStatusLabel(row: DevAmbassadorPayoutRow): string {
+    if (row.status_label && row.status_label.trim()) return row.status_label;
+    const s = (row.status ?? "").toLowerCase();
+    if (s === "pending") return "requested";
+    if (s === "approved") return "waiting payment";
+    if (s === "paid") return "completed";
+    return row.status ?? "unknown";
+  }
 
   function onRowClick(row: DevReferralConversionRow) {
     navigate(`/dev/referrals/${row.id}`);
@@ -93,37 +123,57 @@ export default function DevReferralsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {[
           {
             label: "Total ambassadors",
             value: stats?.total_ambassadors ?? "—",
             icon: Users,
             format: "count" as const,
+            cardClass: "border-border/50 bg-card/60",
+            labelClass: "text-muted-foreground",
+            valueClass: "text-foreground",
+            iconWrapClass: "bg-muted/60 text-muted-foreground",
           },
           {
             label: "Active ambassadors",
             value: stats?.active_ambassadors ?? "—",
             icon: Leaf,
             format: "count" as const,
+            cardClass: "border-emerald-200 bg-emerald-50",
+            labelClass: "text-emerald-700",
+            valueClass: "text-emerald-900",
+            iconWrapClass: "bg-emerald-100 text-emerald-700",
           },
           {
             label: "Inactive ambassadors",
             value: stats?.inactive_ambassadors ?? "—",
             icon: Users,
             format: "count" as const,
+            cardClass: "border-amber-200 bg-amber-50",
+            labelClass: "text-amber-700",
+            valueClass: "text-amber-900",
+            iconWrapClass: "bg-amber-100 text-amber-700",
           },
           {
             label: "Total owed",
             value: stats?.total_owed ?? "—",
             icon: Banknote,
             format: "kes" as const,
+            cardClass: "border-amber-200 bg-amber-50",
+            labelClass: "text-amber-700",
+            valueClass: "text-amber-900",
+            iconWrapClass: "bg-amber-100 text-amber-700",
           },
           {
             label: "Total paid out",
             value: stats?.total_paid_out ?? "—",
             icon: Wallet,
             format: "kes" as const,
+            cardClass: "border-green-200 bg-green-50",
+            labelClass: "text-green-700",
+            valueClass: "text-green-900",
+            iconWrapClass: "bg-green-100 text-green-700",
           },
         ].map((card, i) => (
           <motion.div
@@ -131,25 +181,29 @@ export default function DevReferralsPage() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
-            className="rounded-2xl border border-border/60 bg-background/60 p-5 shadow-sm backdrop-blur-md dark:bg-background/40 dark:border-emerald-900/30"
+            className={cn(
+              "relative overflow-hidden rounded-xl border p-3 sm:p-4 shadow-sm backdrop-blur-sm",
+              "after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-gradient-to-r after:from-primary/60 after:via-primary/20 after:to-transparent",
+              card.cardClass,
+            )}
           >
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                <card.icon className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{card.label}</p>
-                <p className="text-2xl font-semibold tabular-nums text-foreground truncate">
-                  {loading
-                    ? "…"
-                    : typeof card.value === "number"
-                      ? card.format === "kes"
-                        ? formatKes(card.value)
-                        : card.value.toLocaleString()
-                      : card.value}
-                </p>
+            <div className="mb-1 flex items-center justify-between">
+              <p className={cn("text-[10px] font-semibold uppercase tracking-wide sm:text-xs", card.labelClass)}>
+                {card.label}
+              </p>
+              <div className={cn("flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg", card.iconWrapClass)}>
+                <card.icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </div>
             </div>
+            <p className={cn("mt-1 font-heading text-lg sm:text-xl font-bold tracking-tight tabular-nums leading-tight break-words", card.valueClass)}>
+              {loading
+                ? "…"
+                : typeof card.value === "number"
+                  ? card.format === "kes"
+                    ? formatKes(card.value)
+                    : card.value.toLocaleString()
+                  : card.value}
+            </p>
           </motion.div>
         ))}
       </div>
@@ -246,6 +300,67 @@ export default function DevReferralsPage() {
                     <TableCell className="text-right tabular-nums">{formatKes(row.total_earned)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatKes(row.owed)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatKes(row.paid)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-border/60 bg-background/50 shadow-sm backdrop-blur-md dark:border-emerald-900/25 dark:bg-background/30 overflow-hidden">
+        <div className="border-b border-border/50 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-semibold text-foreground">Global payouts</h2>
+          <p className="text-xs text-muted-foreground">Latest ambassador payout requests and states.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border/50 hover:bg-transparent">
+                <TableHead className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Date
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Ambassador
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Amount
+                </TableHead>
+                <TableHead className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Status
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loadingPayouts ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : payoutRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                    No payouts yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                payoutRows.slice(0, 40).map((row) => (
+                  <TableRow
+                    key={row.id}
+                    className="cursor-pointer border-border/40 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/10"
+                    onClick={() => row.ambassador_id && navigate(`/dev/referrals/${row.ambassador_id}`)}
+                  >
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      {row.created_at ? new Date(row.created_at).toLocaleString() : "—"}
+                    </TableCell>
+                    <TableCell className="font-medium text-foreground">{row.ambassador_name ?? "Ambassador"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatKes(row.amount)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={cn("capitalize", payoutStatusBadgeClass(row.status))}>
+                        {payoutStatusLabel(row)}
+                      </Badge>
+                    </TableCell>
                   </TableRow>
                 ))
               )}

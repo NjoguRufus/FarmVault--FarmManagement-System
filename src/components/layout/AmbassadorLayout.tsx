@@ -7,10 +7,13 @@ import { AmbassadorTopBar } from "@/components/layout/AmbassadorTopBar";
 import { AmbassadorMobileBottomNav } from "@/components/layout/AmbassadorMobileBottomNav";
 import { getAmbassadorSession } from "@/services/ambassadorService";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAmbassadorAccess } from "@/contexts/AmbassadorAccessContext";
+import { AuthLoadingScreen } from "@/components/auth/AuthLoadingScreen";
 
 export function AmbassadorLayout() {
   const { user: clerkUser, isLoaded } = useUser();
   const { authReady, user: fvUser } = useAuth();
+  const { workspaceMode } = useAmbassadorAccess();
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [gateOk, setGateOk] = useState(false);
@@ -36,10 +39,14 @@ export function AmbassadorLayout() {
         navigate("/auth/callback", { replace: true });
         return;
       }
+      if (pt === "both" && fvUser.companyId && workspaceMode === "company") {
+        navigate("/dashboard", { replace: true });
+        return;
+      }
     }
 
     setGateOk(true);
-  }, [isLoaded, authReady, clerkUser, fvUser, navigate]);
+  }, [isLoaded, authReady, clerkUser, fvUser, navigate, workspaceMode]);
 
   const handleMenuClick = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth >= 1024) {
@@ -47,10 +54,8 @@ export function AmbassadorLayout() {
     }
   }, []);
 
-  // Render nothing until Clerk + FarmVault auth + role check are all confirmed.
-  // null (not a spinner) is the correct choice — any visible content here causes flicker.
   if (!isLoaded || !authReady || !gateOk) {
-    return null;
+    return <AuthLoadingScreen message="Opening ambassador console…" />;
   }
 
   return (

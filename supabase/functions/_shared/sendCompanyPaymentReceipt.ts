@@ -13,11 +13,23 @@ export type SendCompanyPaymentReceiptIssueInput = {
   sendEmail?: boolean;
 };
 
+export type SendCompanyPaymentReceiptIssueResult = {
+  ok: boolean;
+  status: number;
+  deduped?: boolean;
+  emailed?: boolean;
+  receiptId?: string;
+  receiptNumber?: string;
+  error?: string;
+};
+
 /**
  * After subscription update + payment row exists: issue receipt PDF and email company
  * (billing-receipt-issue `action: issue` — same tenant email rules as notify-company-transactional).
  */
-export async function sendCompanyPaymentReceipt(input: SendCompanyPaymentReceiptIssueInput): Promise<void> {
+export async function sendCompanyPaymentReceipt(
+  input: SendCompanyPaymentReceiptIssueInput,
+): Promise<SendCompanyPaymentReceiptIssueResult> {
   const { supabaseUrl, serviceRoleKey, anonKey, subscriptionPaymentId, sendEmail } = input;
   try {
     const admin = createClient(supabaseUrl, serviceRoleKey);
@@ -65,7 +77,11 @@ export async function sendCompanyPaymentReceipt(input: SendCompanyPaymentReceipt
     const text = await r.text().catch(() => "");
     if (!r.ok) {
       console.error("Receipt email failed:", r.status, text.slice(0, 500));
-      return;
+      return {
+        ok: false,
+        status: r.status,
+        error: text.slice(0, 500) || "billing-receipt-issue request failed",
+      };
     }
 
     try {
@@ -77,10 +93,24 @@ export async function sendCompanyPaymentReceipt(input: SendCompanyPaymentReceipt
       } else {
         console.log("Receipt issue completed:", text.slice(0, 300));
       }
+      return {
+        ok: true,
+        status: r.status,
+        deduped: j.deduped === true,
+        emailed: j.emailed === true,
+        receiptId: typeof j.receipt_id === "string" ? j.receipt_id : undefined,
+        receiptNumber: typeof j.receipt_number === "string" ? j.receipt_number : undefined,
+      };
     } catch {
       console.log("Receipt issue completed (non-JSON body)");
+      return { ok: true, status: r.status };
     }
   } catch (err) {
     console.error("Receipt email failed:", err);
+    return {
+      ok: false,
+      status: 500,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }

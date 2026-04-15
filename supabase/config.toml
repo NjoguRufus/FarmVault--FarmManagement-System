@@ -82,6 +82,9 @@ verify_jwt = false
 [functions.notify-ambassador-onboarding]
 verify_jwt = false
 
+[functions.notify-ambassador-payout-lifecycle]
+verify_jwt = false
+
 # Secret header only; no Supabase JWT.
 [functions.farmvault-email-test]
 verify_jwt = false
@@ -100,4 +103,14 @@ verify_jwt = false
 
 # Cron or developer-triggered system health (Bearer SYSTEM_HEALTH_CHECK_SECRET or Clerk + is_developer).
 [functions.system-health-check]
+verify_jwt = false
+
+# Bearer AMBASSADOR_OPS_SECRET; service role awards / cron commission jobs.
+[functions.ambassador-handle-payment-success]
+verify_jwt = false
+
+[functions.ambassador-process-monthly-commissions]
+verify_jwt = false
+
+[functions.ambassador-process-withdrawals]
 verify_jwt = false

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -17,10 +17,13 @@ import { Button } from "@/components/ui/button";
 import { useAmbassadorProgramRealtime } from "@/hooks/developer/useAmbassadorProgramRealtime";
 import {
   fetchDevAmbassadorEarnings,
+  fetchDevPayouts,
   fetchDevReferralConversionById,
   fetchDevReferrerDetails,
   markAmbassadorEarningsPaid,
+  updateDevPayoutStatus,
   type DevAmbassadorEarningRow,
+  type DevAmbassadorPayoutRow,
   type DevReferrerDetailRow,
 } from "@/services/developerReferralService";
 import { cn } from "@/lib/utils";
@@ -67,6 +70,12 @@ export default function DevReferralDetailPage() {
     enabled: idValid,
   });
 
+  const { data: payouts = [], isLoading: loadingPayouts } = useQuery({
+    queryKey: [...detailKey, "payouts"],
+    queryFn: () => fetchDevPayouts(ambassadorId),
+    enabled: idValid,
+  });
+
   const refetchDetail = useCallback(() => {
     if (!UUID_RE.test(ambassadorId)) return;
     void queryClient.invalidateQueries({ queryKey: detailKey });
@@ -98,6 +107,22 @@ export default function DevReferralDetailPage() {
     onError: (e: Error) => toast.error(e.message ?? "Update failed"),
   });
 
+  const payoutActionMutation = useMutation({
+    mutationFn: ({ payoutId, action }: { payoutId: string; action: "approve" | "reject" | "mark_paid" }) =>
+      updateDevPayoutStatus(payoutId, action),
+    onSuccess: (updated, vars) => {
+      if (updated > 0) {
+        if (vars.action === "approve") toast.success("Payout approved.");
+        else if (vars.action === "mark_paid") toast.success("Payout marked as paid.");
+        else toast.success("Payout rejected.");
+      } else {
+        toast.message("No payout row changed.");
+      }
+      void refetchDetail();
+    },
+    onError: (e: Error) => toast.error(e.message ?? "Payout update failed"),
+  });
+
   if (!idValid) {
     return (
       <div className="space-y-4 pb-8">
@@ -114,8 +139,9 @@ export default function DevReferralDetailPage() {
     );
   }
 
-  const loading = loadingSummary || loadingReferred || loadingEarnings;
+  const loading = loadingSummary || loadingReferred || loadingEarnings || loadingPayouts;
   const hasOwed = Boolean(summary && summary.owed > 0);
+  const [detailTableTab, setDetailTableTab] = useState<"referred" | "earnings" | "payouts">("referred");
 
   return (
     <div className="space-y-6 sm:space-y-8 pb-8">
@@ -198,13 +224,78 @@ export default function DevReferralDetailPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border/60 bg-background/50 shadow-sm backdrop-blur-md dark:border-emerald-900/25 dark:bg-background/30 overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-border/50 px-4 py-3">
-            <User className="h-4 w-4 text-emerald-600" />
-            <h2 className="text-sm font-semibold">Referred users</h2>
+      <div className="rounded-2xl border border-border/60 bg-background/50 shadow-sm backdrop-blur-md dark:border-emerald-900/25 dark:bg-background/30 overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            {detailTableTab === "referred" ? (
+              <User className="h-4 w-4 text-emerald-600" />
+            ) : detailTableTab === "earnings" ? (
+              <Banknote className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <Banknote className="h-4 w-4 text-emerald-600" />
+            )}
+            <h2 className="text-sm font-semibold">
+              {detailTableTab === "referred"
+                ? "Referred users"
+                : detailTableTab === "earnings"
+                  ? "Earnings transactions"
+                  : "Payout requests"}
+            </h2>
           </div>
-          <div className="max-h-[420px] overflow-auto">
+          <div className="flex w-full max-w-2xl flex-wrap rounded-lg bg-muted/70 p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setDetailTableTab("referred")}
+              className={cn(
+                "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors sm:gap-2 sm:px-3",
+                detailTableTab === "referred"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Referred users
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailTableTab("earnings")}
+              className={cn(
+                "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors sm:gap-2 sm:px-3",
+                detailTableTab === "earnings"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Earnings
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailTableTab("payouts")}
+              className={cn(
+                "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium transition-colors sm:gap-2 sm:px-3",
+                detailTableTab === "payouts"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Payout requests
+            </button>
+          </div>
+          {detailTableTab === "earnings" ? (
+            <div className="flex gap-3 text-xs text-muted-foreground">
+              <span>
+                Owed: <strong className="text-amber-600 dark:text-amber-400">{formatKes(totalOwed)}</strong>
+              </span>
+              <span>
+                Paid: <strong className="text-emerald-600 dark:text-emerald-400">{formatKes(totalPaid)}</strong>
+              </span>
+            </div>
+          ) : detailTableTab === "payouts" ? (
+            <p className="text-xs text-muted-foreground">pending=requested · approved=waiting payment · paid=completed</p>
+          ) : null}
+        </div>
+
+        <div className="max-h-[520px] overflow-auto">
+          {detailTableTab === "referred" ? (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/50">
@@ -260,25 +351,7 @@ export default function DevReferralDetailPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-border/60 bg-background/50 shadow-sm backdrop-blur-md dark:border-emerald-900/25 dark:bg-background/30 overflow-hidden">
-          <div className="flex flex-col gap-1 border-b border-border/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Banknote className="h-4 w-4 text-emerald-600" />
-              <h2 className="text-sm font-semibold">Earnings transactions</h2>
-            </div>
-            <div className="flex gap-3 text-xs text-muted-foreground">
-              <span>
-                Owed: <strong className="text-amber-600 dark:text-amber-400">{formatKes(totalOwed)}</strong>
-              </span>
-              <span>
-                Paid: <strong className="text-emerald-600 dark:text-emerald-400">{formatKes(totalPaid)}</strong>
-              </span>
-            </div>
-          </div>
-          <div className="max-h-[420px] overflow-auto">
+          ) : detailTableTab === "earnings" ? (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/50">
@@ -328,7 +401,91 @@ export default function DevReferralDetailPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border/50">
+                  <TableHead className="text-xs uppercase text-muted-foreground whitespace-nowrap">Date</TableHead>
+                  <TableHead className="text-xs uppercase text-muted-foreground text-right whitespace-nowrap">Amount</TableHead>
+                  <TableHead className="text-xs uppercase text-muted-foreground whitespace-nowrap">Status</TableHead>
+                  <TableHead className="text-xs uppercase text-muted-foreground whitespace-nowrap">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loadingPayouts ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">Loading…</TableCell>
+                  </TableRow>
+                ) : payouts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">No payouts yet.</TableCell>
+                  </TableRow>
+                ) : (
+                  payouts.map((p: DevAmbassadorPayoutRow) => {
+                    const s = String(p.status ?? "").toLowerCase();
+                    const isBusy = payoutActionMutation.isPending && payoutActionMutation.variables?.payoutId === p.id;
+                    const label = p.status_label ?? (s === "pending" ? "requested" : s === "approved" ? "waiting payment" : s === "paid" ? "completed" : p.status);
+                    return (
+                      <TableRow key={p.id} className="border-border/40">
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {p.created_at ? new Date(p.created_at).toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{formatKes(p.amount)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize",
+                              s === "paid"
+                                ? "border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                                : s === "approved"
+                                  ? "border-amber-500/40 text-amber-800 dark:text-amber-300"
+                                  : s === "rejected"
+                                    ? "border-destructive/40 text-destructive"
+                                    : "border-sky-500/40 text-sky-800 dark:text-sky-300",
+                            )}
+                          >
+                            {label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={isBusy || s !== "pending"}
+                              onClick={() => payoutActionMutation.mutate({ payoutId: p.id, action: "approve" })}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={isBusy || (s !== "approved" && s !== "pending")}
+                              onClick={() => payoutActionMutation.mutate({ payoutId: p.id, action: "mark_paid" })}
+                            >
+                              {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                              Mark as Paid
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              disabled={isBusy || (s !== "pending" && s !== "approved")}
+                              onClick={() => payoutActionMutation.mutate({ payoutId: p.id, action: "reject" })}
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          )}
         </div>
       </div>
     </div>

@@ -23,6 +23,9 @@ export function useAmbassadorProgramRealtime(onRefresh: () => void) {
       .on("postgres_changes", { event: "*", schema: "public", table: "ambassador_earnings" }, () => {
         onRefreshRef.current();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ambassador_withdrawals" }, () => {
+        onRefreshRef.current();
+      })
       .subscribe();
 
     return () => {

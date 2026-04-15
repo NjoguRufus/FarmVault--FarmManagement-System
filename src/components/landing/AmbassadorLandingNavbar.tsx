@@ -10,8 +10,9 @@ type NavLink =
   | { name: string; to: string; type: "route" };
 
 const navLinks: NavLink[] = [
-  { name: "How it Works", href: "#how-it-works", type: "anchor" },
-  { name: "Commission", href: "#earnings-model", type: "anchor" },
+  { name: "How you earn", href: "#how-you-earn", type: "anchor" },
+  { name: "Income", href: "#income-potential", type: "anchor" },
+  { name: "Trust", href: "#trust", type: "anchor" },
   { name: "Learn FarmVault", to: "/ambassador/learn", type: "route" },
 ];
 
