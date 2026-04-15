@@ -9,6 +9,7 @@ import { ConcurrentUpdateConflictError, throwIfUpdateReturnedNoRows } from '@/li
 type DbProjectRow = {
   id: string;
   company_id: string;
+  farm_id?: string | null;
   name: string;
   crop_type: string;
   environment: string;
@@ -75,6 +76,7 @@ function mapProjectRow(row: DbProjectRow): Project {
     id: row.id,
     name: row.name,
     companyId: row.company_id,
+    farmId: row.farm_id ?? null,
     cropType: row.crop_type as any,
     cropTypeKey: row.crop_type,
     environmentType: row.environment as any,
@@ -163,6 +165,7 @@ export async function listProjects(companyId: string | null): Promise<Project[]>
       `
       id,
       company_id,
+      farm_id,
       name,
       crop_type,
       environment,
@@ -207,6 +210,7 @@ export async function getProject(
       `
       id,
       company_id,
+      farm_id,
       name,
       crop_type,
       environment,
@@ -272,6 +276,7 @@ export async function developerGetProjectById(projectId: string): Promise<Projec
 export interface CreateProjectInput {
   companyId: string;
   createdBy: string;
+  farmId: string;
   name: string;
   cropType: string;
   plantingDate: string; // YYYY-MM-DD
@@ -293,6 +298,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     .from('projects')
     .insert({
       company_id: companyId,
+      farm_id: input.farmId,
       created_by: input.createdBy,
       name: input.name,
       crop_type: input.cropType,

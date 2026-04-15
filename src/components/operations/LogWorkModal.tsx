@@ -29,6 +29,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
 import { listInventoryStock } from '@/services/inventoryReadModelService';
 import { createWorkCard, recordWork, recordInventoryUsageForWorkCard } from '@/services/operationsWorkCardService';
+import { listFarmsByCompany } from '@/services/farmsService';
 import { recordInventoryUsage } from '@/services/inventoryService';
 import { createAdminAlert } from '@/services/adminAlertService';
 import type { InputUsed } from '@/types';
@@ -37,6 +38,8 @@ interface LogWorkModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  initialFarmId?: string | null;
+  initialProjectId?: string | null;
 }
 
 const WORK_TYPES = [
@@ -78,13 +81,20 @@ interface InputItem {
   currentStock: number;
 }
 
-export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProps) {
+export function LogWorkModal({
+  open,
+  onOpenChange,
+  onSuccess,
+  initialFarmId = null,
+  initialProjectId = null,
+}: LogWorkModalProps) {
   const { user } = useAuth();
-  const { projects, activeProject } = useProject();
+  const { projects, activeProject, activeFarmId } = useProject();
   const companyId = user?.companyId ?? null;
 
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
+    farmId: '',
     projectId: activeProject?.id ?? '',
     workTitle: '',
     workCategory: '',
@@ -94,8 +104,57 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
     actualRatePerPerson: 0,
     notes: '',
   });
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms', companyId ?? ''],
+    queryFn: () => listFarmsByCompany(companyId),
+    enabled: Boolean(companyId),
+  });
+  const selectorFarms = useMemo(
+    () =>
+      farms.filter(
+        (f) =>
+          f.status !== 'closed' &&
+          !(
+            f.name.trim().toLowerCase() === 'legacy farm' &&
+            f.location.trim().toLowerCase() === 'unspecified'
+          ),
+      ),
+    [farms],
+  );
 
   const [inputs, setInputs] = useState<InputItem[]>([]);
+  const projectsForSelectedFarm = useMemo(
+    () => projects.filter((p) => p.farmId === formData.farmId),
+    [projects, formData.farmId],
+  );
+  const selectedProject = useMemo(
+    () => projectsForSelectedFarm.find((p) => p.id === formData.projectId) ?? null,
+    [projectsForSelectedFarm, formData.projectId],
+  );
+  React.useEffect(() => {
+    if (!open) return;
+    const preferredFarmId =
+      (initialFarmId ??
+        activeProject?.farmId ??
+        activeFarmId ??
+        formData.farmId) ||
+      selectorFarms[0]?.id ||
+      '';
+    const preferredProjectId =
+      initialProjectId ??
+      (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
+      '';
+    setFormData((prev) => ({ ...prev, farmId: preferredFarmId, projectId: preferredProjectId ?? '' }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open,
+    initialFarmId,
+    initialProjectId,
+    activeProject?.farmId,
+    activeProject?.id,
+    activeFarmId,
+    selectorFarms,
+  ]);
 
   // Fetch inventory items for input selection
   const { data: inventoryItems = [] } = useQuery({
@@ -169,8 +228,8 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
   );
 
   const handleSubmit = async () => {
-    if (!formData.projectId) {
-      toast.error('Please select a project');
+    if (!formData.farmId) {
+      toast.error('Please select a farm');
       return;
     }
     if (!formData.workTitle.trim()) {
@@ -191,7 +250,8 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
       // Step 1: Create the work card in "planned" status
       const workCard = await createWorkCard({
         companyId: companyId!,
-        projectId: formData.projectId,
+        farmId: selectedProject?.farmId ?? formData.farmId,
+        projectId: formData.projectId || null,
         workTitle: formData.workTitle.trim(),
         workCategory: formData.workCategory,
         plannedDate: format(formData.workDate, 'yyyy-MM-dd'),
@@ -238,7 +298,7 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
             itemId: input.itemId,
             quantity: input.quantity,
             reason: `Work: ${formData.workTitle}`,
-            projectId: formData.projectId,
+            projectId: formData.projectId || null,
             actorUserId: user?.id ?? '',
             actorUserName: user?.name ?? null,
           });
@@ -276,6 +336,7 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
       
       // Reset form
       setFormData({
+        farmId: formData.farmId,
         projectId: activeProject?.id ?? '',
         workTitle: '',
         workCategory: '',
@@ -307,23 +368,24 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Row 1: Farm/Project + Date */}
+          {/* Row 1: Farm + Date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="project">Farm / Project *</Label>
+              <Label htmlFor="farm">Farm *</Label>
               <Select
-                value={formData.projectId}
-                onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v }))}
+                value={formData.farmId || 'none'}
+                onValueChange={(v) => setFormData(prev => ({ ...prev, farmId: v === 'none' ? '' : v, projectId: '' }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select project" />
+                  <SelectValue placeholder="Select farm" />
                 </SelectTrigger>
                 <SelectContent>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
+                  <SelectItem value="none">Select farm</SelectItem>
+                  {selectorFarms.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>
                       <div className="flex items-center gap-2">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
-                        {p.name}
+                        {f.name}
                       </div>
                     </SelectItem>
                   ))}
@@ -355,6 +417,30 @@ export function LogWorkModal({ open, onOpenChange, onSuccess }: LogWorkModalProp
                 </PopoverContent>
               </Popover>
             </div>
+          </div>
+
+          {/* Row 1b: Project optional */}
+          <div className="space-y-2">
+            <Label htmlFor="project">Project (optional)</Label>
+            <Select
+              value={formData.projectId || 'none'}
+              onValueChange={(v) => setFormData(prev => ({ ...prev, projectId: v === 'none' ? '' : v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No project (farm-only)</SelectItem>
+                {projectsForSelectedFarm.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <div className="flex items-center gap-2">
+                      <Briefcase className="h-4 w-4 text-muted-foreground" />
+                      {p.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Row 2: Work Name + Work Type */}

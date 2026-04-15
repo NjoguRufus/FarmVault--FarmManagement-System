@@ -44,7 +44,7 @@ const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon
 };
 
 export default function AdminOperationsPage() {
-  const { activeProject, projects } = useProject();
+  const { activeProject, activeFarmId, projects } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
@@ -270,6 +270,8 @@ export default function AdminOperationsPage() {
       <PlanWorkModal
         open={showPlanWorkModal}
         onOpenChange={setShowPlanWorkModal}
+        initialFarmId={activeProject?.farmId ?? activeFarmId ?? null}
+        initialProjectId={activeProject?.id ?? null}
         onSuccess={() => {
           setShowPlanWorkModal(false);
           refetchCards();

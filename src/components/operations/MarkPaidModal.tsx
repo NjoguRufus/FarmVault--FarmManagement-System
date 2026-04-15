@@ -80,6 +80,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
       try {
         await createFinanceExpense({
           companyId: companyId!,
+          farmId: workCard.farmId,
           projectId: workCard.projectId,
           category: 'labour',
           amount: formData.amount,

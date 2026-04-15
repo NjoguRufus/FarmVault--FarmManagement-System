@@ -289,6 +289,7 @@ export interface Project {
   id: string;
   name: string;
   companyId: string;
+  farmId?: string | null;
   cropType: CropType;
   cropTypeKey?: string;
   environmentType?: EnvironmentType;
@@ -349,6 +350,25 @@ export interface Project {
       reason?: string;
     } | null;
   };
+}
+
+export type FarmOwnershipType = 'owned' | 'leased';
+export type FarmLeaseDurationType = 'months' | 'years';
+
+export interface Farm {
+  id: string;
+  companyId: string;
+  userId?: string | null;
+  name: string;
+  location: string;
+  status?: 'active' | 'closed';
+  ownershipType: FarmOwnershipType;
+  leaseCost?: number | null;
+  leaseDuration?: number | null;
+  leaseDurationType?: FarmLeaseDurationType | null;
+  leaseAmountPaid?: number | null;
+  leaseExpiresAt?: Date | null;
+  createdAt: Date;
 }
 
 export interface CropStage {
@@ -427,6 +447,7 @@ export type ExpenseCategory =
 export interface Expense {
   id: string;
   companyId: string;
+  farmId: string;
   projectId?: string;
   cropType?: CropType;
   harvestId?: string; // For broker expenses linked to a harvest
@@ -936,6 +957,7 @@ export interface WorkCardPayment {
 export interface OperationsWorkCard {
   id: string;
   companyId: string;
+  farmId: string;
   projectId: string | null;
   stageId: string | null;
   stageName?: string | null;

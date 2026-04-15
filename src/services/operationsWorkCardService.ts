@@ -34,6 +34,7 @@ export interface EditHistoryEntry {
 export interface WorkCard {
   id: string;
   companyId: string;
+  farmId: string;
   projectId: string | null;
 
   stageId: string | null;
@@ -99,6 +100,7 @@ export interface WorkCard {
 type WorkCardRow = {
   id: string;
   company_id: string;
+  farm_id: string;
   project_id: string | null;
   title: string | null;
   status: string | null;
@@ -113,11 +115,12 @@ type WorkCardRow = {
 };
 
 const WORK_CARD_ROW_SELECT =
-  'id, company_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at, row_version';
+  'id, company_id, farm_id, project_id, title, status, allocated_manager_id, payload, inputs_used, edit_history, worker_ids, created_at, updated_at, row_version';
 
 export type CreateWorkCardInput = {
   companyId: string;
-  projectId: string;
+  farmId: string;
+  projectId?: string | null;
   stageId?: string | null;
   stageIndex?: number | null;
   stageName?: string | null;
@@ -295,6 +298,7 @@ function mapRowToWorkCard(row: WorkCardRow): WorkCard {
   return {
     id: row.id,
     companyId: row.company_id,
+    farmId: row.farm_id,
     projectId: row.project_id,
 
     stageId: payload.stageId ?? null,
@@ -421,7 +425,8 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
     .from(WORK_CARDS_TABLE)
     .insert({
       company_id: companyId,
-      project_id: input.projectId,
+      farm_id: input.farmId,
+      project_id: input.projectId ?? null,
       title: input.workTitle,
       status: 'planned',
       allocated_manager_id: normalizeOptionalUuid(input.allocatedManagerId),
@@ -903,6 +908,7 @@ export async function recordInventoryUsageForWorkCard(params: {
 
 export async function getWorkCardsForCompany(params: {
   companyId: string;
+  farmId?: string | null;
   projectId?: string | null;
   status?: WorkCardStatus | WorkCardStatus[];
 }): Promise<WorkCard[]> {
@@ -917,6 +923,8 @@ export async function getWorkCardsForCompany(params: {
 
   if (params.projectId) {
     query = query.eq('project_id', params.projectId);
+  } else if (params.farmId) {
+    query = query.eq('farm_id', params.farmId);
   }
 
   if (params.status) {
@@ -945,6 +953,7 @@ export async function getWorkCardsForCompany(params: {
 export async function getWorkCardsForWorker(params: {
   companyId: string;
   workerId: string;
+  farmId?: string | null;
   projectId?: string | null;
 }): Promise<WorkCard[]> {
   const companyId = requireCompanyId(params.companyId);
@@ -959,6 +968,8 @@ export async function getWorkCardsForWorker(params: {
 
   if (params.projectId) {
     query = query.eq('project_id', params.projectId);
+  } else if (params.farmId) {
+    query = query.eq('farm_id', params.farmId);
   }
 
   const { data, error } = await query.returns<WorkCardRow[]>();
@@ -990,14 +1001,31 @@ export async function getTodayInventoryUsage(companyId: string): Promise<{
   totalQuantity: number;
   unit: string;
 }[]> {
+  const tenant = requireCompanyId(companyId);
   const today = new Date().toISOString().split('T')[0];
+  const startOfDayIso = `${today}T00:00:00`;
+
+  const { data: todayCards, error: cardsError } = await db
+    .ops()
+    .from(WORK_CARDS_TABLE)
+    .select('id')
+    .eq('company_id', tenant)
+    .gte('created_at', startOfDayIso);
+
+  if (cardsError) {
+    console.error('[operations] Failed to get today work cards for inventory usage', cardsError);
+    return [];
+  }
+
+  const workCardIds = (todayCards ?? []).map((row: { id: string }) => row.id).filter(Boolean);
+  if (!workCardIds.length) return [];
 
   const { data, error } = await db
     .ops()
     .from(INVENTORY_USAGE_TABLE)
     .select('inventory_item_id, inventory_item_name, quantity, unit')
-    .eq('company_id', companyId)
-    .gte('recorded_at', `${today}T00:00:00`);
+    .in('work_card_id', workCardIds)
+    .gte('recorded_at', startOfDayIso);
 
   if (error) {
     console.error('[operations] Failed to get today inventory usage', error);
@@ -1117,3 +1145,37 @@ export const approveWorkCard = async (_input: any): Promise<WorkCard> => {
 export const rejectWorkCard = async (_input: any): Promise<WorkCard> => {
   throw new Error('Rejection workflow removed');
 };
+
+export async function countUnlinkedFarmWorkCards(params: {
+  companyId: string;
+  farmId: string;
+}): Promise<number> {
+  const tenant = requireCompanyId(params.companyId);
+  const { count, error } = await db
+    .ops()
+    .from(WORK_CARDS_TABLE)
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', tenant)
+    .eq('farm_id', params.farmId)
+    .is('project_id', null);
+  if (error) throw error;
+  return Number(count ?? 0);
+}
+
+export async function linkFarmWorkCardsToProject(params: {
+  companyId: string;
+  farmId: string;
+  projectId: string;
+}): Promise<number> {
+  const tenant = requireCompanyId(params.companyId);
+  const { data, error } = await db
+    .ops()
+    .from(WORK_CARDS_TABLE)
+    .update({ project_id: params.projectId })
+    .eq('company_id', tenant)
+    .eq('farm_id', params.farmId)
+    .is('project_id', null)
+    .select('id');
+  if (error) throw error;
+  return (data ?? []).length;
+}

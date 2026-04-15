@@ -84,8 +84,8 @@ const packagingConfig: Record<
     label: 'Single Item',
     singularLabel: 'item',
     pluralLabel: 'items',
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-50',
+    color: 'text-primary',
+    bgColor: 'bg-primary/10',
     stockLabel: 'Number of items',
     unitsPerLabel: 'Amount per item',
     priceLabel: 'Price per item',
@@ -97,8 +97,8 @@ const packagingConfig: Record<
     label: 'Sack / Bag',
     singularLabel: 'sack',
     pluralLabel: 'sacks',
-    color: 'text-amber-600',
-    bgColor: 'bg-amber-50',
+    color: 'text-fv-gold',
+    bgColor: 'bg-fv-gold-soft/50',
     stockLabel: 'Number of sacks',
     unitsPerLabel: 'Content per sack',
     priceLabel: 'Price per sack',
@@ -110,8 +110,8 @@ const packagingConfig: Record<
     label: 'Box / Carton',
     singularLabel: 'box',
     pluralLabel: 'boxes',
-    color: 'text-orange-600',
-    bgColor: 'bg-orange-50',
+    color: 'text-primary',
+    bgColor: 'bg-primary/10',
     stockLabel: 'Number of boxes',
     unitsPerLabel: 'Units per box',
     priceLabel: 'Price per box',
@@ -123,8 +123,8 @@ const packagingConfig: Record<
     label: 'Bottle / Container',
     singularLabel: 'bottle',
     pluralLabel: 'bottles',
-    color: 'text-emerald-600',
-    bgColor: 'bg-emerald-50',
+    color: 'text-fv-success',
+    bgColor: 'bg-fv-success/10',
     stockLabel: 'Number of bottles',
     unitsPerLabel: 'Content per bottle',
     priceLabel: 'Price per bottle',
@@ -136,8 +136,8 @@ const packagingConfig: Record<
     label: 'Pack / Bundle',
     singularLabel: 'pack',
     pluralLabel: 'packs',
-    color: 'text-purple-600',
-    bgColor: 'bg-purple-50',
+    color: 'text-primary',
+    bgColor: 'bg-primary/10',
     stockLabel: 'Number of packs',
     unitsPerLabel: 'Units per pack',
     priceLabel: 'Price per pack',
@@ -149,8 +149,8 @@ const packagingConfig: Record<
     label: 'Other',
     singularLabel: 'unit',
     pluralLabel: 'units',
-    color: 'text-gray-600',
-    bgColor: 'bg-gray-50',
+    color: 'text-muted-foreground',
+    bgColor: 'bg-muted/40',
     stockLabel: 'Number of units',
     unitsPerLabel: 'Amount per unit',
     priceLabel: 'Price per unit',
@@ -582,8 +582,7 @@ export function AddInventoryItemModal({
     return () => window.cancelAnimationFrame(id);
   }, [open, step]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     if (step !== 3) return;
     if (!name.trim() || !categoryId || !unit) return;
 
@@ -808,6 +807,12 @@ export function AddInventoryItemModal({
       } else {
         e.preventDefault();
       }
+      return;
+    }
+    if (step === 3) {
+      // Prevent accidental save when pressing Enter inside price/supplier fields.
+      // Save should happen only through the explicit "Save item" button.
+      e.preventDefault();
     }
   };
 
@@ -836,8 +841,8 @@ export function AddInventoryItemModal({
           if (step < 3 && !saving) e.preventDefault();
         }}
         className={cn(
-          'max-w-[420px] w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto gap-0',
-          'glass-strong border-border/40 shadow-md shadow-black/[0.06]',
+          'max-w-[430px] w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto gap-0',
+          'bg-card border border-border/60 shadow-lg',
           'rounded-xl p-5 sm:p-6',
         )}
       >
@@ -852,7 +857,7 @@ export function AddInventoryItemModal({
                   className={cn(
                     'rounded-md px-2 py-0.5 transition-colors',
                     step === n
-                      ? 'bg-primary/10 text-primary'
+                      ? 'bg-fv-gold-soft/60 text-fv-olive'
                       : step > n
                         ? 'text-foreground/80'
                         : 'text-muted-foreground',
@@ -873,15 +878,7 @@ export function AddInventoryItemModal({
           </div>
         </DialogHeader>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (step !== 3) return;
-            void handleSubmit(e);
-          }}
-          onKeyDown={formKeyDown}
-          className="flex min-h-0 flex-1 flex-col"
-        >
+        <form onKeyDown={formKeyDown} className="flex min-h-0 flex-1 flex-col">
           <div className="relative min-h-[220px] flex-1 overflow-hidden">
             <AnimatePresence mode="wait" custom={slideDir}>
               <motion.div
@@ -1228,7 +1225,8 @@ export function AddInventoryItemModal({
                 </button>
               ) : (
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => void handleSubmit()}
                   disabled={saving || !name.trim() || !categoryId || !unit.trim() || !numberOfPacks}
                   className={cn(
                     'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition-all',

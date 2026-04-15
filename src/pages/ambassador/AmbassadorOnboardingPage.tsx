@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowRight, Banknote, Check, Copy, Gift, Leaf, Link2, Loader2, Mail, Repeat2 } from "lucide-react";
+import { ArrowRight, Banknote, Check, Copy, Gift, Leaf, Link2, Loader2, Repeat2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,6 @@ import {
   setAmbassadorSession,
 } from "@/services/ambassadorService";
 import { invokeNotifyAmbassadorOnboarding } from "@/lib/email";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { persistIntendedRoute } from "@/lib/routing/postAuth";
 import { buildAmbassadorReferralScanUrl } from "@/lib/ambassador/referralLink";
 import { getReferralDeviceId } from "@/lib/ambassador/referralPersistence";
@@ -39,6 +38,7 @@ const cardClass =
 
 const gold = "text-[#D8B980]";
 const blue = "text-[#9DC3E6]";
+const AMBASSADOR_PROFILE_TYPE: AmbassadorType = "agrovet";
 
 export default function AmbassadorOnboardingPage() {
   const queryClient = useQueryClient();
@@ -47,7 +47,6 @@ export default function AmbassadorOnboardingPage() {
   const { setIsAccessingAmbassador, setWorkspaceMode } = useAmbassadorAccess();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [type, setType] = useState<AmbassadorType>("agrovet");
   const [screen, setScreen] = useState<Screen>("boot");
   const [referralCode, setReferralCode] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -92,7 +91,7 @@ export default function AmbassadorOnboardingPage() {
         name: nm,
         phone: undefined,
         email,
-        type: "farmer",
+        type: AMBASSADOR_PROFILE_TYPE,
         referrerCode: storedRef ?? undefined,
         deviceId: getReferralDeviceId(),
       });
@@ -190,7 +189,7 @@ export default function AmbassadorOnboardingPage() {
         name: name.trim(),
         phone: phone.trim() || undefined,
         email: clerkEmail,
-        type,
+        type: AMBASSADOR_PROFILE_TYPE,
         referrerCode: storedRef ?? undefined,
         deviceId: getReferralDeviceId(),
       });
@@ -347,9 +346,10 @@ export default function AmbassadorOnboardingPage() {
                 Ambassador profile
               </div>
               <h1 className="text-2xl font-bold text-white tracking-tight mb-1">Tell us about you</h1>
-              <p className="text-sm text-neutral-400 mb-6">
-                We could not auto-create your profile. Complete these fields to continue.
-              </p>
+              <div className="mb-6 space-y-1.5 text-left">
+                <p className="text-base font-bold text-white">Anyone can become a FarmVault Ambassador.</p>
+                <p className="text-sm text-white/70">No experience needed — we&apos;ll guide you step-by-step.</p>
+              </div>
 
               {bootError ? (
                 <p className="text-sm text-amber-200/90 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-4">
@@ -363,15 +363,19 @@ export default function AmbassadorOnboardingPage() {
                 </p>
               ) : null}
 
-              <div className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 mb-6 flex items-start gap-3">
-                <Mail className="h-5 w-5 text-[#9DC3E6] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-neutral-500">Email (from your account)</p>
-                  <p className="text-sm font-medium text-white break-all">{clerkEmail || "— add email in your account"}</p>
-                </div>
-              </div>
-
               <form onSubmit={(e) => void onProfileSubmit(e)} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="amb-onb-email" className="text-neutral-300">
+                    Email
+                  </Label>
+                  <Input
+                    id="amb-onb-email"
+                    value={clerkEmail}
+                    readOnly
+                    aria-readonly="true"
+                    className="bg-white/[0.04] border-white/10 text-white/90 rounded-xl cursor-not-allowed"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="amb-onb-name" className="text-neutral-300">
                     Full name
@@ -397,19 +401,6 @@ export default function AmbassadorOnboardingPage() {
                     placeholder="+254 …"
                     className="bg-white/5 border-white/15 text-white placeholder:text-neutral-600 rounded-xl"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-neutral-300">Ambassador type</Label>
-                  <Select value={type} onValueChange={(v) => setType(v as AmbassadorType)}>
-                    <SelectTrigger className="bg-white/5 border-white/15 text-white rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="agrovet">Agrovet</SelectItem>
-                      <SelectItem value="farmer">Farmer</SelectItem>
-                      <SelectItem value="company">Company</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
                 <Button
                   type="submit"

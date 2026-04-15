@@ -31,7 +31,7 @@ const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon
 
 export default function StaffOperationsPage() {
   const { user } = useAuth();
-  const { activeProject } = useProject();
+  const { activeProject, activeFarmId } = useProject();
   const { employee } = useCurrentEmployee();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
@@ -301,6 +301,8 @@ export default function StaffOperationsPage() {
       <LogWorkModal
         open={showLogWorkModal}
         onOpenChange={setShowLogWorkModal}
+        initialFarmId={activeProject?.farmId ?? activeFarmId ?? null}
+        initialProjectId={activeProject?.id ?? null}
         onSuccess={() => {
           setShowLogWorkModal(false);
           handleWorkUpdated();

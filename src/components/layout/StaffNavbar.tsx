@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
 import { Menu, ChevronDown, Crown, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useStaff } from '@/contexts/StaffContext';
-import { ConnectivityStatusPill } from '@/components/status/ConnectivityStatusPill';
 import { cn } from '@/lib/utils';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import {
@@ -23,6 +23,7 @@ import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 import { logger } from "@/lib/logger";
+import { listFarmsByCompany } from '@/services/farmsService';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -31,7 +32,7 @@ interface StaffNavbarProps {
 
 export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarProps) {
   const { user } = useAuth();
-  const { projects, activeProject, setActiveProject } = useProject();
+  const { projects, activeProject, activeFarmId, setActiveProject, setActiveFarmId } = useProject();
   const { fullName, roleLabel, companyName: staffCompanyName, companyId } = useStaff();
   const { startTour: startStaffTour } = useStaffTour();
   const {
@@ -58,6 +59,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
       ? 'emerald'
       : 'amber';
   const location = useLocation();
+  const [selectorView, setSelectorView] = React.useState<'projects' | 'farms'>('projects');
 
   useEffect(() => {
     if (!import.meta.env.DEV || !companyId) return;
@@ -80,6 +82,18 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
   const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
   const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms', companyId ?? ''],
+    queryFn: () => listFarmsByCompany(companyId),
+    enabled: Boolean(companyId),
+  });
+  const selectorFarms = farms.filter(
+    (f) =>
+      f.status !== 'closed' &&
+      !(f.name.trim().toLowerCase() === 'legacy farm' && f.location.trim().toLowerCase() === 'unspecified'),
+  );
+  const activeFarmSummary =
+    !activeProject && activeFarmId ? selectorFarms.find((f) => f.id === activeFarmId) ?? null : null;
 
   const path = location.pathname || '';
   let pageTitle = 'Staff Workspace';
@@ -148,6 +162,13 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                     {activeProject.name}
                   </span>
                 </>
+              ) : activeFarmSummary ? (
+                <>
+                  <span className="text-base sm:text-lg">🌾</span>
+                  <span className="font-medium hidden md:inline max-w-[140px] truncate">
+                    {activeFarmSummary.name}
+                  </span>
+                </>
               ) : (
                 <span className="text-muted-foreground text-xs sm:text-sm">All projects</span>
               )}
@@ -166,33 +187,85 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                   onClick={(e) => {
                     e.preventDefault();
                     setActiveProject(null);
+                    setActiveFarmId(null);
                   }}
                 >
                   All
                 </Button>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {selectableCompanyProjects.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>
-              ) : (
-                selectableCompanyProjects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.id}
-                    onClick={() => setActiveProject(project)}
+              <div className="px-2 py-2">
+                <div className="flex rounded-md bg-muted/70 p-1 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectorView('projects')}
                     className={cn(
-                      'flex items-center gap-3 cursor-pointer',
-                      activeProject?.id === project.id && 'bg-muted'
+                      'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+                      selectorView === 'projects' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
-                    <span className="text-lg">{cropTypeKeyEmoji(project.cropType)}</span>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{project.name}</span>
-                      <span className="text-xs text-muted-foreground capitalize">
-                        {project.cropType.replace('-', ' ')} • {project.location}
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-                ))
+                    Projects
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectorView('farms')}
+                    className={cn(
+                      'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+                      selectorView === 'farms' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    Farms
+                  </button>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              {selectorView === 'projects' ? (
+                selectableCompanyProjects.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">No projects in your company.</p>
+                ) : (
+                  selectableCompanyProjects.map((project) => (
+                    <DropdownMenuItem
+                      key={project.id}
+                      onClick={() => setActiveProject(project)}
+                      className={cn(
+                        'flex items-center gap-3 cursor-pointer',
+                        activeProject?.id === project.id && 'bg-muted'
+                      )}
+                    >
+                      <span className="text-lg">{cropTypeKeyEmoji(project.cropType)}</span>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{project.name}</span>
+                        <span className="text-xs text-muted-foreground capitalize">
+                          {project.cropType.replace('-', ' ')} • {project.location}
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  ))
+                )
+              ) : (
+                selectorFarms.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">No active farms in your company.</p>
+                ) : (
+                  selectorFarms.map((farm) => (
+                    <DropdownMenuItem
+                      key={`farm-${farm.id}`}
+                      onClick={() => {
+                        setActiveProject(null);
+                        setActiveFarmId(farm.id);
+                      }}
+                      className={cn(
+                        'flex items-center gap-3 cursor-pointer',
+                        !activeProject && activeFarmId === farm.id && 'bg-muted',
+                      )}
+                    >
+                      <span className="text-lg">🌾</span>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{farm.name}</span>
+                        <span className="text-xs text-muted-foreground">{farm.location}</span>
+                      </div>
+                    </DropdownMenuItem>
+                  ))
+                )
               )}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -200,21 +273,6 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
         {/* Right: status + user menu */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <ConnectivityStatusPill
-            className="shrink-0 px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px]"
-            workspaceApprovalTone={
-              !companyId
-                ? 'unknown'
-                : workspaceStatusLoading
-                  ? 'loading'
-                  : workspacePending
-                    ? 'pending'
-                    : workspaceApproved
-                      ? 'active'
-                      : 'unknown'
-            }
-          />
-
           {isActivePaid && !isOverrideActive && (
             <div className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-200">
               <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden />
