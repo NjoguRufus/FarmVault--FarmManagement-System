@@ -42,6 +42,7 @@ export const LEGACY_ROLE_TO_PRESET: Record<string, RolePresetKey> = {
   sales_broker: 'harvest_staff',
   'sales-broker': 'harvest_staff',
   broker: 'harvest_staff',
+  worker: 'operations_manager',
   'operations-staff': 'operations_manager',
   'full-access': 'administrator',
 };

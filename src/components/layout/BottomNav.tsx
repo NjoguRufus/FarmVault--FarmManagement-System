@@ -10,6 +10,7 @@ import { MobileMoreDrawer } from './MobileMoreDrawer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
 import { logger } from "@/lib/logger";
+import { brokerMayAccessNavPath, isSalesBrokerUser } from '@/lib/brokerNav';
 
 type DrawerGroup = { title: string; items: BottomNavItem[] };
 
@@ -45,11 +46,13 @@ export function BottomNav() {
   const { can } = usePermissions();
   const location = useLocation();
   const mainItems = getMainNavItems(user).filter((item) => {
+    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
   });
   const moreItems = getMoreNavItems(user).filter((item) => {
+    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
@@ -187,9 +190,7 @@ export function BottomNav() {
         case '/projects':
         case '/operations':
         case '/inventory':
-        case '/crop-stages':
         case '/harvest':
-        case '/challenges':
           return 'Farm Operations';
         case '/employees':
         case '/suppliers':

@@ -1,10 +1,11 @@
 import type { Project } from '@/types';
-import { hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
+import { hasFallbackHarvestModule, hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
 
 export const HARVEST_ENTRY_PATH = '/harvest';
 export const HARVEST_SALES_PATH = '/harvest-sales';
 export const HARVEST_COLLECTIONS_BASE_PATH = '/harvest-collections';
 export const TOMATO_HARVEST_BASE_PATH = '/tomato-harvest';
+export const FALLBACK_HARVEST_BASE_PATH = '/harvest-sessions';
 
 function normalizeCropType(cropType: unknown): string {
   return String(cropType ?? '')
@@ -28,8 +29,13 @@ export function resolveHarvestEntryPath(activeProject: Project | null | undefine
   }
 
   const canUseCollections = cropType ? hasHarvestCollectionsModule(cropType) : false;
-  if (!canUseCollections) return HARVEST_SALES_PATH;
+  if (canUseCollections) {
+    return projectId ? `${HARVEST_COLLECTIONS_BASE_PATH}/${projectId}` : HARVEST_COLLECTIONS_BASE_PATH;
+  }
 
-  return projectId ? `${HARVEST_COLLECTIONS_BASE_PATH}/${projectId}` : HARVEST_COLLECTIONS_BASE_PATH;
+  const canUseFallback = cropType ? hasFallbackHarvestModule(cropType) : true;
+  if (canUseFallback) return projectId ? `${FALLBACK_HARVEST_BASE_PATH}/${projectId}` : FALLBACK_HARVEST_BASE_PATH;
+
+  return HARVEST_SALES_PATH;
 }
 

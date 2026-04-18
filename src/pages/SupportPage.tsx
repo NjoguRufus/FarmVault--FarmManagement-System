@@ -1,37 +1,26 @@
-import React, { useEffect, useState } from 'react';
-import { HelpCircle, MessageCircle, FileText, Mail, Phone, ExternalLink, AlertTriangle, Send, Loader2 } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { HelpCircle, MessageCircle, Mail, Phone, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  listCodeRedsForCompany,
-  getCodeRed,
-  listCodeRedMessages,
-  addCodeRedMessage,
-  createCodeRed,
-  type CodeRedRequestData,
-  type CodeRedMessageData,
-} from '@/services/codeRedService';
-import { format } from 'date-fns';
-import { useNotifications } from '@/contexts/NotificationContext';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
+import { buttonVariants } from '@/components/ui/button';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { cn } from '@/lib/utils';
+import type { VariantProps } from 'class-variance-authority';
+
+type SupportChannel = {
+  title: string;
+  description: string;
+  action: string;
+  href: string;
+  icon: React.ReactNode;
+  iconClass: string;
+  buttonVariant: NonNullable<VariantProps<typeof buttonVariants>['variant']>;
+  buttonClass: string;
+  external?: boolean;
+};
 
 export default function SupportPage() {
   const { user } = useAuth();
-  const { addNotification } = useNotifications();
-  const isCompanyAdmin = user?.role === 'company-admin' || (user as any)?.role === 'company_admin';
-
-  const [codeReds, setCodeReds] = useState<CodeRedRequestData[]>([]);
-  const [loadingCodeRed, setLoadingCodeRed] = useState(true);
-  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
-  const [selectedRequest, setSelectedRequest] = useState<CodeRedRequestData | null>(null);
-  const [messages, setMessages] = useState<CodeRedMessageData[]>([]);
-  const [newMessageBody, setNewMessageBody] = useState('');
-  const [sending, setSending] = useState(false);
-  const [codeRedError, setCodeRedError] = useState<string | null>(null);
-
-  // New Code Red form (company admin only)
-  const [showNewCodeRed, setShowNewCodeRed] = useState(false);
-  const [newCodeRedMessage, setNewCodeRedMessage] = useState('');
-  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     captureEvent(AnalyticsEvents.SUPPORT_PAGE_VIEWED, {
@@ -41,131 +30,43 @@ export default function SupportPage() {
     });
   }, [user?.companyId]);
 
-  useEffect(() => {
-    if (!isCompanyAdmin || !user?.companyId) {
-      setLoadingCodeRed(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await listCodeRedsForCompany(user.companyId!);
-        if (!cancelled) setCodeReds(list);
-      } catch (e: any) {
-        if (!cancelled) setCodeRedError(e?.message || 'Failed to load Code Red');
-      } finally {
-        if (!cancelled) setLoadingCodeRed(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isCompanyAdmin, user?.companyId]);
-
-  useEffect(() => {
-    if (!selectedRequestId) {
-      setSelectedRequest(null);
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const req = await getCodeRed(selectedRequestId);
-        if (cancelled) return;
-        setSelectedRequest(req ?? null);
-        if (req) {
-          const msgs = await listCodeRedMessages(selectedRequestId);
-          if (!cancelled) setMessages(msgs);
-        }
-      } catch (e: any) {
-        if (!cancelled) setCodeRedError(e?.message || 'Failed to load thread');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedRequestId]);
-
-  const handleSendMessage = async () => {
-    if (!selectedRequestId || !newMessageBody.trim() || !user) return;
-    setSending(true);
-    setCodeRedError(null);
-    try {
-      const role = user.role === 'company-admin' || (user as any).role === 'company_admin' ? 'company-admin' : user.role;
-      await addCodeRedMessage(
-        selectedRequestId,
-        user.id,
-        user.name || user.email || 'User',
-        role,
-        newMessageBody.trim()
-      );
-      setNewMessageBody('');
-      const msgs = await listCodeRedMessages(selectedRequestId);
-      setMessages(msgs);
-    } catch (e: any) {
-      setCodeRedError(e?.message || 'Failed to send message');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleCreateCodeRed = async () => {
-    if (!user?.companyId || !newCodeRedMessage.trim()) return;
-    setCreating(true);
-    setCodeRedError(null);
-    try {
-      await createCodeRed(
-        user.companyId,
-        user.companyName || 'Our company',
-        user.id,
-        user.name || user.email || 'Admin',
-        user.email || '',
-        newCodeRedMessage.trim()
-      );
-      setNewCodeRedMessage('');
-      setShowNewCodeRed(false);
-      const list = await listCodeRedsForCompany(user.companyId);
-      setCodeReds(list);
-      addNotification({ title: 'Code Red sent', message: 'The developer has been notified.', toastType: 'warning' });
-    } catch (e: any) {
-      setCodeRedError(e?.message || 'Failed to send Code Red');
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const formatDate = (ts: any) => {
-    if (!ts) return '—';
-    if (ts.toDate) return format(ts.toDate(), 'PPp');
-    if (ts.seconds) return format(new Date(ts.seconds * 1000), 'PPp');
-    return '—';
-  };
-
-  const supportOptions = [
+  const channels: SupportChannel[] = [
     {
-      title: 'Documentation',
-      description: 'Browse our comprehensive guides and tutorials',
-      icon: <FileText className="h-6 w-6" />,
-      action: 'View Docs',
-      color: 'bg-primary/10 text-primary',
+      title: 'WhatsApp Support',
+      description: 'Chat with us on WhatsApp for quick help',
+      action: 'Open WhatsApp',
+      href: 'https://wa.me/254714456167',
+      icon: <MessageCircle className="h-4 w-4" aria-hidden />,
+      iconClass:
+        'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-400 dark:ring-emerald-400/30',
+      buttonVariant: 'default',
+      buttonClass:
+        'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-500/40 dark:hover:bg-emerald-600',
+      external: true,
+    },
+    {
+      title: 'Call Support',
+      description: 'Call us for immediate assistance',
+      action: 'Call Now',
+      href: 'tel:+254714456167',
+      icon: <Phone className="h-4 w-4" aria-hidden />,
+      iconClass: 'bg-primary/12 text-primary ring-1 ring-primary/20',
+      buttonVariant: 'default',
+      buttonClass: 'shadow-sm',
+      external: false,
     },
     {
       title: 'Email Support',
-      description: 'Get help from our support team via email',
-      icon: <Mail className="h-6 w-6" />,
+      description: 'Send us an email and we’ll reply ASAP',
       action: 'Send Email',
-      color: 'bg-fv-gold-soft text-fv-olive',
-    },
-    {
-      title: 'Phone Support',
-      description: 'Call us for immediate assistance',
-      icon: <Phone className="h-6 w-6" />,
-      action: 'Call Now',
-      color: 'bg-fv-success/10 text-fv-success',
-    },
-    {
-      title: 'Live Chat',
-      description: 'Chat with our support agents in real-time',
-      icon: <MessageCircle className="h-6 w-6" />,
-      action: 'Start Chat',
-      color: 'bg-fv-info/10 text-fv-info',
+      href: 'mailto:support@farmvault.africa',
+      icon: <Mail className="h-4 w-4" aria-hidden />,
+      iconClass:
+        'bg-[#D8B980]/20 text-[#6b5a3a] ring-1 ring-[#D8B980]/35 dark:bg-[#D8B980]/15 dark:text-[#e8d5b0] dark:ring-[#D8B980]/25',
+      buttonVariant: 'outline',
+      buttonClass:
+        'border-[#D8B980]/50 text-foreground hover:bg-[#D8B980]/12 dark:border-[#D8B980]/40 dark:hover:bg-[#D8B980]/10',
+      external: false,
     },
   ];
 
@@ -189,191 +90,120 @@ export default function SupportPage() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Support</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+    <div className="mx-auto max-w-5xl space-y-6 animate-fade-in pb-8">
+      <header className="space-y-0.5">
+        <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">Support</h1>
+        <p className="max-w-xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
           Get help and find answers to your questions
         </p>
-      </div>
+      </header>
 
-      {/* Code Red — Company Admin only */}
-      {isCompanyAdmin && (
-        <div className="fv-card border-destructive/30 border">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
-            <h3 className="text-lg font-semibold text-foreground">Code Red</h3>
-          </div>
-          <p className="text-sm text-muted-foreground mb-4">
-            For urgent issues only (e.g. data loss, need recovery). The developer will see your request and can restore your data from a backup. Use for critical emergencies.
-          </p>
-          {codeRedError && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive mb-4">
-              {codeRedError}
-            </div>
-          )}
-          {!showNewCodeRed ? (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setShowNewCodeRed(true)}
-                className="fv-btn fv-btn--primary bg-destructive/90 hover:bg-destructive"
+      <section aria-label="Contact options" className="space-y-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Reach the team
+        </h2>
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
+          {channels.map((ch) => (
+            <div
+              key={ch.title}
+              className={cn(
+                'flex flex-col rounded-xl border border-border/80 bg-card p-3.5 shadow-sm',
+                'transition-colors duration-200 hover:border-border hover:bg-muted/20',
+                'dark:border-border/60 dark:bg-card/60',
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                    ch.iconClass,
+                  )}
+                >
+                  {ch.icon}
+                </div>
+                <div className="min-w-0 flex-1 pt-0.5">
+                  <h3 className="text-sm font-semibold leading-tight text-foreground">{ch.title}</h3>
+                  <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{ch.description}</p>
+                </div>
+              </div>
+              <a
+                href={ch.href}
+                {...(ch.external ? { target: '_blank', rel: 'noreferrer' } : {})}
+                className={cn(
+                  buttonVariants({ variant: ch.buttonVariant, size: 'sm' }),
+                  'mt-3 w-full rounded-lg text-xs font-medium no-underline h-9',
+                  ch.buttonClass,
+                )}
               >
-                <AlertTriangle className="h-4 w-4" />
-                Send Code Red
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <textarea
-                placeholder="Describe the urgent issue (e.g. we lost our data, need recovery…)"
-                value={newCodeRedMessage}
-                onChange={(e) => setNewCodeRedMessage(e.target.value)}
-                className="fv-input min-h-[80px] w-full"
-                rows={3}
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={creating || !newCodeRedMessage.trim()}
-                  onClick={handleCreateCodeRed}
-                  className="fv-btn fv-btn--primary bg-destructive/90 hover:bg-destructive"
-                >
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Send Code Red
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowNewCodeRed(false); setNewCodeRedMessage(''); }}
-                  className="fv-btn fv-btn--ghost"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {loadingCodeRed ? (
-            <p className="text-sm text-muted-foreground mt-4 flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </p>
-          ) : codeReds.length > 0 && (
-            <div className="mt-6 pt-4 border-t border-border">
-              <h4 className="text-sm font-medium text-foreground mb-2">Your Code Red requests</h4>
-              <div className="space-y-2">
-                {codeReds.map((r) => (
-                  <div key={r.id} className="rounded-lg bg-muted/30 p-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedRequestId(selectedRequestId === r.id ? null : r.id)}
-                      className="w-full text-left font-medium text-foreground"
-                    >
-                      {r.message.slice(0, 80)}{r.message.length > 80 ? '…' : ''} · {r.status} · {formatDate(r.updatedAt)}
-                    </button>
-                    {selectedRequestId === r.id && selectedRequest && (
-                      <div className="mt-3 space-y-2">
-                        <div className="space-y-1 max-h-40 overflow-y-auto">
-                          {messages.map((m) => (
-                            <div
-                              key={m.id}
-                              className={`p-2 rounded text-sm ${
-                                m.fromRole === 'developer' ? 'bg-primary/10' : 'bg-muted/50'
-                              }`}
-                            >
-                              <span className="font-medium">{m.fromName}</span>
-                              <span className="text-xs text-muted-foreground ml-1">({m.fromRole})</span>
-                              <p className="mt-0.5">{m.body}</p>
-                              <p className="text-xs text-muted-foreground">{formatDate(m.createdAt)}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Reply…"
-                            value={newMessageBody}
-                            onChange={(e) => setNewMessageBody(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                            className="fv-input flex-1"
-                          />
-                          <button
-                            type="button"
-                            disabled={sending || !newMessageBody.trim()}
-                            onClick={handleSendMessage}
-                            className="fv-btn fv-btn--primary"
-                          >
-                            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            Send
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Support Options */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {supportOptions.map((option) => (
-          <div key={option.title} className="fv-card hover:shadow-card-hover transition-shadow">
-            <div className="flex items-start gap-4">
-              <div className={`flex h-14 w-14 items-center justify-center rounded-xl ${option.color}`}>
-                {option.icon}
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-foreground mb-1">{option.title}</h3>
-                <p className="text-sm text-muted-foreground">{option.description}</p>
-              </div>
-              <button className="fv-btn fv-btn--secondary text-sm">
-                {option.action}
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* FAQs */}
-      <div className="fv-card">
-        <div className="flex items-center gap-2 mb-6">
-          <HelpCircle className="h-5 w-5 text-primary" />
-          <h3 className="text-lg font-semibold">Frequently Asked Questions</h3>
-        </div>
-
-        <div className="space-y-4">
-          {faqs.map((faq, index) => (
-            <div key={index} className="p-4 bg-muted/30 rounded-lg">
-              <h4 className="font-medium text-foreground mb-2">{faq.question}</h4>
-              <p className="text-sm text-muted-foreground">{faq.answer}</p>
+                {ch.action}
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-90" aria-hidden />
+              </a>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      {/* Contact Info */}
-      <div className="fv-card">
-        <h3 className="text-lg font-semibold mb-4">Contact Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex items-center gap-3">
-            <Mail className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm text-muted-foreground">Email</p>
-              <p className="font-medium">support@farmvault.com</p>
-            </div>
+      <section aria-labelledby="support-faq-heading">
+        <div
+          className={cn(
+            'rounded-2xl border border-border/80 bg-card p-5 shadow-sm sm:p-6',
+            'dark:border-border/60 dark:bg-card/60',
+          )}
+        >
+          <div className="mb-4 flex items-center gap-2">
+            <HelpCircle className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+            <h2 id="support-faq-heading" className="text-lg font-semibold tracking-tight">
+              Frequently Asked Questions
+            </h2>
           </div>
-          <div className="flex items-center gap-3">
-            <Phone className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm text-muted-foreground">Phone</p>
-              <p className="font-medium">+254 700 123 456</p>
+
+          <Accordion type="single" collapsible className="w-full rounded-xl border border-border/50 bg-muted/20 px-1 dark:bg-muted/10">
+            {faqs.map((faq, index) => (
+              <AccordionItem
+                key={index}
+                value={`faq-${index}`}
+                className="border-border/60 px-3 last:border-b-0"
+              >
+                <AccordionTrigger className="py-3.5 text-left text-sm font-medium leading-snug text-foreground hover:no-underline [&[data-state=open]]:text-foreground">
+                  {faq.question}
+                </AccordionTrigger>
+                <AccordionContent className="text-sm leading-relaxed text-muted-foreground">
+                  {faq.answer}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        </div>
+      </section>
+
+      <section aria-labelledby="support-contact-heading">
+        <div
+          className={cn(
+            'rounded-2xl border border-border/80 bg-card p-5 shadow-sm sm:p-6',
+            'dark:border-border/60 dark:bg-card/60',
+          )}
+        >
+          <h2 id="support-contact-heading" className="text-lg font-semibold tracking-tight">
+            Contact Information
+          </h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="flex items-start gap-3 rounded-xl border border-border/50 bg-muted/15 p-4 dark:bg-muted/10">
+              <Mail className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email</p>
+                <p className="mt-0.5 break-all text-sm font-medium text-foreground">support@farmvault.africa</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-xl border border-border/50 bg-muted/15 p-4 dark:bg-muted/10">
+              <Phone className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phone</p>
+                <p className="mt-0.5 text-sm font-medium text-foreground">+254 714 456167</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

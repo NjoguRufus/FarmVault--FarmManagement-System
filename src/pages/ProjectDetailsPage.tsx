@@ -44,6 +44,8 @@ import {
 } from '@/components/ui/dialog';
 import { StageEditModal } from '@/components/projects/StageEditModal';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { CropStagesPanel } from '@/pages/CropStagesPage';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { isProjectClosed } from '@/lib/projectClosed';
@@ -144,6 +146,7 @@ export default function ProjectDetailsPage() {
   );
   const [stageEditOpen, setStageEditOpen] = useState(false);
   const [selectedStageForEdit, setSelectedStageForEdit] = useState<CropStage | null>(null);
+  const [cropStagesDrawerOpen, setCropStagesDrawerOpen] = useState(false);
 
   const workLogs = useMemo(
     () =>
@@ -497,6 +500,17 @@ export default function ProjectDetailsPage() {
       {/* 2. Season Progress – after hero on desktop, after Financial on mobile */}
       {timelineItems.length > 0 && (
         <div className="order-3 lg:order-2">
+          <div className="mb-3 flex items-center justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setCropStagesDrawerOpen(true)}
+              disabled={!activeProject}
+            >
+              Open crop stages
+            </Button>
+          </div>
           <SeasonProgressTimeline
             items={timelineItems}
             onStageClick={isClosed ? undefined : handleStageClick}
@@ -530,13 +544,13 @@ export default function ProjectDetailsPage() {
             onViewWorkLogs={() => setDetailsDialog('workLogs')}
             onViewInventory={() => setDetailsDialog('inventory')}
             onViewExpenses={() => setDetailsDialog('expenses')}
-            onViewChallenges={() => navigate('/challenges')}
+            onViewChallenges={() => navigate('/records?tab=challenges')}
             workLogsByCategory={workLogsByCategory}
           />
           <ProjectChallengesPanel
             challenges={challenges}
-            onAddChallenge={() => navigate('/challenges')}
-            onViewAll={() => navigate('/challenges')}
+            onAddChallenge={() => navigate('/records?tab=challenges')}
+            onViewAll={() => navigate('/records?tab=challenges')}
             limit={5}
           />
         </div>
@@ -552,7 +566,7 @@ export default function ProjectDetailsPage() {
             onViewWorkLogs={() => setDetailsDialog('workLogs')}
             onViewExpenses={() => setDetailsDialog('expenses')}
             onViewInventory={() => setDetailsDialog('inventory')}
-            onAddChallenge={() => navigate('/challenges')}
+            onAddChallenge={() => navigate('/records?tab=challenges')}
             showPlanSeason={project.status === 'active'}
             showAddChallenge={!isClosed}
           />
@@ -725,6 +739,17 @@ export default function ProjectDetailsPage() {
         createdBy={user?.id ?? ''}
         onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
       />
+
+      <Sheet open={cropStagesDrawerOpen} onOpenChange={setCropStagesDrawerOpen}>
+        <SheetContent side="right" draggable className="w-full sm:max-w-2xl p-0">
+          <SheetHeader className="p-6 border-b border-border/60">
+            <SheetTitle>Crop stages</SheetTitle>
+          </SheetHeader>
+          <div className="p-6">
+            <CropStagesPanel embedded />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

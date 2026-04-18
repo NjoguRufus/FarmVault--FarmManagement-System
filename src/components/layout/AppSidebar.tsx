@@ -14,6 +14,7 @@ import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 import { logger } from "@/lib/logger";
+import { brokerMayAccessNavPath, isSalesBrokerUser } from '@/lib/brokerNav';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -52,6 +53,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   );
 
   const navItems = getNavItemsForSidebar(user).filter((item) => {
+    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
@@ -115,9 +117,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       case '/projects':
       case '/operations':
       case '/inventory':
-      case '/crop-stages':
       case '/harvest':
-      case '/season-challenges':
         return 'Farm Operations';
       case '/employees':
       case '/suppliers':

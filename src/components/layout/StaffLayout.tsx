@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { StaffTourProvider } from '@/tour/StaffTourProvider';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 import { logger } from "@/lib/logger";
+import { isSalesBrokerUser } from '@/lib/brokerNav';
 
 export function StaffLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -39,6 +40,10 @@ export function StaffLayout() {
   const companyId = user.companyId != null ? String(user.companyId).trim() : '';
   if (!companyId) {
     return <Navigate to="/" replace />;
+  }
+
+  if (isSalesBrokerUser(user)) {
+    return <Navigate to="/broker" replace />;
   }
 
   if (import.meta.env.DEV) {

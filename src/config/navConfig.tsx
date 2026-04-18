@@ -48,11 +48,9 @@ export const companyNavConfig: NavItem[] = [
   { label: 'Projects', path: '/projects', icon: FolderKanban, group: 'main' },
   { label: 'Operations', path: '/operations', icon: Wrench, group: 'main' },
   { label: 'Inventory', path: '/inventory', icon: Package, group: 'main' },
-  { label: 'Crop Stages', path: '/crop-stages', icon: Layers, group: 'more' },
   { label: 'Expenses', path: '/expenses', icon: Receipt, group: 'more' },
   { label: 'Harvest', path: '/harvest', icon: TrendingUp, group: 'more' },
   { label: 'Suppliers', path: '/suppliers', icon: Truck, group: 'more' },
-  { label: 'Season Challenges', path: '/challenges', icon: AlertTriangle, group: 'more' },
   { label: 'Employees', path: '/employees', icon: Users, group: 'more' },
   { label: 'Records', path: '/records', icon: FileText, group: 'more' },
   { label: 'Reports', path: '/reports', icon: FileText, group: 'more' },
@@ -121,11 +119,9 @@ function getMergedManagerNav(): NavItem[] {
   return Array.from(deduped.values());
 }
 
-/** Broker nav. */
+/** Broker nav — tomato market dispatches (detail routes are /broker/harvest/:id). */
 export const brokerNavConfig: NavItem[] = [
-  { label: 'Broker Dashboard', path: '/broker', icon: LayoutDashboard, group: 'main' },
-  { label: 'Harvest & Sales', path: '/broker/harvest-sales', icon: TrendingUp, group: 'main' },
-  { label: 'Market Expenses', path: '/broker/expenses', icon: Receipt, group: 'main' },
+  { label: 'My markets', shortLabel: 'Markets', path: '/broker', icon: TrendingUp, group: 'main' },
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
@@ -159,13 +155,6 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
   if (user.role === 'developer') return developerNavConfig;
   if (user.role === 'company-admin' || user.role === ('company_admin' as any))
     return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
-  if (user.role === 'employee' || user.role === ('user' as any)) return staffNavConfig;
-  if (
-    user.role === 'manager' ||
-    emp === 'manager' ||
-    emp === 'operations-manager'
-  )
-    return getMergedManagerNav();
   if (
     user.role === 'broker' ||
     emp === 'sales-broker' ||
@@ -173,10 +162,18 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
   )
     return brokerNavConfig;
   if (
-    (user.role === 'employee' || user.role === ('user' as any)) &&
-    (emp === 'logistics-driver' || emp === 'driver')
+    user.role === 'employee' ||
+    user.role === ('user' as any)
+  ) {
+    if (emp === 'logistics-driver' || emp === 'driver') return driverNavConfig;
+    return staffNavConfig;
+  }
+  if (
+    user.role === 'manager' ||
+    emp === 'manager' ||
+    emp === 'operations-manager'
   )
-    return driverNavConfig;
+    return getMergedManagerNav();
 
   return companyNavConfig.filter((i) => i.path === '/dashboard');
 }
