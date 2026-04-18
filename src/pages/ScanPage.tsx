@@ -72,7 +72,7 @@ const CROPS: CropJourney[] = [
   {
     id: "capsicum",
     label: "Capsicum (Hoho)",
-    emoji: "🌶️",
+    emoji: "🫑",
     headline: "Capsicum — from planning to harvest, keep your farm organized.",
     problem: "When records are not clear, decisions become slower and harder.",
     intro: "With FarmVault, you can:",

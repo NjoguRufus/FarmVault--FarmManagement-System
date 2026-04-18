@@ -38,15 +38,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Button } from '@/components/ui/button';
 
-export default function CropStagesPage() {
+function CropStagesPageContent() {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
-  const { data: allStages = [], isLoading } = useCompanyProjectStages(companyId);
+  const stagesQuery = useCompanyProjectStages(companyId);
+  const { data: allStages = [], isLoading } = stagesQuery;
+  const stagesError = stagesQuery.error;
+  const refetchStages = stagesQuery.refetch;
   const { data: allWorkLogs = [] } = useCollection<WorkLog>('workLogs', 'workLogs', scope);
   const { challenges: challengesFromSupabase = [] } = useSeasonChallenges(
     companyId,
@@ -285,6 +290,23 @@ export default function CropStagesPage() {
     }
   };
 
+  if (!isLoading && stagesError) {
+    return (
+      <div className="fv-card p-8 max-w-lg mx-auto text-center space-y-4">
+        <AlertTriangle className="h-10 w-10 mx-auto text-amber-600" />
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Failed to load crop stages</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {(stagesError as Error)?.message || 'Something went wrong. You can try again.'}
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={() => void refetchStages()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   const handleAddChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStage || !activeProject || !user) return;
@@ -398,26 +420,26 @@ export default function CropStagesPage() {
             const statusLabel = item.status === 'completed' ? 'completed' : item.status === 'current' ? 'in progress' : 'pending';
             const estimatedEnd = plantingDateNorm ? getStageEndDate(plantingDateNorm, item.estimatedEndDay) : null;
             const dayRange = `Day ${item.stage.dayStart}–${item.stage.dayEnd}`;
+            const stage =
+              sortedStages.find((s) => s.stageName === item.stage.label) ??
+              sortedStages[index] ??
+              null;
             return (
               <div
                 key={item.stage.key}
                 role="button"
                 tabIndex={0}
                 onClick={() => {
-                  const stage = sortedStages[index];
-                  if (stage) {
-                    setSelectedStage(stage);
-                    setStageEditOpen(true);
-                  }
+                  if (!stage) return;
+                  setSelectedStage(stage);
+                  setStageEditOpen(true);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    const stage = sortedStages[index];
-                    if (stage) {
-                      setSelectedStage(stage);
-                      setStageEditOpen(true);
-                    }
+                    if (!stage) return;
+                    setSelectedStage(stage);
+                    setStageEditOpen(true);
                   }
                 }}
                 className="flex items-start gap-4 p-4 rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
@@ -853,5 +875,26 @@ export default function CropStagesPage() {
         onSaved={() => queryClient.invalidateQueries({ queryKey: ['projectStages'] })}
       />
     </div>
+  );
+}
+
+export default function CropStagesPage() {
+  return (
+    <ErrorBoundary
+      fallback={
+        <div className="fv-card p-8 max-w-lg mx-auto text-center space-y-4">
+          <AlertTriangle className="h-10 w-10 mx-auto text-amber-600" />
+          <h2 className="text-lg font-semibold text-foreground">Something went wrong on this page</h2>
+          <p className="text-sm text-muted-foreground">
+            Crop stages could not be shown. Try refreshing or go back to the dashboard.
+          </p>
+          <Button type="button" onClick={() => window.location.reload()}>
+            Reload page
+          </Button>
+        </div>
+      }
+    >
+      <CropStagesPageContent />
+    </ErrorBoundary>
   );
 }

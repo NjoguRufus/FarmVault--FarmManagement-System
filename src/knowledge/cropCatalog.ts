@@ -192,6 +192,46 @@ export const BUILTIN_CROP_CATALOG: CropKnowledge[] = [
   },
 ];
 
+/** True if this normalized key is a built-in crop (cannot be re-defined via company catalog). */
+export function isReservedBuiltinCropTypeKey(cropTypeKey: string | null | undefined): boolean {
+  const n = normalizeCropTypeKey(cropTypeKey);
+  if (!n) return true;
+  return BUILTIN_CROP_CATALOG.some((c) => normalizeCropTypeKey(c.cropTypeKey) === n);
+}
+
+/**
+ * Generic horticulture profile for crops that are not in {@link BUILTIN_CROP_CATALOG}.
+ * Used when adding a row to Supabase `public.record_crop_catalog` from the new-project wizard.
+ */
+export function buildCustomCropTemplateForCatalog(
+  displayName: string,
+  cropTypeKeyRaw: string,
+): Omit<CropKnowledge, 'id'> {
+  const cropTypeKey = normalizeCropTypeKey(cropTypeKeyRaw);
+  return {
+    cropTypeKey,
+    displayName: displayName.trim() || cropTypeKey.replace(/_/g, ' '),
+    category: 'horticulture',
+    baseCycleDays: 120,
+    supportsEnvironment: true,
+    environmentModifiers: {
+      open_field: { dayAdjustment: 0 },
+      greenhouse: { dayAdjustment: -8 },
+    },
+    stages: [
+      { key: 'establishment', label: 'Establishment', baseDayStart: 0, baseDayEnd: 20 },
+      { key: 'vegetative', label: 'Vegetative growth', baseDayStart: 21, baseDayEnd: 55 },
+      {
+        key: 'productive',
+        label: 'Flowering / productive phase',
+        baseDayStart: 56,
+        baseDayEnd: 95,
+      },
+      { key: 'harvest', label: 'Harvest / maturity window', baseDayStart: 96, baseDayEnd: 130 },
+    ],
+  };
+}
+
 export function findCropKnowledgeByTypeKey(
   catalog: CropKnowledge[],
   cropTypeKey: string | null | undefined,

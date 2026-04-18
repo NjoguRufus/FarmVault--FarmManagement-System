@@ -16,6 +16,11 @@ import { addToOfflineQueue } from '@/lib/offlineQueue';
 import { logActivity } from '@/services/employeeAccessService';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
+import {
+  createFinanceExpense,
+  setFinanceExpenseReferenceId,
+  softDeleteFinanceExpense,
+} from '@/services/financeExpenseService';
 
 /** Use same authenticated supabase client for all harvest tables so JWT/defaults (e.g. created_by) apply. */
 const harvest = () => supabase.schema('harvest');
@@ -1081,6 +1086,8 @@ export async function recordPickerPayment(params: {
   note?: string | null;
   paidBy?: string | null;
   projectId?: string | null;
+  /** Required for expense sync (Harvest Wallet / analytics). */
+  farmId?: string | null;
   clientEntryId?: string;
 }): Promise<string> {
   const clientEntryId = params.clientEntryId ?? crypto.randomUUID();
@@ -1095,6 +1102,7 @@ export async function recordPickerPayment(params: {
     paid_by: params.paidBy ?? null,
     company_id: params.companyId,
     project_id: params.projectId ?? null,
+    farm_id: params.farmId ?? null,
   };
 
   const queueAndReturn = async () => {
@@ -1226,55 +1234,90 @@ export async function addPickerWeighEntry(params: {
   });
 }
 
+/** Strip characters that would break the machine-readable note suffix. */
+function sanitizePickerPayoutLabel(raw: string): string {
+  const s = raw.replace(/\|/g, '·').replace(/\s+/g, ' ').trim();
+  return s || '';
+}
+
+/** Human-readable prefix + stable UUID anchors (parsed by financeExpenseService). */
+async function buildPickerPayoutExpenseNote(params: {
+  companyId: string;
+  collectionId: string;
+  pickerId: string;
+}): Promise<string> {
+  const [collRes, pickers] = await Promise.all([
+    harvest()
+      .from('harvest_collections')
+      .select('notes, collection_date')
+      .eq('company_id', params.companyId)
+      .eq('id', params.collectionId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    getHarvestPickersByIds([params.pickerId]),
+  ]);
+  if (collRes.error) throw collRes.error;
+  const coll = collRes.data as { notes?: string | null; collection_date?: string | null } | null;
+  const rawNotes = sanitizePickerPayoutLabel(String(coll?.notes ?? ''));
+  const dateStr = coll?.collection_date ? String(coll.collection_date).slice(0, 10) : '';
+  const collectionLabel =
+    rawNotes || (dateStr ? `Collection ${dateStr}` : 'Harvest collection');
+  const p = pickers[0];
+  let pickerLabel = 'Picker';
+  if (p) {
+    const pname = (p.pickerName ?? '').trim();
+    if (pname) {
+      pickerLabel = p.pickerNumber != null ? `#${p.pickerNumber} ${pname}` : pname;
+    } else if (p.pickerNumber != null) {
+      pickerLabel = `Picker #${p.pickerNumber}`;
+    }
+  }
+  pickerLabel = sanitizePickerPayoutLabel(pickerLabel) || 'Picker';
+  return `Picker payout · ${collectionLabel} · ${pickerLabel} | collection:${params.collectionId} | picker:${params.pickerId}`;
+}
+
 /** Ensure one expense row in finance.expenses for this picker payment (no duplicates). Exported for offline queue sync. */
 export async function syncPickerPaymentToExpenseForOffline(params: {
   companyId: string;
+  farmId: string;
   projectId: string;
   collectionId: string;
   pickerId: string;
   amountPaid: number;
   paymentEntryId: string;
 }): Promise<void> {
-  const note = `French beans picker payout | collection:${params.collectionId} | picker:${params.pickerId}`;
-  const expenseDate = new Date().toISOString().slice(0, 10);
-
   const { data: existing } = await db
     .finance()
     .from('expenses')
     .select('id')
-    .eq('project_id', params.projectId)
-    .eq('category', 'picker_payout')
-    .eq('amount', params.amountPaid)
-    .eq('note', note)
+    .eq('company_id', params.companyId)
+    .eq('reference_id', params.paymentEntryId)
+    .eq('source', 'picker_payment')
     .is('deleted_at', null)
     .maybeSingle();
   if (existing?.id) return;
 
-  const payload = {
-    company_id: params.companyId,
-    project_id: params.projectId,
-    category: 'picker_payout',
+  const note = await buildPickerPayoutExpenseNote({
+    companyId: params.companyId,
+    collectionId: params.collectionId,
+    pickerId: params.pickerId,
+  });
+  await createFinanceExpense({
+    companyId: params.companyId,
+    farmId: params.farmId,
+    projectId: params.projectId,
+    category: 'labor',
     amount: params.amountPaid,
-    currency: 'KES',
-    expense_date: expenseDate,
     note,
-  };
-  logger.log('[Picker Payment Expense Payload]', payload);
-
-  const { error } = await db
-    .finance()
-    .from('expenses')
-    .insert(payload);
-
-  if (error) {
-    console.error('[Picker Payment Expense Error]', error);
-    throw error;
-  }
+    expenseDate: new Date().toISOString().slice(0, 10),
+    source: 'picker_payment',
+    referenceId: params.paymentEntryId,
+  });
   captureEvent(AnalyticsEvents.EXPENSE_SYNCED_TO_INVENTORY, {
     company_id: params.companyId,
     project_id: params.projectId,
     collection_id: params.collectionId,
-    expense_category: 'picker_payout',
+    expense_category: 'labor',
     module_name: 'harvest',
   });
 }
@@ -1285,28 +1328,78 @@ export async function markPickerCashPaid(params: {
   companyId: string;
   pickerId: string;
   amount: number;
+  farmId?: string | null;
   projectId?: string;
   note?: string | null;
   paidBy?: string | null;
 }): Promise<void> {
   if (params.amount <= 0) return;
-  const paymentEntryId = await recordPickerPayment({
+  const farmId = params.farmId ?? null;
+  const projectId = params.projectId ?? null;
+  if (!farmId || !projectId) {
+    throw new Error('Farm and project are required to record this payment.');
+  }
+
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  if (isOffline) {
+    await recordPickerPayment({
+      companyId: params.companyId,
+      collectionId: params.collectionId,
+      pickerId: params.pickerId,
+      amount: params.amount,
+      note: params.note ?? null,
+      paidBy: params.paidBy ?? null,
+      projectId,
+      farmId,
+    });
+    return;
+  }
+
+  const expenseNote = await buildPickerPayoutExpenseNote({
     companyId: params.companyId,
     collectionId: params.collectionId,
     pickerId: params.pickerId,
-    amount: params.amount,
-    note: params.note ?? null,
-    paidBy: params.paidBy ?? null,
   });
-  if (params.projectId && paymentEntryId) {
-    await syncPickerPaymentToExpenseForOffline({
+  let expenseId: string | null = null;
+  try {
+    const exp = await createFinanceExpense({
       companyId: params.companyId,
-      projectId: params.projectId,
+      farmId,
+      projectId,
+      category: 'labor',
+      amount: params.amount,
+      note: expenseNote,
+      expenseDate: new Date().toISOString().slice(0, 10),
+      createdBy: params.paidBy ?? null,
+      source: 'picker_payment',
+    });
+    expenseId = exp.id;
+
+    const paymentEntryId = await recordPickerPayment({
+      companyId: params.companyId,
       collectionId: params.collectionId,
       pickerId: params.pickerId,
-      amountPaid: params.amount,
-      paymentEntryId,
+      amount: params.amount,
+      note: params.note ?? null,
+      paidBy: params.paidBy ?? null,
+      projectId,
+      farmId,
     });
+
+    await setFinanceExpenseReferenceId({
+      companyId: params.companyId,
+      expenseId,
+      referenceId: paymentEntryId,
+    });
+  } catch (e) {
+    if (expenseId) {
+      try {
+        await softDeleteFinanceExpense({ companyId: params.companyId, expenseId });
+      } catch {
+        // ignore rollback failure
+      }
+    }
+    throw e;
   }
 }
 
@@ -1318,26 +1411,27 @@ export async function markPickersPaidInBatch(params: {
   totalAmount: number;
   pickerAmountsById?: Record<string, number>;
   projectId?: string;
+  farmId?: string | null;
 }): Promise<void> {
-  const { companyId, collectionId, pickerIds, totalAmount, pickerAmountsById, projectId } = params;
+  const { companyId, collectionId, pickerIds, totalAmount, pickerAmountsById, projectId, farmId } = params;
   if (pickerIds.length === 0) return;
+  if (!farmId || !projectId) {
+    throw new Error('Farm and project are required to record these payments.');
+  }
 
   const perPicker = pickerAmountsById ?? {};
   const fallbackEach = totalAmount / pickerIds.length;
   for (const pickerId of pickerIds) {
     const amount = perPicker[pickerId] ?? fallbackEach;
     if (amount > 0) {
-      const paymentEntryId = await recordPickerPayment({ companyId, collectionId, pickerId, amount });
-      if (projectId && paymentEntryId) {
-        await syncPickerPaymentToExpenseForOffline({
-          companyId,
-          projectId,
-          collectionId,
-          pickerId,
-          amountPaid: amount,
-          paymentEntryId,
-        });
-      }
+      await markPickerCashPaid({
+        companyId,
+        collectionId,
+        pickerId,
+        amount,
+        farmId,
+        projectId,
+      });
     }
   }
 }
@@ -1482,6 +1576,7 @@ export async function applyHarvestCashPayment(params: {
 export async function payPickersFromWalletBatch(params: {
   companyId: string;
   projectId: string;
+  farmId: string;
   cropType: string;
   collectionId: string;
   pickerIds: string[];
@@ -1492,22 +1587,14 @@ export async function payPickersFromWalletBatch(params: {
   for (const pickerId of params.pickerIds) {
     const amount = amounts[pickerId];
     if (amount != null && amount > 0) {
-      const paymentEntryId = await recordPickerPayment({
+      await markPickerCashPaid({
         companyId: params.companyId,
         collectionId: params.collectionId,
         pickerId,
         amount,
+        farmId: params.farmId,
+        projectId: params.projectId,
       });
-      if (paymentEntryId) {
-        await syncPickerPaymentToExpenseForOffline({
-          companyId: params.companyId,
-          projectId: params.projectId,
-          collectionId: params.collectionId,
-          pickerId,
-          amountPaid: amount,
-          paymentEntryId,
-        });
-      }
       totalDebit += amount;
     }
   }

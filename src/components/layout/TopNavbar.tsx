@@ -38,7 +38,14 @@ interface TopNavbarProps {
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
   const { user } = useAuth();
-  const { projects, activeProject, activeFarmId, setActiveProject, setActiveFarmId } = useProject();
+  const {
+    projects,
+    activeProject,
+    activeFarmId,
+    setActiveProject,
+    setActiveFarmId,
+    isSwitchingProject,
+  } = useProject();
   const {
     isTrial,
     isExpired,
@@ -188,6 +195,11 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               )}
               <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
             </DropdownMenuTrigger>
+            {isSwitchingProject && (
+              <span className="hidden sm:inline text-xs text-muted-foreground animate-pulse ml-1">
+                Switching project…
+              </span>
+            )}
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuLabel className="flex items-center justify-between gap-2 pr-2 font-normal">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

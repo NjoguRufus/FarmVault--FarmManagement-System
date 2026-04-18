@@ -5,11 +5,87 @@
  */
 
 import { db, requireCompanyId } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import { ConcurrentUpdateConflictError } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { enqueueUnifiedNotification } from '@/services/unifiedNotificationPipeline';
 
 const LARGE_EXPENSE_KES = 50_000;
+
+const harvest = () => supabase.schema('harvest');
+
+/** Strip machine suffix so toasts and lists never show raw UUID anchors. */
+export function displayPickerPayoutExpenseNote(note: string | null): string {
+  if (!note) return 'Picker payout';
+  const cut = note.indexOf(' | collection:');
+  if (cut >= 0) {
+    const head = note.slice(0, cut).trim();
+    return head || 'Picker payout';
+  }
+  return (
+    note
+      .replace(/\s*\|\s*collection:[a-f0-9-]{36}\s*\|\s*picker:[a-f0-9-]{36}\s*$/i, '')
+      .trim() || 'Picker payout'
+  );
+}
+
+function parsePickerPayoutNoteIds(note: string): { collectionId?: string; pickerId?: string } {
+  const collectionMatch = note.match(/collection:([a-f0-9-]{36})/i);
+  const pickerMatch = note.match(/picker:([a-f0-9-]{36})/i);
+  return {
+    collectionId: collectionMatch?.[1],
+    pickerId: pickerMatch?.[1],
+  };
+}
+
+async function loadHarvestPickerPayoutLabels(
+  companyId: string,
+  collectionIds: string[],
+  pickerIds: string[],
+): Promise<{ collections: Map<string, string>; pickers: Map<string, string> }> {
+  const collections = new Map<string, string>();
+  const pickers = new Map<string, string>();
+  const cids = [...new Set(collectionIds)].filter(Boolean);
+  const pids = [...new Set(pickerIds)].filter(Boolean);
+
+  if (cids.length) {
+    const { data, error } = await harvest()
+      .from('harvest_collections')
+      .select('id, notes, collection_date')
+      .eq('company_id', companyId)
+      .in('id', cids)
+      .is('deleted_at', null);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const r = row as { id: string; notes?: string | null; collection_date?: string | null };
+      const name = String(r.notes ?? '').trim();
+      const ds = r.collection_date ? String(r.collection_date).slice(0, 10) : '';
+      collections.set(r.id, name || (ds ? `Collection ${ds}` : 'Harvest collection'));
+    }
+  }
+  if (pids.length) {
+    const { data, error } = await harvest()
+      .from('harvest_pickers')
+      .select('id, picker_number, picker_name')
+      .eq('company_id', companyId)
+      .in('id', pids);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const r = row as { id: string; picker_number?: number | null; picker_name?: string | null };
+      const pname = String(r.picker_name ?? '').trim();
+      const num = r.picker_number;
+      const label = pname
+        ? num != null
+          ? `#${num} ${pname}`
+          : pname
+        : num != null
+          ? `Picker #${num}`
+          : 'Picker';
+      pickers.set(r.id, label);
+    }
+  }
+  return { collections, pickers };
+}
 
 export type FinanceExpenseRow = {
   id: string;
@@ -24,6 +100,8 @@ export type FinanceExpenseRow = {
   created_by: string | null;
   created_at: string;
   row_version?: number | null;
+  source?: string | null;
+  reference_id?: string | null;
 };
 
 /** Shape compatible with Expense for listing (date as Date or string). */
@@ -57,7 +135,9 @@ export async function getFinanceExpenses(
   let q = db
     .finance()
     .from('expenses')
-    .select('id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
+    .select(
+      'id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version,source,reference_id',
+    )
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .order('expense_date', { ascending: false });
@@ -73,29 +153,58 @@ export async function getFinanceExpenses(
   if (error) throw error;
   const rows = (data ?? []) as FinanceExpenseRow[];
 
-  return rows.map((row) => {
+  const parsed = rows.map((row) => {
     const note = row.note ?? '';
-    const isPickerPayout = row.category === 'picker_payout' || note.toLowerCase().includes('picker payout');
-    
-    // Parse collection and picker IDs from note format: "... | collection:UUID | picker:UUID"
+    const rowSource = (row as { source?: string }).source;
+    const isPickerPayout =
+      row.category === 'picker_payout' ||
+      rowSource === 'picker_payment' ||
+      note.toLowerCase().includes('picker payout');
     let harvestCollectionId: string | undefined;
     let pickerId: string | undefined;
     if (isPickerPayout && note) {
-      const collectionMatch = note.match(/collection:([a-f0-9-]{36})/i);
-      const pickerMatch = note.match(/picker:([a-f0-9-]{36})/i);
-      if (collectionMatch) harvestCollectionId = collectionMatch[1];
-      if (pickerMatch) pickerId = pickerMatch[1];
+      const ids = parsePickerPayoutNoteIds(note);
+      harvestCollectionId = ids.collectionId;
+      pickerId = ids.pickerId;
     }
-    
-    // Create clean description for picker payouts
+    return { row, note, isPickerPayout, harvestCollectionId, pickerId };
+  });
+
+  const collectionIds: string[] = [];
+  const pickerIds: string[] = [];
+  for (const p of parsed) {
+    if (!p.isPickerPayout) continue;
+    if (p.harvestCollectionId) collectionIds.push(p.harvestCollectionId);
+    if (p.pickerId) pickerIds.push(p.pickerId);
+  }
+
+  let collMap = new Map<string, string>();
+  let pickMap = new Map<string, string>();
+  try {
+    const loaded = await loadHarvestPickerPayoutLabels(companyId, collectionIds, pickerIds);
+    collMap = loaded.collections;
+    pickMap = loaded.pickers;
+  } catch {
+    // Harvest schema may be unavailable; descriptions still fall back to generic text.
+  }
+
+  return parsed.map(({ row, note, isPickerPayout, harvestCollectionId, pickerId }) => {
     let description: string;
     if (isPickerPayout) {
-      // Clean up the note - remove collection/picker UUIDs for display
-      description = 'French Beans Picker Payout';
+      const head = displayPickerPayoutExpenseNote(note);
+      const segments = head.split(' · ').filter(Boolean);
+      const looksFriendly = segments.length >= 3;
+      if (looksFriendly) {
+        description = head;
+      } else if (harvestCollectionId && pickerId) {
+        description = `Picker payout · ${collMap.get(harvestCollectionId) ?? 'Harvest collection'} · ${pickMap.get(pickerId) ?? 'Picker'}`;
+      } else {
+        description = head;
+      }
     } else {
       description = (note || row.category || 'Expense').trim() || 'Expense';
     }
-    
+
     return {
       id: row.id,
       companyId: row.company_id,
@@ -105,11 +214,13 @@ export async function getFinanceExpenses(
       description,
       amount: Number(row.amount ?? 0),
       date: row.expense_date,
-      meta: isPickerPayout ? {
-        source: 'harvest_wallet_picker_payment',
-        harvestCollectionId,
-        pickerId,
-      } : undefined,
+      meta: isPickerPayout
+        ? {
+            source: 'harvest_wallet_picker_payment',
+            harvestCollectionId,
+            pickerId,
+          }
+        : undefined,
     };
   });
 }
@@ -123,6 +234,10 @@ export interface CreateExpenseInput {
   note?: string | null;
   expenseDate?: string | null;
   createdBy?: string | null;
+  /** Row origin (default manual). */
+  source?: string | null;
+  /** Optional linkage UUID (e.g. picker payment entry id). */
+  referenceId?: string | null;
 }
 
 /**
@@ -133,20 +248,28 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
   const tenant = requireCompanyId(input.companyId);
   const expenseDate = input.expenseDate ?? new Date().toISOString().slice(0, 10);
 
+  const insertRow: Record<string, unknown> = {
+    company_id: tenant,
+    farm_id: input.farmId,
+    project_id: input.projectId ?? null,
+    category: input.category,
+    amount: input.amount,
+    currency: 'KES',
+    expense_date: expenseDate,
+    note: input.note ?? null,
+    created_by: input.createdBy ?? null,
+  };
+  if (input.source != null && String(input.source).trim()) {
+    insertRow.source = String(input.source).trim();
+  }
+  if (input.referenceId != null && String(input.referenceId).trim()) {
+    insertRow.reference_id = String(input.referenceId).trim();
+  }
+
   const { data, error } = await db
     .finance()
     .from('expenses')
-    .insert({
-      company_id: tenant,
-      farm_id: input.farmId,
-      project_id: input.projectId ?? null,
-      category: input.category,
-      amount: input.amount,
-      currency: 'KES',
-      expense_date: expenseDate,
-      note: input.note ?? null,
-      created_by: input.createdBy ?? null,
-    })
+    .insert(insertRow)
     .select('id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version')
     .single();
 
@@ -161,7 +284,12 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
 
   if (typeof window !== 'undefined') {
     const amt = Number(row.amount ?? 0);
-    const desc = (row.note || row.category || 'Expense').trim() || 'Expense';
+    const rawNote = (row.note || row.category || 'Expense').trim() || 'Expense';
+    const isPicker =
+      row.category === 'picker_payout' ||
+      String((row as { source?: string }).source ?? '') === 'picker_payment' ||
+      String(row.note ?? '').toLowerCase().includes('picker payout');
+    const desc = isPicker ? displayPickerPayoutExpenseNote(row.note) : rawNote;
     enqueueUnifiedNotification({
       tier: 'activity',
       kind: 'activity_expense_added',
@@ -182,13 +310,19 @@ export async function createFinanceExpense(input: CreateExpenseInput): Promise<E
     }
   }
 
+  const rawDesc = (row.note || row.category || 'Expense').trim() || 'Expense';
+  const isPicker =
+    row.category === 'picker_payout' ||
+    String((row as { source?: string }).source ?? '') === 'picker_payment' ||
+    String(row.note ?? '').toLowerCase().includes('picker payout');
+
   return {
     id: row.id,
     companyId: row.company_id,
     farmId: row.farm_id,
     projectId: row.project_id ?? undefined,
     category: row.category,
-    description: (row.note || row.category || 'Expense').trim() || 'Expense',
+    description: isPicker ? displayPickerPayoutExpenseNote(row.note) : rawDesc,
     amount: Number(row.amount ?? 0),
     date: row.expense_date,
   };
@@ -275,4 +409,34 @@ export async function linkFarmExpensesToProject(params: {
     .select('id');
   if (error) throw error;
   return (data ?? []).length;
+}
+
+/** Soft-delete a finance.expense (e.g. rollback when payment insert fails). */
+export async function softDeleteFinanceExpense(params: { companyId: string; expenseId: string }): Promise<void> {
+  const tenant = requireCompanyId(params.companyId);
+  const { error } = await db
+    .finance()
+    .from('expenses')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', params.expenseId)
+    .eq('company_id', tenant)
+    .is('deleted_at', null);
+  if (error) throw error;
+}
+
+/** Link expense row to picker payment entry after both exist. */
+export async function setFinanceExpenseReferenceId(params: {
+  companyId: string;
+  expenseId: string;
+  referenceId: string;
+}): Promise<void> {
+  const tenant = requireCompanyId(params.companyId);
+  const { error } = await db
+    .finance()
+    .from('expenses')
+    .update({ reference_id: params.referenceId })
+    .eq('id', params.expenseId)
+    .eq('company_id', tenant)
+    .is('deleted_at', null);
+  if (error) throw error;
 }

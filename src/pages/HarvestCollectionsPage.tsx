@@ -41,7 +41,7 @@ import { formatDate, toDate } from '@/lib/dateUtils';
 import { buildHarvestCollectionAutoName } from '@/lib/harvestCollectionNaming';
 import { cn } from '@/lib/utils';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
-import type { HarvestCollection, HarvestPicker, PickerWeighEntry } from '@/types';
+import type { HarvestCollection, HarvestPicker, PickerWeighEntry, Project } from '@/types';
 import {
   createHarvestCollection,
   addHarvestPicker,
@@ -146,7 +146,7 @@ export default function HarvestCollectionsPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const { can: canKey, projectAccessIds } = useEmployeeAccess();
-  const { activeProject, projects, setActiveProject } = useProject();
+  const { activeProject, activeFarmId, projects, setActiveProject } = useProject();
   const { hasPendingWrites, isSyncing, isOnline, triggerSync } = useConnectivityStatus();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -167,6 +167,12 @@ export default function HarvestCollectionsPage() {
     return activeProject;
   }, [routeProjectId, projects, activeProject]);
 
+  /** Farm context for expenses and picker payouts (project preferred). */
+  const harvestFarmId = useMemo(
+    () => effectiveProject?.farmId ?? activeFarmId ?? null,
+    [effectiveProject?.farmId, activeFarmId],
+  );
+
   const harvestProjectSelectOptions = useMemo(() => {
     const open = companyProjects.filter((p) => !isProjectClosed(p));
     if (
@@ -178,6 +184,16 @@ export default function HarvestCollectionsPage() {
     }
     return open;
   }, [companyProjects, effectiveProject]);
+
+  const switchHarvestProject = useCallback(
+    (projectId: string) => {
+      const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
+      if (!next || isProjectClosed(next)) return;
+      setActiveProject(next as Project);
+      navigate(`/harvest-collections/${next.id}`, { replace: true });
+    },
+    [harvestProjectSelectOptions, setActiveProject, navigate],
+  );
 
   useEffect(() => {
     if (!routeProjectId || !effectiveProject || effectiveProject.id !== routeProjectId) return;
@@ -232,6 +248,8 @@ export default function HarvestCollectionsPage() {
   const [quickPayPickerId, setQuickPayPickerId] = useState<string | null>(null);
   const [quickPayAmount, setQuickPayAmount] = useState('');
   const [quickPaySaving, setQuickPaySaving] = useState(false);
+  /** Single-picker Pay Full flow (non–quick pay grid). */
+  const [singlePickerPayWorkingId, setSinglePickerPayWorkingId] = useState<string | null>(null);
   const [quickPayPartialOpen, setQuickPayPartialOpen] = useState(false);
   const [quickPayPartialBalance, setQuickPayPartialBalance] = useState(0);
   const [quickPayLocalPaidByPickerId, setQuickPayLocalPaidByPickerId] = useState<Record<string, number>>({});
@@ -817,6 +835,11 @@ export default function HarvestCollectionsPage() {
       return String(b.id ?? '').localeCompare(String(a.id ?? ''));
     });
   }, [allCollections, effectiveProject]);
+
+  useEffect(() => {
+    setSelectedCollectionId(null);
+    setViewMode('list');
+  }, [effectiveProject?.id]);
 
   // New collection modal suggestion: use the same project-scoped list as visible cards.
   // This keeps preview aligned with UI state and includes all statuses.
@@ -2108,6 +2131,15 @@ export default function HarvestCollectionsPage() {
       return;
     }
 
+    if (!effectiveProject?.id || !harvestFarmId) {
+      toast({
+        title: 'Farm or project missing',
+        description: 'Select an active project with a farm, or open this harvest from a farm workspace.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const payAmount = getPickerTotals(picker.id).totalPay;
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
@@ -2158,13 +2190,15 @@ export default function HarvestCollectionsPage() {
       }
     }
 
+    setSinglePickerPayWorkingId(pickerId);
     try {
       await markPickerCashPaid({
         collectionId: selectedCollectionId,
         companyId: companyId!,
         pickerId,
         amount: payAmount,
-        projectId: effectiveProject?.id,
+        farmId: harvestFarmId,
+        projectId: effectiveProject.id,
       });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
@@ -2189,16 +2223,22 @@ export default function HarvestCollectionsPage() {
         }
       }
       toast({
-        title: isOffline ? 'Payment saved offline' : 'Paid',
-        description: isOffline ? 'It will sync when online.' : undefined,
+        title: isOffline ? 'Saved offline' : 'Payment successful ✅',
+        description: isOffline ? 'Will finish when you are back online.' : undefined,
       });
     } catch (e: any) {
       if (pendingSingleDebitId) {
         setWalletLedgerEntries((prev) => prev.filter((e) => e.id !== pendingSingleDebitId));
       }
-      toast({ title: 'Sync failed', description: e?.message, variant: 'destructive' });
+      toast({
+        title: 'Payment did not go through',
+        description: e?.message ?? 'Something went wrong. Try again.',
+        variant: 'destructive',
+      });
       queryClient.invalidateQueries({ queryKey: ['harvestPickers'] });
       queryClient.invalidateQueries({ queryKey: ['pickerPayments'] });
+    } finally {
+      setSinglePickerPayWorkingId(null);
     }
   };
 
@@ -2258,6 +2298,14 @@ export default function HarvestCollectionsPage() {
       setQuickPayOpen(false);
       return;
     }
+    if (!effectiveProject?.id || !harvestFarmId) {
+      toast({
+        title: 'Farm or project missing',
+        description: 'Choose an active project tied to your farm first.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const amountClamped = balance > 0 ? Math.min(amount, balance) : amount;
     setQuickPaySaving(true);
     try {
@@ -2275,7 +2323,8 @@ export default function HarvestCollectionsPage() {
         companyId,
         pickerId: quickPayPickerId,
         amount: amountClamped,
-        projectId: effectiveProject?.id,
+        farmId: harvestFarmId,
+        projectId: effectiveProject.id,
         note: undefined,
         paidBy: user?.id ?? undefined,
       });
@@ -2304,7 +2353,7 @@ export default function HarvestCollectionsPage() {
         remainingBalance,
       });
       logger.log('[Harvest] Payment save success', { pickerId: quickPayPickerId, amount: amountClamped, collectionId: selectedCollectionId });
-      toast({ title: 'Paid' });
+      toast({ title: 'Payment successful ✅' });
       setQuickPayAmount('');
       const nextId = getNextQuickPayPickerId({
         currentPickerId: quickPayPickerId,
@@ -2352,6 +2401,14 @@ export default function HarvestCollectionsPage() {
       return;
     }
     if (pickerIds.length === 0 || !selectedCollectionId || !companyId || !effectiveProject) return;
+    if (!harvestFarmId) {
+      toast({
+        title: 'Farm or project missing',
+        description: 'Select an active project linked to your farm.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
     const unpaidPickers = pickerIds
@@ -2424,6 +2481,7 @@ export default function HarvestCollectionsPage() {
         await payPickersFromWalletBatch({
           companyId,
           projectId: effectiveProject.id,
+          farmId: harvestFarmId,
           cropType: String(effectiveProject.cropType),
           collectionId: selectedCollectionId,
           pickerIds: payableIds,
@@ -2436,7 +2494,8 @@ export default function HarvestCollectionsPage() {
           pickerIds: payableIds,
           totalAmount,
           pickerAmountsById,
-          projectId: effectiveProject?.id,
+          projectId: effectiveProject.id,
+          farmId: harvestFarmId,
         });
       }
 
@@ -2575,16 +2634,11 @@ export default function HarvestCollectionsPage() {
           <h1 className="text-2xl font-bold text-foreground" data-tour="staff-harvest-header">
             Harvest Collections
           </h1>
-          <div className="mt-2 max-w-xs md:hidden">
+          <div className="mt-2 max-w-xs">
             <p className="text-xs text-muted-foreground mb-1.5">Select project</p>
             <UiSelect
               value={activeProject?.id ?? undefined}
-              onValueChange={(projectId) => {
-                const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
-                if (next && !isProjectClosed(next)) {
-                  setActiveProject(next);
-                }
-              }}
+              onValueChange={(projectId) => switchHarvestProject(projectId)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Choose a project" />
@@ -2666,16 +2720,11 @@ export default function HarvestCollectionsPage() {
               <HelpCircle className="h-5 w-5" />
             </Button>
           </div>
-          <div className="w-full min-w-0 md:hidden">
+          <div className="w-full min-w-0 sm:max-w-[min(100%,320px)] shrink-0">
             <p className="text-xs text-muted-foreground mb-1.5">Project</p>
             <UiSelect
               value={effectiveProject?.id ?? undefined}
-              onValueChange={(projectId) => {
-                const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
-                if (next && !isProjectClosed(next)) {
-                  setActiveProject(next);
-                }
-              }}
+              onValueChange={(projectId) => switchHarvestProject(projectId)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select project" />
@@ -4177,7 +4226,7 @@ export default function HarvestCollectionsPage() {
                                         {quickPaySaving ? (
                                           <>
                                             <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                            Paying…
+                                            Saving…
                                           </>
                                         ) : (
                                           'Pay Full'

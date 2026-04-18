@@ -29,7 +29,11 @@ interface ProjectContextType {
   /** Set when listProjects fails (e.g. RLS) so UI can avoid a false “no projects” onboarding state. */
   projectsFetchError: Error | null;
   activeProject: Project | null;
+  /** Same as activeProject?.id — convenient for query keys and guards. */
+  currentProjectId: string | null;
   setActiveProject: (project: Project | null) => void;
+  /** Brief true after active project changes so UI can show “Switching project…”. */
+  isSwitchingProject: boolean;
   /** Farm workspace selection when no project is active (navbar Farms tab). */
   activeFarmId: string | null;
   setActiveFarmId: (farmId: string | null) => void;
@@ -96,7 +100,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [cachedProjects, setCachedProjects] = useState<Project[]>(() => readCachedProjects());
   const [activeProject, setActiveProjectState] = useState<Project | null>(null);
   const [activeFarmId, setActiveFarmIdState] = useState<string | null>(null);
+  const [isSwitchingProject, setIsSwitchingProject] = useState(false);
   const restoredWorkspaceSelectionRef = useRef<string | null>(null);
+  const prevActiveProjectIdRef = useRef<string | null>(null);
 
   const setActiveFarmId = useCallback(
     (farmId: string | null) => {
@@ -232,6 +238,51 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [projects, activeProject, setActiveProject]);
 
   useEffect(() => {
+    const nextId = activeProject?.id ?? null;
+    const prevId = prevActiveProjectIdRef.current;
+    if (prevId === nextId) return;
+    prevActiveProjectIdRef.current = nextId;
+    if (!companyId || !authReady || !isAuthenticated) return;
+
+    const keysPrefixes = [
+      'harvestCollections',
+      'harvestPickers',
+      'pickerPayments',
+      'pickerIntake',
+      'financeExpenses',
+      'dashboard-expenses',
+      'dashboard-expenses-supa',
+      'dashboardFinancialTotals',
+      'harvestSalesTotals',
+      'inventoryItems',
+      'inventoryUsage',
+      'dashboard-inventory-supa',
+      'operationsWorkCards',
+      'projectStages',
+      'farm-expenses',
+      'farm-workcards',
+    ] as const;
+    for (const prefix of keysPrefixes) {
+      void queryClient.invalidateQueries({
+        predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === prefix,
+      });
+    }
+    void queryClient.invalidateQueries({ queryKey: ['records', 'notebook'] });
+
+    if (prevId !== null) {
+      setIsSwitchingProject(true);
+      const done = window.setTimeout(() => setIsSwitchingProject(false), 600);
+      return () => window.clearTimeout(done);
+    }
+  }, [
+    activeProject?.id,
+    companyId,
+    authReady,
+    isAuthenticated,
+    queryClient,
+  ]);
+
+  useEffect(() => {
     if (!activeProject) return;
     const fresh = projects.find((p) => p.id === activeProject.id);
     if (!fresh) return;
@@ -292,7 +343,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         isLoadingProjects,
         projectsFetchError,
         activeProject,
+        currentProjectId: activeProject?.id ?? null,
         setActiveProject,
+        isSwitchingProject,
         activeFarmId,
         setActiveFarmId,
         getProjectsByCompany,

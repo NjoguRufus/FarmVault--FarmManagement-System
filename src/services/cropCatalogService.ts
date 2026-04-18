@@ -1,154 +1,154 @@
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from '@/lib/documentLayer';
-import { db } from '@/lib/documentLayer';
-import { normalizeCropTypeKey, type CropCatalogDoc, type CropKnowledge } from '@/knowledge/cropCatalog';
+/**
+ * Company custom crops — Supabase `public.record_crop_catalog`.
+ * Merged with built-ins in `useCropCatalog` for project creation and dashboards.
+ */
 
-const CROP_CATALOG_COLLECTION = 'cropCatalog';
-let hasLoggedCropCatalogPermissionError = false;
+import { supabase } from '@/lib/supabase';
+import { db, requireCompanyId } from '@/lib/db';
+import {
+  buildCustomCropTemplateForCatalog,
+  normalizeCropTypeKey,
+  type CropCatalogDoc,
+  type CropKnowledge,
+} from '@/knowledge/cropCatalog';
 
 type CropCatalogCallback = (data: CropCatalogDoc[]) => void;
 
 type AddCropInput = Omit<CropKnowledge, 'id'> & { id?: string };
 type UpdateCropInput = Partial<Omit<CropKnowledge, 'id'>> & { companyId: string };
 
-function mapCropDoc(id: string, data: any): CropCatalogDoc {
+function mapRowToCropCatalogDoc(row: {
+  id: string;
+  name: string;
+  slug: string;
+  company_id: string | null;
+}): CropCatalogDoc {
+  const cropTypeKey = normalizeCropTypeKey(row.slug);
+  const name = String(row.name ?? '').trim();
+  const tmpl = buildCustomCropTemplateForCatalog(name || cropTypeKey.replace(/_/g, ' '), cropTypeKey);
   return {
-    id,
-    companyId: String(data.companyId || ''),
-    cropTypeKey: String(data.cropTypeKey || ''),
-    displayName: String(data.displayName || ''),
-    category: data.category === 'field_crop' ? 'field_crop' : 'horticulture',
-    baseCycleDays: Number(data.baseCycleDays || 0),
-    supportsEnvironment: Boolean(data.supportsEnvironment),
-    environmentModifiers: {
-      open_field: {
-        dayAdjustment: Number(data.environmentModifiers?.open_field?.dayAdjustment || 0),
-      },
-      ...(data.environmentModifiers?.greenhouse
-        ? {
-            greenhouse: {
-              dayAdjustment: Number(data.environmentModifiers.greenhouse.dayAdjustment || 0),
-            },
-          }
-        : {}),
-    },
-    stages: Array.isArray(data.stages)
-      ? data.stages.map((stage: any) => ({
-          key: String(stage.key || ''),
-          label: String(stage.label || ''),
-          baseDayStart: Number(stage.baseDayStart || 0),
-          baseDayEnd: Number(stage.baseDayEnd || 0),
-        }))
-      : [],
+    id: row.id,
+    companyId: String(row.company_id ?? ''),
+    ...tmpl,
+    displayName: name || tmpl.displayName,
+    cropTypeKey,
   };
 }
 
-export function subscribeCropCatalog(companyId: string, onData: CropCatalogCallback) {
+async function fetchCompanyCropCatalog(companyId: string): Promise<CropCatalogDoc[]> {
+  const { data, error } = await db
+    .public()
+    .from('record_crop_catalog')
+    .select('id,name,slug,company_id,created_at')
+    .eq('company_id', companyId)
+    .order('name', { ascending: true });
+  if (error) {
+    console.error('[cropCatalog] fetch failed', error);
+    return [];
+  }
+  return ((data ?? []) as { id: string; name: string; slug: string; company_id: string | null }[]).map(
+    mapRowToCropCatalogDoc,
+  );
+}
+
+/**
+ * Subscribe to this company's custom crops (initial fetch + Supabase Realtime).
+ */
+export function subscribeCropCatalog(companyId: string, onData: CropCatalogCallback): () => void {
   if (!companyId) {
     onData([]);
     return () => undefined;
   }
 
-  const q = query(
-    collection(db, CROP_CATALOG_COLLECTION),
-    where('companyId', '==', companyId),
-  );
+  let cancelled = false;
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      hasLoggedCropCatalogPermissionError = false;
-      const rows = snapshot.docs.map((d) => mapCropDoc(d.id, d.data()));
-      onData(rows);
-    },
-    (error) => {
-      const code = String((error as { code?: string } | null)?.code || '');
-      if (code === 'permission-denied') {
-        if (!hasLoggedCropCatalogPermissionError) {
-          hasLoggedCropCatalogPermissionError = true;
-          console.warn(
-            'Crop catalog access denied. Showing built-in crops only.',
-          );
-        }
-      } else {
-        console.error('Failed to subscribe crop catalog:', error);
-      }
-      onData([]);
-    },
-  );
+  const push = (rows: CropCatalogDoc[]) => {
+    if (!cancelled) onData(rows);
+  };
+
+  void (async () => {
+    push(await fetchCompanyCropCatalog(companyId));
+  })();
+
+  const channel = supabase
+    .channel(`record_crop_catalog:${companyId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'record_crop_catalog',
+        filter: `company_id=eq.${companyId}`,
+      },
+      () => {
+        void (async () => {
+          push(await fetchCompanyCropCatalog(companyId));
+        })();
+      },
+    )
+    .subscribe();
+
+  return () => {
+    cancelled = true;
+    void supabase.removeChannel(channel);
+  };
 }
 
-export async function addCropToCatalog(companyId: string, data: AddCropInput) {
-  if (!companyId) throw new Error('companyId is required.');
+function slugFromNormalizedCropKey(normalizedKey: string): string {
+  return normalizedKey.replace(/_/g, '-');
+}
+
+export async function addCropToCatalog(companyId: string, data: AddCropInput): Promise<string> {
+  const tenant = requireCompanyId(companyId);
   const normalizedCropTypeKey = normalizeCropTypeKey(data.cropTypeKey);
   if (!normalizedCropTypeKey) throw new Error('cropTypeKey is required.');
 
-  const payload = {
-    ...data,
-    cropTypeKey: normalizedCropTypeKey,
-    id: data.id || normalizedCropTypeKey,
-    companyId,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
+  const displayName = (data.displayName ?? '').trim() || normalizedCropTypeKey.replace(/_/g, ' ');
+  const slug = slugFromNormalizedCropKey(normalizedCropTypeKey);
 
-  const ref = await addDoc(collection(db, CROP_CATALOG_COLLECTION), payload);
-  return ref.id;
+  const { data: row, error } = await db
+    .public()
+    .from('record_crop_catalog')
+    .insert({
+      company_id: tenant,
+      name: displayName,
+      slug,
+      created_by: 'user',
+    })
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  const id = String((row as { id?: string })?.id ?? '');
+  if (!id) throw new Error('Insert succeeded but no id was returned.');
+  return id;
 }
 
-export async function updateCropInCatalog(docId: string, data: UpdateCropInput) {
+export async function updateCropInCatalog(docId: string, data: UpdateCropInput): Promise<void> {
   if (!docId) throw new Error('docId is required.');
-  if (!data.companyId) throw new Error('companyId is required for update.');
+  const tenant = requireCompanyId(data.companyId);
 
-  const ref = doc(db, CROP_CATALOG_COLLECTION, docId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('Crop catalog entry not found.');
-
-  const existingCompanyId = String(snap.data()?.companyId || '');
-  if (existingCompanyId !== data.companyId) {
-    throw new Error('Company mismatch. Update denied.');
+  const patch: Record<string, unknown> = {};
+  if (data.displayName !== undefined) patch.name = String(data.displayName).trim();
+  if (data.cropTypeKey !== undefined) {
+    const n = normalizeCropTypeKey(data.cropTypeKey);
+    if (!n) throw new Error('Invalid cropTypeKey.');
+    patch.slug = slugFromNormalizedCropKey(n);
   }
+  if (Object.keys(patch).length === 0) return;
 
-  const { companyId: _, ...rest } = data;
-  const updates: Record<string, unknown> = {};
-  Object.entries(rest).forEach(([key, value]) => {
-    if (value !== undefined) {
-      if (key === 'cropTypeKey') {
-        const normalized = normalizeCropTypeKey(String(value || ''));
-        if (!normalized) return;
-        updates[key] = normalized;
-        return;
-      }
-      updates[key] = value;
-    }
-  });
-  await updateDoc(ref, {
-    ...updates,
-    updatedAt: serverTimestamp(),
-  });
+  const { error } = await db
+    .public()
+    .from('record_crop_catalog')
+    .update(patch)
+    .eq('id', docId)
+    .eq('company_id', tenant);
+  if (error) throw error;
 }
 
-export async function deleteCropFromCatalog(docId: string, companyId?: string) {
+export async function deleteCropFromCatalog(docId: string, companyId: string): Promise<void> {
   if (!docId) throw new Error('docId is required.');
-
-  const ref = doc(db, CROP_CATALOG_COLLECTION, docId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('Crop catalog entry not found.');
-  const existingCompanyId = String(snap.data()?.companyId || '');
-  if (!existingCompanyId) throw new Error('Invalid crop catalog entry: missing companyId.');
-  if (companyId && existingCompanyId !== companyId) {
-    throw new Error('Company mismatch. Delete denied.');
-  }
-
-  await deleteDoc(ref);
+  const tenant = requireCompanyId(companyId);
+  const { error } = await db.public().from('record_crop_catalog').delete().eq('id', docId).eq('company_id', tenant);
+  if (error) throw error;
 }

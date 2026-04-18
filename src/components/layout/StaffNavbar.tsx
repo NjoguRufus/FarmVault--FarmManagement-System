@@ -32,7 +32,14 @@ interface StaffNavbarProps {
 
 export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarProps) {
   const { user } = useAuth();
-  const { projects, activeProject, activeFarmId, setActiveProject, setActiveFarmId } = useProject();
+  const {
+    projects,
+    activeProject,
+    activeFarmId,
+    setActiveProject,
+    setActiveFarmId,
+    isSwitchingProject,
+  } = useProject();
   const { fullName, roleLabel, companyName: staffCompanyName, companyId } = useStaff();
   const { startTour: startStaffTour } = useStaffTour();
   const {
@@ -173,6 +180,11 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
                 <span className="text-muted-foreground text-xs sm:text-sm">All projects</span>
               )}
               <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+              {isSwitchingProject && (
+                <span className="hidden md:inline text-[10px] text-muted-foreground animate-pulse">
+                  Switching…
+                </span>
+              )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuLabel className="flex items-center justify-between gap-2 pr-2 font-normal">

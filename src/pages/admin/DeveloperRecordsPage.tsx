@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { DEVELOPER_NOTEBOOK_DEFAULT_CROPS, type RecordCropCard } from '@/services/recordsService';
 import { fetchDeveloperCompanies } from '@/services/developerService';
+import { toast } from 'sonner';
 
 const FV_GREEN = '#1F7A63';
 const FV_GREEN_HOVER = '#176553';
@@ -162,10 +163,15 @@ export default function DeveloperRecordsPage() {
         return;
       }
       try {
+        if (!scopedCompanyId) {
+          if (!cancelled) setCropSuggest([]);
+          return;
+        }
         const { data, error } = await db
           .public()
           .from('record_crop_catalog')
           .select('id, name, slug')
+          .eq('company_id', scopedCompanyId)
           .ilike('name', `%${q}%`)
           .limit(5);
         if (error) throw error;
@@ -178,13 +184,18 @@ export default function DeveloperRecordsPage() {
     return () => {
       cancelled = true;
     };
-  }, [cropName, addCropOpen]);
+  }, [cropName, addCropOpen, scopedCompanyId]);
 
   const saveCustomCrop = async () => {
     const name = cropName.trim();
     const slug = slugify(name);
     if (!name || !slug) return;
+    if (!scopedCompanyId) {
+      toast.error('Pick a company in the filter before adding a crop name.');
+      return;
+    }
     const { error } = await db.public().from('record_crop_catalog').insert({
+      company_id: scopedCompanyId,
       name,
       slug,
       created_by: 'developer',
@@ -193,6 +204,9 @@ export default function DeveloperRecordsPage() {
       setAddCropOpen(false);
       setCropName('');
       setCropSuggest([]);
+      toast.success('Crop name saved for that company.');
+    } else {
+      toast.error(error.message || 'Could not save.');
     }
   };
 

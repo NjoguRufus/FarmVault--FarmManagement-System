@@ -83,11 +83,13 @@ export async function processOfflineQueue(item: OfflineQueueItem): Promise<void>
     const paymentEntryId = data?.id;
 
     const projectId = payload.project_id as string | undefined;
-    if (projectId && paymentEntryId) {
+    const farmId = payload.farm_id as string | undefined | null;
+    if (projectId && paymentEntryId && farmId) {
       try {
         const { syncPickerPaymentToExpenseForOffline } = await import('@/services/harvestCollectionsService');
         await syncPickerPaymentToExpenseForOffline({
           companyId: company_id,
+          farmId,
           projectId,
           collectionId: collection_id,
           pickerId: picker_id,
