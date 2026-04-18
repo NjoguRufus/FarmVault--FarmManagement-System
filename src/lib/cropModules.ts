@@ -6,6 +6,7 @@
 export type CropModuleId =
   | 'harvest-collections'
   | 'tomato-harvest'
+  | 'fallback-harvest'
   | 'picker-payments'
   | 'grading'
   | 'sorting';
@@ -21,7 +22,7 @@ export function getCropModules(cropType: string): CropModuleId[] {
     case 'tomatoes':
       return ['tomato-harvest', 'grading', 'sorting'];
     default:
-      return [];
+      return ['fallback-harvest'];
   }
 }
 
@@ -33,4 +34,9 @@ export function hasHarvestCollectionsModule(cropType: string): boolean {
 /** Tomato bucket intake + packaging + sales (per session). */
 export function hasTomatoHarvestModule(cropType: string): boolean {
   return getCropModules(cropType).includes('tomato-harvest');
+}
+
+/** Modular fallback harvest sessions (all other crops). */
+export function hasFallbackHarvestModule(cropType: string): boolean {
+  return getCropModules(cropType).includes('fallback-harvest');
 }

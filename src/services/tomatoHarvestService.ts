@@ -44,6 +44,12 @@ export type TomatoMarketDispatchRow = {
   containers_sent: number;
   price_per_container: number | null;
   total_revenue: number | null;
+  /** Sum of broker buyer lines (notebook). */
+  broker_sales_revenue?: number;
+  /** Broker-recorded market costs. */
+  market_expenses_total?: number;
+  /** broker_sales_revenue − market_expenses_total. */
+  net_market_profit?: number;
   status: TomatoMarketDispatchStatus;
   created_at: string;
   updated_at: string;
@@ -104,10 +110,11 @@ export function computeRevenue(
 ): number {
   if (session.sale_mode === 'market') {
     if (dispatch) {
-      if (dispatch.status !== 'completed') return 0;
-      if (dispatch.total_revenue != null && Number.isFinite(Number(dispatch.total_revenue))) {
-        return Math.round(Number(dispatch.total_revenue));
+      const tr = dispatch.total_revenue;
+      if (tr != null && Number.isFinite(Number(tr)) && Number(tr) >= 0) {
+        return Math.round(Number(tr));
       }
+      if (dispatch.status !== 'completed') return 0;
       const dp = dispatch.price_per_container != null ? Number(dispatch.price_per_container) : 0;
       const sent = dispatch.containers_sent ?? 0;
       if (dp > 0 && sent > 0) return Math.round(dp * sent);
@@ -154,7 +161,7 @@ function mapTomatoSessionSummaryRow(
   };
 }
 
-function rowToTomatoMarketDispatch(r: Record<string, unknown>): TomatoMarketDispatchRow {
+export function rowToTomatoMarketDispatch(r: Record<string, unknown>): TomatoMarketDispatchRow {
   return {
     id: String(r.id),
     company_id: String(r.company_id),
@@ -164,6 +171,11 @@ function rowToTomatoMarketDispatch(r: Record<string, unknown>): TomatoMarketDisp
     containers_sent: num(r.containers_sent),
     price_per_container: r.price_per_container != null ? Number(r.price_per_container) : null,
     total_revenue: r.total_revenue != null ? Number(r.total_revenue) : null,
+    broker_sales_revenue:
+      r.broker_sales_revenue != null ? Number(r.broker_sales_revenue) : undefined,
+    market_expenses_total:
+      r.market_expenses_total != null ? Number(r.market_expenses_total) : undefined,
+    net_market_profit: r.net_market_profit != null ? Number(r.net_market_profit) : undefined,
     status: r.status === 'completed' ? 'completed' : 'pending',
     created_at: String(r.created_at ?? ''),
     updated_at: String(r.updated_at ?? ''),
@@ -186,6 +198,12 @@ function dispatchFromSummariesRpc(
     containers_sent: num(row.md_containers_sent),
     price_per_container: row.md_price_per_container != null ? Number(row.md_price_per_container) : null,
     total_revenue: row.md_total_revenue != null ? Number(row.md_total_revenue) : null,
+    broker_sales_revenue:
+      row.md_broker_sales_revenue != null ? Number(row.md_broker_sales_revenue) : undefined,
+    market_expenses_total:
+      row.md_market_expenses_total != null ? Number(row.md_market_expenses_total) : undefined,
+    net_market_profit:
+      row.md_net_market_profit != null ? Number(row.md_net_market_profit) : undefined,
     status: row.md_status === 'completed' ? 'completed' : 'pending',
     created_at: '',
     updated_at: '',

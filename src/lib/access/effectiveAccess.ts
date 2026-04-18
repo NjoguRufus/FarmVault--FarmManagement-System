@@ -4,6 +4,7 @@
  */
 
 import type { PermissionMap } from '@/types';
+import { isBrokerEmployeeRoleString } from '@/lib/roles/canonicalEmployeeRole';
 import { roleToPreset, type RolePresetKey } from './rolePresetDefaults';
 
 export interface EffectiveAccess {
@@ -73,6 +74,8 @@ export const STAFF_DASHBOARD_PATH = '/staff/staff-dashboard';
 export function resolveStaffShellEntryOrHome(landingPage: string | null | undefined): string {
   const p = (landingPage ?? '').trim();
   if (p === STAFF_DASHBOARD_PATH || p === '/staff' || p.startsWith('/staff/')) return p;
+  if (p === '/dashboard' || p === '/broker' || p === '/developer') return p;
+  if (p.startsWith('/ambassador/')) return p;
   return '/';
 }
 
@@ -96,6 +99,11 @@ export function getLandingPageFromPermissions(
   const companyId = options?.companyId != null ? String(options.companyId).trim() : '';
   if (!companyId) {
     return '/';
+  }
+
+  const legacy = (options?.legacyRole ?? '').toLowerCase();
+  if (legacy === 'broker' || legacy === 'sales-broker') {
+    return '/broker';
   }
 
   return STAFF_DASHBOARD_PATH;
@@ -134,7 +142,7 @@ export function resolveEffectiveAccess(params: {
   });
 
   const role = (legacyRole ?? '').toLowerCase();
-  const isBroker = role === 'sales-broker' || role === 'broker';
+  const isBroker = isBrokerEmployeeRoleString(legacyRole);
   const isDriver = role === 'logistics-driver' || role === 'driver';
 
   return {

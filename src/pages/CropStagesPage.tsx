@@ -41,7 +41,7 @@ import { toast } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 
-function CropStagesPageContent() {
+export function CropStagesPanel({ embedded = false }: { embedded?: boolean }) {
   const { activeProject } = useProject();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -339,21 +339,23 @@ function CropStagesPageContent() {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Crop Stages</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {activeProject ? (
-              <>Track stages for <span className="font-medium">{activeProject.name}</span></>
-            ) : (
-              'Manage crop growth stages'
-            )}
-          </p>
+    <div className={cn('space-y-6', !embedded && 'animate-fade-in')}>
+      {!embedded && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Crop Stages</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {activeProject ? (
+                <>
+                  Track stages for <span className="font-medium">{activeProject.name}</span>
+                </>
+              ) : (
+                'Manage crop growth stages'
+              )}
+            </p>
+          </div>
         </div>
-        {/* Stages are generated automatically from crop configuration */}
-      </div>
+      )}
 
       {/* Stats — from plantingDate-driven timeline when available */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -894,7 +896,7 @@ export default function CropStagesPage() {
         </div>
       }
     >
-      <CropStagesPageContent />
+      <CropStagesPanel />
     </ErrorBoundary>
   );
 }

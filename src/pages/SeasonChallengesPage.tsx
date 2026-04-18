@@ -425,28 +425,29 @@ export default function SeasonChallengesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Season Challenges</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1 space-y-2">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Season challenges</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Report and track challenges across all projects.
             {activeProject ? (
               <>
-                Challenges from all projects. New reports use{' '}
+                {' '}
+                New reports use{' '}
                 <span className="font-medium text-foreground/90">{activeProject.name}</span> (nav selection).
               </>
             ) : (
               <>
-                Challenges from all projects.{' '}
-                <span className="font-medium text-foreground/90">Select a project in the nav</span> to report a
-                new one.
+                {' '}
+                <span className="font-medium text-foreground/90">Select a project in the nav</span> to attach new
+                reports.
               </>
             )}
           </p>
         </div>
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogTrigger asChild>
-            <button className="fv-btn fv-btn--primary">
+            <button type="button" className="fv-btn fv-btn--primary shrink-0 self-start sm:self-center">
               <Plus className="h-4 w-4" />
               Report Challenge
             </button>

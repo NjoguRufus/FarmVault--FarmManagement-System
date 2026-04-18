@@ -35,9 +35,13 @@ import HarvestDetailsPage from "@/pages/HarvestDetailsPage";
 import HarvestCollectionsPage from "@/pages/HarvestCollectionsPage";
 import TomatoHarvestListPage from "@/pages/TomatoHarvestListPage";
 import TomatoHarvestSessionDetailPage from "@/pages/TomatoHarvestSessionDetailPage";
+import FallbackHarvestListPage from "@/pages/harvest/FallbackHarvestListPage";
+import FallbackHarvestSessionDetailPage from "@/pages/harvest/FallbackHarvestSessionDetailPage";
 import BrokerHarvestSalesPage from "@/pages/BrokerHarvestSalesPage";
 import BrokerExpensesPage from "@/pages/BrokerExpensesPage";
 import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
+import BrokerTomatoDashboardPage from "@/pages/broker/BrokerTomatoDashboardPage";
+import BrokerTomatoDispatchPage from "@/pages/broker/BrokerTomatoDispatchPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
@@ -349,9 +353,18 @@ const AppRoutesWithLock = () => (
           </RequireAuth>
         }
       >
-        <Route path="/app" element={<CompanyDashboardRoute />} />
-        <Route path="/app/*" element={<CompanyDashboardRoute />} />
-        <Route path="/dashboard" element={<PermissionRoute module="dashboard"><CompanyDashboardRoute /></PermissionRoute>} />
+        <Route path="/app" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
+        <Route path="/app/*" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
+        <Route
+          path="/dashboard"
+          element={
+            <PermissionRoute module="dashboard">
+              <RequireNotBroker>
+                <CompanyDashboardRoute />
+              </RequireNotBroker>
+            </PermissionRoute>
+          }
+        />
         <Route path="/projects" element={<PermissionRoute module="projects"><RequireNotBroker><ProjectsPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/farms/:farmId" element={<PermissionRoute module="projects"><RequireNotBroker><FarmDetailsPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/projects/new" element={<PermissionRoute module="projects" actionPath="create"><RequireNotBroker><Navigate to="/projects?new=1" replace /></RequireNotBroker></PermissionRoute>} />
@@ -367,13 +380,19 @@ const AppRoutesWithLock = () => (
         <Route path="/inventory/categories" element={<PermissionRoute module="inventory"><InventoryCategoriesPage /></PermissionRoute>} />
         <Route path="/inventory/suppliers" element={<PermissionRoute module="inventory"><InventorySuppliersPage /></PermissionRoute>} />
         {/* Crop-aware Harvest entrypoint (French Beans → Collections; others → Harvest & Sales) */}
-        <Route path="/harvest" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestEntryRoute /></RequireNotBroker></PermissionRoute>} />
-        <Route path="/harvest-sales" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestSalesPage /></RequireNotBroker></PermissionRoute>} />
-        <Route path="/harvest-sales/harvest/:harvestId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/harvest" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker"><HarvestEntryRoute /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/harvest-sessions/:projectId/session/:sessionId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker"><FallbackHarvestSessionDetailPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/harvest-sessions/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker"><FallbackHarvestListPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/harvest-sales" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker"><HarvestSalesPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/harvest-sales/harvest/:harvestId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker"><HarvestDetailsPage /></RequireNotBroker></PermissionRoute>} />
         {/* Single route with optional projectId so the page does not remount when URL gains/loses projectId */}
         <Route path="/harvest-collections/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/tomato-harvest/:projectId/session/:sessionId" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestSessionDetailPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/tomato-harvest/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestListPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/broker" element={<RequireBroker><BrokerTomatoDashboardPage /></RequireBroker>} />
+        <Route path="/broker/harvest/:dispatchId" element={<RequireBroker><BrokerTomatoDispatchPage /></RequireBroker>} />
+        <Route path="/broker/harvest-sales" element={<Navigate to="/broker" replace />} />
+        <Route path="/broker/expenses" element={<Navigate to="/broker" replace />} />
         <Route path="/suppliers" element={<PermissionRoute module="projects"><SuppliersPage /></PermissionRoute>} />
         <Route path="/challenges" element={<PermissionRoute module="planning"><SeasonChallengesPage /></PermissionRoute>} />
         <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />
@@ -474,8 +493,6 @@ const AppRoutesWithLock = () => (
       {/* Legacy role-based routes (manager/broker/driver) are no longer used; keep redirects for old bookmarks. */}
       <Route path="/manager" element={<Navigate to="/staff/staff-dashboard" replace />} />
       <Route path="/manager/*" element={<Navigate to="/staff/staff-dashboard" replace />} />
-      <Route path="/broker" element={<Navigate to="/staff/staff-dashboard" replace />} />
-      <Route path="/broker/*" element={<Navigate to="/staff/staff-dashboard" replace />} />
       <Route path="/driver" element={<Navigate to="/staff/staff-dashboard" replace />} />
 
       {/* Developer-only routes under /admin and /dev */}

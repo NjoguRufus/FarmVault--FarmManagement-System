@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, FileText, Loader2, Plus, RefreshCw, Search, Sprout } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -30,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
+import SeasonChallengesPage from '@/pages/SeasonChallengesPage';
 
 const BRAND_GREEN = '#16a34a';
 const BRAND_GOLD = '#D8B980';
@@ -82,7 +83,11 @@ function formatRelativeTime(iso: string | null): string {
 
 export default function AdminRecordsPage() {
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'crops' | 'notes' | 'admin'>('crops');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
+  const initialTab =
+    urlTab === 'challenges' ? 'challenges' : urlTab === 'notes' ? 'notes' : urlTab === 'admin' ? 'admin' : 'crops';
+  const [tab, setTab] = useState<'crops' | 'notes' | 'admin' | 'challenges'>(initialTab);
   const [fabOpen, setFabOpen] = useState(false);
   const [addCropOpen, setAddCropOpen] = useState(false);
   const [cropCatalogSaving, setCropCatalogSaving] = useState(false);
@@ -97,6 +102,20 @@ export default function AdminRecordsPage() {
   const { isDeveloper, companyId: scopeCompanyId } = useCompanyScope();
   const { activeProject, activeFarmId } = useProject();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const nextUrlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
+    const next =
+      nextUrlTab === 'challenges'
+        ? 'challenges'
+        : nextUrlTab === 'notes'
+          ? 'notes'
+          : nextUrlTab === 'admin'
+            ? 'admin'
+            : 'crops';
+    setTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const openAddNoteModal = () => {
     setNewNoteTitle('');
@@ -525,32 +544,52 @@ export default function AdminRecordsPage() {
       {authReady && companyReady && !cropStatsQuery.isLoading && !cropStatsQuery.isError && (
         <Tabs
           value={tab}
-          onValueChange={(v) => setTab(v as typeof tab)}
+          onValueChange={(v) => {
+            const next = v as typeof tab;
+            setTab(next);
+            const params = new URLSearchParams(searchParams);
+            if (next === 'crops') params.delete('tab');
+            else params.set('tab', next);
+            setSearchParams(params, { replace: true });
+          }}
           className="space-y-6"
         >
-          <TabsList className="h-11 w-full justify-start gap-1 rounded-xl bg-muted/40 p-1 sm:w-auto">
-            <TabsTrigger
-              value="crops"
-              className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              Crops
-            </TabsTrigger>
-            <TabsTrigger
-              value="notes"
-              className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              Notes
-            </TabsTrigger>
-            <TabsTrigger
-              value="admin"
-              className="relative rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <Bell className="h-3.5 w-3.5" />
-                Admin notes
-              </span>
-            </TabsTrigger>
-          </TabsList>
+          <div
+            className={cn(
+              'w-full overflow-x-auto overflow-y-hidden overscroll-x-contain pb-0.5 sm:overflow-visible sm:pb-0',
+              '[scrollbar-width:thin] [-webkit-overflow-scrolling:touch]',
+            )}
+          >
+            <TabsList className="h-11 inline-flex w-max min-h-[2.75rem] flex-nowrap items-stretch justify-start gap-1 rounded-xl bg-muted/40 p-1 sm:w-auto sm:min-w-0">
+              <TabsTrigger
+                value="crops"
+                className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                Crops
+              </TabsTrigger>
+              <TabsTrigger
+                value="notes"
+                className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                Notes
+              </TabsTrigger>
+              <TabsTrigger
+                value="challenges"
+                className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                Season challenges
+              </TabsTrigger>
+              <TabsTrigger
+                value="admin"
+                className="relative shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Bell className="h-3.5 w-3.5 shrink-0" />
+                  Admin notes
+                </span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="crops" className="mt-0 space-y-6">
             {visibleCrops.length === 0 ? (
@@ -632,6 +671,10 @@ export default function AdminRecordsPage() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="challenges" className="mt-0">
+            <SeasonChallengesPage />
           </TabsContent>
 
           <TabsContent value="admin" className="mt-0">

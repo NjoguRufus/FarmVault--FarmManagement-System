@@ -26,6 +26,11 @@ export function useTomatoHarvestDashboardRealtime(
       void qc.invalidateQueries({ queryKey: ['dashboard-expenses'], exact: false });
       void qc.invalidateQueries({ queryKey: ['financeExpenses'], exact: false });
       void qc.invalidateQueries({ queryKey: ['tomato-custom-markets', cid] });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-dispatches'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-dispatch'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-sales'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-expenses'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-crates-sold'], exact: false });
     };
 
     const channel = supabase

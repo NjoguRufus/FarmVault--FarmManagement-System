@@ -198,7 +198,16 @@ export default function TomatoHarvestSessionDetailPage() {
   const totalBuckets = useMemo(() => pickersMerged.reduce((s, p) => s + p.bucketCount, 0), [pickersMerged]);
   const pickerCost = session ? computePickerCost(totalBuckets, Number(session.picker_rate_per_bucket)) : 0;
   const revenue = session ? computeRevenue(session, dispatch) : 0;
-  const net = computeNet(revenue, pickerCost);
+  const marketExpensesTotal =
+    dispatch?.market_expenses_total != null ? Number(dispatch.market_expenses_total) : 0;
+  const net =
+    session && session.sale_mode === 'market' && dispatch
+      ? Math.round(revenue - pickerCost - marketExpensesTotal)
+      : computeNet(revenue, pickerCost);
+  const revenuePendingDisplay =
+    session?.sale_mode === 'market' &&
+    dispatch?.status === 'pending' &&
+    (dispatch?.total_revenue == null || Number(dispatch.total_revenue) <= 0);
 
   const marketPathCommitted = useMemo(
     () => Boolean(session?.sale_mode === 'market' && dispatch != null),
@@ -670,21 +679,17 @@ export default function TomatoHarvestSessionDetailPage() {
             <SimpleStatCard
               layout="mobile-compact"
               title="Revenue"
-              value={
-                session.sale_mode === 'market' && dispatch?.status === 'pending'
-                  ? 'Pending'
-                  : formatKes(revenue)
-              }
+              value={revenuePendingDisplay ? 'Pending' : formatKes(revenue)}
               subtitle={
-                session.sale_mode === 'market' && dispatch?.status === 'pending'
+                revenuePendingDisplay
                   ? 'To be updated after market sale'
-                  : undefined
+                  : session.sale_mode === 'market' && dispatch?.status === 'pending'
+                    ? 'Live total from broker sales'
+                    : undefined
               }
               icon={TrendingUp}
               iconVariant="gold"
-              valueVariant={
-                session.sale_mode === 'market' && dispatch?.status === 'pending' ? 'warning' : 'success'
-              }
+              valueVariant={revenuePendingDisplay ? 'warning' : 'success'}
               className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
             />
           )}
@@ -1181,9 +1186,31 @@ export default function TomatoHarvestSessionDetailPage() {
                       className="min-h-10 rounded-lg"
                     />
                   </div>
-                  {canViewHarvestFinancials && (
-                    <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90">Revenue pending</p>
-                  )}
+                  {canViewHarvestFinancials &&
+                    (dispatch ? (
+                      <div className="rounded-md border border-border/60 bg-background/80 p-2 text-[11px] space-y-1">
+                        <p className="font-semibold text-foreground">Broker market (live)</p>
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
+                          <span>Sales</span>
+                          <span className="text-right font-medium text-foreground tabular-nums">
+                            {formatKes(Number(dispatch.broker_sales_revenue ?? 0))}
+                          </span>
+                          <span>Market expenses</span>
+                          <span className="text-right font-medium text-foreground tabular-nums">
+                            {formatKes(Number(dispatch.market_expenses_total ?? 0))}
+                          </span>
+                          <span>Net (market)</span>
+                          <span className="text-right font-medium text-foreground tabular-nums">
+                            {formatKes(Number(dispatch.net_market_profit ?? 0))}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Buyers and market costs are recorded by the assigned broker.
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90">Revenue pending</p>
+                    ))}
                 </div>
               )}
 
