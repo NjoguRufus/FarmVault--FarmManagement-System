@@ -1,4 +1,5 @@
 import type { Employee, User } from "@/types";
+import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 
 function normalizeLandingPath(landing: string): string {
   const l = (landing || "/dashboard").trim() || "/dashboard";
@@ -11,7 +12,7 @@ export const COMPANY_ONBOARDING_PATH = "/onboarding/company";
 
 export const AMBASSADOR_CONSOLE_DASHBOARD_PATH = "/ambassador/console/dashboard";
 
-/** Clerk OAuth return + default `afterSignInUrl` / `afterSignUpUrl` — redirects to `/dashboard` only. */
+/** Clerk OAuth return + default `afterSignInUrl` / `afterSignUpUrl` — hands off to `/auth/callback` → `/auth/continue` → app entry. */
 export const AUTH_CALLBACK_PATH = "/auth/callback";
 
 /** Full post-auth resolution (ambassador funnel, intended routes). */
@@ -48,7 +49,6 @@ export function resolvePostAuthDestination(input: ResolvePostAuthDestinationInpu
     setupIncomplete,
     employeeProfile,
     resetRequired,
-    effectiveAccessLandingPage,
     hasAmbassadorAccessIntent,
     isAmbassadorSignupType,
   } = input;
@@ -74,8 +74,8 @@ export function resolvePostAuthDestination(input: ResolvePostAuthDestinationInpu
     return AMBASSADOR_CONSOLE_DASHBOARD_PATH;
   }
 
-  if (setupIncomplete && !employeeProfile) {
-    if (resetRequired) {
+  if (setupIncomplete) {
+    if (resetRequired && !employeeProfile) {
       return "/start-fresh";
     }
     if (isAmbassadorSignupType) {
@@ -84,7 +84,7 @@ export function resolvePostAuthDestination(input: ResolvePostAuthDestinationInpu
     return COMPANY_ONBOARDING_PATH;
   }
 
-  return normalizeLandingPath(effectiveAccessLandingPage);
+  return APP_ENTRY_PATH;
 }
 
 /** Exact `/sign-in` or `/sign-up` only — not `/sign-in/*` (Clerk MFA / SSO substeps must not be interrupted). */
@@ -138,7 +138,7 @@ export function resolveSignedInTopLevelAuthDestination(
 
   const hasCompany = Boolean(user.companyId) || Boolean(employeeProfile);
   if (hasCompany) {
-    return normalizeLandingPath(effectiveAccessLandingPage);
+    return APP_ENTRY_PATH;
   }
 
   return COMPANY_ONBOARDING_PATH;

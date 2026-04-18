@@ -10,7 +10,8 @@ import { MobileMoreDrawer } from './MobileMoreDrawer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
 import { logger } from "@/lib/logger";
-import { brokerMayAccessNavPath, isSalesBrokerUser } from '@/lib/brokerNav';
+import { brokerMayAccessNavPath } from '@/lib/brokerNav';
+import { isNavItemActive } from '@/lib/navActive';
 
 type DrawerGroup = { title: string; items: BottomNavItem[] };
 
@@ -42,17 +43,17 @@ function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undef
 }
 
 export function BottomNav() {
-  const { user } = useAuth();
+  const { user, effectiveAccess } = useAuth();
   const { can } = usePermissions();
   const location = useLocation();
   const mainItems = getMainNavItems(user).filter((item) => {
-    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
+    if (effectiveAccess.isBroker && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
   });
   const moreItems = getMoreNavItems(user).filter((item) => {
-    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
+    if (effectiveAccess.isBroker && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
@@ -299,7 +300,11 @@ export function BottomNav() {
             <NavItem
               key={item.path}
               item={item}
-              active={false}
+              activeOverride={
+                effectiveAccess.isBroker
+                  ? isNavItemActive(location.pathname, location.search, item.path)
+                  : undefined
+              }
               to={item.path}
             />
           );
@@ -319,12 +324,15 @@ export function BottomNav() {
 function NavItem({
   item,
   active: activeProp,
+  activeOverride,
   to,
   asButton,
   onPress,
 }: {
   item: { label: string; icon: React.ComponentType<{ className?: string }>; tourId?: string };
   active?: boolean;
+  /** When set (e.g. broker tab URLs), overrides React Router NavLink `isActive`. */
+  activeOverride?: boolean;
   to?: string;
   asButton?: boolean;
   onPress?: () => void;
@@ -381,28 +389,31 @@ function NavItem({
 
   if (!to) return null;
 
-  const itemPath = to.replace(/\/+/g, '/');
-
+  const [pathOnly] = to.split('?');
+  const normalizedPath = pathOnly.replace(/\/+/g, '/') || '/';
   const endMatch =
-    itemPath === '/' || itemPath === '/developer' || itemPath === '/broker';
+    !to.includes('?') &&
+    (normalizedPath === '/' || normalizedPath === '/developer' || normalizedPath === '/broker');
 
   return (
     <NavLink
-      to={itemPath}
+      to={to}
       end={endMatch}
       data-tour={item.tourId}
       className="relative z-10 flex flex-1 min-w-0 min-h-[44px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
       aria-label={item.label}
     >
-      {({ isActive }) => (
+      {({ isActive }) => {
+        const tabActive = activeOverride ?? isActive;
+        return (
         <motion.span
           className={cn(
             'flex flex-1 min-w-0 w-full h-full rounded-xl',
-            isActive && 'bg-green-100/85 dark:bg-emerald-900/45'
+            tabActive && 'bg-green-100/85 dark:bg-emerald-900/45'
           )}
           initial={false}
           animate={
-            isActive
+            tabActive
               ? {
                   scale: ACTIVE_TAB_SCALE,
                   boxShadow: ACTIVE_TAB_SHADOW,
@@ -417,24 +428,25 @@ function NavItem({
         >
           <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[44px] py-1 px-2">
             <span className="flex items-center justify-center h-5 w-5 shrink-0">
-              <Icon
-                className={cn(
-                  'h-5 w-5 shrink-0 transition-colors duration-200 ease-in-out',
-                  isActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
-                )}
-              />
+            <Icon
+              className={cn(
+                'h-5 w-5 shrink-0 transition-colors duration-200 ease-in-out',
+                tabActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
+              )}
+            />
             </span>
             <span
               className={cn(
                 'text-[10px] font-medium truncate max-w-[72px] text-center transition-colors duration-200 ease-in-out',
-                isActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
+                tabActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
               )}
             >
               {item.label}
             </span>
           </span>
         </motion.span>
-      )}
+        );
+      }}
     </NavLink>
   );
 }

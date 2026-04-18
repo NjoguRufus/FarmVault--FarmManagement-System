@@ -17,6 +17,7 @@ export function isAppRoutePath(pathname: string): boolean {
     '/start-fresh',
     '/dashboard',
     '/app',
+    '/broker',
     '/projects',
     '/expenses',
     '/operations',

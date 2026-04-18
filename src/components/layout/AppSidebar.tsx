@@ -14,7 +14,8 @@ import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 import { logger } from "@/lib/logger";
-import { brokerMayAccessNavPath, isSalesBrokerUser } from '@/lib/brokerNav';
+import { brokerMayAccessNavPath } from '@/lib/brokerNav';
+import { isNavItemActive } from '@/lib/navActive';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -42,18 +43,13 @@ function getSidebarTourId(path: string): string | undefined {
 
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, effectiveAccess } = useAuth();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
   const { plan, isDeveloper, isLoading: planLoading, isOverride } = useEffectivePlanAccess();
 
-  const normalizedCurrentPath = useMemo(
-    () => location.pathname.replace(/\/+/g, '/'),
-    [location.pathname],
-  );
-
   const navItems = getNavItemsForSidebar(user).filter((item) => {
-    if (isSalesBrokerUser(user) && brokerMayAccessNavPath(item.path)) return true;
+    if (effectiveAccess.isBroker && brokerMayAccessNavPath(item.path)) return true;
     const module = getModuleForPath(item.path);
     if (!module) return true;
     return can(module, 'view');
@@ -222,11 +218,12 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
                 </li>
               ) : null}
               {group.items.map((item) => {
-            const normalizedPath = normalizedCurrentPath;
-            const itemPath = item.path.replace(/\/+/g, '/');
-            const isActive = normalizedPath === itemPath || (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
+            const itemPath = item.path;
+            const isActive = item.external
+              ? false
+              : isNavItemActive(location.pathname, location.search, itemPath);
             const Icon = item.icon;
-            const lockedFeature = getLockedProFeatureForPath(itemPath);
+            const lockedFeature = getLockedProFeatureForPath(itemPath.split('?')[0]);
             const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
             const isLocked =
               Boolean(lockedFeature) &&
@@ -262,7 +259,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
                   <li key={item.path}>
                     {item.external ? (
                       <a
-                        href={itemPath}
+                        href={item.path.split('?')[0]}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={sharedClassName}
@@ -272,8 +269,8 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
                       </a>
                     ) : (
                       <Link
-                        to={itemPath}
-                        data-tour={getSidebarTourId(itemPath)}
+                        to={item.path}
+                        data-tour={getSidebarTourId(item.path.split('?')[0])}
                         className={sharedClassName}
                         aria-disabled={isLocked ? true : undefined}
                         onMouseDown={(e) => {

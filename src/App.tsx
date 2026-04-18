@@ -156,6 +156,7 @@ import { OnboardingModalPriorityProvider } from "@/contexts/OnboardingModalPrior
 import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { RootRoute } from "@/components/routing/RootRoute";
+import { FarmRoleGate } from "@/components/routing/FarmRoleGate";
 import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { DomainGuard } from "@/components/routing/DomainGuard";
 import { AppLockGate } from "@/components/auth/AppLockGate";
@@ -193,6 +194,8 @@ import { OneSignalBootstrap } from "@/components/notifications/OneSignalBootstra
 import { OneSignalIdentitySync } from "@/components/notifications/OneSignalIdentitySync";
 import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
 import { logger } from "@/lib/logger";
+import AppEntryPage from "@/app/app-entry/page";
+import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 
 const queryClient = new QueryClient();
 
@@ -269,7 +272,7 @@ const AppRoutesWithLock = () => (
       <Route path="/auth/ambassador-continue" element={<AmbassadorAuthContinuePage />} />
       <Route path="/emergency-access" element={<EmergencyAccessPage />} />
       <Route path="/choose-plan" element={<Navigate to="/onboarding/company" replace />} />
-      <Route path="/company" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/company" element={<Navigate to={APP_ENTRY_PATH} replace />} />
       <Route path="/onboarding/company" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
       <Route path="/onboarding" element={<Navigate to="/onboarding/company" replace />} />
       <Route path="/pending-approval" element={<RequireAuth><PendingApprovalPage /></RequireAuth>} />
@@ -277,6 +280,8 @@ const AppRoutesWithLock = () => (
       <Route path="/start-fresh" element={<RequireAuth><StartFreshPage /></RequireAuth>} />
       <Route path="/setup-company" element={<Navigate to="/onboarding/company" replace />} />
       <Route path="/setup" element={<Navigate to="/onboarding/company" replace />} />
+      <Route path="/app/app-entry" element={<RequireAuth><AppEntryPage /></RequireAuth>} />
+      <Route path="/app-entry" element={<Navigate to={APP_ENTRY_PATH} replace />} />
 
       {/* Core public pages */}
       <Route path="/features" element={<FeaturesPage />} />
@@ -343,16 +348,17 @@ const AppRoutesWithLock = () => (
       <Route path="/blog" element={<BlogIndexPage />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
 
-      {/* Protected app routes (auth + onboarding required) */}
+      {/* Protected admin / farm app: brokers share MainLayout with role-aware nav + route guards. */}
       <Route
         element={
           <RequireAuth>
             <RequireOnboarding>
-              <MainLayout />
+              <FarmRoleGate />
             </RequireOnboarding>
           </RequireAuth>
         }
       >
+        <Route element={<MainLayout />}>
         <Route path="/app" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
         <Route path="/app/*" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
         <Route
@@ -416,6 +422,7 @@ const AppRoutesWithLock = () => (
         <Route path="/records/:cropSlug" element={<PermissionRoute module="notes"><CropDetailsPage /></PermissionRoute>} />
         <Route path="/records/:cropSlug/new" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
         <Route path="/records/:cropSlug/:noteId" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
+        </Route>
       </Route>
 
       {/* Staff workspace routes */}

@@ -413,6 +413,7 @@ const ROLE_DEFAULTS: Record<string, PermissionMapInput> = {
   manager: PERMISSION_PRESETS.manager,
   'sales-broker': {
     dashboard: { view: true },
+    settings: { view: true, edit: true },
     expenses: { view: true, create: true, edit: true },
     harvest: {
       view: true,
@@ -426,6 +427,7 @@ const ROLE_DEFAULTS: Record<string, PermissionMapInput> = {
   },
   broker: {
     dashboard: { view: true },
+    settings: { view: true, edit: true },
     expenses: { view: true, create: true, edit: true },
     harvest: {
       view: true,
@@ -629,7 +631,8 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
 ];
 
 export function getModuleForPath(path: string): PermissionModule | null {
-  const normalized = path.replace(/\/+/g, '/');
+  const pathOnly = path.split('?')[0];
+  const normalized = pathOnly.replace(/\/+/g, '/');
   for (let i = 0; i < PATH_TO_MODULE.length; i += 1) {
     const { prefix, module } = PATH_TO_MODULE[i];
     if (normalized === prefix || normalized.startsWith(`${prefix}/`)) {

@@ -119,9 +119,18 @@ function getMergedManagerNav(): NavItem[] {
   return Array.from(deduped.values());
 }
 
-/** Broker nav — tomato market dispatches (detail routes are /broker/harvest/:id). */
+/** Broker nav — same shell as farm app; detail routes are /broker/harvest/:id. */
 export const brokerNavConfig: NavItem[] = [
-  { label: 'My markets', shortLabel: 'Markets', path: '/broker', icon: TrendingUp, group: 'main' },
+  { label: 'Dashboard', shortLabel: 'Home', path: '/broker', icon: LayoutDashboard, group: 'main' },
+  {
+    label: 'My markets',
+    shortLabel: 'Markets',
+    path: '/broker?tab=markets',
+    icon: TrendingUp,
+    group: 'main',
+  },
+  { label: 'Profile', shortLabel: 'Profile', path: '/settings', icon: Settings, group: 'main' },
+  { label: 'Support', path: '/support', icon: HelpCircle, group: 'more' },
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
@@ -155,12 +164,8 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
   if (user.role === 'developer') return developerNavConfig;
   if (user.role === 'company-admin' || user.role === ('company_admin' as any))
     return companyNavConfig.filter((i) => i.path !== '/employee-dashboard');
-  if (
-    user.role === 'broker' ||
-    emp === 'sales-broker' ||
-    emp === 'broker'
-  )
-    return brokerNavConfig;
+  const empNorm = String(emp ?? '').trim().toLowerCase();
+  if (user.role === 'broker' || empNorm === 'sales-broker' || empNorm === 'broker') return brokerNavConfig;
   if (
     user.role === 'employee' ||
     user.role === ('user' as any)
