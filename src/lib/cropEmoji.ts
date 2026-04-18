@@ -6,7 +6,8 @@
 const EXACT: Record<string, string> = {
   tomatoes: '🍅',
   'french-beans': '🫛',
-  capsicum: '🌶️',
+  /** Bell pepper (U+1FAD1); not hot pepper 🌶️ */
+  capsicum: '🫑',
   maize: '🌽',
   watermelons: '🍉',
   watermelon: '🍉',
@@ -30,7 +31,9 @@ export function cropTypeKeyEmoji(typeKey: string | null | undefined): string {
 
   if (withoutCustom.includes('tomat')) return '🍅';
   if (withoutCustom.includes('bean') || withoutCustom.includes('french')) return '🫛';
-  if (withoutCustom.includes('capsic') || withoutCustom.includes('pepper')) return '🌶️';
+  if (withoutCustom.includes('capsic')) return '🫑';
+  if (withoutCustom.includes('bell') && withoutCustom.includes('pepper')) return '🫑';
+  if (withoutCustom.includes('pepper')) return '🌶️';
   if (withoutCustom.includes('maize') || withoutCustom.includes('corn')) return '🌽';
   if (withoutCustom.includes('melon') || withoutCustom.includes('water')) return '🍉';
   if (withoutCustom.includes('rice')) return '🌾';

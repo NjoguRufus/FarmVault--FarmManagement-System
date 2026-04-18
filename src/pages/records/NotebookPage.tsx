@@ -27,6 +27,8 @@ import { SmartRichNotesEditor } from "@/components/records/SmartRichNotesEditor"
 import { parseNotebookContentToBlocks } from "@/lib/notebook/parseNotebookContentToBlocks";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./notebookPage.css";
+import { useProject } from "@/contexts/ProjectContext";
+import { FARM_NOTEBOOK_GENERAL_SLUG } from "@/constants/farmNotebook";
 
 type FarmNotebookEntryRow = {
   id: string;
@@ -52,8 +54,15 @@ export default function NotebookPage() {
   const location = useLocation();
   const { cropSlug: rawCropSlug, noteId: rawNoteId } = useParams();
   const cropSlug = decodeURIComponent(String(rawCropSlug ?? "")).trim();
-  const noteIdParam = rawNoteId ? decodeURIComponent(String(rawNoteId)) : null;
+  const pathEndsWithNew = /\b\/new\/?$/.test(location.pathname);
+  const noteIdParam = rawNoteId
+    ? decodeURIComponent(String(rawNoteId)).trim()
+    : pathEndsWithNew
+      ? "new"
+      : null;
 
+  const isGeneralFarmNotebook = cropSlug === FARM_NOTEBOOK_GENERAL_SLUG;
+  const { activeProject, activeFarmId } = useProject();
   const { user } = useAuth();
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
@@ -217,12 +226,17 @@ export default function NotebookPage() {
         setSaveError(null);
         if (!cropSlug) throw new Error("Missing crop.");
 
-        const base = db
+        let base = db
           .public()
           .from("farm_notebook_entries")
           .select("*")
-          .eq("id", noteIdParam)
-          .eq("crop_slug", cropSlug);
+          .eq("id", noteIdParam);
+
+        if (isGeneralFarmNotebook) {
+          base = base.is("crop_slug", null);
+        } else {
+          base = base.eq("crop_slug", cropSlug);
+        }
 
         const { data, error } = isDeveloperRoute
           ? await base.maybeSingle()
@@ -273,7 +287,7 @@ export default function NotebookPage() {
     return () => {
       cancelled = true;
     };
-  }, [noteIdParam, companyId, cropSlug, isDeveloperRoute]);
+  }, [noteIdParam, companyId, cropSlug, isDeveloperRoute, isGeneralFarmNotebook]);
 
   async function uploadNoteAttachment(file: File) {
     const fileExt = file.name.split(".").pop();
@@ -374,19 +388,27 @@ export default function NotebookPage() {
     const run = (async () => {
       try {
         if (!noteId) {
+          const farmId = activeProject?.farmId ?? activeFarmId ?? null;
+          const projectId = activeProject?.id ?? null;
+          const insertRow: Record<string, unknown> = {
+            company_id: companyId,
+            crop_slug: isGeneralFarmNotebook ? null : cropSlug,
+            title: nextTitle,
+            content: nextContent,
+            raw_text: plainBody,
+            structured_blocks: structuredBlocks,
+            attachments,
+            created_by: isDeveloperRoute ? "developer" : user.id,
+          };
+          if (isGeneralFarmNotebook) {
+            insertRow.entry_kind = "note";
+            if (farmId) insertRow.farm_id = farmId;
+            if (projectId) insertRow.project_id = projectId;
+          }
           const { data, error } = await db
             .public()
             .from("farm_notebook_entries")
-            .insert({
-              company_id: companyId,
-              crop_slug: cropSlug,
-              title: nextTitle,
-              content: nextContent,
-              raw_text: plainBody,
-              structured_blocks: structuredBlocks,
-              attachments,
-              created_by: isDeveloperRoute ? "developer" : user.id,
-            })
+            .insert(insertRow)
             .select("id")
             .single();
 
@@ -464,7 +486,7 @@ export default function NotebookPage() {
 
     const { error } = await db.public().from("farm_notebook_entries").insert({
       company_id: targetCompanyId,
-      crop_slug: cropSlug,
+      crop_slug: isGeneralFarmNotebook ? null : cropSlug,
       title,
       content,
       raw_text: htmlToPlainText(content),
@@ -504,7 +526,11 @@ export default function NotebookPage() {
 
       toast.success("Note deleted");
       setShowDeleteConfirm(false);
-      navigate(`${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`);
+      navigate(
+        isGeneralFarmNotebook
+          ? `${isDeveloperRoute ? "/developer/records" : "/records"}`
+          : `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to delete note.";
       toast.error(msg);
@@ -540,7 +566,11 @@ export default function NotebookPage() {
           variant="ghost"
           className="rounded-xl"
           onClick={() =>
-            navigate(`${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`)
+            navigate(
+              isGeneralFarmNotebook
+                ? `${isDeveloperRoute ? "/developer/records" : "/records"}`
+                : `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`,
+            )
           }
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -548,7 +578,9 @@ export default function NotebookPage() {
         </Button>
 
         <div className="min-w-0 flex-1 px-2">
-          <div className="text-xs text-muted-foreground truncate">{cropSlug}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {isGeneralFarmNotebook ? "Farm notebook" : cropSlug}
+          </div>
           <div
             className={cn(
               "text-xs font-medium truncate",
@@ -623,7 +655,7 @@ export default function NotebookPage() {
             disabled={saving || deleting || (!isDeveloperRoute && (scope.error != null || !companyId))}
           >
             <Save className="h-4 w-4 mr-2" />
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>

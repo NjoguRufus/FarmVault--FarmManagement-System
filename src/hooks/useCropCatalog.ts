@@ -13,6 +13,7 @@ interface UseCropCatalogResult {
   isLoading: boolean;
 }
 
+/** Built-in catalog merged with this company’s rows in `public.record_crop_catalog` (Supabase). */
 export function useCropCatalog(companyId: string | null | undefined): UseCropCatalogResult {
   const [customCrops, setCustomCrops] = useState<CropCatalogDoc[]>([]);
   const [isLoading, setIsLoading] = useState(true);

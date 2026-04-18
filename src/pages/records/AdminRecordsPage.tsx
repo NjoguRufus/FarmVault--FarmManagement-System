@@ -1,22 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, FileText, Loader2, Plus, RefreshCw, Search, Sprout } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
-import { db } from '@/lib/db';
+import { useProject } from '@/contexts/ProjectContext';
+import { db, requireCompanyId } from '@/lib/db';
+import { parseNotebookContentToBlocks } from '@/lib/notebook/parseNotebookContentToBlocks';
 import { supabase } from '@/lib/supabase';
 import { RecordsCropGrid } from '@/components/records/RecordsCropGrid';
+import { RecordNotebookEntryCard } from '@/components/records/RecordNotebookEntryCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   DEVELOPER_NOTEBOOK_DEFAULT_CROPS,
   type RecordCropCard,
 } from '@/services/recordsService';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
 
 const BRAND_GREEN = '#16a34a';
 const BRAND_GOLD = '#D8B980';
@@ -44,6 +57,12 @@ type NotebookEntryRow = {
 
 type CropStats = { count: number; lastActivity: string | null };
 
+/** Route segment for notebook entry: general farm notes use reserved `farm` slug. */
+function notebookEntryPathSlug(cropSlug: string | null | undefined): string {
+  const s = String(cropSlug ?? '').trim();
+  return s ? encodeURIComponent(s) : FARM_NOTEBOOK_GENERAL_SLUG;
+}
+
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return 'No activity';
   const d = new Date(iso);
@@ -66,12 +85,82 @@ export default function AdminRecordsPage() {
   const [tab, setTab] = useState<'crops' | 'notes' | 'admin'>('crops');
   const [fabOpen, setFabOpen] = useState(false);
   const [addCropOpen, setAddCropOpen] = useState(false);
+  const [cropCatalogSaving, setCropCatalogSaving] = useState(false);
   const [cropName, setCropName] = useState('');
   const [cropSuggest, setCropSuggest] = useState<Array<{ id: string; name: string; slug: string }>>([]);
+  const [addNoteOpen, setAddNoteOpen] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [addNoteSaving, setAddNoteSaving] = useState(false);
 
-  const { authReady } = useAuth();
+  const { authReady, user } = useAuth();
+  const navigate = useNavigate();
   const { isDeveloper, companyId: scopeCompanyId } = useCompanyScope();
+  const { activeProject, activeFarmId } = useProject();
   const queryClient = useQueryClient();
+
+  const openAddNoteModal = () => {
+    setNewNoteTitle('');
+    setAddNoteOpen(true);
+  };
+
+  const createFarmNoteAndOpenEditor = async () => {
+    const title = newNoteTitle.trim();
+    if (!title) {
+      toast.error('Enter a name for this note.');
+      return;
+    }
+    let companyId: string;
+    try {
+      companyId = requireCompanyId(scopeCompanyId);
+    } catch {
+      toast.error('Company workspace is required.');
+      return;
+    }
+    if (!user?.id) {
+      toast.error('You must be signed in to create a note.');
+      return;
+    }
+    setAddNoteSaving(true);
+    try {
+      const plainBody = '';
+      const structuredBlocks = parseNotebookContentToBlocks(plainBody);
+      const insertRow: Record<string, unknown> = {
+        company_id: companyId,
+        crop_slug: null,
+        title,
+        content: '',
+        raw_text: plainBody,
+        structured_blocks: structuredBlocks,
+        attachments: [],
+        created_by: user.id,
+        entry_kind: 'note',
+      };
+      const farmId = activeProject?.farmId ?? activeFarmId ?? null;
+      const projectId = activeProject?.id ?? null;
+      if (farmId) insertRow.farm_id = farmId;
+      if (projectId) insertRow.project_id = projectId;
+
+      const { data, error } = await db
+        .public()
+        .from('farm_notebook_entries')
+        .insert(insertRow)
+        .select('id')
+        .single();
+      if (error) throw error;
+      const id = String((data as { id?: string })?.id ?? '');
+      if (!id) throw new Error('Insert succeeded but no id was returned.');
+
+      await queryClient.invalidateQueries({ queryKey: ['records', 'notebook'] });
+      setAddNoteOpen(false);
+      setNewNoteTitle('');
+      toast.success('Note created');
+      navigate(`/records/${FARM_NOTEBOOK_GENERAL_SLUG}/${encodeURIComponent(id)}`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not create note.');
+    } finally {
+      setAddNoteSaving(false);
+    }
+  };
 
   const companyReady = isDeveloper ? true : !!(scopeCompanyId && String(scopeCompanyId).trim());
   const needsCompany = !isDeveloper && !companyReady;
@@ -95,10 +184,16 @@ export default function AdminRecordsPage() {
         return;
       }
       try {
+        const cid = String(scopeCompanyId ?? '').trim();
+        if (!cid) {
+          if (!cancelled) setCropSuggest([]);
+          return;
+        }
         const { data, error } = await db
           .public()
           .from('record_crop_catalog')
           .select('id, name, slug')
+          .eq('company_id', cid)
           .ilike('name', `%${q}%`)
           .limit(5);
         if (error) throw error;
@@ -111,21 +206,36 @@ export default function AdminRecordsPage() {
     return () => {
       cancelled = true;
     };
-  }, [cropName, addCropOpen]);
+  }, [cropName, addCropOpen, scopeCompanyId]);
 
   const saveCustomCrop = async () => {
     const name = cropName.trim();
     const slug = slugify(name);
     if (!name || !slug) return;
-    const { error } = await db.public().from('record_crop_catalog').insert({
-      name,
-      slug,
-      created_by: 'user',
-    });
-    if (!error) {
+    let cid: string;
+    try {
+      cid = requireCompanyId(scopeCompanyId);
+    } catch {
+      toast.error('Select a company workspace first.');
+      return;
+    }
+    setCropCatalogSaving(true);
+    try {
+      const { error } = await db.public().from('record_crop_catalog').insert({
+        company_id: cid,
+        name,
+        slug,
+        created_by: 'user',
+      });
+      if (error) throw error;
+      toast.success('Saved ✅');
       setAddCropOpen(false);
       setCropName('');
       setCropSuggest([]);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not save.');
+    } finally {
+      setCropCatalogSaving(false);
     }
   };
 
@@ -268,8 +378,6 @@ export default function AdminRecordsPage() {
     });
   }, [filteredCrops]);
 
-  const firstCropSlug = visibleCrops[0]?.slug ?? visibleCrops[0]?.crop_id ?? '';
-
   const mainBlock = (() => {
     if (!authReady) {
       return (
@@ -377,17 +485,17 @@ export default function AdminRecordsPage() {
             onClick={() => setAddCropOpen(true)}
           >
             <Plus className="h-4 w-4 mr-1" />
-            Add custom crop
+            Add crop name
           </Button>
           <Button
             size="sm"
             className="rounded-xl shadow-md hover:opacity-95"
             style={{ backgroundColor: BRAND_GREEN }}
             disabled={!companyReady}
-            onClick={() => setFabOpen(true)}
+            onClick={openAddNoteModal}
           >
             <Plus className="h-4 w-4 mr-1" />
-            Add note
+            Add new note
           </Button>
         </div>
       </div>
@@ -484,51 +592,46 @@ export default function AdminRecordsPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="notes" className="mt-0">
-            <div className={cn(glassCard(), 'p-6')}>
-              {recentNotesQuery.isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-16 w-full rounded-xl" />
-                  <Skeleton className="h-16 w-full rounded-xl" />
-                </div>
-              ) : recentNotesQuery.isError ? (
+          <TabsContent value="notes" className="mt-0 space-y-6">
+            {recentNotesQuery.isLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-44 w-full rounded-2xl" />
+                ))}
+              </div>
+            ) : recentNotesQuery.isError ? (
+              <div className={cn(glassCard(), 'p-6')}>
                 <p className="text-sm text-red-600">Could not load recent notes.</p>
-              ) : (recentNotesQuery.data?.length ?? 0) === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No notebook entries yet. Open a crop and add a personal note.
+              </div>
+            ) : (recentNotesQuery.data?.length ?? 0) === 0 ? (
+              <div className={cn(glassCard(), 'p-10 text-center')}>
+                <FileText className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
+                <h2 className="text-lg font-semibold text-foreground mb-2">No notes yet</h2>
+                <p className="text-sm text-muted-foreground max-w-md mx-auto mb-5">
+                  Add a farm notebook note or open a crop notebook. New notes use the same cards as your crop
+                  shortcuts.
                 </p>
-              ) : (
-                <ul className="space-y-3">
-                  {recentNotesQuery.data!.map((n) => (
-                    <li
-                      key={n.id}
-                      className="rounded-xl border border-border/50 bg-background/40 p-4 transition-colors hover:border-[color:var(--fv-brand-green)]/30"
-                    >
-                      {String(n.source ?? '').toLowerCase() === 'developer' ? (
-                        <div className="mb-1 w-fit rounded-md bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
-                          From Developer
-                        </div>
-                      ) : null}
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <Link
-                          to={`/records/${encodeURIComponent(String(n.crop_slug ?? ''))}/${encodeURIComponent(n.id)}`}
-                          className="font-medium text-foreground hover:underline"
-                        >
-                          {(n.title ?? '').trim() || 'Untitled'}
-                        </Link>
-                        <span className="text-[11px] text-muted-foreground">
-                          {String(n.crop_slug ?? '').trim() || 'unknown'} ·{' '}
-                          {n.created_at ? new Date(n.created_at).toLocaleString() : ''}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                        {(n.content ?? '').trim().slice(0, 180) || 'No content yet…'}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                <Button onClick={openAddNoteModal} size="sm" style={{ backgroundColor: BRAND_GREEN }}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add new note
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                {recentNotesQuery.data!.map((n) => (
+                  <RecordNotebookEntryCard
+                    key={n.id}
+                    to={`/records/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                    title={(n.title ?? '').trim() || 'Untitled'}
+                    content={n.content}
+                    cropSlug={n.crop_slug}
+                    updatedAt={n.updated_at ?? null}
+                    createdAt={n.created_at ?? null}
+                    isFromDeveloper={String(n.source ?? '').toLowerCase() === 'developer'}
+                  />
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="admin" className="mt-0">
@@ -557,7 +660,7 @@ export default function AdminRecordsPage() {
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         <span style={{ color: BRAND_GOLD }}>From notebook</span>
                         <span>·</span>
-                        <span>{String(n.crop_slug ?? '').trim() || 'unknown'}</span>
+                        <span>{String(n.crop_slug ?? '').trim() || 'Farm notebook'}</span>
                         {isDeveloper ? (
                           <>
                             <span>·</span>
@@ -573,7 +676,7 @@ export default function AdminRecordsPage() {
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3">
                         <Link
-                          to={`/records/${encodeURIComponent(String(n.crop_slug ?? ''))}/${encodeURIComponent(n.id)}`}
+                          to={`/records/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
                           className="text-base font-semibold text-foreground hover:underline"
                         >
                           {(n.title ?? '').trim() || 'Untitled'}
@@ -591,18 +694,77 @@ export default function AdminRecordsPage() {
         </Tabs>
       )}
 
-      {companyReady && firstCropSlug ? (
+      {companyReady ? (
         <Button
           type="button"
           size="lg"
           className="fixed bottom-6 right-6 z-40 h-14 rounded-full px-6 shadow-xl transition-transform hover:scale-[1.03]"
           style={{ backgroundColor: BRAND_GREEN }}
-          onClick={() => setFabOpen(true)}
+          onClick={openAddNoteModal}
         >
           <Plus className="h-5 w-5 mr-2" />
-          Add note
+          Add new note
         </Button>
       ) : null}
+
+      <Dialog
+        open={addNoteOpen}
+        onOpenChange={(open) => {
+          setAddNoteOpen(open);
+          if (!open) setNewNoteTitle('');
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add new note</DialogTitle>
+            <DialogDescription>
+              Name this record (for example, Fertilizers). You can write the full note on the next screen.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="fv-new-note-title">Note name</Label>
+            <Input
+              id="fv-new-note-title"
+              autoFocus
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              placeholder="e.g. Fertilizers"
+              disabled={addNoteSaving}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void createFarmNoteAndOpenEditor();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setAddNoteOpen(false)}
+              disabled={addNoteSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              style={{ backgroundColor: BRAND_GREEN }}
+              disabled={addNoteSaving || !newNoteTitle.trim()}
+              onClick={() => void createFarmNoteAndOpenEditor()}
+            >
+              {addNoteSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Start writing'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={fabOpen} onOpenChange={setFabOpen}>
         <DialogContent className="sm:max-w-md">
@@ -634,7 +796,7 @@ export default function AdminRecordsPage() {
       <Dialog open={addCropOpen} onOpenChange={setAddCropOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add custom crop</DialogTitle>
+            <DialogTitle>Add crop name</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
             <Input
@@ -663,11 +825,15 @@ export default function AdminRecordsPage() {
             ) : null}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddCropOpen(false)}>
+            <Button variant="outline" disabled={cropCatalogSaving} onClick={() => setAddCropOpen(false)}>
               Cancel
             </Button>
-            <Button style={{ backgroundColor: BRAND_GREEN }} onClick={() => void saveCustomCrop()}>
-              Save
+            <Button
+              style={{ backgroundColor: BRAND_GREEN }}
+              disabled={cropCatalogSaving}
+              onClick={() => void saveCustomCrop()}
+            >
+              {cropCatalogSaving ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

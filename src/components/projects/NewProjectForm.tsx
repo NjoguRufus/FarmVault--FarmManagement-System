@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar as CalendarIcon, Info, Sprout, Plus, Trash2, Lock } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronsUpDown, Info, Sprout, Plus, Trash2, Lock } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -9,19 +9,31 @@ import { cn } from '@/lib/utils';
 import { createBudgetPool, getBudgetPoolsByCompany } from '@/services/budgetPoolService';
 import { getChallengeTemplates } from '@/services/challengeTemplatesService';
 import { createProject } from '@/services/projectsService';
+import { addCropToCatalog } from '@/services/cropCatalogService';
 import { listFarmsByCompany } from '@/services/farmsService';
 import {
+  buildCustomCropTemplateForCatalog,
   cropSupportsEnvironment,
   findCropKnowledgeByTypeKey,
   getEffectiveEnvironmentForCrop,
   getEnvironmentOptionsForCrop,
+  isReservedBuiltinCropTypeKey,
   normalizeCropTypeKey,
   toProjectCropTypeKey,
+  type CropKnowledge,
 } from '@/knowledge/cropCatalog';
 import { detectStageForCrop } from '@/knowledge/stageDetection';
 import { getLegacyStartingStageIndex } from '@/lib/stageDetection';
 import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -33,7 +45,16 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { getCropDaysToHarvest } from '@/utils/expectedHarvest';
@@ -102,6 +123,17 @@ function toStartOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+/** URL-safe slug for custom crop keys (`record_crop_catalog.slug` / project `crop_type`). */
+function slugifyCropName(input: string): string {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/['"]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
 function StepIndicator({ step }: { step: WizardStep }) {
   const pct = step === 1 ? 33 : step === 2 ? 66 : 100;
   return (
@@ -133,7 +165,7 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
   const { user } = useAuth();
   const { setActiveProject, projects } = useProject();
   const queryClient = useQueryClient();
-  const { crops: cropCatalog } = useCropCatalog(user?.companyId);
+  const { crops: cropCatalogFromHook } = useCropCatalog(user?.companyId);
   const planAccess = useEffectivePlanAccess();
   const multiBlockAccess = useFeatureAccess('multiBlockManagement');
 
@@ -149,9 +181,10 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
     acreage: '',
     budget: '',
   });
-  const [farmSearch, setFarmSearch] = useState('');
+  const [farmComboOpen, setFarmComboOpen] = useState(false);
+  const [farmComboSearch, setFarmComboSearch] = useState('');
   const [farmModalOpen, setFarmModalOpen] = useState(false);
-  const [farmInputFocused, setFarmInputFocused] = useState(false);
+  const [farmModalInitialName, setFarmModalInitialName] = useState('');
   const [manualStageOverride, setManualStageOverride] = useState(false);
   const [stepOneError, setStepOneError] = useState('');
   const [stepTwoReadyToSubmit, setStepTwoReadyToSubmit] = useState(false);
@@ -170,6 +203,31 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
   const [pendingLinkCounts, setPendingLinkCounts] = useState<{ expenses: number; operations: number; total: number } | null>(null);
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [customCropDialogOpen, setCustomCropDialogOpen] = useState(false);
+  const [customCropNameInput, setCustomCropNameInput] = useState('');
+  const [customCropSaving, setCustomCropSaving] = useState(false);
+  /** Until Firestore snapshot includes the new crop, merge this into the selectable list. */
+  const [optimisticCustomCrop, setOptimisticCustomCrop] = useState<CropKnowledge | null>(null);
+  const [cropComboOpen, setCropComboOpen] = useState(false);
+  const [cropComboSearch, setCropComboSearch] = useState('');
+
+  const cropCatalog = useMemo((): CropKnowledge[] => {
+    const base = cropCatalogFromHook;
+    if (!optimisticCustomCrop) return base;
+    const n = normalizeCropTypeKey(optimisticCustomCrop.cropTypeKey);
+    if (base.some((c) => normalizeCropTypeKey(c.cropTypeKey) === n)) return base;
+    return [...base, optimisticCustomCrop].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, 'en', { sensitivity: 'base' }),
+    );
+  }, [cropCatalogFromHook, optimisticCustomCrop]);
+
+  useEffect(() => {
+    if (!optimisticCustomCrop) return;
+    const n = normalizeCropTypeKey(optimisticCustomCrop.cropTypeKey);
+    if (cropCatalogFromHook.some((c) => normalizeCropTypeKey(c.cropTypeKey) === n)) {
+      setOptimisticCustomCrop(null);
+    }
+  }, [cropCatalogFromHook, optimisticCustomCrop]);
 
   const isProTier =
     planAccess.isDeveloper || planAccess.plan === 'enterprise' || planAccess.isOverride || planAccess.plan === 'pro';
@@ -183,6 +241,94 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
   const openUpgrade = () => {
     openUpgradeModal({ checkoutPlan: 'pro' });
     setUpgradeOpen(true);
+  };
+
+  const filteredCropsForCombo = useMemo(() => {
+    const q = cropComboSearch.trim().toLowerCase();
+    if (!q) return cropCatalog;
+    return cropCatalog.filter((c) => {
+      const key = normalizeCropTypeKey(c.cropTypeKey);
+      const keyHyphen = key.replace(/_/g, '-');
+      return (
+        c.displayName.toLowerCase().includes(q) ||
+        key.includes(q.replace(/\s+/g, '_')) ||
+        keyHyphen.includes(q.replace(/\s+/g, '-'))
+      );
+    });
+  }, [cropCatalog, cropComboSearch]);
+
+  const canOfferAddCustomCrop = useMemo(() => {
+    const raw = cropComboSearch.trim();
+    if (raw.length < 2 || !user?.companyId) return false;
+    if (filteredCropsForCombo.length > 0) return false;
+    const slug = slugifyCropName(raw);
+    if (!slug) return false;
+    if (isReservedBuiltinCropTypeKey(slug)) return false;
+    return true;
+  }, [cropComboSearch, filteredCropsForCombo.length, user?.companyId]);
+
+  const submitCustomCrop = async () => {
+    const name = customCropNameInput.trim();
+    if (name.length < 2) {
+      toast.error('Enter a crop name (at least 2 characters).');
+      return;
+    }
+    if (!user?.companyId) {
+      toast.error('No active company selected.');
+      return;
+    }
+    const slug = slugifyCropName(name);
+    if (!slug) {
+      toast.error('Use letters or numbers in the crop name.');
+      return;
+    }
+    const normalizedKey = normalizeCropTypeKey(slug);
+    if (!normalizedKey) {
+      toast.error('Could not build a crop key from that name.');
+      return;
+    }
+    if (isReservedBuiltinCropTypeKey(normalizedKey)) {
+      toast.error('That name matches a built-in crop. Choose it from the list or pick a different name.');
+      return;
+    }
+    const already = findCropKnowledgeByTypeKey(cropCatalogFromHook, normalizedKey);
+    if (already) {
+      setForm((prev) => ({
+        ...prev,
+        cropTypeKey: normalizeCropTypeKey(already.cropTypeKey),
+        environmentType: getEffectiveEnvironmentForCrop(already, prev.environmentType),
+      }));
+      setManualStageOverride(false);
+      setCustomCropDialogOpen(false);
+      setCustomCropNameInput('');
+      toast.message('Crop already in your list', { description: `Selected "${already.displayName}".` });
+      return;
+    }
+
+    setCustomCropSaving(true);
+    try {
+      const template = buildCustomCropTemplateForCatalog(name, normalizedKey);
+      await addCropToCatalog(user.companyId, template);
+      const optimistic: CropKnowledge = {
+        id: `optimistic:${normalizedKey}`,
+        ...template,
+      };
+      setOptimisticCustomCrop(optimistic);
+      setForm((prev) => ({
+        ...prev,
+        cropTypeKey: template.cropTypeKey,
+        environmentType: getEffectiveEnvironmentForCrop(optimistic, prev.environmentType),
+      }));
+      setManualStageOverride(false);
+      setCustomCropDialogOpen(false);
+      setCustomCropNameInput('');
+      toast.success(`Added "${template.displayName}" to your crops`);
+    } catch (err) {
+      logger.error('[custom crop]', err);
+      toast.error(err instanceof Error ? err.message : 'Could not save custom crop.');
+    } finally {
+      setCustomCropSaving(false);
+    }
   };
 
   useEffect(() => {
@@ -278,12 +424,6 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
       setForm((prev) => ({ ...prev, farmId: initialFarmId }));
     }
   }, [initialFarmId, form.farmId]);
-
-  useEffect(() => {
-    if (!selectedCrop && cropCatalog.length > 0) {
-      setForm((prev) => ({ ...prev, cropTypeKey: cropCatalog[0].cropTypeKey }));
-    }
-  }, [selectedCrop, cropCatalog]);
 
   useEffect(() => {
     const nextEnvironment = getEffectiveEnvironmentForCrop(selectedCrop, form.environmentType);
@@ -447,6 +587,20 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
     const environmentAdjustment = detectedStage?.environmentDayAdjustment ?? 0;
     const stagesForWrite = selectedCrop.stages;
 
+    const projectNameTrim = form.projectName.trim();
+    const duplicateName = projects.some(
+      (p) =>
+        user?.companyId &&
+        p.companyId === user.companyId &&
+        (p.farmId ?? '') === form.farmId &&
+        p.name.trim().toLowerCase() === projectNameTrim.toLowerCase() &&
+        !isProjectClosed(p),
+    );
+    if (duplicateName) {
+      toast.error('A project with this name already exists on this farm.');
+      return;
+    }
+
     setSaving(true);
     try {
       const isBlockMode = enableBlockManagement && blocks.length > 0;
@@ -486,6 +640,14 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
       const separateBudget = budgetType === 'separate' ? Math.max(0, Number(form.budget || '0') || 0) : 0;
       const poolId = budgetType === 'pool' && budgetPoolId ? budgetPoolId : null;
 
+      const farmForNotes = farms.find((farm) => farm.id === form.farmId);
+      const combinedNotes =
+        initialFarmId && farmForNotes?.location?.trim()
+          ? [form.notes?.trim() || null, `Farm location: ${farmForNotes.location.trim()}`]
+              .filter(Boolean)
+              .join('\n\n')
+          : form.notes || null;
+
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         logger.log('[Project Creation payload]', {
@@ -509,7 +671,7 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
         expectedEndDate: null,
         fieldSize: Number(form.acreage || '0') || null,
         fieldUnit: 'acres',
-        notes: form.notes || null,
+        notes: combinedNotes,
         budget: poolId ? 0 : separateBudget,
         budgetPoolId: poolId,
       });
@@ -537,9 +699,14 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
         return;
       }
       finishProjectCreation(project);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('[Project Create Error]', e);
-      toast.error('Failed to create project. Please try again.');
+      const code = (e as { code?: string })?.code;
+      if (code === '23505') {
+        toast.error('Project already exists on this farm.');
+      } else {
+        toast.error('Failed to create project. Please try again.');
+      }
     } finally {
       setSaving(false);
     }
@@ -563,24 +730,22 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
       ),
     [farms],
   );
-  const filteredFarms = useMemo(() => {
-    const q = farmSearch.trim().toLowerCase();
+  const filteredFarmsForCombo = useMemo(() => {
+    const q = farmComboSearch.trim().toLowerCase();
     if (!q) return selectableFarms;
     return selectableFarms.filter(
       (farm) =>
         farm.name.toLowerCase().includes(q) || farm.location.toLowerCase().includes(q),
     );
-  }, [selectableFarms, farmSearch]);
-  const canCreateFarmFromSearch =
-    farmSearch.trim().length > 1 &&
-    !selectableFarms.some((farm) => farm.name.toLowerCase() === farmSearch.trim().toLowerCase());
-  const showFarmSuggestions = farmSearch.trim().length > 0;
+  }, [selectableFarms, farmComboSearch]);
+  const canCreateFarmFromCombo =
+    farmComboSearch.trim().length > 1 &&
+    !selectableFarms.some((farm) => farm.name.toLowerCase() === farmComboSearch.trim().toLowerCase());
 
-  useEffect(() => {
-    if (!form.farmId || farmSearch.trim()) return;
-    const selectedFarm = farms.find((farm) => farm.id === form.farmId);
-    if (selectedFarm) setFarmSearch(selectedFarm.name);
-  }, [form.farmId, farmSearch, farms]);
+  const selectedFarmLabel = useMemo(() => {
+    const f = farms.find((farm) => farm.id === form.farmId);
+    return f?.name?.trim() ? `${f.name}${f.location?.trim() ? ` · ${f.location}` : ''}` : '';
+  }, [farms, form.farmId]);
 
   const stageChangePill = (className?: string) => (
     <Select
@@ -633,66 +798,82 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
             <>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Farm (required)</label>
-                <div className="relative">
-                  <input
-                    className="fv-input pr-8"
-                    value={farmSearch}
-                    onFocus={() => setFarmInputFocused(true)}
-                    onBlur={() => {
-                      // allow click handlers on dropdown options to fire before hiding
-                      window.setTimeout(() => setFarmInputFocused(false), 120);
-                    }}
-                    onChange={(e) => {
-                      setFarmSearch(e.target.value);
-                      setForm((prev) => ({ ...prev, farmId: '' }));
-                    }}
-                    placeholder="Search farms by name or location"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                    ▼
-                  </span>
-                  {farmInputFocused && showFarmSuggestions && (
-                    <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 rounded-md border border-border/60 bg-popover p-2 shadow-md">
-                      <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border/60 p-1.5">
-                        {filteredFarms.map((farm) => (
-                          <button
-                            key={farm.id}
-                            type="button"
-                            className={cn(
-                              'w-full rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted/60',
-                              form.farmId === farm.id && 'bg-emerald-50 text-emerald-900',
-                            )}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              setForm((prev) => ({ ...prev, farmId: farm.id }));
-                              setFarmSearch(farm.name);
-                              setFarmInputFocused(false);
-                            }}
-                          >
-                            <span className="font-medium">{farm.name}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">{farm.location}</span>
-                          </button>
-                        ))}
-                        {filteredFarms.length === 0 && (
-                          <p className="px-2 py-1 text-xs text-muted-foreground">No farm match found.</p>
-                        )}
-                      </div>
-                      {canCreateFarmFromSearch && (
-                        <button
-                          type="button"
-                          className="mt-2 inline-flex h-10 items-center rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setFarmInputFocused(false);
-                            setFarmModalOpen(true);
-                          }}
-                        >
-                          + Add New Farm
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <Popover
+                  open={farmComboOpen}
+                  onOpenChange={(open) => {
+                    setFarmComboOpen(open);
+                    if (!open) setFarmComboSearch('');
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={farmComboOpen}
+                      className="w-full justify-between font-normal h-10 px-3"
+                    >
+                      <span className="truncate">{selectedFarmLabel || 'Select farm'}</span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Search farms by name or location…"
+                        value={farmComboSearch}
+                        onValueChange={setFarmComboSearch}
+                      />
+                      <CommandList>
+                        <CommandGroup>
+                          {filteredFarmsForCombo.map((farm) => (
+                            <CommandItem
+                              key={farm.id}
+                              value={`${farm.id}-${farm.name}`}
+                              onSelect={() => {
+                                setForm((prev) => ({ ...prev, farmId: farm.id }));
+                                setFarmComboOpen(false);
+                                setFarmComboSearch('');
+                              }}
+                            >
+                              <span className="font-medium">{farm.name}</span>
+                              {farm.location?.trim() ? (
+                                <span className="ml-2 text-xs text-muted-foreground">{farm.location}</span>
+                              ) : null}
+                            </CommandItem>
+                          ))}
+                          {canCreateFarmFromCombo ? (
+                            <CommandItem
+                              value="__add_new_farm__"
+                              onSelect={() => {
+                                setFarmModalInitialName(farmComboSearch.trim());
+                                setFarmComboOpen(false);
+                                setFarmComboSearch('');
+                                setFarmModalOpen(true);
+                              }}
+                              className="text-primary font-medium"
+                            >
+                              <Plus className="mr-2 h-4 w-4" />
+                              Add new farm — {farmComboSearch.trim()}
+                            </CommandItem>
+                          ) : null}
+                        </CommandGroup>
+                        {filteredFarmsForCombo.length === 0 && !canCreateFarmFromCombo ? (
+                          <CommandEmpty>
+                            {farmComboSearch.trim().length > 1
+                              ? 'No farms match that search.'
+                              : selectableFarms.length === 0
+                                ? 'No farms yet. Type at least 2 letters to add a new farm from the list.'
+                                : 'No farms match.'}
+                          </CommandEmpty>
+                        ) : null}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Filter the list or pick <span className="font-medium">Add new farm</span>.
+                </p>
               </div>
 
               <div className="space-y-1">
@@ -709,29 +890,89 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Crop</label>
-                  <Select
-                    value={normalizeCropTypeKey(form.cropTypeKey)}
-                    onValueChange={(value) => {
-                      const nextCrop = findCropKnowledgeByTypeKey(cropCatalog, value);
-                      setForm((prev) => ({
-                        ...prev,
-                        cropTypeKey: value,
-                        environmentType: getEffectiveEnvironmentForCrop(nextCrop, prev.environmentType),
-                      }));
-                      setManualStageOverride(false);
+                  <Popover
+                    open={cropComboOpen}
+                    onOpenChange={(open) => {
+                      setCropComboOpen(open);
+                      if (!open) setCropComboSearch('');
                     }}
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select crop" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {cropCatalog.map((crop) => (
-                        <SelectItem key={crop.id} value={normalizeCropTypeKey(crop.cropTypeKey)}>
-                          {crop.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={cropComboOpen}
+                        className="w-full justify-between font-normal h-10 px-3"
+                      >
+                        <span className="truncate">{selectedCrop?.displayName ?? 'Select crop'}</span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Search crops…"
+                          value={cropComboSearch}
+                          onValueChange={setCropComboSearch}
+                        />
+                        <CommandList>
+                          <CommandGroup>
+                            {filteredCropsForCombo.map((crop) => (
+                              <CommandItem
+                                key={crop.id}
+                                value={`${crop.id}-${normalizeCropTypeKey(crop.cropTypeKey)}`}
+                                onSelect={() => {
+                                  const key = normalizeCropTypeKey(crop.cropTypeKey);
+                                  const nextCrop = findCropKnowledgeByTypeKey(cropCatalog, key);
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    cropTypeKey: key,
+                                    environmentType: getEffectiveEnvironmentForCrop(
+                                      nextCrop ?? undefined,
+                                      prev.environmentType,
+                                    ),
+                                  }));
+                                  setManualStageOverride(false);
+                                  setCropComboOpen(false);
+                                  setCropComboSearch('');
+                                }}
+                              >
+                                {crop.displayName}
+                              </CommandItem>
+                            ))}
+                            {canOfferAddCustomCrop ? (
+                              <CommandItem
+                                value="__add_new_crop__"
+                                onSelect={() => {
+                                  setCustomCropNameInput(cropComboSearch.trim());
+                                  setCropComboOpen(false);
+                                  setCropComboSearch('');
+                                  setCustomCropDialogOpen(true);
+                                }}
+                                className="text-primary font-medium"
+                              >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add new crop — {cropComboSearch.trim()}
+                              </CommandItem>
+                            ) : null}
+                          </CommandGroup>
+                          {filteredCropsForCombo.length === 0 && !canOfferAddCustomCrop ? (
+                            <CommandEmpty>
+                              {cropComboSearch.trim().length < 2
+                                ? 'No matching crop. Type at least 2 letters to add a new crop.'
+                                : isReservedBuiltinCropTypeKey(slugifyCropName(cropComboSearch.trim()))
+                                  ? 'That matches a built-in crop — pick it from the list above.'
+                                  : 'No crops match.'}
+                            </CommandEmpty>
+                          ) : null}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Filter the list or pick <span className="font-medium">Add new crop</span>.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -1217,13 +1458,64 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
       />
       <FarmFormModal
         open={farmModalOpen}
-        onOpenChange={setFarmModalOpen}
-        initialName={farmSearch.trim()}
+        onOpenChange={(open) => {
+          setFarmModalOpen(open);
+          if (!open) setFarmModalInitialName('');
+        }}
+        initialName={farmModalInitialName}
         onCreated={(farm: Farm) => {
           setForm((prev) => ({ ...prev, farmId: farm.id }));
-          setFarmSearch(farm.name);
+          setFarmModalOpen(false);
+          setFarmModalInitialName('');
         }}
       />
+      <Dialog
+        open={customCropDialogOpen}
+        onOpenChange={(open) => {
+          setCustomCropDialogOpen(open);
+          if (!open) setCustomCropNameInput('');
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add custom crop</DialogTitle>
+            <DialogDescription>
+              Enter the crop name as you know it (for example, Cassava or Snow peas). It appears in the crop list for
+              everyone in your company.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="fv-custom-crop-name">Crop name</Label>
+            <Input
+              id="fv-custom-crop-name"
+              autoFocus
+              value={customCropNameInput}
+              onChange={(e) => setCustomCropNameInput(e.target.value)}
+              placeholder="e.g. Cassava, Snow peas"
+              disabled={customCropSaving}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitCustomCrop();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCustomCropDialogOpen(false)}
+              disabled={customCropSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void submitCustomCrop()} disabled={customCropSaving || !customCropNameInput.trim()}>
+              {customCropSaving ? 'Saving…' : 'Save & select'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={linkPromptOpen} onOpenChange={(next) => !linkingOldActivities && setLinkPromptOpen(next)}>
         <AlertDialogContent>
           <AlertDialogHeader>
