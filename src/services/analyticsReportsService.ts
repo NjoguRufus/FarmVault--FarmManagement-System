@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { fetchTomatoCompanyAggregate, fetchTomatoMonthlyRevenueByCompany } from '@/services/tomatoHarvestService';
 
 export type AnalyticsCropProfitRow = {
   crop: string | null;
@@ -52,19 +53,51 @@ function logSupabaseError(context: Record<string, unknown>, error: unknown) {
   console.error('Supabase error (json):', JSON.stringify({ ...context, error }, null, 2));
 }
 
+function isTomatoesCropName(c: string | null): boolean {
+  if (!c) return false;
+  const n = c.toLowerCase().replace(/_/g, '-').trim();
+  return n === 'tomatoes' || n === 'tomato';
+}
+
 export async function fetchAnalyticsCropProfit(companyId: string): Promise<AnalyticsCropProfitRow[]> {
-  const { data, error } = await supabase.rpc('analytics_crop_profit', { p_company_id: companyId });
+  const [{ data, error }, tomatoAgg] = await Promise.all([
+    supabase.rpc('analytics_crop_profit', { p_company_id: companyId }),
+    fetchTomatoCompanyAggregate(companyId, null).catch(() => null),
+  ]);
   if (error) {
     logSupabaseError({ op: 'rpc', fn: 'analytics_crop_profit', p_company_id: companyId }, error);
     throw error;
   }
   const rows = (data ?? []) as Record<string, unknown>[];
-  return rows.map((r) => ({
+  const mapped: AnalyticsCropProfitRow[] = rows.map((r) => ({
     crop: typeof r.crop === 'string' ? r.crop : r.crop == null ? null : String(r.crop),
     total_revenue: toNumber(r.total_revenue),
     total_expenses: toNumber(r.total_expenses),
     profit: toNumber(r.profit),
   }));
+
+  const tomatoRev = tomatoAgg?.totalRevenue ?? 0;
+  if (tomatoRev > 0) {
+    const idx = mapped.findIndex((r) => isTomatoesCropName(r.crop));
+    if (idx >= 0) {
+      const ex = mapped[idx].total_expenses;
+      mapped[idx] = {
+        crop: mapped[idx].crop,
+        total_revenue: tomatoRev,
+        total_expenses: ex,
+        profit: tomatoRev - ex,
+      };
+    } else {
+      mapped.push({
+        crop: 'tomatoes',
+        total_revenue: tomatoRev,
+        total_expenses: 0,
+        profit: tomatoRev,
+      });
+    }
+  }
+
+  return mapped;
 }
 
 export async function fetchAnalyticsCropYield(companyId: string): Promise<AnalyticsCropYieldRow[]> {
@@ -80,24 +113,39 @@ export async function fetchAnalyticsCropYield(companyId: string): Promise<Analyt
   }));
 }
 
+function normalizeMonthKey(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.slice(0, 10);
+  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+  return String(raw).slice(0, 10);
+}
+
 export async function fetchAnalyticsMonthlyRevenue(companyId: string): Promise<AnalyticsMonthlyRevenueRow[]> {
-  const { data, error } = await supabase.rpc('analytics_monthly_revenue', { p_company_id: companyId });
+  const [{ data, error }, tomatoMonths] = await Promise.all([
+    supabase.rpc('analytics_monthly_revenue', { p_company_id: companyId }),
+    fetchTomatoMonthlyRevenueByCompany(companyId).catch(() => []),
+  ]);
   if (error) {
     logSupabaseError({ op: 'rpc', fn: 'analytics_monthly_revenue', p_company_id: companyId }, error);
     throw error;
   }
   const rows = (data ?? []) as Record<string, unknown>[];
-  return rows.map((r) => {
-    const m = r.month;
-    let monthStr: string;
-    if (typeof m === 'string') monthStr = m;
-    else if (m instanceof Date) monthStr = m.toISOString().slice(0, 10);
-    else monthStr = String(m ?? '');
-    return {
-      month: monthStr,
-      revenue: toNumber(r.revenue),
-    };
-  });
+  const byMonth = new Map<string, number>();
+  for (const r of rows) {
+    const mk = normalizeMonthKey(r.month);
+    if (!mk) continue;
+    const key = mk.length >= 7 ? `${mk.slice(0, 7)}-01` : mk;
+    byMonth.set(key, (byMonth.get(key) ?? 0) + toNumber(r.revenue));
+  }
+  for (const t of tomatoMonths) {
+    const mk = normalizeMonthKey(t.month);
+    if (!mk) continue;
+    const key = mk.length >= 7 ? `${mk.slice(0, 7)}-01` : mk;
+    byMonth.set(key, (byMonth.get(key) ?? 0) + t.revenue);
+  }
+  return Array.from(byMonth.entries())
+    .map(([month, revenue]) => ({ month, revenue }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 export async function fetchAnalyticsExpenseBreakdown(companyId: string): Promise<AnalyticsExpenseBreakdownRow[]> {

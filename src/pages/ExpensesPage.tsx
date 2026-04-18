@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt, Loader2 } from 'lucide-react';
 import { AuditLogsButton } from '@/components/audit/AuditLogsButton';
 import { useProject } from '@/contexts/ProjectContext';
@@ -9,7 +9,11 @@ import { ExpensesBarChart } from '@/components/dashboard/ExpensesBarChart';
 import { FeatureGate } from '@/components/subscription';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
-import { getFinanceExpenses, createFinanceExpense } from '@/services/financeExpenseService';
+import {
+  getFinanceExpenses,
+  createFinanceExpense,
+  TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE,
+} from '@/services/financeExpenseService';
 import { listFarmsByCompany } from '@/services/farmsService';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
@@ -160,6 +164,7 @@ export default function ExpensesPage() {
   const { activeProject, activeFarmId } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -928,6 +933,7 @@ export default function ExpensesPage() {
               <SelectItem value="Seeds">Seeds</SelectItem>
               <SelectItem value="Fertilizers">Fertilizers</SelectItem>
               <SelectItem value="Labor">Labor</SelectItem>
+              <SelectItem value="labour">Labour (picker)</SelectItem>
               <SelectItem value="Pesticides">Pesticides</SelectItem>
               <SelectItem value="Irrigation">Irrigation</SelectItem>
               <SelectItem value="Equipment">Equipment</SelectItem>
@@ -1059,23 +1065,43 @@ export default function ExpensesPage() {
                 const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
                 const collectionId = expense.meta?.harvestCollectionId;
                 const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
-                
+                const isTomatoPickerLabour =
+                  expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
+                  Boolean(expense.meta?.tomatoHarvestSessionId);
+                const tomatoSessionId = expense.meta?.tomatoHarvestSessionId;
+                const tomatoProjectId = expense.projectId;
+                const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
+
                 return (
-                  <tr 
+                  <tr
                     key={row.key}
-                    className={isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''}
-                    onClick={isPickerPayout && collectionId ? () => setLaborPayoutDrawerCollectionId(collectionId) : undefined}
+                    className={
+                      isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''
+                    }
+                    onClick={
+                      isPickerPayout && collectionId
+                        ? () => setLaborPayoutDrawerCollectionId(collectionId)
+                        : undefined
+                    }
                   >
                     <td>
                       <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-foreground">{expense.description}</span>
+                          {isTomatoPickerLabour && (
+                            <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100">
+                              Auto-generated
+                            </span>
+                          )}
                           {expense.pending && (
                             <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
                               Syncing...
                             </span>
                           )}
                         </div>
+                        {isTomatoPickerLabour && tomatoLabourNote ? (
+                          <span className="text-xs text-muted-foreground">{tomatoLabourNote}</span>
+                        ) : null}
                         {isPickerPayout && collectionLabel && (
                           <span className="text-xs text-muted-foreground">Collection: {collectionLabel}</span>
                         )}
@@ -1097,6 +1123,27 @@ export default function ExpensesPage() {
                         >
                           <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                         </button>
+                      ) : isTomatoPickerLabour && tomatoSessionId && tomatoProjectId ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="p-2 hover:bg-muted rounded-lg transition-colors"
+                            >
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() =>
+                                navigate(`/tomato-harvest/${tomatoProjectId}/session/${tomatoSessionId}`)
+                              }
+                            >
+                              View harvest
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       ) : (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -1179,37 +1226,78 @@ export default function ExpensesPage() {
             const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
             const collectionId = expense.meta?.harvestCollectionId;
             const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
-            
+            const isTomatoPickerLabour =
+              expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
+              Boolean(expense.meta?.tomatoHarvestSessionId);
+            const tomatoSessionId = expense.meta?.tomatoHarvestSessionId;
+            const tomatoProjectId = expense.projectId;
+            const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
+
             return (
-              <div 
-                key={row.key} 
+              <div
+                key={row.key}
                 role={isPickerPayout && collectionId ? 'button' : undefined}
                 tabIndex={isPickerPayout && collectionId ? 0 : undefined}
                 className={cn(
                   'p-4 bg-muted/30 rounded-lg',
-                  isPickerPayout && collectionId && 'cursor-pointer hover:bg-muted/50 active:scale-[0.99]'
+                  isPickerPayout && collectionId && 'cursor-pointer hover:bg-muted/50 active:scale-[0.99]',
                 )}
-                onClick={isPickerPayout && collectionId ? () => setLaborPayoutDrawerCollectionId(collectionId) : undefined}
-                onKeyDown={isPickerPayout && collectionId ? (ev) => ev.key === 'Enter' && setLaborPayoutDrawerCollectionId(collectionId) : undefined}
+                onClick={
+                  isPickerPayout && collectionId
+                    ? () => setLaborPayoutDrawerCollectionId(collectionId)
+                    : undefined
+                }
+                onKeyDown={
+                  isPickerPayout && collectionId
+                    ? (ev) => ev.key === 'Enter' && setLaborPayoutDrawerCollectionId(collectionId)
+                    : undefined
+                }
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="flex items-center gap-2">
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="font-medium text-foreground">{expense.description}</p>
+                      {isTomatoPickerLabour && (
+                        <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100 shrink-0">
+                          Auto-generated
+                        </span>
+                      )}
                       {expense.pending && (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
                           Syncing...
                         </span>
                       )}
                     </div>
+                    {isTomatoPickerLabour && tomatoLabourNote ? (
+                      <p className="text-xs text-muted-foreground mt-1">{tomatoLabourNote}</p>
+                    ) : null}
                     {isPickerPayout && collectionLabel && (
                       <p className="text-xs text-muted-foreground">Collection: {collectionLabel}</p>
                     )}
                     <p className="text-xs text-muted-foreground mt-0.5">{formatDate(expense.date)}</p>
                   </div>
-                  <span className="font-semibold">{formatCurrency(expense.amount)}</span>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <span className="font-semibold">{formatCurrency(expense.amount)}</span>
+                    {isTomatoPickerLabour && tomatoSessionId && tomatoProjectId ? (
+                      <button
+                        type="button"
+                        className="fv-btn fv-btn--secondary text-xs py-1 px-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/tomato-harvest/${tomatoProjectId}/session/${tomatoSessionId}`);
+                        }}
+                      >
+                        View harvest
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <span className={cn('fv-badge', getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category))}>
+                <span
+                  className={cn(
+                    'fv-badge',
+                    getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category),
+                  )}
+                >
                   {expense.category === 'picker_payout' ? 'labour' : expense.category}
                 </span>
               </div>

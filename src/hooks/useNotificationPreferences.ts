@@ -50,6 +50,23 @@ function getBrowserPermission(): NotificationPermission | 'unsupported' {
   return Notification.permission;
 }
 
+/** Read notification prefs from localStorage (for non-React callers, e.g. after an in-app action). */
+export function readStoredNotificationPrefs(userId: string | undefined): {
+  notificationsEnabled: boolean;
+  soundEnabled: boolean;
+  soundFile: NotificationSoundFile;
+} {
+  if (typeof window === 'undefined') {
+    return { notificationsEnabled: false, soundEnabled: true, soundFile: 'notification1.aac' };
+  }
+  const p = loadPreferences(userId);
+  return {
+    notificationsEnabled: p.notificationsEnabled,
+    soundEnabled: p.soundEnabled,
+    soundFile: p.soundFile,
+  };
+}
+
 function loadPreferences(userId: string | undefined): NotificationPreferences {
   if (typeof window === 'undefined') return DEFAULT_PREFERENCES;
   

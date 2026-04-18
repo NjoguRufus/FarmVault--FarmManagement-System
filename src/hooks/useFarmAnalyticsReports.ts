@@ -91,6 +91,41 @@ export function useFarmAnalyticsReports(companyId: string | null | undefined) {
       )
       .on(
         'postgres_changes',
+        { event: '*', schema: 'finance', table: 'expenses', filter: `company_id=eq.${id}` },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'harvest',
+          table: 'tomato_harvest_sessions',
+          filter: `company_id=eq.${id}`,
+        },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'harvest',
+          table: 'tomato_harvest_picker_logs',
+          filter: `company_id=eq.${id}`,
+        },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'harvest',
+          table: 'tomato_market_dispatches',
+          filter: `company_id=eq.${id}`,
+        },
+        () => void refetchAll(),
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'inventory_usage_logs', filter: `company_id=eq.${id}` },
         () => void refetchAll(),
       )

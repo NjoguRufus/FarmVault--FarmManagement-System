@@ -10,7 +10,7 @@ export interface SimpleStatCardProps {
   subtitle?: string;
   className?: string;
   layout?: "horizontal" | "vertical" | "mobile-compact";
-  valueVariant?: "default" | "success" | "warning" | "destructive";
+  valueVariant?: "default" | "success" | "warning" | "destructive" | "info";
   responsive?: boolean; // NEW – aligns with LuxuryStatCard
 }
 
@@ -50,6 +50,7 @@ export function SimpleStatCard({
     success: "text-fv-success",
     warning: "text-fv-warning",
     destructive: "text-destructive",
+    info: "text-fv-info",
   };
 
   const cardBase =

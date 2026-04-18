@@ -3,7 +3,12 @@
  * Use for feature toggles and navigation (e.g. Harvest Collections for French Beans).
  */
 
-export type CropModuleId = 'harvest-collections' | 'picker-payments' | 'grading' | 'sorting';
+export type CropModuleId =
+  | 'harvest-collections'
+  | 'tomato-harvest'
+  | 'picker-payments'
+  | 'grading'
+  | 'sorting';
 
 /**
  * Returns the list of module IDs enabled for a given crop type.
@@ -14,7 +19,7 @@ export function getCropModules(cropType: string): CropModuleId[] {
     case 'french-beans':
       return ['harvest-collections', 'picker-payments'];
     case 'tomatoes':
-      return ['grading', 'sorting'];
+      return ['tomato-harvest', 'grading', 'sorting'];
     default:
       return [];
   }
@@ -23,4 +28,9 @@ export function getCropModules(cropType: string): CropModuleId[] {
 /** Type-safe check: does this crop have the Harvest Collections module? */
 export function hasHarvestCollectionsModule(cropType: string): boolean {
   return getCropModules(cropType).includes('harvest-collections');
+}
+
+/** Tomato bucket intake + packaging + sales (per session). */
+export function hasTomatoHarvestModule(cropType: string): boolean {
+  return getCropModules(cropType).includes('tomato-harvest');
 }
