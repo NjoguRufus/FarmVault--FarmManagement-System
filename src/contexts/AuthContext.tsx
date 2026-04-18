@@ -9,6 +9,7 @@ import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
 import { resolveOrCreatePlatformUser } from '@/lib/auth/resolveOrCreatePlatformUser';
 import { EMPLOYEES_SELECT } from '@/lib/employees/employeesColumns';
+import { mapEmployeeFromSupabaseRow } from '@/lib/employees/mapEmployeeFromSupabaseRow';
 import { clearQuickUnlockState } from '@/services/appLockService';
 import { clearPendingApprovalSession } from '@/lib/pendingApprovalSession';
 import {
@@ -271,31 +272,7 @@ function writeCachedUser(user: User | null) {
 }
 
 function mapEmployeeRow(row: any): Employee {
-  const fullName = row.full_name != null ? String(row.full_name) : undefined;
-  return {
-    id: String(row.id ?? ''),
-    companyId: String(row.company_id ?? ''),
-    // `employees` table uses `full_name` (no `name` column). Keep UI `name` derived.
-    name: resolveUserDisplayName({
-      profileDisplayName: fullName,
-      email: row.email != null ? String(row.email) : undefined,
-    }),
-    fullName,
-    email: row.email != null ? String(row.email) : undefined,
-    phone: row.phone != null ? String(row.phone) : undefined,
-    // UI legacy: keep `contact` derived from phone for display/search.
-    contact: row.phone != null ? String(row.phone) : undefined,
-    role: row.role ?? null,
-    // `employees` table has only `role` (no `employee_role` column)
-    employeeRole: row.role ?? null,
-    department: row.department != null ? String(row.department) : undefined,
-    status: (row.status as Employee['status']) ?? 'active',
-    permissions: row.permissions as PermissionMap | undefined,
-    // UI legacy: treat join date as created_at for Supabase-backed employees
-    joinDate: row.created_at ?? undefined,
-    createdAt: row.created_at ?? undefined,
-    authUserId: row.clerk_user_id != null ? String(row.clerk_user_id) : undefined,
-  };
+  return mapEmployeeFromSupabaseRow(row as Record<string, unknown>);
 }
 
 async function loadEmployeeProfile(uid: string): Promise<Employee | null> {

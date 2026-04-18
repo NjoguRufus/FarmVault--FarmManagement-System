@@ -16,6 +16,7 @@ import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRe
 import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
 import { logger } from "@/lib/logger";
 import { useAmbassadorAccess } from '@/contexts/AmbassadorAccessContext';
+import { brokerMayAccessNavPath } from '@/lib/brokerNav';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -44,9 +45,17 @@ export function MainLayout() {
     return allowed ? null : '/dashboard';
   }, [isEmergencySession, location.pathname]);
 
+  const brokerShellBailout = useMemo(() => {
+    if (!user || !effectiveAccess.isBroker) return null;
+    const path = `${location.pathname}${location.search || ''}`;
+    if (brokerMayAccessNavPath(path)) return null;
+    return '/broker';
+  }, [user, effectiveAccess.isBroker, location.pathname, location.search]);
+
   // Enforce role-based access to main app sections.
   const redirectTarget = useMemo(() => {
     if (emergencyRedirectTarget) return emergencyRedirectTarget;
+    if (brokerShellBailout) return brokerShellBailout;
     if (!user) return null;
     const path = location.pathname;
 
@@ -69,7 +78,7 @@ export function MainLayout() {
       user.profileUserType === 'ambassador' ||
       (user.profileUserType === 'both' && !user.companyId);
 
-    if (isStaffUser && !isAmbassadorUser && !path.startsWith('/staff')) {
+    if (isStaffUser && !isAmbassadorUser && !effectiveAccess.isBroker && !path.startsWith('/staff')) {
       const staffTarget = effectiveAccess.landingPage;
       const isStaffLanding =
         staffTarget === '/staff/staff-dashboard' ||
@@ -102,7 +111,15 @@ export function MainLayout() {
     }
 
     return null;
-  }, [user, location.pathname, emergencyRedirectTarget, effectiveAccess.landingPage, workspaceMode]);
+  }, [
+    user,
+    location.pathname,
+    emergencyRedirectTarget,
+    brokerShellBailout,
+    effectiveAccess.landingPage,
+    effectiveAccess.isBroker,
+    workspaceMode,
+  ]);
 
   // Use useEffect to handle navigation instead of conditional rendering
   // This prevents infinite loops by only redirecting when the target actually changes

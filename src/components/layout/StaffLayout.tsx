@@ -10,11 +10,11 @@ import { cn } from '@/lib/utils';
 import { StaffTourProvider } from '@/tour/StaffTourProvider';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 import { logger } from "@/lib/logger";
-import { isSalesBrokerUser } from '@/lib/brokerNav';
+import { APP_ENTRY_PATH } from '@/lib/routing/appEntryPaths';
 
 export function StaffLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { user } = useAuth();
+  const { user, effectiveAccess } = useAuth();
   useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId));
   const location = useLocation();
 
@@ -24,7 +24,7 @@ export function StaffLayout() {
 
   // Company admins and developers should not use staff shell.
   if (user.role === 'company-admin' || (user as any).role === 'company_admin' || user.role === 'developer') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={APP_ENTRY_PATH} replace />;
   }
 
   // Ambassador-only users must never land in the staff shell.
@@ -42,7 +42,7 @@ export function StaffLayout() {
     return <Navigate to="/" replace />;
   }
 
-  if (isSalesBrokerUser(user)) {
+  if (effectiveAccess.isBroker) {
     return <Navigate to="/broker" replace />;
   }
 

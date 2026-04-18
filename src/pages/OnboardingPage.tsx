@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { APP_ENTRY_PATH } from '@/lib/routing/appEntryPaths';
 import {
   clearOnboardingSessionProgress,
   readOnboardingSessionProgress,
@@ -300,7 +301,7 @@ export default function OnboardingPage() {
         : typeof window !== 'undefined'
           ? window.location.origin
           : 'https://app.farmvault.africa';
-    const dashboardUrl = `${base}/dashboard`;
+    const dashboardUrl = `${base}${APP_ENTRY_PATH}`;
     const submitterEmail = accountEmail.trim().toLowerCase() || recipient;
 
     setPostOnboardingProTrialWelcome(companyName.trim());
@@ -419,7 +420,7 @@ export default function OnboardingPage() {
 
   // Fully onboarded tenant — leave this flow.
   if (fvUser?.companyId && !setupIncomplete) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={APP_ENTRY_PATH} replace />;
   }
 
   // Ambassador-only users must not reach company onboarding (no capabilities RPC wait).
@@ -531,7 +532,7 @@ export default function OnboardingPage() {
       clearFarmerReferralStorageAfterSuccess();
       await syncTenantCompanyFromServer();
       await refreshAuthState();
-      navigate('/dashboard', { replace: true });
+      navigate(APP_ENTRY_PATH, { replace: true });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to finish setup';
       setError(message);

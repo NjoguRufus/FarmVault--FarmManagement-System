@@ -18,6 +18,7 @@ import {
   AMBASSADOR_CONSOLE_DASHBOARD_PATH,
   resolvePostAuthDestination,
 } from "@/lib/routing/postAuthDestination";
+import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 
 function normalizeEmergencyLanding(landing: string): string {
   const l = (landing || "/dashboard").trim() || "/dashboard";
@@ -98,13 +99,13 @@ export default function PostAuthContinuePage() {
     clearAmbassadorAccessIntent();
   }
 
-  if (setupIncomplete && !employeeProfile) {
+  if (setupIncomplete) {
     return <Navigate to={dest} replace state={{ from: location }} />;
   }
 
-  if (intended) {
-    return <Navigate to={intended} replace />;
+  if (dest !== APP_ENTRY_PATH) {
+    return <Navigate to={dest} replace />;
   }
 
-  return <Navigate to={dest} replace />;
+  return <Navigate to={APP_ENTRY_PATH} replace state={{ intended: intended || undefined }} />;
 }
