@@ -20,7 +20,6 @@ const MAIN_APP_PATH_PREFIXES = [
   '/records',
   '/crop-stages',
   '/company',
-  '/profile',
 ] as const;
 
 function matchesMainAppPath(pathname: string): boolean {

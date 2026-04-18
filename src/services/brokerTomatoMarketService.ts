@@ -223,6 +223,68 @@ export async function listTomatoMarketExpenseLines(params: {
   });
 }
 
+/** All expense lines for the given dispatches (RLS limits to broker-visible rows). */
+export async function listTomatoMarketExpenseLinesForDispatches(params: {
+  companyId: string;
+  dispatchIds: string[];
+}): Promise<TomatoMarketExpenseLineRow[]> {
+  const cid = requireCompanyId(params.companyId);
+  const ids = [...new Set(params.dispatchIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { data, error } = await harvest()
+    .from('tomato_market_expense_lines')
+    .select('*')
+    .eq('company_id', cid)
+    .in('market_dispatch_id', ids)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((raw) => {
+    const r = raw as Record<string, unknown>;
+    return {
+      id: String(r.id),
+      company_id: String(r.company_id),
+      market_dispatch_id: String(r.market_dispatch_id),
+      category: String(r.category ?? ''),
+      amount: num(r.amount),
+      created_at: String(r.created_at ?? ''),
+    };
+  });
+}
+
+export type BrokerTomatoExpenseLineWithContext = TomatoMarketExpenseLineRow & {
+  market_name: string | null;
+  harvest_number: number | null;
+  session_date: string | null;
+};
+
+/** Expense lines across all tomato market dispatches visible to the broker, with dispatch context. */
+export async function listBrokerTomatoExpenseLinesWithContext(
+  companyId: string,
+): Promise<BrokerTomatoExpenseLineWithContext[]> {
+  const dispatches = await listBrokerTomatoDispatchesWithSessions(companyId);
+  const dispatchIds = dispatches.map((d) => d.dispatch.id);
+  const lines = await listTomatoMarketExpenseLinesForDispatches({ companyId, dispatchIds });
+  const metaByDispatch = new Map(
+    dispatches.map((r) => [
+      r.dispatch.id,
+      {
+        market_name: r.dispatch.market_name.trim() ? r.dispatch.market_name : null,
+        harvest_number: r.session?.harvest_number ?? null,
+        session_date: r.session?.session_date ?? null,
+      },
+    ]),
+  );
+  return lines.map((l) => {
+    const meta = metaByDispatch.get(l.market_dispatch_id);
+    return {
+      ...l,
+      market_name: meta?.market_name ?? null,
+      harvest_number: meta?.harvest_number ?? null,
+      session_date: meta?.session_date ?? null,
+    };
+  });
+}
+
 export async function insertTomatoMarketExpenseLines(params: {
   companyId: string;
   dispatchId: string;

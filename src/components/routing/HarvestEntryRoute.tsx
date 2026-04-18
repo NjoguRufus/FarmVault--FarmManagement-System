@@ -16,7 +16,21 @@ export function HarvestEntryRoute() {
   const location = useLocation();
 
   const to = useMemo(() => {
-    const base = resolveHarvestEntryPath(activeProject);
+    const base = resolveHarvestEntryPath(activeProject, '');
+    const search = location.search ?? '';
+    return `${base}${search}`;
+  }, [activeProject, location.search]);
+
+  return <Navigate to={to} replace />;
+}
+
+/** Same as {@link HarvestEntryRoute} but resolves paths under `/staff/...` (staff shell). */
+export function StaffHarvestEntryRoute() {
+  const { activeProject } = useProject();
+  const location = useLocation();
+
+  const to = useMemo(() => {
+    const base = resolveHarvestEntryPath(activeProject, '/staff');
     const search = location.search ?? '';
     return `${base}${search}`;
   }, [activeProject, location.search]);

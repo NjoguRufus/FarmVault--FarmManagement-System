@@ -131,6 +131,7 @@ import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestC
 import { HarvestCollectionTransferModal } from '@/components/modals/HarvestCollectionTransferModal';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FeatureGate } from '@/components/subscription';
+import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const COLLECTION_ICONS = [Scale, Package, Leaf, Sprout] as const;
 const HARVEST_COLLECTION_BASE_NAME = 'test';
@@ -151,6 +152,7 @@ export default function HarvestCollectionsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const userCompanyId = user?.companyId ?? null;
+  const harvestNavPrefix = useHarvestNavPrefix();
 
   const isAdminUser = user?.role === 'company-admin' || user?.role === 'developer';
 
@@ -190,9 +192,9 @@ export default function HarvestCollectionsPage() {
       const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
       if (!next || isProjectClosed(next)) return;
       setActiveProject(next as Project);
-      navigate(`/harvest-collections/${next.id}`, { replace: true });
+      navigate(`${harvestNavPrefix}/harvest-collections/${next.id}`, { replace: true });
     },
-    [harvestProjectSelectOptions, setActiveProject, navigate],
+    [harvestProjectSelectOptions, setActiveProject, navigate, harvestNavPrefix],
   );
 
   useEffect(() => {

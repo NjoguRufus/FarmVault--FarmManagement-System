@@ -22,6 +22,7 @@ export function useBrokerTomatoRealtime(
       void qc.invalidateQueries({ queryKey: ['broker-tomato-dispatch'], exact: false });
       void qc.invalidateQueries({ queryKey: ['broker-tomato-sales'], exact: false });
       void qc.invalidateQueries({ queryKey: ['broker-tomato-expenses'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['broker-tomato-market-expenses', cid] });
       void qc.invalidateQueries({ queryKey: ['broker-tomato-templates', cid] });
       void qc.invalidateQueries({ queryKey: ['tomato-harvest-dispatch', cid] });
       void qc.invalidateQueries({ queryKey: ['tomato-dashboard-totals', cid] });

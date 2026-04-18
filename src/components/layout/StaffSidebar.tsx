@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -14,6 +15,7 @@ import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 import { logger } from "@/lib/logger";
+import { hasHarvestCollectionsModule } from '@/lib/cropModules';
 
 interface StaffSidebarProps {
   collapsed: boolean;
@@ -23,6 +25,7 @@ interface StaffSidebarProps {
 export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   const location = useLocation();
   const { user } = useAuth();
+  const { activeProject } = useProject();
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const isMobile = useIsMobile();
@@ -52,7 +55,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   const canOperations = effectivePermissionKeys.has('operations.view') || can('operations', 'view');
 
   if (canHarvestCollections) {
-    items.push({ label: 'Harvest Collections', path: '/staff/harvest-collections' });
+    items.push({ label: 'Harvest', path: '/staff/harvest' });
   }
   if (canInventory) {
     items.push({ label: 'Inventory', path: '/staff/inventory' });
@@ -117,10 +120,20 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
             {items.map((item) => {
               const normalizedPath = normalizedCurrentPath;
               const itemPath = item.path.replace(/\/+/g, '/');
-              const isActive =
-                normalizedPath === itemPath ||
-                (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
-              const lockedFeature = getLockedProFeatureForPath(itemPath);
+              const isStaffHarvestEntry = itemPath === '/staff/harvest';
+              const isActive = isStaffHarvestEntry
+                ? normalizedPath === '/staff/harvest' ||
+                  normalizedPath.startsWith('/staff/harvest-collections') ||
+                  normalizedPath.startsWith('/staff/tomato-harvest') ||
+                  normalizedPath.startsWith('/staff/harvest-sessions')
+                : normalizedPath === itemPath ||
+                  (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
+              const lockedFeature =
+                isStaffHarvestEntry &&
+                activeProject &&
+                hasHarvestCollectionsModule(String(activeProject.cropTypeKey ?? activeProject.cropType ?? ''))
+                  ? getLockedProFeatureForPath('/staff/harvest-collections')
+                  : getLockedProFeatureForPath(itemPath);
               const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
               const isLocked =
                 Boolean(lockedFeature) &&
@@ -132,7 +145,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
                   <Link
                     to={itemPath}
                     data-tour={
-                      item.path === '/staff/harvest-collections'
+                      item.path === '/staff/harvest'
                         ? 'staff-nav-harvest'
                         : item.path === '/staff/inventory'
                         ? 'staff-nav-inventory'

@@ -38,7 +38,7 @@ import TomatoHarvestSessionDetailPage from "@/pages/TomatoHarvestSessionDetailPa
 import FallbackHarvestListPage from "@/pages/harvest/FallbackHarvestListPage";
 import FallbackHarvestSessionDetailPage from "@/pages/harvest/FallbackHarvestSessionDetailPage";
 import BrokerHarvestSalesPage from "@/pages/BrokerHarvestSalesPage";
-import BrokerExpensesPage from "@/pages/BrokerExpensesPage";
+import BrokerTomatoMarketExpensesPage from "@/pages/broker/BrokerTomatoMarketExpensesPage";
 import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
 import BrokerTomatoDashboardPage from "@/pages/broker/BrokerTomatoDashboardPage";
 import BrokerTomatoDispatchPage from "@/pages/broker/BrokerTomatoDispatchPage";
@@ -157,7 +157,7 @@ import { RoutePersistence } from "@/components/routing/RoutePersistence";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { RootRoute } from "@/components/routing/RootRoute";
 import { FarmRoleGate } from "@/components/routing/FarmRoleGate";
-import { HarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
+import { HarvestEntryRoute, StaffHarvestEntryRoute } from "@/components/routing/HarvestEntryRoute";
 import { DomainGuard } from "@/components/routing/DomainGuard";
 import { AppLockGate } from "@/components/auth/AppLockGate";
 import DevSignInPage from "@/pages/dev/DevSignIn";
@@ -398,7 +398,7 @@ const AppRoutesWithLock = () => (
         <Route path="/broker" element={<RequireBroker><BrokerTomatoDashboardPage /></RequireBroker>} />
         <Route path="/broker/harvest/:dispatchId" element={<RequireBroker><BrokerTomatoDispatchPage /></RequireBroker>} />
         <Route path="/broker/harvest-sales" element={<Navigate to="/broker" replace />} />
-        <Route path="/broker/expenses" element={<Navigate to="/broker" replace />} />
+        <Route path="/broker/expenses" element={<RequireBroker><BrokerTomatoMarketExpensesPage /></RequireBroker>} />
         <Route path="/suppliers" element={<PermissionRoute module="projects"><SuppliersPage /></PermissionRoute>} />
         <Route path="/challenges" element={<PermissionRoute module="planning"><SeasonChallengesPage /></PermissionRoute>} />
         <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />
@@ -439,8 +439,41 @@ const AppRoutesWithLock = () => (
         <Route path="profile" element={<Navigate to="/settings" replace />} />
         <Route path="support" element={<SupportPage />} />
         <Route path="feedback" element={<FeedbackPage />} />
+        <Route path="harvest" element={<PermissionRoute module="harvest"><StaffHarvestEntryRoute /></PermissionRoute>} />
         <Route
-          path="harvest-collections"
+          path="harvest-sessions/:projectId/session/:sessionId"
+          element={
+            <PermissionRoute module="harvest">
+              <FallbackHarvestSessionDetailPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="harvest-sessions/:projectId?"
+          element={
+            <PermissionRoute module="harvest">
+              <FallbackHarvestListPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="tomato-harvest/:projectId/session/:sessionId"
+          element={
+            <PermissionRoute module="harvest">
+              <TomatoHarvestSessionDetailPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="tomato-harvest/:projectId?"
+          element={
+            <PermissionRoute module="harvest">
+              <TomatoHarvestListPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="harvest-collections/:projectId?"
           element={
             <PermissionRoute module="harvest">
               <HarvestCollectionsPage />

@@ -6,7 +6,7 @@ export function normalizeNavTarget(path: string): string {
 }
 
 /**
- * Active state for sidebar / bottom links that may include search params (broker dashboard tabs).
+ * Active state for sidebar / bottom links; optional `?query` on `itemPath` must match `location.search`.
  */
 export function isNavItemActive(pathname: string, search: string, itemPath: string): boolean {
   const item = normalizeNavTarget(itemPath);
@@ -14,18 +14,15 @@ export function isNavItemActive(pathname: string, search: string, itemPath: stri
   const pathNorm = pathname.replace(/\/+/g, '/') || '/';
 
   const pathMatches =
-    pathNorm === itemBase || (itemBase !== '/' && pathNorm.startsWith(`${itemBase}/`));
+    pathNorm === itemBase ||
+    (itemBase !== '/' && pathNorm.startsWith(`${itemBase}/`) && itemBase !== '/broker');
   if (!pathMatches) return false;
 
-  const have = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-
   if (!itemQuery) {
-    if (itemBase === '/broker') {
-      return have.get('tab') !== 'markets';
-    }
     return true;
   }
 
+  const have = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   const want = new URLSearchParams(itemQuery);
   for (const [k, v] of want.entries()) {
     if (have.get(k) !== v) return false;

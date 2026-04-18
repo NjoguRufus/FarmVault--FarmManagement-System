@@ -331,14 +331,14 @@ export function StaffDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {canHarvest && (
           <Link
-            to="/staff/harvest-collections"
+            to="/staff/harvest"
             className="block"
             data-tour="staff-card-harvest"
           >
             <div className="fv-card p-4 h-full hover:bg-accent/40 transition-colors cursor-pointer">
-              <h2 className="text-lg font-semibold mb-2">Harvest & Collections</h2>
+              <h2 className="text-lg font-semibold mb-2">Harvest</h2>
               <p className="text-sm text-muted-foreground">
-                Open today&apos;s harvest collections workspace for field weigh-in and picker entries.
+                Open harvest for the active project—collections, tomato sessions, or modular harvest—based on crop.
               </p>
             </div>
           </Link>

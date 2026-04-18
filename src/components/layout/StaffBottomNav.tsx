@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Scale, Package, Receipt, Wrench, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { cn } from '@/lib/utils';
@@ -10,12 +11,14 @@ import { getLockedProFeatureForPath } from '@/config/lockedProRoutes';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMatrix';
 import { logger } from "@/lib/logger";
+import { hasHarvestCollectionsModule } from '@/lib/cropModules';
 
 const ACTIVE_TAB_SHADOW =
   '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
 
 export function StaffBottomNav() {
   const { user } = useAuth();
+  const { activeProject } = useProject();
   const { can } = usePermissions();
   const { can: canKey, effectivePermissionKeys } = useEmployeeAccess();
   const location = useLocation();
@@ -61,7 +64,7 @@ export function StaffBottomNav() {
   const canOperations = effectivePermissionKeys.has('operations.view') || can('operations', 'view');
 
   if (canHarvestCollections) {
-    items.push({ label: 'Harvest', path: '/staff/harvest-collections', icon: Scale });
+    items.push({ label: 'Harvest', path: '/staff/harvest', icon: Scale });
   }
   if (canInventory) {
     items.push({ label: 'Inventory', path: '/staff/inventory', icon: Package });
@@ -99,10 +102,20 @@ export function StaffBottomNav() {
         {items.map((item) => {
           const Icon = item.icon;
           const itemPath = item.path.replace(/\/+/g, '/');
-          const isActive =
-            normalizedPath === itemPath ||
-            (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
-          const lockedFeature = getLockedProFeatureForPath(itemPath);
+          const isStaffHarvestEntry = itemPath === '/staff/harvest';
+          const isActive = isStaffHarvestEntry
+            ? normalizedPath === '/staff/harvest' ||
+              normalizedPath.startsWith('/staff/harvest-collections') ||
+              normalizedPath.startsWith('/staff/tomato-harvest') ||
+              normalizedPath.startsWith('/staff/harvest-sessions')
+            : normalizedPath === itemPath ||
+              (itemPath !== '/' && normalizedPath.startsWith(itemPath + '/'));
+          const lockedFeature =
+            isStaffHarvestEntry &&
+            activeProject &&
+            hasHarvestCollectionsModule(String(activeProject.cropTypeKey ?? activeProject.cropType ?? ''))
+              ? getLockedProFeatureForPath('/staff/harvest-collections')
+              : getLockedProFeatureForPath(itemPath);
           const requiredTier = lockedFeature ? features[lockedFeature] : 'basic';
           const isLocked =
             Boolean(lockedFeature) &&

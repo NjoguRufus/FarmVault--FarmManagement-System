@@ -37,7 +37,7 @@ interface TopNavbarProps {
 }
 
 export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps) {
-  const { user } = useAuth();
+  const { user, effectiveAccess } = useAuth();
   const {
     projects,
     activeProject,
@@ -142,6 +142,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
     (user.role === 'driver' || (user.role === 'employee' && (empRole === 'logistics-driver' || empRole === 'driver')))
   );
 
+  const isBrokerWorkspace = effectiveAccess.isBroker;
+
   return (
     <header
       id="main-navbar"
@@ -165,6 +167,37 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
           {isDriver ? (
             <div className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-border bg-muted/50 px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm text-muted-foreground">
               <span className="font-medium">Driver</span>
+            </div>
+          ) : isBrokerWorkspace ? (
+            <div
+              className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-border bg-muted/40 px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm"
+              title="Project is assigned by your company. Contact staff to change it."
+            >
+              {activeProject ? (
+                <>
+                  <span className="text-base sm:text-lg">{cropTypeKeyEmoji(activeProject.cropType)}</span>
+                  <span className="font-medium hidden sm:inline text-foreground">{activeProject.name}</span>
+                  <span className="font-medium sm:hidden max-w-[80px] truncate text-foreground">{activeProject.name}</span>
+                  <span className="hidden sm:inline text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
+                    {activeProject.status}
+                  </span>
+                </>
+              ) : activeFarmSummary ? (
+                <>
+                  <span className="text-base sm:text-lg">🌾</span>
+                  <span className="font-medium hidden sm:inline max-w-[160px] truncate text-foreground">
+                    {activeFarmSummary.name}
+                  </span>
+                  <span className="font-medium sm:hidden max-w-[80px] truncate text-foreground">
+                    {activeFarmSummary.name}
+                  </span>
+                  <span className="hidden sm:inline text-xs text-muted-foreground px-2 py-0.5 rounded-full bg-muted">
+                    Farm
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted-foreground text-xs sm:text-sm">Assigned workspace</span>
+              )}
             </div>
           ) : (
           <DropdownMenu>

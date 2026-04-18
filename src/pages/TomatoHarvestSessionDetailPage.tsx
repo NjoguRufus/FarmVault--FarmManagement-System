@@ -50,6 +50,7 @@ import { playNotificationSound } from '@/services/notificationSoundService';
 import { fetchDisplayNamesByClerkUserIds } from '@/services/profileClerkDisplayNames';
 import { listEmployees } from '@/services/employeesSupabaseService';
 import type { Employee } from '@/types';
+import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 import {
   addTomatoBucketLog,
   addTomatoPicker,
@@ -101,6 +102,7 @@ export default function TomatoHarvestSessionDetailPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
+  const harvestNavPrefix = useHarvestNavPrefix();
 
   const canEdit =
     canKey('harvest_collections.edit') ||
@@ -632,7 +634,7 @@ export default function TomatoHarvestSessionDetailPage() {
       <button
         type="button"
         className="fv-btn fv-btn--secondary flex items-center gap-2"
-        onClick={() => navigate(`/tomato-harvest/${projectId}`)}
+        onClick={() => navigate(`${harvestNavPrefix}/tomato-harvest/${projectId}`)}
       >
         <ChevronLeft className="h-4 w-4" />
         All tomato harvests

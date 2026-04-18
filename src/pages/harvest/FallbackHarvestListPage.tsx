@@ -16,12 +16,14 @@ import {
   type FallbackHarvestSessionRow,
 } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
+import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
 
 export default function FallbackHarvestListPage() {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const harvestNavPrefix = useHarvestNavPrefix();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -69,7 +71,7 @@ export default function FallbackHarvestListPage() {
         containerType: 'bags',
       });
       void qc.invalidateQueries({ queryKey: ['fallback-harvest-sessions', companyId, projectId] });
-      navigate(`/harvest-sessions/${projectId}/session/${created.id}`, { replace: true });
+      navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}/session/${created.id}`, { replace: true });
     } catch (e: any) {
       toast({ title: 'Failed to create session', description: e?.message ?? String(e), variant: 'destructive' });
     } finally {
@@ -130,7 +132,7 @@ export default function FallbackHarvestListPage() {
               className={cn(
                 'w-full text-left rounded-xl border border-border/60 bg-card/40 hover:bg-muted/20 transition-colors',
               )}
-              onClick={() => navigate(`/harvest-sessions/${projectId}/session/${s.id}`)}
+              onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}/session/${s.id}`)}
             >
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">
