@@ -39,6 +39,7 @@ import {
   type FallbackPickerRow,
 } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
+import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
 
@@ -51,6 +52,7 @@ const DESTINATIONS = [
 export default function FallbackHarvestSessionDetailPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const navigate = useNavigate();
+  const harvestNavPrefix = useHarvestNavPrefix();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -298,7 +300,7 @@ export default function FallbackHarvestSessionDetailPage() {
   if (!session) {
     return (
       <div className="space-y-4">
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`/harvest-sessions/${projectId}`)}>
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}`)}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </Button>
@@ -310,7 +312,7 @@ export default function FallbackHarvestSessionDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`/harvest-sessions/${projectId}`)}>
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}`)}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </Button>

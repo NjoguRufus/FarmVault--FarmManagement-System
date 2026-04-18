@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Package, TrendingUp, Receipt, Wallet, Truck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,8 +32,6 @@ export default function BrokerTomatoDashboardPage() {
   const { user, authReady, companyDataQueriesEnabled } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
-  const assignedSectionRef = useRef<HTMLDivElement | null>(null);
 
   const companyId = user?.companyId ?? null;
   /** Do not gate on `companyDataQueriesEnabled` — it stays false during provisional tenant trust and blocks brokers forever. RLS still protects data. */
@@ -62,14 +60,6 @@ export default function BrokerTomatoDashboardPage() {
     queryFn: () => sumCratesSoldByDispatchIds(companyId!, dispatchIds),
     enabled: queryEnabled && dispatchIds.length > 0,
   });
-
-  useEffect(() => {
-    if (searchParams.get('tab') !== 'markets') return;
-    const id = window.requestAnimationFrame(() => {
-      assignedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [searchParams]);
 
   const totals = useMemo(() => {
     let rev = 0;
@@ -145,7 +135,7 @@ export default function BrokerTomatoDashboardPage() {
             />
           </div>
 
-          <div ref={assignedSectionRef} className="space-y-3 scroll-mt-24">
+          <div className="space-y-3 scroll-mt-24">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
               Assigned harvests
             </h2>

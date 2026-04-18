@@ -123,13 +123,13 @@ function getMergedManagerNav(): NavItem[] {
 export const brokerNavConfig: NavItem[] = [
   { label: 'Dashboard', shortLabel: 'Home', path: '/broker', icon: LayoutDashboard, group: 'main' },
   {
-    label: 'My markets',
-    shortLabel: 'Markets',
-    path: '/broker?tab=markets',
-    icon: TrendingUp,
+    label: 'Market expenses',
+    shortLabel: 'Expenses',
+    path: '/broker/expenses',
+    icon: Receipt,
     group: 'main',
   },
-  { label: 'Profile', shortLabel: 'Profile', path: '/settings', icon: Settings, group: 'main' },
+  { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
   { label: 'Support', path: '/support', icon: HelpCircle, group: 'more' },
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
@@ -145,7 +145,7 @@ export const staffNavConfig: NavItem[] = [
   { label: 'Dashboard', path: '/staff/staff-dashboard', icon: LayoutDashboard, group: 'main' },
   { label: 'Operations', path: '/staff/operations', icon: Wrench, group: 'main' },
   { label: 'Inventory', path: '/staff/inventory', icon: Package, group: 'main' },
-  { label: 'Harvest & Collections', path: '/staff/harvest-collections', icon: TrendingUp, group: 'more' },
+  { label: 'Harvest', path: '/staff/harvest', icon: TrendingUp, group: 'more' },
   { label: 'Expenses', path: '/staff/expenses', icon: Receipt, group: 'more' },
   { label: 'Reports', path: '/staff/reports', icon: FileText, group: 'more' },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },

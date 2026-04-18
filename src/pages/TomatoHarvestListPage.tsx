@@ -29,6 +29,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { hasTomatoHarvestModule } from '@/lib/cropModules';
 import { format } from 'date-fns';
+import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
 
@@ -42,6 +43,7 @@ export default function TomatoHarvestListPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
+  const harvestNavPrefix = useHarvestNavPrefix();
 
   const canView = canKey('harvest_collections.view') || can('harvest', 'view');
   const canCreate =
@@ -120,7 +122,7 @@ export default function TomatoHarvestListPage() {
       await queryClient.invalidateQueries({ queryKey: ['tomato-harvest-sessions', companyId, projectId] });
       setNewOpen(false);
       toast({ title: 'Harvest started', description: sessionDisplayTitle(row) });
-      navigate(`/tomato-harvest/${projectId}/session/${row.id}`);
+      navigate(`${harvestNavPrefix}/tomato-harvest/${projectId}/session/${row.id}`);
     } catch (e) {
       toast({
         title: 'Could not create harvest',
@@ -139,7 +141,11 @@ export default function TomatoHarvestListPage() {
   if (routeProjectId && effectiveProject && !isTomatoProject) {
     return (
       <div className="space-y-4 p-4 animate-fade-in">
-        <button type="button" className="fv-btn fv-btn--secondary flex items-center gap-2" onClick={() => navigate('/projects')}>
+        <button
+          type="button"
+          className="fv-btn fv-btn--secondary flex items-center gap-2"
+          onClick={() => navigate(harvestNavPrefix ? '/staff/staff-dashboard' : '/projects')}
+        >
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
@@ -243,7 +249,9 @@ export default function TomatoHarvestListPage() {
                   key={s.session.id}
                   type="button"
                   className="fv-card p-4 text-left w-full hover:border-primary/40 transition-colors space-y-2"
-                  onClick={() => navigate(`/tomato-harvest/${projectId}/session/${s.session.id}`)}
+                  onClick={() =>
+                    navigate(`${harvestNavPrefix}/tomato-harvest/${projectId}/session/${s.session.id}`)
+                  }
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>

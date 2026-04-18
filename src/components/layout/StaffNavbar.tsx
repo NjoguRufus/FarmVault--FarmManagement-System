@@ -106,6 +106,10 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   let pageTitle = 'Staff Workspace';
   if (path.startsWith('/staff/harvest-collections')) {
     pageTitle = 'Harvest Collections';
+  } else if (path.startsWith('/staff/tomato-harvest')) {
+    pageTitle = 'Tomato harvest';
+  } else if (path.startsWith('/staff/harvest-sessions') || path === '/staff/harvest') {
+    pageTitle = 'Harvest';
   } else if (path.startsWith('/staff/inventory')) {
     pageTitle = 'Inventory';
   } else if (path.startsWith('/staff/expenses')) {

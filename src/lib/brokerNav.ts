@@ -17,7 +17,6 @@ export function brokerMayAccessNavPath(path: string): boolean {
     p === '/support' ||
     p.startsWith('/support/') ||
     p === '/feedback' ||
-    p.startsWith('/feedback/') ||
-    p === '/profile'
+    p.startsWith('/feedback/')
   );
 }
