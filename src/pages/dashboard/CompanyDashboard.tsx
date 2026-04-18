@@ -1,5 +1,13 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { DollarSign, TrendingUp, Wallet, Calendar as CalendarIcon, HelpCircle, AlertTriangle, Activity } from 'lucide-react';
+import {
+  DollarSign,
+  TrendingUp,
+  Wallet,
+  Calendar as CalendarIcon,
+  HelpCircle,
+  AlertTriangle,
+  Activity,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { StatCard } from '@/components/dashboard/StatCard';
 import {
@@ -78,6 +86,9 @@ import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FeatureGate } from '@/components/subscription';
 import { logger } from "@/lib/logger";
+import { hasTomatoHarvestModule } from '@/lib/cropModules';
+import { fetchTomatoCompanyAggregate } from '@/services/tomatoHarvestService';
+import { useTomatoHarvestDashboardRealtime } from '@/hooks/useTomatoHarvestDashboardRealtime';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -386,6 +397,23 @@ export function CompanyDashboard() {
     }
     return companyProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
   }, [statCardsScopeValid, companyProjects, farmProgressVisibleProjectIds]);
+
+  const hasTomatoProjects = useMemo(
+    () =>
+      companyProjects.some((p) =>
+        hasTomatoHarvestModule(String(p.cropTypeKey ?? p.cropType ?? '')),
+      ),
+    [companyProjects],
+  );
+
+  useTomatoHarvestDashboardRealtime(queryCompanyId, queryClient);
+
+  const { data: tomatoDashboardAgg } = useQuery({
+    queryKey: ['tomato-dashboard-totals', queryCompanyId ?? '', statCardsScopeValid ?? 'all'],
+    queryFn: () => fetchTomatoCompanyAggregate(queryCompanyId!, statCardsScopeValid ?? null),
+    enabled: Boolean(queryCompanyId && hasTomatoProjects),
+    staleTime: 30_000,
+  });
 
   const filteredExpenses = useMemo(() => {
     let filtered = companyId ? allExpenses.filter((e) => e.companyId === companyId) : allExpenses;
@@ -767,6 +795,13 @@ export function CompanyDashboard() {
   const harvestFinancialsProjectIdGlobal =
     activeProject && companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
 
+  const { data: tomatoGlobalAgg } = useQuery({
+    queryKey: ['tomato-dashboard-totals', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all-global'],
+    queryFn: () => fetchTomatoCompanyAggregate(queryCompanyId!, harvestFinancialsProjectIdGlobal),
+    enabled: Boolean(queryCompanyId && hasTomatoProjects),
+    staleTime: 30_000,
+  });
+
   const { data: fbTotalsGlobal } = useQuery({
     queryKey: ['dashboardFinancialTotals', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all'],
     queryFn: () => getCompanyCollectionFinancialsAggregate(queryCompanyId ?? '', harvestFinancialsProjectIdGlobal),
@@ -829,7 +864,8 @@ export function CompanyDashboard() {
 
   const hookLedgerExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const hookLedgerSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalRevenue = hookLedgerSales + (fbTotalsGlobal?.totalRevenue ?? 0);
+  const totalRevenue =
+    hookLedgerSales + (fbTotalsGlobal?.totalRevenue ?? 0) + (tomatoGlobalAgg?.totalRevenue ?? 0);
   const totalExpenses = hookLedgerExpenses + (fbTotalsGlobal?.totalExpenses ?? 0);
   const profitLoss = totalRevenue - totalExpenses;
   const netBalance = profitLoss;
@@ -839,7 +875,12 @@ export function CompanyDashboard() {
 
   const statCardsHookExpenses = financialLedgerExpenses.reduce((sum, e) => sum + e.amount, 0);
   const statCardsHookSales = financialLedgerSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const displayTotalRevenue = statCardsHookSales + (effectiveFbTotalsForStatCards?.totalRevenue ?? 0);
+  const displayTotalRevenue =
+    statCardsHookSales +
+    (effectiveFbTotalsForStatCards?.totalRevenue ?? 0) +
+    (tomatoDashboardAgg?.totalRevenue ?? 0);
+  const revenuePendingRibbon =
+    hasTomatoProjects && (tomatoDashboardAgg?.pendingMarketDispatches ?? 0) > 0 ? 'Pending' : undefined;
   const displayTotalExpenses = statCardsHookExpenses + (effectiveFbTotalsForStatCards?.totalExpenses ?? 0);
   const displayNetBalance = displayTotalRevenue - displayTotalExpenses;
   const displayRemainingBudget = statCardsBudgetTotal - displayTotalExpenses;
@@ -1246,7 +1287,9 @@ export function CompanyDashboard() {
                       change={15.3}
                       changeLabel={revenueChangeLabel}
                       icon={<TrendingUp className="h-4 w-4" />}
-                      variant="gold"
+                      variant="default"
+                      valueVariant="success"
+                      ribbon={revenuePendingRibbon}
                       compact
                     />
                   </div>
@@ -1283,7 +1326,8 @@ export function CompanyDashboard() {
                       change={displayNetBalance >= 0 ? 22.1 : -5.2}
                       changeLabel="vs last month"
                       icon={<Wallet className="h-4 w-4" />}
-                      variant={displayNetBalance >= 0 ? 'primary' : 'default'}
+                      variant="default"
+                      valueVariant={displayNetBalance >= 0 ? 'info' : 'destructive'}
                       compact
                     />
                   </div>
@@ -1350,7 +1394,9 @@ export function CompanyDashboard() {
                   change={15.3}
                   changeLabel={revenueChangeLabel}
                   icon={<TrendingUp className="h-4 w-4" />}
-                  variant="gold"
+                  variant="default"
+                  valueVariant="success"
+                  ribbon={revenuePendingRibbon}
                   compact
                 />
               </div>
@@ -1378,7 +1424,8 @@ export function CompanyDashboard() {
                       change={displayNetBalance >= 0 ? 22.1 : -5.2}
                       changeLabel="vs last month"
                       icon={<Wallet className="h-4 w-4" />}
-                      variant={displayNetBalance >= 0 ? 'primary' : 'default'}
+                      variant="default"
+                      valueVariant={displayNetBalance >= 0 ? 'info' : 'destructive'}
                       compact
                     />
                   </div>

@@ -1,9 +1,10 @@
 import type { Project } from '@/types';
-import { hasHarvestCollectionsModule } from '@/lib/cropModules';
+import { hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
 
 export const HARVEST_ENTRY_PATH = '/harvest';
 export const HARVEST_SALES_PATH = '/harvest-sales';
 export const HARVEST_COLLECTIONS_BASE_PATH = '/harvest-collections';
+export const TOMATO_HARVEST_BASE_PATH = '/tomato-harvest';
 
 function normalizeCropType(cropType: unknown): string {
   return String(cropType ?? '')
@@ -20,10 +21,15 @@ export function isFrenchBeansCrop(cropType: unknown): boolean {
 
 export function resolveHarvestEntryPath(activeProject: Project | null | undefined): string {
   const cropType = normalizeCropType(activeProject?.cropType);
+  const projectId = activeProject?.id;
+
+  if (cropType && hasTomatoHarvestModule(cropType)) {
+    return projectId ? `${TOMATO_HARVEST_BASE_PATH}/${projectId}` : TOMATO_HARVEST_BASE_PATH;
+  }
+
   const canUseCollections = cropType ? hasHarvestCollectionsModule(cropType) : false;
   if (!canUseCollections) return HARVEST_SALES_PATH;
 
-  const projectId = activeProject?.id;
   return projectId ? `${HARVEST_COLLECTIONS_BASE_PATH}/${projectId}` : HARVEST_COLLECTIONS_BASE_PATH;
 }
 

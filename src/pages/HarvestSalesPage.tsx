@@ -36,10 +36,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { hasHarvestCollectionsModule } from '@/lib/cropModules';
+import { hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { getCompanyCollectionFinancialsAggregate } from '@/services/harvestCollectionsService';
+import { fetchTomatoSessionsForProject } from '@/services/tomatoHarvestService';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { FeatureGate, ProBadge } from '@/components/subscription';
@@ -64,10 +65,24 @@ export default function HarvestSalesPage() {
 
   const isFrenchBeans = activeProject?.cropType?.toLowerCase() === 'french-beans';
   const showHarvestCollections = activeProject && hasHarvestCollectionsModule(activeProject.cropType ?? '');
+  const showTomatoHarvest = Boolean(activeProject && hasTomatoHarvestModule(activeProject.cropType ?? ''));
   const frenchBeansCollectionsAccess = useFeatureAccess('frenchBeansCollections');
   const advancedHarvestAccess = useFeatureAccess('advancedHarvest');
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
+
+  useEffect(() => {
+    if (!companyId || !activeProject?.id || !showTomatoHarvest) return;
+    void queryClient.prefetchQuery({
+      queryKey: ['tomato-harvest-sessions', companyId, activeProject.id],
+      queryFn: () =>
+        fetchTomatoSessionsForProject({
+          companyId,
+          projectId: activeProject.id,
+        }),
+      staleTime: 60_000,
+    });
+  }, [companyId, activeProject?.id, showTomatoHarvest, queryClient]);
   const scope = { companyScoped: true, companyId, isDeveloper };
   const { data: allHarvests = [], isLoading: loadingHarvests } = useCollection<Harvest>('harvests', 'harvests', scope);
   const { data: allSales = [], isLoading: loadingSales } = useCollection<Sale>('sales', 'sales', scope);
@@ -1586,6 +1601,20 @@ export default function HarvestSalesPage() {
           />
         )}
       </div>
+
+      {showTomatoHarvest && activeProject && (
+        <div className="fv-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-primary/15">
+          <div>
+            <h3 className="text-lg font-semibold">Tomato harvest</h3>
+            <p className="text-sm text-muted-foreground">
+              Bucket tally per picker, packaging counts, and farm gate or market sales for this project.
+            </p>
+          </div>
+          <Button type="button" className="fv-btn shrink-0" onClick={() => navigate(`/tomato-harvest/${activeProject.id}`)}>
+            Open tomato harvest
+          </Button>
+        </div>
+      )}
 
       {/* French Beans: Harvest Collections (Supabase) — Pro: frenchBeansCollections + advanced aggregates */}
       {showHarvestCollections && (

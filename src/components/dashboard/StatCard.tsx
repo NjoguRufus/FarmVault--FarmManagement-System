@@ -13,6 +13,8 @@ interface StatCardProps {
   valueVariant?: 'default' | 'primary' | 'success' | 'warning' | 'destructive' | 'info';
   compact?: boolean;
   responsive?: boolean;
+  /** Small corner label (e.g. status ribbon). */
+  ribbon?: string;
   /** When true, title stays clear; value area is blurred with Pro overlay (set by FeatureGate). */
   proLocked?: boolean;
   onProUpgrade?: () => void;
@@ -28,6 +30,7 @@ export function StatCard({
   valueVariant = 'default',
   compact = false,
   responsive = true,
+  ribbon,
   proLocked = false,
   onProUpgrade,
 }: StatCardProps) {
@@ -71,9 +74,16 @@ export function StatCard({
   const accent =
     'after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-gradient-to-r after:from-primary/60 after:via-primary/20 after:to-transparent';
 
+  const ribbonEl = ribbon ? (
+    <span className="pointer-events-none absolute right-0 top-0 z-10 rounded-bl-md bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-sm dark:bg-amber-600/95">
+      {ribbon}
+    </span>
+  ) : null;
+
   if (compact) {
     return (
       <div className={cn(cardBase, padding, accent, cardTintClasses[variant])}>
+        {ribbonEl}
         <div className="mb-1 flex items-center justify-between">
           <span
             className={cn(
@@ -168,6 +178,7 @@ export function StatCard({
 
   return (
     <div className={cn(cardBase, padding, accent, cardTintClasses[variant])}>
+      {ribbonEl}
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</span>
         {icon && (

@@ -33,6 +33,8 @@ import InventorySuppliersPage from "@/pages/InventorySuppliersPage";
 import HarvestSalesPage from "@/pages/HarvestSalesPage";
 import HarvestDetailsPage from "@/pages/HarvestDetailsPage";
 import HarvestCollectionsPage from "@/pages/HarvestCollectionsPage";
+import TomatoHarvestListPage from "@/pages/TomatoHarvestListPage";
+import TomatoHarvestSessionDetailPage from "@/pages/TomatoHarvestSessionDetailPage";
 import BrokerHarvestSalesPage from "@/pages/BrokerHarvestSalesPage";
 import BrokerExpensesPage from "@/pages/BrokerExpensesPage";
 import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
@@ -370,6 +372,8 @@ const AppRoutesWithLock = () => (
         <Route path="/harvest-sales/harvest/:harvestId" element={<PermissionRoute module="harvest"><RequireNotBroker redirectTo="/broker/harvest-sales"><HarvestDetailsPage /></RequireNotBroker></PermissionRoute>} />
         {/* Single route with optional projectId so the page does not remount when URL gains/loses projectId */}
         <Route path="/harvest-collections/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker><HarvestCollectionsPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/tomato-harvest/:projectId/session/:sessionId" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestSessionDetailPage /></RequireNotBroker></PermissionRoute>} />
+        <Route path="/tomato-harvest/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestListPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/suppliers" element={<PermissionRoute module="projects"><SuppliersPage /></PermissionRoute>} />
         <Route path="/challenges" element={<PermissionRoute module="planning"><SeasonChallengesPage /></PermissionRoute>} />
         <Route path="/employees" element={<PermissionRoute module="employees"><EmployeesPage /></PermissionRoute>} />

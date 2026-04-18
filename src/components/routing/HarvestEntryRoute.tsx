@@ -5,6 +5,7 @@ import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
 
 /**
  * Central crop-aware "Harvest" entrypoint.
+ * - Tomatoes → Tomato harvest sessions (per project when available)
  * - French Beans (Harvest Collections module) → Harvest Collections (optionally scoped by projectId)
  * - Other crops / no project → Harvest & Sales
  *
