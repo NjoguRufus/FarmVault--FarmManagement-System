@@ -28,6 +28,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { logger } from "@/lib/logger";
+import { useSearchParams } from 'react-router-dom';
 
 export default function InventoryPage() {
   const { activeProject } = useProject();
@@ -35,6 +36,7 @@ export default function InventoryPage() {
   const { can, permissions } = usePermissions();
   const queryClient = useQueryClient();
   const companyId = user?.companyId ?? null;
+  const [searchParams, setSearchParams] = useSearchParams();
   // Add Item: support both permission keys - "addItem" (PermissionEditor/rolePresetDefaults) and "create" (Access & Permissions / accessControl PERMISSION_KEYS)
   const canAddByAddItem = can('inventory', 'addItem');
   const canAddByCreate = can('inventory', 'create');
@@ -241,6 +243,17 @@ export default function InventoryPage() {
   const { notifyUsageRecorded } = useInventoryNotifications();
 
   const isLoading = stockLoading || categoriesLoading || suppliersLoading || allStockLoading;
+
+  // Quick Access hook: allow /inventory?add=1 to open the Add Item modal.
+  useEffect(() => {
+    if (searchParams.get('add') !== '1') return;
+    if (!canAddInventoryItem) return;
+    setAddOpen(true);
+    setSearchParams((p) => {
+      p.delete('add');
+      return p;
+    }, { replace: true });
+  }, [searchParams, setSearchParams, canAddInventoryItem]);
 
   const prefetchItemHistory = useCallback(
     (prefetchItemId: string) => {

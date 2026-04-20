@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { EMERGENCY_ALLOWED_PREFIXES } from '@/config/emergencyAccess';
 import { useAdminAlertsRealtime } from '@/hooks/useAdminAlertsRealtime';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { AuthLoadingScreen } from '@/components/auth/AuthLoadingScreen';
 import { PostTrialPlanModal } from '@/components/subscription/PostTrialPlanModal';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
@@ -147,6 +148,12 @@ export function MainLayout() {
       isDesktop,
       path: location.pathname,
     });
+  }
+
+  // Hard gate: never render plan-dependent UI until the plan is confirmed from Supabase.
+  // This prevents BASIC/PRO flicker on refresh for paying customers.
+  if (!isEmergencySession && subscriptionLoading) {
+    return <AuthLoadingScreen />;
   }
 
   return (
