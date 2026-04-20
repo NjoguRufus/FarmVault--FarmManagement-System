@@ -63,18 +63,19 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
     queryKey: ['subscription-gate', companyId],
     enabled: !!companyId,
     queryFn: () => getSubscriptionGateState(),
-    // Paid-plan transitions must show immediately after payment; refetch is driven by realtime + explicit refetchQueries.
-    staleTime: 0,
+    // Paid-plan transitions: useCompanySubscriptionRealtime + explicit refetchQueries keep this fresh without focus refetch storms.
+    staleTime: 45_000,
     gcTime: 5 * 60_000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 
   const { data: stkConfirmed, isLoading: stkConfirmedLoading } = useQuery({
     queryKey: ['company-mpesa-stk-confirmed', companyId],
     enabled: !!companyId && !isDeveloper,
     queryFn: () => hasConfirmedMpesaStkForCompany(companyId!),
-    staleTime: 0,
+    staleTime: 60_000,
     gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const resolved = useMemo(

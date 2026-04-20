@@ -30,6 +30,7 @@ export type FarmVaultUserMenuProps = {
   supportPath?: string;
   /** Subscription / billing (company app) */
   showBilling?: boolean;
+  showSettings?: boolean;
   showSupport?: boolean;
   accountLabel?: string;
   triggerClassName?: string;
@@ -47,6 +48,7 @@ export function FarmVaultUserMenu({
   settingsPath = "/settings",
   supportPath = "/support",
   showBilling = false,
+  showSettings = true,
   showSupport = true,
   accountLabel = "My Account",
   triggerClassName,
@@ -123,10 +125,12 @@ export function FarmVaultUserMenu({
             Billing
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuItem className="cursor-pointer" onClick={() => navigate(settingsPath)}>
-          <Settings className="mr-2 h-4 w-4" />
-          Settings
-        </DropdownMenuItem>
+        {showSettings ? (
+          <DropdownMenuItem className="cursor-pointer" onClick={() => navigate(settingsPath)}>
+            <Settings className="mr-2 h-4 w-4" />
+            Settings
+          </DropdownMenuItem>
+        ) : null}
         {showSupport ? (
           <DropdownMenuItem className="cursor-pointer" onClick={() => navigate(supportPath)}>
             <HelpCircle className="mr-2 h-4 w-4" />

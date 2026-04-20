@@ -25,9 +25,14 @@ export type TomatoMarketSalesEntryRow = {
   market_dispatch_id: string;
   entry_number: number;
   buyer_label: string | null;
+  /** Optional contact; used on broker UI to search buyers by phone. */
+  buyer_phone: string | null;
   price_per_unit: number;
   quantity: number;
   line_total: number;
+  /** Broker-only: null | collected (see broker_collected_amount) | debt (pay later). */
+  broker_payment_kind: 'collected' | 'debt' | null;
+  broker_collected_amount: number | null;
   created_at: string;
 };
 
@@ -76,7 +81,12 @@ export async function listBrokerTomatoDispatchesWithSessions(
     .select('id, project_id, packaging_count, packaging_type, harvest_number, session_date, sale_mode')
     .eq('company_id', cid)
     .in('id', sessionIds);
-  if (sErr) throw sErr;
+  if (sErr) {
+    return rows.map((r) => ({
+      dispatch: rowToTomatoMarketDispatch(r),
+      session: null,
+    }));
+  }
 
   const sessionById = new Map(
     (sessions ?? []).map((s) => {
@@ -152,15 +162,24 @@ export async function listTomatoMarketSalesEntries(params: {
   if (error) throw error;
   return (data ?? []).map((raw) => {
     const r = raw as Record<string, unknown>;
+    const kindRaw = r.broker_payment_kind;
+    const kind =
+      kindRaw === 'collected' || kindRaw === 'debt' ? (kindRaw as 'collected' | 'debt') : null;
     return {
       id: String(r.id),
       company_id: String(r.company_id),
       market_dispatch_id: String(r.market_dispatch_id),
       entry_number: num(r.entry_number),
       buyer_label: r.buyer_label != null ? String(r.buyer_label) : null,
+      buyer_phone: r.buyer_phone != null ? String(r.buyer_phone).trim() || null : null,
       price_per_unit: num(r.price_per_unit),
       quantity: Math.max(1, Math.floor(num(r.quantity))),
       line_total: num(r.line_total),
+      broker_payment_kind: kind,
+      broker_collected_amount:
+        r.broker_collected_amount != null && Number.isFinite(num(r.broker_collected_amount))
+          ? Math.round(num(r.broker_collected_amount))
+          : null,
       created_at: String(r.created_at ?? ''),
     };
   });
@@ -170,15 +189,18 @@ export async function insertTomatoMarketSalesEntry(params: {
   companyId: string;
   dispatchId: string;
   buyerLabel?: string | null;
+  buyerPhone?: string | null;
   pricePerUnit: number;
   quantity: number;
 }): Promise<void> {
   const cid = requireCompanyId(params.companyId);
+  const phone = params.buyerPhone?.trim() || null;
   const { error } = await harvest().from('tomato_market_sales_entries').insert({
     company_id: cid,
     market_dispatch_id: params.dispatchId,
     entry_number: 0,
     buyer_label: params.buyerLabel?.trim() || null,
+    buyer_phone: phone,
     price_per_unit: Math.max(0, Number(params.pricePerUnit) || 0),
     quantity: Math.max(1, Math.floor(Number(params.quantity) || 1)),
   });
@@ -193,6 +215,106 @@ export async function deleteTomatoMarketSalesEntry(params: {
   const { error } = await harvest()
     .from('tomato_market_sales_entries')
     .delete()
+    .eq('company_id', cid)
+    .eq('id', params.entryId);
+  if (error) throw error;
+}
+
+const MIN_BUYER_EDIT_REASON_LEN = 8;
+
+export async function updateTomatoMarketSalesEntry(params: {
+  companyId: string;
+  entryId: string;
+  buyerLabel: string | null;
+  pricePerUnit: number;
+  quantity: number;
+  editReason: string;
+  editorUserId?: string | null;
+}): Promise<void> {
+  const cid = requireCompanyId(params.companyId);
+  const reason = params.editReason.trim();
+  if (reason.length < MIN_BUYER_EDIT_REASON_LEN) {
+    throw new Error(`Reason for edit must be at least ${MIN_BUYER_EDIT_REASON_LEN} characters (audit trail).`);
+  }
+
+  const { data: row, error: fetchErr } = await harvest()
+    .from('tomato_market_sales_entries')
+    .select('id, buyer_label, price_per_unit, quantity, line_total')
+    .eq('company_id', cid)
+    .eq('id', params.entryId)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!row) throw new Error('Buyer line not found');
+
+  const r = row as Record<string, unknown>;
+  const before = {
+    buyer_label: r.buyer_label,
+    price_per_unit: num(r.price_per_unit),
+    quantity: Math.max(1, Math.floor(num(r.quantity))),
+    line_total: num(r.line_total),
+  };
+
+  const qty = Math.max(1, Math.floor(Number(params.quantity) || 1));
+  const price = Math.max(0, Number(params.pricePerUnit) || 0);
+
+  const { error: upErr } = await harvest()
+    .from('tomato_market_sales_entries')
+    .update({
+      buyer_label: params.buyerLabel?.trim() ? params.buyerLabel.trim() : null,
+      price_per_unit: price,
+      quantity: qty,
+    })
+    .eq('company_id', cid)
+    .eq('id', params.entryId);
+  if (upErr) throw upErr;
+
+  const lineTotal = Math.round(price * qty * 100) / 100;
+  const after = {
+    buyer_label: params.buyerLabel?.trim() ? params.buyerLabel.trim() : null,
+    price_per_unit: price,
+    quantity: qty,
+    line_total: lineTotal,
+  };
+
+  const { error: audErr } = await harvest().from('tomato_market_sales_entry_edit_audits').insert({
+    company_id: cid,
+    sales_entry_id: params.entryId,
+    reason,
+    snapshot_before: before,
+    snapshot_after: after,
+    editor_user_id: params.editorUserId?.trim() || null,
+  });
+  if (audErr) throw audErr;
+}
+
+/** Broker notebook only: phone search + collected / debt flags (no audit line edit). */
+export async function updateTomatoMarketSalesEntryBrokerRecord(params: {
+  companyId: string;
+  entryId: string;
+  buyerPhone: string | null;
+  brokerPaymentKind: 'collected' | 'debt' | null;
+  brokerCollectedAmount: number | null;
+}): Promise<void> {
+  const cid = requireCompanyId(params.companyId);
+  const kind = params.brokerPaymentKind;
+  if (kind === 'collected') {
+    const a = params.brokerCollectedAmount;
+    if (a == null || !Number.isFinite(a) || a < 0) {
+      throw new Error('Enter a valid collected amount.');
+    }
+  }
+  const collected =
+    kind === 'collected' && params.brokerCollectedAmount != null
+      ? Math.round(Number(params.brokerCollectedAmount))
+      : null;
+
+  const { error } = await harvest()
+    .from('tomato_market_sales_entries')
+    .update({
+      buyer_phone: params.buyerPhone?.trim() ? params.buyerPhone.trim() : null,
+      broker_payment_kind: kind,
+      broker_collected_amount: collected,
+    })
     .eq('company_id', cid)
     .eq('id', params.entryId);
   if (error) throw error;

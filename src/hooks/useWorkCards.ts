@@ -21,6 +21,7 @@ export function useWorkCardsForCompany(
   const query = useQuery<WorkCard[]>({
     queryKey,
     enabled,
+    staleTime: 60_000,
     queryFn: () =>
       getWorkCardsForCompany({
         companyId: companyId as string,
@@ -59,6 +60,7 @@ export function useWorkCardsForManager(
   const query = useQuery<WorkCard[]>({
     queryKey,
     enabled,
+    staleTime: 60_000,
     queryFn: () =>
       getWorkCardsForManager({
         companyId: companyId as string,
@@ -83,6 +85,7 @@ export function useWorkCard(id: string | null | undefined) {
   const query = useQuery<WorkCard | null>({
     queryKey,
     enabled,
+    staleTime: 60_000,
     queryFn: () => getWorkCardById(id as string),
   });
 
@@ -108,6 +111,7 @@ export function useWorkCardsForProject(
   const query = useQuery<WorkCard[]>({
     queryKey,
     enabled,
+    staleTime: 60_000,
     queryFn: () =>
       getWorkCardsForCompany({
         companyId: companyId as string,

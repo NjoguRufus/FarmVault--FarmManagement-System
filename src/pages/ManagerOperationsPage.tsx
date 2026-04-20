@@ -114,7 +114,7 @@ export default function ManagerOperationsPage() {
     managerIdsArray,
     user?.companyId ?? null,
   );
-  const { data: companyWorkCards = [], isLoading: companyCardsLoading } = useWorkCardsForCompany(user?.companyId ?? null, { refetchInterval: 5000 });
+  const { data: companyWorkCards = [], isLoading: companyCardsLoading } = useWorkCardsForCompany(user?.companyId ?? null);
   const workCards = useMemo(() => {
     const fromManager = managerIdsArray.length > 0 ? managerWorkCards : [];
     const fromCompany =

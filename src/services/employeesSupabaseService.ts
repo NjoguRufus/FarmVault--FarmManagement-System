@@ -149,7 +149,7 @@ export async function saveEmployeeDraft(input: SaveEmployeeDraftInput): Promise<
 
   const email = emailRaw?.toLowerCase() ?? null;
   const fullName = fullNameRaw || email || null;
-  const preset = input.permissionPreset ?? 'viewer';
+  const preset = input.permissionPreset ?? 'custom';
   const nestedPermissions = (input.permissions ?? (getPresetPermissions(preset) as PermissionMap)) as PermissionMap;
   const permissions = flattenPermissionMap(nestedPermissions);
 
@@ -262,9 +262,9 @@ export async function inviteEmployee(payload: InviteEmployeePayload): Promise<In
     fullName: payload.fullName?.trim() || payload.email.trim(),
     email: payload.email.trim().toLowerCase(),
     phone: payload.phone?.trim() || null,
-    role: payload.role ?? payload.permissionPreset ?? 'viewer',
+    role: payload.role ?? payload.permissionPreset ?? 'custom',
     department: payload.department ?? null,
-    permissionPreset: payload.permissionPreset ?? 'viewer',
+    permissionPreset: payload.permissionPreset ?? 'custom',
     permissionOverrides: payload.permissionOverrides ?? null,
     assignedProjectIds: payload.assignedProjectIds ?? [],
     actorEmployeeId: payload.actorEmployeeId ?? null,

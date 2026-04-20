@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { debounce } from '@/lib/debounce';
 import {
   getCompanyRecordCrops,
   createCompanyRecordCrop,
@@ -98,20 +99,23 @@ export function useFarmNotebookAdminNotes() {
   useEffect(() => {
     if (!trimmedCompanyId || error || !userReady) return undefined;
 
+    const flush = debounce(() => {
+      void queryClient.invalidateQueries({
+        queryKey: ['records', 'farm-notebook-admin-notes', trimmedCompanyId],
+      });
+    }, 600);
+
     const channel = supabase
       .channel(`farm-notebook-admin-notes:${trimmedCompanyId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'farm_notebook_admin_notes' },
-        () => {
-          void queryClient.invalidateQueries({
-            queryKey: ['records', 'farm-notebook-admin-notes', trimmedCompanyId],
-          });
-        },
+        () => flush(),
       )
       .subscribe();
 
     return () => {
+      flush.cancel();
       void supabase.removeChannel(channel);
     };
   }, [trimmedCompanyId, error, userReady, queryClient]);

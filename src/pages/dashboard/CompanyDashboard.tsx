@@ -190,6 +190,7 @@ export function CompanyDashboard() {
     queryKey: ['dashboard-expenses-supa', queryCompanyId ?? ''],
     queryFn: () => getFinanceExpenses(queryCompanyId ?? ''),
     enabled: Boolean(queryCompanyId),
+    staleTime: 120_000,
   });
   // Map to shape compatible with existing dashboard computations
   const allExpenses = useMemo(() =>
@@ -219,6 +220,7 @@ export function CompanyDashboard() {
     queryKey: ['dashboard-inventory-supa', queryCompanyId ?? ''],
     queryFn: () => listInventoryStock({ companyId: queryCompanyId! }),
     enabled: Boolean(queryCompanyId),
+    staleTime: 120_000,
   });
   // Map InventoryStockRow to InventoryItem shape for dashboard widgets
   const allInventory = useMemo(() =>
@@ -279,7 +281,7 @@ export function CompanyDashboard() {
     queryKey: ['company-activity-logs', queryCompanyId ?? ''],
     queryFn: () => listActivityLogs({ companyId: queryCompanyId!, limit: 20 }),
     enabled: Boolean(queryCompanyId),
-    staleTime: 15_000,
+    staleTime: 60_000,
   });
 
   const mergedActivityLogs = useMemo(() => {
@@ -866,7 +868,11 @@ export function CompanyDashboard() {
   const hookLedgerSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
   const totalRevenue =
     hookLedgerSales + (fbTotalsGlobal?.totalRevenue ?? 0) + (tomatoGlobalAgg?.totalRevenue ?? 0);
-  const totalExpenses = hookLedgerExpenses + (fbTotalsGlobal?.totalExpenses ?? 0);
+  const totalExpenses =
+    hookLedgerExpenses +
+    (fbTotalsGlobal?.totalExpenses ?? 0) +
+    (tomatoGlobalAgg?.pickerCost ?? 0) +
+    (tomatoGlobalAgg?.totalMarketExpenses ?? 0);
   const profitLoss = totalRevenue - totalExpenses;
   const netBalance = profitLoss;
   const totalSales = totalRevenue;
@@ -881,7 +887,11 @@ export function CompanyDashboard() {
     (tomatoDashboardAgg?.totalRevenue ?? 0);
   const revenuePendingRibbon =
     hasTomatoProjects && (tomatoDashboardAgg?.pendingMarketDispatches ?? 0) > 0 ? 'Pending' : undefined;
-  const displayTotalExpenses = statCardsHookExpenses + (effectiveFbTotalsForStatCards?.totalExpenses ?? 0);
+  const displayTotalExpenses =
+    statCardsHookExpenses +
+    (effectiveFbTotalsForStatCards?.totalExpenses ?? 0) +
+    (tomatoDashboardAgg?.pickerCost ?? 0) +
+    (tomatoDashboardAgg?.totalMarketExpenses ?? 0);
   const displayNetBalance = displayTotalRevenue - displayTotalExpenses;
   const displayRemainingBudget = statCardsBudgetTotal - displayTotalExpenses;
 

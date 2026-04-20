@@ -20,12 +20,8 @@ export const PRESET_ADMIN: Record<string, boolean> = toMap([...PERMISSION_KEYS])
 /** Presets by role key. */
 export const PERMISSION_PRESETS: Record<PermissionPresetKey, Record<string, boolean>> = {
   admin: PRESET_ADMIN,
-  farm_manager: toMap(ROLE_DEFAULT_PERMISSIONS.farm_manager),
-  supervisor: toMap(ROLE_DEFAULT_PERMISSIONS.supervisor),
-  weighing_clerk: toMap(ROLE_DEFAULT_PERMISSIONS.weighing_clerk),
-  finance_officer: toMap(ROLE_DEFAULT_PERMISSIONS.finance_officer),
-  inventory_officer: toMap(ROLE_DEFAULT_PERMISSIONS.inventory_officer),
-  viewer: toMap(ROLE_DEFAULT_PERMISSIONS.viewer),
+  'operations-manager': toMap(ROLE_DEFAULT_PERMISSIONS['operations-manager']),
+  'sales-broker': toMap(ROLE_DEFAULT_PERMISSIONS['sales-broker']),
   custom: {},
 };
 

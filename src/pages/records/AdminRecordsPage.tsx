@@ -8,6 +8,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { db, requireCompanyId } from '@/lib/db';
 import { parseNotebookContentToBlocks } from '@/lib/notebook/parseNotebookContentToBlocks';
 import { supabase } from '@/lib/supabase';
+import { debounce } from '@/lib/debounce';
 import { RecordsCropGrid } from '@/components/records/RecordsCropGrid';
 import { RecordNotebookEntryCard } from '@/components/records/RecordNotebookEntryCard';
 import { Button } from '@/components/ui/button';
@@ -261,7 +262,8 @@ export default function AdminRecordsPage() {
   const cropStatsQuery = useQuery({
     queryKey: ['records', 'notebook', 'crop-stats', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
     enabled: authReady && companyReady,
-    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<Record<string, CropStats>> => {
       const { data, error } = await db
         .public()
@@ -287,7 +289,8 @@ export default function AdminRecordsPage() {
   const recentNotesQuery = useQuery({
     queryKey: ['records', 'notebook', 'recent-notes', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
     enabled: authReady && companyReady,
-    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotebookEntryRow[]> => {
       const { data, error } = await db
         .public()
@@ -303,7 +306,8 @@ export default function AdminRecordsPage() {
   const adminNotesQuery = useQuery({
     queryKey: ['records', 'notebook', 'admin-tab', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
     enabled: authReady && companyReady,
-    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotebookEntryRow[]> => {
       const { data, error } = await db
         .public()
@@ -319,13 +323,17 @@ export default function AdminRecordsPage() {
 
   useEffect(() => {
     if (!authReady || !companyReady) return;
+    const flush = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: ['records', 'notebook'] });
+    }, 700);
     const channel = supabase
       .channel('fv-notebook-records')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_notebook_entries' }, () => {
-        void queryClient.invalidateQueries({ queryKey: ['records', 'notebook'] });
+        flush();
       })
       .subscribe();
     return () => {
+      flush.cancel();
       void supabase.removeChannel(channel);
     };
   }, [authReady, companyReady, queryClient]);

@@ -197,9 +197,9 @@ export default function BillingPage() {
     queryKey: ['company-billing', companyId],
     enabled: !!companyId,
     queryFn: () => getCompany(companyId!),
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
   });
 
   const { data: subRow, isLoading: subLoading } = useQuery({

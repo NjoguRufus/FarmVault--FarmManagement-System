@@ -1,11 +1,46 @@
 import { useState } from "react";
 import { Check, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from "@/config/plans";
+import { SUBSCRIPTION_PLANS, type BillingMode, getBillingModeDurationLabel } from "@/config/plans";
 import { BillingModeSelector } from "@/components/subscription/BillingModeSelector";
+import { useBillingPrices } from "@/hooks/useBillingPrices";
+
+function PriceText({
+  amount,
+  isLoading,
+}: {
+  amount: number;
+  isLoading: boolean;
+}) {
+  return (
+    <span className="relative inline-flex items-baseline">
+      <span className="text-3xl font-bold text-[#1f3a2d]">KES {amount.toLocaleString()}</span>
+      {isLoading && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 -bottom-1 h-2 rounded-md bg-black/10 animate-pulse"
+        />
+      )}
+    </span>
+  );
+}
 
 export function PricingSection() {
   const [billingMode, setBillingMode] = useState<BillingMode>("monthly");
+  const { getAmount, isLoading } = useBillingPrices();
+
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_MONTHLY_FALLBACK = 2500;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_MONTHLY_FALLBACK = 5000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_SEASONAL_FALLBACK = 8500;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_SEASONAL_FALLBACK = 15000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_ANNUAL_FALLBACK = 24000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_ANNUAL_FALLBACK = 48000;
 
   return (
     <section id="pricing" className="bg-white py-16 md:py-24">
@@ -23,11 +58,35 @@ export function PricingSection() {
           <BillingModeSelector mode={billingMode} onChange={setBillingMode} />
         </div>
         <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
-          {SUBSCRIPTION_PLANS.map((plan) => (
-            <article
-              key={plan.value}
-              className={`rounded-xl border p-6 ${plan.popular ? "border-[#D8B980] bg-[#fffdf9]" : "border-[#d8b980]/40 bg-white"}`}
-            >
+          {SUBSCRIPTION_PLANS.map((plan) => {
+            const cycle = billingMode === "season" ? "seasonal" : billingMode;
+            const liveAmount =
+              plan.value === "basic" || plan.value === "pro"
+                ? getAmount(plan.value, cycle)
+                : null;
+
+            const fallbackAmount =
+              plan.value === "basic"
+                ? cycle === "monthly"
+                  ? BASIC_MONTHLY_FALLBACK
+                  : cycle === "seasonal"
+                    ? BASIC_SEASONAL_FALLBACK
+                    : BASIC_ANNUAL_FALLBACK
+                : plan.value === "pro"
+                  ? cycle === "monthly"
+                    ? PRO_MONTHLY_FALLBACK
+                    : cycle === "seasonal"
+                      ? PRO_SEASONAL_FALLBACK
+                      : PRO_ANNUAL_FALLBACK
+                  : null;
+
+            const amount = liveAmount ?? fallbackAmount;
+
+            return (
+              <article
+                key={plan.value}
+                className={`rounded-xl border p-6 ${plan.popular ? "border-[#D8B980] bg-[#fffdf9]" : "border-[#d8b980]/40 bg-white"}`}
+              >
               <h3 className="text-xl font-bold text-[#1f3a2d]">{plan.name}</h3>
               <p className="mt-1 text-sm text-[#5f6f63]">{plan.description}</p>
               {plan.popular && (
@@ -37,11 +96,9 @@ export function PricingSection() {
               )}
 
               <div className="mt-5">
-                {getPlanPrice(plan.value, billingMode) != null ? (
+                {amount != null ? (
                   <>
-                    <p className="text-3xl font-bold text-[#1f3a2d]">
-                      KES {getPlanPrice(plan.value, billingMode)?.toLocaleString()}
-                    </p>
+                    <PriceText amount={amount} isLoading={isLoading} />
                     <p className="mt-1 text-xs text-[#5f6f63]">
                       {getBillingModeDurationLabel(billingMode)}
                     </p>
@@ -66,8 +123,9 @@ export function PricingSection() {
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </a>
               </Button>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>

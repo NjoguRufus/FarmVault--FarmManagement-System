@@ -110,6 +110,11 @@ export function computeRevenue(
 ): number {
   if (session.sale_mode === 'market') {
     if (dispatch) {
+      // Prefer broker notebook totals when available — they’re updated live even while dispatch is pending.
+      const brokerRev = dispatch.broker_sales_revenue;
+      if (brokerRev != null && Number.isFinite(Number(brokerRev)) && Number(brokerRev) > 0) {
+        return Math.round(Number(brokerRev));
+      }
       const tr = dispatch.total_revenue;
       if (tr != null && Number.isFinite(Number(tr)) && Number(tr) >= 0) {
         return Math.round(Number(tr));
@@ -149,7 +154,14 @@ function mapTomatoSessionSummaryRow(
 ): TomatoSessionSummary {
   const pickerCost = computePickerCost(totalBuckets, Number(session.picker_rate_per_bucket));
   const revenue = computeRevenue(session, dispatch);
-  const netProfit = computeNet(revenue, pickerCost);
+  const marketExpenses =
+    session.sale_mode === 'market' && dispatch?.market_expenses_total != null
+      ? Math.round(Number(dispatch.market_expenses_total) || 0)
+      : 0;
+  const netProfit =
+    session.sale_mode === 'market' && dispatch
+      ? Math.round(revenue - pickerCost - marketExpenses)
+      : computeNet(revenue, pickerCost);
   return {
     session,
     dispatch,
@@ -711,6 +723,7 @@ export type TomatoCompanyAggregate = {
   totalCrates: number;
   pickerCost: number;
   pendingMarketDispatches: number;
+  totalMarketExpenses?: number;
 };
 
 export async function fetchTomatoCompanyAggregate(
@@ -723,7 +736,14 @@ export async function fetchTomatoCompanyAggregate(
     p_project_id: projectId ?? null,
   });
   if (error || !data || !Array.isArray(data) || data.length === 0) {
-    return { totalRevenue: 0, totalBuckets: 0, totalCrates: 0, pickerCost: 0, pendingMarketDispatches: 0 };
+    return {
+      totalRevenue: 0,
+      totalBuckets: 0,
+      totalCrates: 0,
+      pickerCost: 0,
+      pendingMarketDispatches: 0,
+      totalMarketExpenses: 0,
+    };
   }
   const row = data[0] as Record<string, unknown>;
   return {
@@ -732,6 +752,8 @@ export async function fetchTomatoCompanyAggregate(
     totalCrates: num(row.total_crates),
     pickerCost: num(row.picker_cost),
     pendingMarketDispatches: num(row.pending_market_dispatches),
+    totalMarketExpenses:
+      row.total_market_expenses != null ? num(row.total_market_expenses) : undefined,
   };
 }
 

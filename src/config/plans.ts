@@ -34,8 +34,11 @@ export const SUBSCRIPTION_PLANS: PlanOption[] = [
     ],
     popular: false,
     pricing: {
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       monthly: 2500,
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       season: 8500,
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       annual: 24000,
     },
   },
@@ -57,8 +60,11 @@ export const SUBSCRIPTION_PLANS: PlanOption[] = [
     ],
     popular: true,
     pricing: {
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       monthly: 5000,
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       season: 15000,
+      // FALLBACK ONLY — sync with core.billing_prices if prices change
       annual: 48000,
     },
   },

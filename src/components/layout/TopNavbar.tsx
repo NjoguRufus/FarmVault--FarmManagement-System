@@ -99,6 +99,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   const hidePaymentUpgradeModal = trialExpiredNeedsPlan && isCompanyAdmin;
 
   const isDeveloperNav = user?.role === 'developer';
+  const canSeeBillingAndSettings = isCompanyAdmin || isDeveloperNav;
   const workspacePending =
     !isDeveloperNav && Boolean(user?.companyId) && isWorkspacePending;
   const workspaceApproved =
@@ -473,7 +474,8 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             afterSignOutUrl="/sign-in"
             settingsPath="/settings"
             supportPath="/support"
-            showBilling
+            showBilling={canSeeBillingAndSettings}
+            showSettings={canSeeBillingAndSettings}
           />
         </div>
       </div>

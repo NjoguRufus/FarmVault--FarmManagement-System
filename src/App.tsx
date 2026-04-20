@@ -1,7 +1,8 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createAppQueryClient } from "@/lib/createAppQueryClient";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { ProjectProvider } from "@/contexts/ProjectContext";
@@ -42,6 +43,7 @@ import BrokerTomatoMarketExpensesPage from "@/pages/broker/BrokerTomatoMarketExp
 import BrokerHarvestDetailsPage from "@/pages/BrokerHarvestDetailsPage";
 import BrokerTomatoDashboardPage from "@/pages/broker/BrokerTomatoDashboardPage";
 import BrokerTomatoDispatchPage from "@/pages/broker/BrokerTomatoDispatchPage";
+import BrokerFallbackDispatchPage from "@/pages/broker/BrokerFallbackDispatchPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import SeasonChallengesPage from "@/pages/SeasonChallengesPage";
 import EmployeesPage from "@/pages/EmployeesPage";
@@ -197,7 +199,7 @@ import { logger } from "@/lib/logger";
 import AppEntryPage from "@/app/app-entry/page";
 import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 
-const queryClient = new QueryClient();
+const queryClient = createAppQueryClient();
 
 /** Preserves ?ref= (and other params) when /signup redirects to /sign-up. */
 function SignupQueryPreservingRedirect() {
@@ -396,6 +398,7 @@ const AppRoutesWithLock = () => (
         <Route path="/tomato-harvest/:projectId/session/:sessionId" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestSessionDetailPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/tomato-harvest/:projectId?" element={<PermissionRoute module="harvest"><RequireNotBroker><TomatoHarvestListPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/broker" element={<RequireBroker><BrokerTomatoDashboardPage /></RequireBroker>} />
+        <Route path="/broker/harvest-fallback/:dispatchId" element={<RequireBroker><BrokerFallbackDispatchPage /></RequireBroker>} />
         <Route path="/broker/harvest/:dispatchId" element={<RequireBroker><BrokerTomatoDispatchPage /></RequireBroker>} />
         <Route path="/broker/harvest-sales" element={<Navigate to="/broker" replace />} />
         <Route path="/broker/expenses" element={<RequireBroker><BrokerTomatoMarketExpensesPage /></RequireBroker>} />

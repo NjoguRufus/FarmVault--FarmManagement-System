@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calendar, DollarSign, Landmark, SlidersHorizontal, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { debounce } from "@/lib/debounce";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -160,18 +161,27 @@ export default function AdminFinancesPage({ embedded = false }: { embedded?: boo
   });
 
   useEffect(() => {
+    const flushRevenue = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: ["company-revenue-analytics"] });
+      void queryClient.invalidateQueries({ queryKey: ["company-revenue-page"] });
+    }, 800);
+    const flushExpenses = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: ["company-expenses-analytics"] });
+      void queryClient.invalidateQueries({ queryKey: ["company-expenses-page"] });
+    }, 800);
+
     const channel = supabase
       .channel("admin-finances-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "company_revenue" }, () => {
-        queryClient.invalidateQueries({ queryKey: ["company-revenue-analytics"] });
-        queryClient.invalidateQueries({ queryKey: ["company-revenue-page"] });
+        flushRevenue();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "company_expenses" }, () => {
-        queryClient.invalidateQueries({ queryKey: ["company-expenses-analytics"] });
-        queryClient.invalidateQueries({ queryKey: ["company-expenses-page"] });
+        flushExpenses();
       })
       .subscribe();
     return () => {
+      flushRevenue.cancel();
+      flushExpenses.cancel();
       void supabase.removeChannel(channel);
     };
   }, [queryClient]);

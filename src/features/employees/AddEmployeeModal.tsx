@@ -19,9 +19,11 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { EMPLOYEE_ROLE_LABELS, EMPLOYEE_ROLES } from '@/config/accessControl';
+import { EMPLOYEE_ROLE_LABELS, EMPLOYEE_ROLES, PERMISSION_KEYS } from '@/config/accessControl';
 import { useAddEmployeeForm } from './useAddEmployeeForm';
 import { toast } from 'sonner';
+import { AccessControlPermissionEditor } from '@/components/permissions/AccessControlPermissionEditor';
+import { getPresetPermissions } from '@/lib/employees/permissionPresets';
 
 interface AddEmployeeModalProps {
   open: boolean;
@@ -31,6 +33,12 @@ interface AddEmployeeModalProps {
 
 export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeModalProps) {
   const { state, update, submit, reset, saving, error } = useAddEmployeeForm();
+  const roleValue = state.role || state.permission_preset;
+  const canEditPermissions = roleValue === 'custom' || roleValue === 'operations-manager';
+  const allowedKeys = React.useMemo(
+    () => new Set(Object.keys(state.permissions).filter((k) => state.permissions[k] === true)),
+    [state.permissions]
+  );
 
   const handleOpenChange = (next: boolean) => {
     if (!next) reset();
@@ -46,6 +54,12 @@ export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeM
       onSuccess?.();
     }
   };
+
+  const canSubmit =
+    !saving &&
+    Boolean(state.email.trim()) &&
+    Boolean(roleValue) &&
+    (!canEditPermissions || allowedKeys.size > 0);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -87,10 +101,16 @@ export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeM
             <div className="space-y-2">
               <Label>Role</Label>
               <Select
-                value={state.role || state.permission_preset}
+                value={roleValue}
                 onValueChange={(v) => {
-                  update('role', (v as any) || '');
-                  update('permission_preset', (v as any) || 'viewer');
+                  const next = (v as any) || '';
+                  update('role', next);
+                  update('permission_preset', next || 'custom');
+                  if (next === 'operations-manager') {
+                    update('permissions', getPresetPermissions('operations-manager'));
+                    return;
+                  }
+                  if (next !== 'custom') update('permissions', {});
                 }}
               >
                 <SelectTrigger>
@@ -102,6 +122,7 @@ export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeM
                       {EMPLOYEE_ROLE_LABELS[r]}
                     </SelectItem>
                   ))}
+                  <SelectItem value="custom">{EMPLOYEE_ROLE_LABELS.custom}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -115,6 +136,31 @@ export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeM
               />
             </div>
           </div>
+
+          {canEditPermissions && (
+            <div className="space-y-2">
+              <Label>Access & permissions</Label>
+              <p className="text-xs text-muted-foreground">
+                Select the permissions this employee should have. Nothing is saved until you click Save.
+              </p>
+              <AccessControlPermissionEditor
+                allowedKeys={allowedKeys}
+                onChange={(next) => {
+                  const flat: Record<string, boolean> = {};
+                  PERMISSION_KEYS.forEach((k) => {
+                    flat[k] = next.has(k);
+                  });
+                  update('permissions', flat);
+                }}
+              />
+              {allowedKeys.size === 0 && (
+                <p className="text-xs text-destructive">
+                  Select at least one permission to continue.
+                </p>
+              )}
+            </div>
+          )}
+
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
@@ -122,8 +168,8 @@ export function AddEmployeeModal({ open, onOpenChange, onSuccess }: AddEmployeeM
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Adding…' : 'Add employee'}
+            <Button type="submit" disabled={!canSubmit}>
+              {saving ? 'Saving…' : 'Save employee'}
             </Button>
           </DialogFooter>
         </form>

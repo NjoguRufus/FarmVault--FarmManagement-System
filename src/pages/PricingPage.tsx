@@ -9,8 +9,29 @@ import { Footer } from "@/components/landing/Footer";
 import { SEO_ROUTES } from "@/seo/routes";
 import { getOrganizationSchema, getBreadcrumbSchema, getFAQSchema } from "@/seo/structuredData";
 import { SeoInternalLinks } from "@/components/seo/SeoInternalLinks";
-import { SUBSCRIPTION_PLANS, type BillingMode, getPlanPrice, getBillingModeDurationLabel } from "@/config/plans";
+import { SUBSCRIPTION_PLANS, type BillingMode, getBillingModeDurationLabel } from "@/config/plans";
 import { BillingModeSelector } from "@/components/subscription/BillingModeSelector";
+import { useBillingPrices } from "@/hooks/useBillingPrices";
+
+function PriceText({
+  amount,
+  isLoading,
+}: {
+  amount: number;
+  isLoading: boolean;
+}) {
+  return (
+    <span className="relative inline-flex items-baseline">
+      <span className="text-4xl font-bold text-foreground">KES {amount.toLocaleString()}</span>
+      {isLoading && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 -bottom-1 h-2 rounded-md bg-muted/60 animate-pulse"
+        />
+      )}
+    </span>
+  );
+}
 
 const breadcrumbs = [
   { name: "Home", path: "/" },
@@ -46,6 +67,20 @@ const faqs = [
 
 export default function PricingPage() {
   const [billingMode, setBillingMode] = useState<BillingMode>('monthly');
+  const { getAmount, isLoading } = useBillingPrices();
+
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_MONTHLY_FALLBACK = 2500;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_MONTHLY_FALLBACK = 5000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_SEASONAL_FALLBACK = 8500;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_SEASONAL_FALLBACK = 15000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const BASIC_ANNUAL_FALLBACK = 24000;
+  // FALLBACK ONLY — sync with core.billing_prices if prices change
+  const PRO_ANNUAL_FALLBACK = 48000;
 
   return (
     <div className="min-h-screen bg-background font-body">
@@ -108,7 +143,28 @@ export default function PricingPage() {
         <div className="container mx-auto px-4 lg:px-8">
           <div className="grid md:grid-cols-3 gap-6 lg:gap-8 max-w-5xl mx-auto">
             {SUBSCRIPTION_PLANS.map((plan, i) => {
-              const amount = getPlanPrice(plan.value, billingMode);
+              const cycle = billingMode === 'season' ? 'seasonal' : billingMode;
+              const liveAmount =
+                plan.value === 'basic' || plan.value === 'pro'
+                  ? getAmount(plan.value, cycle)
+                  : null;
+
+              const fallbackAmount =
+                plan.value === 'basic'
+                  ? cycle === 'monthly'
+                    ? BASIC_MONTHLY_FALLBACK
+                    : cycle === 'seasonal'
+                      ? BASIC_SEASONAL_FALLBACK
+                      : BASIC_ANNUAL_FALLBACK
+                  : plan.value === 'pro'
+                    ? cycle === 'monthly'
+                      ? PRO_MONTHLY_FALLBACK
+                      : cycle === 'seasonal'
+                        ? PRO_SEASONAL_FALLBACK
+                        : PRO_ANNUAL_FALLBACK
+                    : null;
+
+              const amount = liveAmount ?? fallbackAmount;
               const durationLabel = getBillingModeDurationLabel(billingMode);
 
               return (
@@ -143,9 +199,7 @@ export default function PricingPage() {
                     {amount != null ? (
                       <>
                         <div className="flex items-baseline gap-1">
-                          <span className="text-4xl font-bold text-foreground">
-                            KES {amount.toLocaleString()}
-                          </span>
+                          <PriceText amount={amount} isLoading={isLoading} />
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">{durationLabel}</p>
                         {billingMode === 'annual' && (

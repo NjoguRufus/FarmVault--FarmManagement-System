@@ -70,9 +70,12 @@ export type FallbackMarketSalesEntryRow = {
   market_dispatch_id: string;
   entry_number: number;
   buyer_label: string | null;
+  buyer_phone: string | null;
   price_per_unit: number;
   quantity: number;
   line_total: number;
+  broker_payment_kind: 'collected' | 'debt' | null;
+  broker_collected_amount: number | null;
   created_at: string;
 };
 
@@ -395,6 +398,20 @@ export async function upsertFallbackMarketDispatch(params: {
   return rowToFallbackMarketDispatch(data as any);
 }
 
+export async function updateFallbackMarketDispatchStatus(params: {
+  companyId: string;
+  dispatchId: string;
+  status: FallbackDispatchStatus;
+}): Promise<void> {
+  const cid = requireCompanyId(params.companyId);
+  const { error } = await harvest()
+    .from('fallback_market_dispatches')
+    .update({ status: params.status, updated_at: new Date().toISOString() })
+    .eq('company_id', cid)
+    .eq('id', params.dispatchId);
+  if (error) throw error;
+}
+
 export async function listFallbackMarketSalesEntries(params: {
   companyId: string;
   dispatchId: string;
@@ -407,23 +424,35 @@ export async function listFallbackMarketSalesEntries(params: {
     .eq('market_dispatch_id', params.dispatchId)
     .order('entry_number', { ascending: true });
   if (error) throw error;
-  return ((data ?? []) as any[]).map((r) => ({
-    id: String(r.id),
-    company_id: String(r.company_id),
-    market_dispatch_id: String(r.market_dispatch_id),
-    entry_number: num(r.entry_number),
-    buyer_label: r.buyer_label != null ? String(r.buyer_label) : null,
-    price_per_unit: num(r.price_per_unit),
-    quantity: num(r.quantity),
-    line_total: num(r.line_total),
-    created_at: String(r.created_at),
-  }));
+  return ((data ?? []) as any[]).map((r) => {
+    const kindRaw = r.broker_payment_kind;
+    const kind =
+      kindRaw === 'collected' || kindRaw === 'debt' ? (kindRaw as 'collected' | 'debt') : null;
+    return {
+      id: String(r.id),
+      company_id: String(r.company_id),
+      market_dispatch_id: String(r.market_dispatch_id),
+      entry_number: num(r.entry_number),
+      buyer_label: r.buyer_label != null ? String(r.buyer_label) : null,
+      buyer_phone: r.buyer_phone != null ? String(r.buyer_phone).trim() || null : null,
+      price_per_unit: num(r.price_per_unit),
+      quantity: num(r.quantity),
+      line_total: num(r.line_total),
+      broker_payment_kind: kind,
+      broker_collected_amount:
+        r.broker_collected_amount != null && Number.isFinite(num(r.broker_collected_amount))
+          ? Math.round(num(r.broker_collected_amount))
+          : null,
+      created_at: String(r.created_at),
+    };
+  });
 }
 
 export async function addFallbackMarketSalesEntry(params: {
   companyId: string;
   dispatchId: string;
   buyerLabel?: string | null;
+  buyerPhone?: string | null;
   pricePerUnit: number;
   quantity: number;
 }): Promise<void> {
@@ -438,6 +467,7 @@ export async function addFallbackMarketSalesEntry(params: {
     .maybeSingle();
   if (maxErr) throw maxErr;
   const next = maxRow?.entry_number != null ? Number(maxRow.entry_number) + 1 : 1;
+  const phone = params.buyerPhone?.trim() || null;
 
   const { error } = await harvest()
     .from('fallback_market_sales_entries')
@@ -446,6 +476,7 @@ export async function addFallbackMarketSalesEntry(params: {
       market_dispatch_id: params.dispatchId,
       entry_number: next,
       buyer_label: params.buyerLabel ?? null,
+      buyer_phone: phone,
       price_per_unit: params.pricePerUnit,
       quantity: params.quantity,
     });
@@ -460,6 +491,106 @@ export async function deleteFallbackMarketSalesEntry(params: {
   const { error } = await harvest()
     .from('fallback_market_sales_entries')
     .delete()
+    .eq('company_id', cid)
+    .eq('id', params.entryId);
+  if (error) throw error;
+}
+
+const MIN_FALLBACK_BUYER_EDIT_REASON_LEN = 8;
+
+export async function updateFallbackMarketSalesEntry(params: {
+  companyId: string;
+  entryId: string;
+  buyerLabel: string | null;
+  pricePerUnit: number;
+  quantity: number;
+  editReason: string;
+  editorUserId?: string | null;
+}): Promise<void> {
+  const cid = requireCompanyId(params.companyId);
+  const reason = params.editReason.trim();
+  if (reason.length < MIN_FALLBACK_BUYER_EDIT_REASON_LEN) {
+    throw new Error(`Reason for edit must be at least ${MIN_FALLBACK_BUYER_EDIT_REASON_LEN} characters (audit trail).`);
+  }
+
+  const { data: row, error: fetchErr } = await harvest()
+    .from('fallback_market_sales_entries')
+    .select('id, buyer_label, price_per_unit, quantity, line_total')
+    .eq('company_id', cid)
+    .eq('id', params.entryId)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!row) throw new Error('Buyer line not found');
+
+  const r = row as Record<string, unknown>;
+  const before = {
+    buyer_label: r.buyer_label,
+    price_per_unit: num(r.price_per_unit),
+    quantity: num(r.quantity),
+    line_total: num(r.line_total),
+  };
+
+  const qty = Math.max(0.01, Number(params.quantity) || 0);
+  const price = Math.max(0, Number(params.pricePerUnit) || 0);
+
+  const { error: upErr } = await harvest()
+    .from('fallback_market_sales_entries')
+    .update({
+      buyer_label: params.buyerLabel?.trim() ? params.buyerLabel.trim() : null,
+      price_per_unit: price,
+      quantity: qty,
+    })
+    .eq('company_id', cid)
+    .eq('id', params.entryId);
+  if (upErr) throw upErr;
+
+  const lineTotal = Math.round(price * qty * 100) / 100;
+  const after = {
+    buyer_label: params.buyerLabel?.trim() ? params.buyerLabel.trim() : null,
+    price_per_unit: price,
+    quantity: qty,
+    line_total: lineTotal,
+  };
+
+  const { error: audErr } = await harvest().from('fallback_market_sales_entry_edit_audits').insert({
+    company_id: cid,
+    sales_entry_id: params.entryId,
+    reason,
+    snapshot_before: before,
+    snapshot_after: after,
+    editor_user_id: params.editorUserId?.trim() || null,
+  });
+  if (audErr) throw audErr;
+}
+
+/** Broker notebook only: phone + collected / debt (no line-edit audit). */
+export async function updateFallbackMarketSalesEntryBrokerRecord(params: {
+  companyId: string;
+  entryId: string;
+  buyerPhone: string | null;
+  brokerPaymentKind: 'collected' | 'debt' | null;
+  brokerCollectedAmount: number | null;
+}): Promise<void> {
+  const cid = requireCompanyId(params.companyId);
+  const kind = params.brokerPaymentKind;
+  if (kind === 'collected') {
+    const a = params.brokerCollectedAmount;
+    if (a == null || !Number.isFinite(a) || a < 0) {
+      throw new Error('Enter a valid collected amount.');
+    }
+  }
+  const collected =
+    kind === 'collected' && params.brokerCollectedAmount != null
+      ? Math.round(Number(params.brokerCollectedAmount))
+      : null;
+
+  const { error } = await harvest()
+    .from('fallback_market_sales_entries')
+    .update({
+      buyer_phone: params.buyerPhone?.trim() ? params.buyerPhone.trim() : null,
+      broker_payment_kind: kind,
+      broker_collected_amount: collected,
+    })
     .eq('company_id', cid)
     .eq('id', params.entryId);
   if (error) throw error;

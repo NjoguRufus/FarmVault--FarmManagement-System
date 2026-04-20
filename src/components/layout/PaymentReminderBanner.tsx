@@ -18,8 +18,8 @@ export function PaymentReminderBanner() {
     queryKey: ['company-payment-reminder', companyId],
     enabled: !!companyId && !isDeveloper,
     queryFn: () => getCompany(companyId!),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
+    staleTime: 120_000,
+    refetchOnWindowFocus: false,
   });
 
   const [dismissing, setDismissing] = React.useState(false);

@@ -24,6 +24,7 @@ import {
   logActivity,
 } from '@/services/employeeAccessService';
 import { AccessControlPermissionEditor } from '@/components/permissions/AccessControlPermissionEditor';
+import { PERMISSION_KEYS, type PermissionKey } from '@/config/accessControl';
 import { EMPLOYEE_ROLE_LABELS, type EmployeeRoleKey } from '@/config/accessControl';
 import { db } from '@/lib/db';
 import { format } from 'date-fns';
@@ -234,14 +235,118 @@ export default function EmployeeProfilePage() {
           <Card>
             <CardHeader>
               <CardTitle>Access & Permissions</CardTitle>
-              <p className="text-sm text-muted-foreground">Grouped by module. Only admins can change these.</p>
+              <p className="text-sm text-muted-foreground">
+                Grouped by category. Choose what this employee can view or edit.
+              </p>
             </CardHeader>
             <CardContent>
-              <AccessControlPermissionEditor
-                allowedKeys={allowedKeys}
-                onChange={setAllowedKeys}
-                disabled={!canManagePermissions}
-              />
+              {/* Keep the legacy editor available for now, but render a clearer grouped UI first. */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3">
+                <Accordion type="multiple" className="w-full">
+                  {[
+                    { id: 'dashboard', label: '📊 Dashboard', keys: PERMISSION_KEYS.filter((k) => k.startsWith('dashboard.')) },
+                    {
+                      id: 'projects_ops',
+                      label: '🌱 Projects & Operations',
+                      keys: PERMISSION_KEYS.filter(
+                        (k) =>
+                          k.startsWith('projects.') ||
+                          k.startsWith('operations.') ||
+                          k.startsWith('crop_monitoring.') ||
+                          k.startsWith('suppliers.')
+                      ),
+                    },
+                    { id: 'inventory', label: '📦 Inventory', keys: PERMISSION_KEYS.filter((k) => k.startsWith('inventory.')) },
+                    {
+                      id: 'harvest',
+                      label: '🚜 Harvest',
+                      keys: PERMISSION_KEYS.filter((k) => k.startsWith('harvest.') || k.startsWith('harvest_collections.')),
+                    },
+                    { id: 'records', label: '📁 Records', keys: PERMISSION_KEYS.filter((k) => k.startsWith('records.')) },
+                    {
+                      id: 'finance',
+                      label: '💰 Finance',
+                      keys: PERMISSION_KEYS.filter(
+                        (k) => k.startsWith('expenses.') || k.startsWith('financials.') || k.startsWith('reports.')
+                      ),
+                    },
+                    { id: 'logistics', label: '🚚 Logistics', keys: PERMISSION_KEYS.filter((k) => k.startsWith('logistics.')) },
+                    { id: 'employees', label: '👥 Employees', keys: PERMISSION_KEYS.filter((k) => k.startsWith('employees.')) },
+                    { id: 'settings', label: '⚙️ Settings', keys: PERMISSION_KEYS.filter((k) => k.startsWith('settings.')) },
+                  ]
+                    .filter((g) => g.keys.length > 0)
+                    .map((group) => {
+                      const viewKeys = group.keys.filter((k) => k.endsWith('.view'));
+                      const editKeys = group.keys.filter((k) => !k.endsWith('.view'));
+                      const canViewAll = viewKeys.length ? viewKeys.every((k) => allowedKeys.has(k)) : false;
+                      const canEditAll = editKeys.length ? editKeys.every((k) => allowedKeys.has(k)) : false;
+                      const disabled = !canManagePermissions;
+
+                      const setMany = (keys: readonly PermissionKey[], checked: boolean) => {
+                        const next = new Set(allowedKeys);
+                        keys.forEach((k) => {
+                          if (checked) next.add(k);
+                          else next.delete(k);
+                        });
+                        setAllowedKeys(next);
+                      };
+
+                      return (
+                        <AccordionItem key={group.id} value={group.id} className="border-border/50">
+                          <div className="flex items-center gap-3">
+                            <AccordionTrigger className="py-3 hover:no-underline">
+                              <span className="text-sm font-medium text-foreground">{group.label}</span>
+                            </AccordionTrigger>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="text-xs text-muted-foreground">View</span>
+                              <Switch
+                                checked={canViewAll}
+                                disabled={disabled || viewKeys.length === 0}
+                                onCheckedChange={(checked) => setMany(viewKeys as PermissionKey[], Boolean(checked))}
+                                aria-label={`${group.label} view permission`}
+                              />
+                              <span className="text-xs text-muted-foreground">Edit</span>
+                              <Switch
+                                checked={canEditAll}
+                                disabled={disabled || editKeys.length === 0}
+                                onCheckedChange={(checked) => setMany(editKeys as PermissionKey[], Boolean(checked))}
+                                aria-label={`${group.label} edit permissions`}
+                              />
+                            </div>
+                          </div>
+                          <AccordionContent className="pt-1 pb-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {group.keys
+                                .filter((k) => !k.endsWith('.view'))
+                                .map((key) => {
+                                  const checked = allowedKeys.has(key);
+                                  return (
+                                    <label
+                                      key={key}
+                                      className="flex items-center gap-2 rounded-md border border-border/50 bg-background/70 px-2.5 py-2 text-xs sm:text-sm"
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        disabled={disabled}
+                                        onCheckedChange={(next) => {
+                                          const n = new Set(allowedKeys);
+                                          if (next === true) n.add(key);
+                                          else n.delete(key);
+                                          setAllowedKeys(n);
+                                        }}
+                                      />
+                                      <span className="text-foreground">{key.split('.').slice(1).join('.') || 'view'}</span>
+                                    </label>
+                                  );
+                                })}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      );
+                    })}
+                </Accordion>
+              </div>
+
               {canManagePermissions && (
                 <Button className="mt-4" onClick={handleSavePermissions} disabled={savingPermissions}>
                   {savingPermissions ? 'Saving…' : 'Save permissions'}

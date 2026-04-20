@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
+import { debounce } from "@/lib/debounce";
 import {
   COMPANY_EXPENSE_CATEGORY_PRESETS,
   createCompanyExpense,
@@ -69,27 +70,32 @@ export default function AdminExpensesPage() {
   const { data: paged, isLoading } = useQuery({
     queryKey: ["company-expenses", filters, page],
     queryFn: () => listCompanyExpenses(filters, page, PAGE_SIZE),
+    staleTime: 45_000,
   });
 
   const { data: analyticsRows = [] } = useQuery({
     queryKey: ["company-expenses-analytics", filters],
     queryFn: () => listCompanyExpensesForAnalytics(filters),
+    staleTime: 45_000,
   });
 
   useEffect(() => {
+    const flush = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: ["company-expenses"] });
+      void queryClient.invalidateQueries({ queryKey: ["company-expenses-analytics"] });
+    }, 800);
+
     const channel = supabase
       .channel("company-expenses-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "company_expenses" },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["company-expenses"] });
-          queryClient.invalidateQueries({ queryKey: ["company-expenses-analytics"] });
-        },
+        () => flush(),
       )
       .subscribe();
 
     return () => {
+      flush.cancel();
       void supabase.removeChannel(channel);
     };
   }, [queryClient]);

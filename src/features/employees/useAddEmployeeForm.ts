@@ -15,6 +15,8 @@ export interface AddEmployeeFormState {
   role: EmployeeRoleKey | '';
   department: string;
   permission_preset: EmployeeRoleKey | '';
+  /** Flat "module.action" permission keys used for Add Role. */
+  permissions: Record<string, boolean>;
   project_ids: string[];
 }
 
@@ -24,7 +26,8 @@ const defaultState: AddEmployeeFormState = {
   phone: '',
   role: '',
   department: '',
-  permission_preset: 'viewer',
+  permission_preset: 'custom',
+  permissions: {},
   project_ids: [],
 };
 
@@ -66,7 +69,8 @@ export function useAddEmployeeForm() {
         phone: state.phone.trim() || null,
         role: state.role || undefined,
         department: state.department.trim() || null,
-        permission_preset: (state.permission_preset as EmployeeRoleKey) || 'viewer',
+        permission_preset: (state.permission_preset as EmployeeRoleKey) || 'custom',
+        permissions: state.role === 'custom' || state.role === 'operations-manager' ? state.permissions : null,
         project_ids: state.project_ids.length ? state.project_ids : undefined,
         created_by_clerk_id: userId ?? undefined,
       });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import {
   fetchAnalyticsCropProfit,
@@ -6,9 +6,9 @@ import {
   fetchAnalyticsExpenseBreakdown,
   fetchAnalyticsMonthlyRevenue,
 } from '@/services/analyticsReportsService';
-import { supabase } from '@/lib/supabase';
 
-const staleTime = 60_000;
+/** Analytics RPCs are expensive; treat as soft cache. Pull-to-refresh / explicit refetch still works. */
+const staleTime = 5 * 60_000;
 
 export function useFarmAnalyticsReports(companyId: string | null | undefined) {
   const id = (companyId ?? '').trim();
@@ -67,79 +67,11 @@ export function useFarmAnalyticsReports(companyId: string | null | undefined) {
     if (!cropProfit.length) return null;
     const ranked = [...cropProfit].filter((r) => (r.crop ?? '').length > 0 || r.profit !== 0 || r.total_revenue !== 0);
     if (!ranked.length) return null;
-    // Best crop = crop with highest revenue (per requirements)
     ranked.sort((a, b) => b.total_revenue - a.total_revenue);
     return ranked[0];
   }, [cropProfit]);
 
   const refetchAll = useCallback(() => Promise.all(results.map((q) => q.refetch())), [results]);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const channel = supabase
-      .channel(`farm-analytics-${id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'harvests', filter: `company_id=eq.${id}` },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'expenses', filter: `company_id=eq.${id}` },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'finance', table: 'expenses', filter: `company_id=eq.${id}` },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'harvest',
-          table: 'tomato_harvest_sessions',
-          filter: `company_id=eq.${id}`,
-        },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'harvest',
-          table: 'tomato_harvest_picker_logs',
-          filter: `company_id=eq.${id}`,
-        },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'harvest',
-          table: 'tomato_market_dispatches',
-          filter: `company_id=eq.${id}`,
-        },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'inventory_usage_logs', filter: `company_id=eq.${id}` },
-        () => void refetchAll(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'operations_work_cards', filter: `company_id=eq.${id}` },
-        () => void refetchAll(),
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [enabled, id, refetchAll]);
 
   return {
     enabled,
