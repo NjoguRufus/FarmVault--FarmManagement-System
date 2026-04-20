@@ -198,6 +198,7 @@ import ReferralShortLinkPage from "@/pages/ReferralShortLinkPage";
 import { logger } from "@/lib/logger";
 import AppEntryPage from "@/app/app-entry/page";
 import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
+import { PlanProvider } from "@/contexts/PlanContext";
 
 const queryClient = createAppQueryClient();
 
@@ -622,34 +623,36 @@ const App = () => (
   <AppLockGate>
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
-        <ProjectProvider>
-          <NotificationProvider>
-            <NotificationsTableBridge />
-            <ConnectivityProvider>
-              <TooltipProvider>
-                <Toaster />
-                <Sonner />
-                <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                  <HelmetProvider>
-                    <DomainGuard />
-                    <SignedInAuthEscape />
-                    <ScrollToTop />
-                    <RoutePersistence />
-                    <PosthogAnalytics />
-                    <OneSignalBootstrap />
-                    <OneSignalIdentitySync />
-                    <OnboardingModalPriorityProvider>
-                      <TourProvider>
-                        <AppRoutesWithLock />
-                      </TourProvider>
-                    </OnboardingModalPriorityProvider>
-                    {import.meta.env.DEV && <DevAuthDebugPanel />}
-                  </HelmetProvider>
-                </BrowserRouter>
-              </TooltipProvider>
-            </ConnectivityProvider>
-          </NotificationProvider>
-        </ProjectProvider>
+        <PlanProvider>
+          <ProjectProvider>
+            <NotificationProvider>
+              <NotificationsTableBridge />
+              <ConnectivityProvider>
+                <TooltipProvider>
+                  <Toaster />
+                  <Sonner />
+                  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                    <HelmetProvider>
+                      <DomainGuard />
+                      <SignedInAuthEscape />
+                      <ScrollToTop />
+                      <RoutePersistence />
+                      <PosthogAnalytics />
+                      <OneSignalBootstrap />
+                      <OneSignalIdentitySync />
+                      <OnboardingModalPriorityProvider>
+                        <TourProvider>
+                          <AppRoutesWithLock />
+                        </TourProvider>
+                      </OnboardingModalPriorityProvider>
+                      {import.meta.env.DEV && <DevAuthDebugPanel />}
+                    </HelmetProvider>
+                  </BrowserRouter>
+                </TooltipProvider>
+              </ConnectivityProvider>
+            </NotificationProvider>
+          </ProjectProvider>
+        </PlanProvider>
       </ErrorBoundary>
     </QueryClientProvider>
   </AppLockGate>

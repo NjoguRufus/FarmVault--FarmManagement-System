@@ -20,8 +20,16 @@ export interface ResolvedWorkspaceSubscriptionState {
   isExpired: boolean;
   daysRemaining: number | null;
   isOverrideActive: boolean;
-  plan: WorkspaceSubscriptionPlan;
-  status: WorkspaceSubscriptionStatus;
+  /**
+   * Null until confirmed from Supabase.
+   * UI must treat null as "unknown" and render a loading gate (never assume "basic").
+   */
+  plan: WorkspaceSubscriptionPlan | null;
+  /**
+   * Null until confirmed from Supabase.
+   * Keep nullable to avoid misleading UI states during initial load/hydration.
+   */
+  status: WorkspaceSubscriptionStatus | null;
   trialExpiredNeedsPlan: boolean;
   trialEndsAt: string | null;
   /** Trial end or paid period end (ISO), for billing / renewal display. */
@@ -101,13 +109,14 @@ export function resolveWorkspaceSubscriptionState(
 
   if (!companyId || !subscriptionState) {
     return {
+      // Unknown subscription state: do not assume any plan. UI must render loading gate.
       canWrite: true,
       isTrial: false,
       isExpired: false,
       daysRemaining: null,
       isOverrideActive: false,
-      plan: 'basic',
-      status: 'pending_approval',
+      plan: null,
+      status: null,
       trialExpiredNeedsPlan: false,
       trialEndsAt: null,
       displayAccessEndIso: null,

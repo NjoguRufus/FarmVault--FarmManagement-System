@@ -74,7 +74,26 @@ export function useEffectivePlanAccess(): UseEffectivePlanAccessResult {
       };
     }
 
-    // Build subscription object from hook data
+    // If the plan is not yet confirmed, do not compute access from a fallback.
+    // Consumers must respect isLoading and render a loading gate instead.
+    if (!sub.plan || !sub.status) {
+      return {
+        plan: 'basic',
+        status: 'pending_approval',
+        isTrial: false,
+        isOverride: false,
+        overrideMode: null,
+        expiresAt: null,
+        daysRemaining: null,
+        canAccessFeature: () => false,
+        limits: {
+          maxActiveProjects: 0,
+          maxEmployees: 0,
+        },
+      };
+    }
+
+    // Build subscription object from hook data (confirmed)
     const subscription: CompanySubscription = {
       plan: sub.plan as any,
       status: sub.status as any,
@@ -97,7 +116,7 @@ export function useEffectivePlanAccess(): UseEffectivePlanAccessResult {
 
   return {
     ...access,
-    isLoading: sub.isLoading,
+    isLoading: sub.isLoading || !sub.plan || !sub.status,
     isDeveloper,
     isCompanyAdmin,
     planLabel,
