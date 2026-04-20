@@ -53,17 +53,27 @@ export default function AdminOperationsPage() {
   
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<WorkCardStatus | 'all'>('all');
-  const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [projectFilter, setProjectFilter] = useState<string>(() => activeProject?.id ?? 'all');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [showPlanWorkModal, setShowPlanWorkModal] = useState(false);
   const [showLogWorkModal, setShowLogWorkModal] = useState(false);
   const [selectedWorkCard, setSelectedWorkCard] = useState<WorkCard | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
 
+  // Keep the default filter aligned with the navbar context.
+  useEffect(() => {
+    setProjectFilter(activeProject?.id ?? 'all');
+  }, [activeProject?.id]);
+
   // Fetch all work cards for company
   const { data: workCards = [], isLoading: cardsLoading, refetch: refetchCards } = useQuery({
-    queryKey: ['work-cards', companyId],
-    queryFn: () => getWorkCardsForCompany({ companyId: companyId! }),
+    queryKey: ['work-cards', companyId, activeProject?.id ?? null, activeFarmId ?? null],
+    queryFn: () =>
+      getWorkCardsForCompany({
+        companyId: companyId!,
+        projectId: activeProject?.id ?? null,
+        farmId: activeProject?.id ? null : (activeFarmId ?? null),
+      }),
     enabled: !!companyId,
     staleTime: 60_000,
   });

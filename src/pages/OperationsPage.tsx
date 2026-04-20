@@ -66,7 +66,7 @@ import { logger } from "@/lib/logger";
 
 export default function OperationsPage() {
   const navigate = useNavigate();
-  const { activeProject, projects } = useProject();
+  const { activeProject, activeFarmId, projects } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
@@ -184,17 +184,19 @@ export default function OperationsPage() {
 
   // Work cards (operationsWorkCards): Admin creates; Admin views Planned vs Actual and approves/rejects
   const companyIdForCards = activeProject?.companyId ?? user?.companyId ?? null;
-  const { workCards = [], refetch: refetchWorkCards } = useWorkCardsForCompany(companyIdForCards);
+  const { workCards = [], refetch: refetchWorkCards } = useWorkCardsForCompany(companyIdForCards, {
+    // Prefer project-scoped cards when a project is active; otherwise fall back to farm-scoped.
+    projectId: activeProject?.id ?? null,
+    farmId: activeProject?.id ? null : (activeFarmId ?? null),
+  });
   const invalidateWorkCards = useInvalidateWorkCards();
 
   if (import.meta.env.DEV && typeof workCards !== 'undefined') {
     // Temporary debug: list query result length (remove after verifying create visibility)
     logger.log('[Operations] work cards list', { companyIdForCards, count: workCards?.length ?? 0, projectIds: workCards?.map((c) => c.projectId) });
   }
-  const workCardsForProject = useMemo(() => {
-    if (!activeProject) return workCards;
-    return workCards.filter((c) => c.projectId === activeProject.id);
-  }, [workCards, activeProject]);
+  // `workCards` is already scoped by active project/farm via the query params above.
+  const workCardsForProject = workCards;
 
   /** Work Cards grid: show all cards not yet paid (planned, submitted, rejected, approved). Paid cards move to Work Logs. */
   const workCardsInProgress = useMemo(() => {
