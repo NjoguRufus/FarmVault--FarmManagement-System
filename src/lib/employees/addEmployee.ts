@@ -43,7 +43,7 @@ export async function addEmployee(input: AddEmployeeInput): Promise<{ employee_i
     throw new Error('An employee with this email already exists in this company.');
   }
 
-  const preset = input.permission_preset ?? 'viewer';
+  const preset = input.permission_preset ?? 'custom';
   const nestedPermissions = (input.permissions ?? getPresetPermissions(preset)) as any;
   const permissions = flattenPermissionMap(nestedPermissions);
 

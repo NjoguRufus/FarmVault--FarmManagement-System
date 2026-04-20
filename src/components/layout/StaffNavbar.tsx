@@ -341,6 +341,8 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
             settingsPath="/settings"
             supportPath="/staff/support"
             triggerClassName="sm:gap-2"
+            showSettings={false}
+            showBilling={false}
           />
         </div>
       </div>

@@ -16,8 +16,8 @@ export function SubscriptionAccessGate({ children }: { children: React.ReactElem
     queryKey: ['subscription-gate', user?.companyId],
     queryFn: () => getSubscriptionGateState(),
     enabled: !!user?.companyId && !isDeveloper,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
+    staleTime: 45_000,
+    refetchOnWindowFocus: false,
   });
 
   if (isDeveloper || !user?.companyId) return children;

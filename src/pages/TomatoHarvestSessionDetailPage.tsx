@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ChevronDown,
   ChevronLeft,
   LayoutGrid,
   ListOrdered,
@@ -40,17 +41,25 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { TallyMarksDisplay } from '@/components/tomato-harvest/TallyMarksDisplay';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/dateUtils';
 import { useToast } from '@/hooks/use-toast';
 import { readStoredNotificationPrefs } from '@/hooks/useNotificationPreferences';
 import { useTomatoHarvestLogsRealtime } from '@/hooks/useTomatoHarvestLogsRealtime';
+import { useBrokerTomatoRealtime } from '@/hooks/useBrokerTomatoRealtime';
 import { playNotificationSound } from '@/services/notificationSoundService';
 import { fetchDisplayNamesByClerkUserIds } from '@/services/profileClerkDisplayNames';
 import { listEmployees } from '@/services/employeesSupabaseService';
 import type { Employee } from '@/types';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import {
+  listTomatoMarketExpenseLines,
+  listTomatoMarketSalesEntries,
+  type TomatoMarketSalesEntryRow,
+  updateTomatoMarketSalesEntry,
+} from '@/services/brokerTomatoMarketService';
 import {
   addTomatoBucketLog,
   addTomatoPicker,
@@ -77,8 +86,14 @@ import {
   type TomatoPackagingType,
   type TomatoSaleMode,
 } from '@/services/tomatoHarvestService';
+import {
+  MarketNotebookBuyerRow,
+  tomatoNotebookUnitLabelFromPackaging,
+  tomatoPackagingTypeTitle,
+} from '@/components/harvest/MarketNotebookBuyerRow';
+import { EditMarketSalesBuyerDialog } from '@/components/harvest/EditMarketSalesBuyerDialog';
 
-const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
+const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
 
 const PRESET_TOMATO_MARKETS = ['Muthurwa', 'Githurai', 'Kangemi'] as const;
 
@@ -121,6 +136,8 @@ export default function TomatoHarvestSessionDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ['tomato-harvest-session', companyId, sessionId] });
     void queryClient.invalidateQueries({ queryKey: ['tomato-harvest-sessions', companyId, projectId] });
     void queryClient.invalidateQueries({ queryKey: ['tomato-harvest-dispatch', companyId, sessionId] });
+    void queryClient.invalidateQueries({ queryKey: ['tomato-market-notebook-sales', companyId], exact: false });
+    void queryClient.invalidateQueries({ queryKey: ['tomato-market-notebook-expenses', companyId], exact: false });
   }, [companyId, sessionId, projectId, queryClient]);
 
   const { data: session, isLoading: loadingSession } = useQuery({
@@ -133,6 +150,20 @@ export default function TomatoHarvestSessionDetailPage() {
     queryKey: ['tomato-harvest-dispatch', companyId, sessionId],
     queryFn: () => fetchTomatoMarketDispatchBySession({ companyId: companyId!, sessionId: sessionId! }),
     enabled: Boolean(companyId && sessionId),
+  });
+
+  const { data: tomatoMarketSalesEntries = [] } = useQuery({
+    queryKey: ['tomato-market-notebook-sales', companyId, dispatch?.id],
+    queryFn: () =>
+      listTomatoMarketSalesEntries({ companyId: companyId!, dispatchId: dispatch!.id }),
+    enabled: Boolean(companyId && dispatch?.id),
+  });
+
+  const { data: tomatoMarketExpenseLines = [] } = useQuery({
+    queryKey: ['tomato-market-notebook-expenses', companyId, dispatch?.id],
+    queryFn: () =>
+      listTomatoMarketExpenseLines({ companyId: companyId!, dispatchId: dispatch!.id }),
+    enabled: Boolean(companyId && dispatch?.id),
   });
 
   const { data: customMarkets = [] } = useQuery({
@@ -191,6 +222,7 @@ export default function TomatoHarvestSessionDetailPage() {
   });
 
   useTomatoHarvestLogsRealtime(sessionId, invalidate);
+  useBrokerTomatoRealtime(companyId, queryClient);
 
   const pickersMerged: PickerWithBuckets[] = useMemo(
     () => mergePickersWithBuckets(pickers, logs),
@@ -199,16 +231,49 @@ export default function TomatoHarvestSessionDetailPage() {
 
   const totalBuckets = useMemo(() => pickersMerged.reduce((s, p) => s + p.bucketCount, 0), [pickersMerged]);
   const pickerCost = session ? computePickerCost(totalBuckets, Number(session.picker_rate_per_bucket)) : 0;
-  const revenue = session ? computeRevenue(session, dispatch) : 0;
-  const marketExpensesTotal =
-    dispatch?.market_expenses_total != null ? Number(dispatch.market_expenses_total) : 0;
+
+  const liveNotebookSalesSum = useMemo(
+    () =>
+      tomatoMarketSalesEntries.reduce(
+        (s, e) => s + (Number.isFinite(e.line_total) ? e.line_total : 0),
+        0,
+      ),
+    [tomatoMarketSalesEntries],
+  );
+  const liveNotebookExpenseSum = useMemo(
+    () =>
+      tomatoMarketExpenseLines.reduce(
+        (s, x) => s + (Number.isFinite(x.amount) ? x.amount : 0),
+        0,
+      ),
+    [tomatoMarketExpenseLines],
+  );
+
+  const revenue = useMemo(() => {
+    if (!session) return 0;
+    if (session.sale_mode === 'market' && dispatch) {
+      return Math.round(liveNotebookSalesSum);
+    }
+    return computeRevenue(session, dispatch);
+  }, [session, dispatch, liveNotebookSalesSum]);
+
+  const marketExpensesTotal = useMemo(() => {
+    if (session?.sale_mode === 'market' && dispatch) {
+      return Math.round(liveNotebookExpenseSum);
+    }
+    return dispatch?.market_expenses_total != null ? Number(dispatch.market_expenses_total) : 0;
+  }, [session?.sale_mode, dispatch, liveNotebookExpenseSum]);
+
   const net =
     session && session.sale_mode === 'market' && dispatch
       ? Math.round(revenue - pickerCost - marketExpensesTotal)
       : computeNet(revenue, pickerCost);
+
   const revenuePendingDisplay =
     session?.sale_mode === 'market' &&
     dispatch?.status === 'pending' &&
+    tomatoMarketSalesEntries.length === 0 &&
+    liveNotebookSalesSum <= 0 &&
     (dispatch?.total_revenue == null || Number(dispatch.total_revenue) <= 0);
 
   const marketPathCommitted = useMemo(
@@ -258,8 +323,19 @@ export default function TomatoHarvestSessionDetailPage() {
   const [savingMarketPricing, setSavingMarketPricing] = useState(false);
   const [savingDestination, setSavingDestination] = useState(false);
 
+  /** After dispatch exists: packaging/dispatch form is read-only until Edit. */
+  const [packagingDispatchEditing, setPackagingDispatchEditing] = useState(false);
+
+  const [editingBuyerEntry, setEditingBuyerEntry] = useState<TomatoMarketSalesEntryRow | null>(null);
+  const [savingBuyerEdit, setSavingBuyerEdit] = useState(false);
+
   const [rateInput, setRateInput] = useState('');
   const [savingRate, setSavingRate] = useState(false);
+
+  const brokerDisplayName = useMemo(() => {
+    if (!brokerEmployeeId) return '—';
+    return brokerEmployees.find((e) => e.id === brokerEmployeeId)?.name ?? '—';
+  }, [brokerEmployeeId, brokerEmployees]);
 
   const formHydratedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -293,6 +369,28 @@ export default function TomatoHarvestSessionDetailPage() {
   }, [sessionId]);
 
   useEffect(() => {
+    setPackagingDispatchEditing(false);
+  }, [sessionId, dispatch?.id]);
+
+  useEffect(() => {
+    setEditingBuyerEntry(null);
+  }, [sessionId]);
+
+  /** Default to Sales only once a market dispatch exists (actually sent to market). */
+  const salesTabDefaultedKey = useRef<string | null>(null);
+  useEffect(() => {
+    salesTabDefaultedKey.current = null;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!session || session.sale_mode !== 'market' || !dispatch) return;
+    const key = `${session.id}:${dispatch.id}`;
+    if (salesTabDefaultedKey.current === key) return;
+    salesTabDefaultedKey.current = key;
+    setActiveSection('destination');
+  }, [session?.id, session?.sale_mode, dispatch?.id]);
+
+  useEffect(() => {
     if (saleMode !== 'farm_gate' || !farmSoldSync) return;
     const n = Math.max(0, Math.floor(Number(packCount) || 0));
     setSaleUnits(String(n));
@@ -306,6 +404,41 @@ export default function TomatoHarvestSessionDetailPage() {
     setHighlightId(pickerId);
     window.setTimeout(() => setHighlightId((cur) => (cur === pickerId ? null : cur)), 1600);
   }, []);
+
+  const saveTomatoBuyerLineEdit = useCallback(
+    async (payload: {
+      buyerLabel: string | null;
+      quantity: number;
+      pricePerUnit: number;
+      editReason: string;
+    }) => {
+      if (!companyId || !editingBuyerEntry) return;
+      setSavingBuyerEdit(true);
+      try {
+        await updateTomatoMarketSalesEntry({
+          companyId,
+          entryId: editingBuyerEntry.id,
+          buyerLabel: payload.buyerLabel,
+          quantity: payload.quantity,
+          pricePerUnit: payload.pricePerUnit,
+          editReason: payload.editReason,
+          editorUserId: user?.id ?? null,
+        });
+        invalidate();
+        setEditingBuyerEntry(null);
+        toast({ title: 'Buyer line updated' });
+      } catch (e) {
+        toast({
+          title: 'Could not save',
+          description: e instanceof Error ? e.message : 'Try again.',
+          variant: 'destructive',
+        });
+      } finally {
+        setSavingBuyerEdit(false);
+      }
+    },
+    [companyId, editingBuyerEntry, user?.id, invalidate],
+  );
 
   const handleAddBucket = async (picker: PickerWithBuckets) => {
     if (!companyId || !sessionId || !canEdit || bucketInFlight) return;
@@ -685,9 +818,11 @@ export default function TomatoHarvestSessionDetailPage() {
               subtitle={
                 revenuePendingDisplay
                   ? 'To be updated after market sale'
-                  : session.sale_mode === 'market' && dispatch?.status === 'pending'
-                    ? 'Live total from broker sales'
-                    : undefined
+                  : session.sale_mode === 'market' && tomatoMarketSalesEntries.length > 0
+                    ? 'Live total from broker notebook'
+                    : session.sale_mode === 'market' && dispatch?.status === 'pending'
+                      ? 'Live total from broker sales'
+                      : undefined
               }
               icon={TrendingUp}
               iconVariant="gold"
@@ -982,7 +1117,7 @@ export default function TomatoHarvestSessionDetailPage() {
           )}
 
           {activeSection === 'destination' && (
-            <div className="space-y-3 max-w-lg">
+            <div className="space-y-3 w-full max-w-2xl">
               <div>
                 <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">
                   Destination
@@ -1041,35 +1176,69 @@ export default function TomatoHarvestSessionDetailPage() {
                 </div>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Type</Label>
-                  <Select
-                    value={packType === '' ? 'none' : packType}
-                    onValueChange={(v) => setPackType(v === 'none' ? '' : (v as TomatoPackagingType))}
-                    disabled={!canEdit}
-                  >
-                    <SelectTrigger className="min-h-10 rounded-lg">
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">—</SelectItem>
-                      <SelectItem value="crates">Crates</SelectItem>
-                      <SelectItem value="wooden_boxes">Wooden boxes</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {saleMode === 'farm_gate' && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Type</Label>
+                    <Select
+                      value={packType === '' ? 'none' : packType}
+                      onValueChange={(v) => setPackType(v === 'none' ? '' : (v as TomatoPackagingType))}
+                      disabled={!canEdit}
+                    >
+                      <SelectTrigger className="min-h-10 rounded-lg">
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">—</SelectItem>
+                        <SelectItem value="crates">Crates</SelectItem>
+                        <SelectItem value="wooden_boxes">Wooden boxes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Total</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={packCount}
+                      onChange={(e) => setPackCount(e.target.value)}
+                      disabled={!canEdit}
+                      className="min-h-10 rounded-lg"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Total</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={packCount}
-                    onChange={(e) => setPackCount(e.target.value)}
-                    disabled={!canEdit}
-                    className="min-h-10 rounded-lg"
-                  />
+              )}
+
+              {saleMode === 'market' && !dispatch && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Type</Label>
+                    <Select
+                      value={packType === '' ? 'none' : packType}
+                      onValueChange={(v) => setPackType(v === 'none' ? '' : (v as TomatoPackagingType))}
+                      disabled={!canEdit}
+                    >
+                      <SelectTrigger className="min-h-10 rounded-lg">
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">—</SelectItem>
+                        <SelectItem value="crates">Crates</SelectItem>
+                        <SelectItem value="wooden_boxes">Wooden boxes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Total</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={packCount}
+                      onChange={(e) => setPackCount(e.target.value)}
+                      disabled={!canEdit}
+                      className="min-h-10 rounded-lg"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {saleMode === 'farm_gate' && canViewHarvestFinancials && (
                 <div className="space-y-2 rounded-lg border border-border/50 bg-muted/15 p-2.5 sm:p-3">
@@ -1122,7 +1291,7 @@ export default function TomatoHarvestSessionDetailPage() {
                 </div>
               )}
 
-              {saleMode === 'market' && (
+              {saleMode === 'market' && !dispatch && (
                 <div className="space-y-2 rounded-lg border border-border/50 bg-muted/15 p-2.5 sm:p-3">
                   <div className="space-y-1">
                     <Label className="text-xs">Market</Label>
@@ -1188,32 +1357,237 @@ export default function TomatoHarvestSessionDetailPage() {
                       className="min-h-10 rounded-lg"
                     />
                   </div>
-                  {canViewHarvestFinancials &&
-                    (dispatch ? (
-                      <div className="rounded-md border border-border/60 bg-background/80 p-2 text-[11px] space-y-1">
-                        <p className="font-semibold text-foreground">Broker market (live)</p>
-                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
-                          <span>Sales</span>
-                          <span className="text-right font-medium text-foreground tabular-nums">
-                            {formatKes(Number(dispatch.broker_sales_revenue ?? 0))}
-                          </span>
-                          <span>Market expenses</span>
-                          <span className="text-right font-medium text-foreground tabular-nums">
-                            {formatKes(Number(dispatch.market_expenses_total ?? 0))}
-                          </span>
-                          <span>Net (market)</span>
-                          <span className="text-right font-medium text-foreground tabular-nums">
-                            {formatKes(Number(dispatch.net_market_profit ?? 0))}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">
-                          Buyers and market costs are recorded by the assigned broker.
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90">Revenue pending</p>
-                    ))}
+                  {canViewHarvestFinancials && (
+                    <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90">Revenue pending</p>
+                  )}
                 </div>
+              )}
+
+              {saleMode === 'market' && canViewHarvestFinancials && dispatch && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border/60 bg-background/80 px-2.5 py-2 sm:px-3 sm:py-2.5">
+                    <p className="text-sm font-semibold text-foreground">Broker market (live)</p>
+                    <div className="mt-2 grid min-w-0 grid-cols-3 gap-2">
+                      <SimpleStatCard
+                        layout="mobile-compact"
+                        responsive={false}
+                        title="Sales"
+                        value={formatKes(Math.round(liveNotebookSalesSum))}
+                        icon={TrendingUp}
+                        iconVariant="gold"
+                        valueVariant="success"
+                        className="min-h-0 py-2 px-2 [&_div.mb-2]:mb-1 [&_div.flex]:gap-1 [&_svg]:!h-2.5 [&_svg]:!w-2.5 [&_p.font-heading]:!text-sm [&_p.font-heading]:!leading-tight [&_p.text-muted-foreground]:!text-[9px]"
+                      />
+                      <SimpleStatCard
+                        layout="mobile-compact"
+                        responsive={false}
+                        title="Market expenses"
+                        value={formatKes(Math.round(liveNotebookExpenseSum))}
+                        icon={Wallet}
+                        iconVariant="muted"
+                        className="min-h-0 py-2 px-2 [&_div.mb-2]:mb-1 [&_div.flex]:gap-1 [&_svg]:!h-2.5 [&_svg]:!w-2.5 [&_p.font-heading]:!text-sm [&_p.font-heading]:!leading-tight [&_p.text-muted-foreground]:!text-[9px]"
+                      />
+                      <SimpleStatCard
+                        layout="mobile-compact"
+                        responsive={false}
+                        title="Net (market)"
+                        value={formatKes(Math.round(liveNotebookSalesSum - liveNotebookExpenseSum))}
+                        icon={Banknote}
+                        iconVariant="muted"
+                        valueVariant={
+                          Math.round(liveNotebookSalesSum - liveNotebookExpenseSum) >= 0 ? 'info' : 'destructive'
+                        }
+                        className="min-h-0 py-2 px-2 [&_div.mb-2]:mb-1 [&_div.flex]:gap-1 [&_svg]:!h-2.5 [&_svg]:!w-2.5 [&_p.font-heading]:!text-sm [&_p.font-heading]:!leading-tight [&_p.text-muted-foreground]:!text-[9px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Buyers</p>
+                    {tomatoMarketSalesEntries.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-border/70 py-8 text-center text-xs text-muted-foreground">
+                        No buyer lines yet.
+                      </p>
+                    ) : (
+                      tomatoMarketSalesEntries.map((e) => (
+                        <MarketNotebookBuyerRow
+                          key={e.id}
+                          entryNumber={e.entry_number}
+                          buyerLabel={e.buyer_label}
+                          quantity={e.quantity}
+                          pricePerUnit={e.price_per_unit}
+                          lineTotal={e.line_total}
+                          unitLabel={tomatoNotebookUnitLabelFromPackaging(packType)}
+                          formatKes={formatKes}
+                          onEdit={canEdit ? () => setEditingBuyerEntry(e) : undefined}
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {saleMode === 'market' && dispatch && (
+                <Collapsible defaultOpen={false} className="rounded-lg border border-border/60 bg-muted/10">
+                  <CollapsibleTrigger
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left hover:bg-muted/40 touch-manipulation [&[data-state=open]>svg]:rotate-180"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <p className="text-sm font-semibold text-foreground">Packaging &amp; dispatch</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Type, totals, market, broker, units sent — use Edit to change
+                      </p>
+                    </div>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
+                    {!packagingDispatchEditing ? (
+                      <>
+                        <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/15 px-3 py-2.5 text-[11px] sm:text-xs">
+                          {(
+                            [
+                              { k: 'Type', v: tomatoPackagingTypeTitle(packType) },
+                              {
+                                k: 'Total',
+                                v: String(Math.max(0, Math.floor(Number(packCount) || 0))),
+                              },
+                              { k: 'Market', v: marketSelect.trim() || '—' },
+                              { k: 'Broker', v: brokerDisplayName },
+                              {
+                                k: 'Sent',
+                                v: String(Math.max(0, Math.floor(Number(marketContainersSent) || 0))),
+                              },
+                            ] as const
+                          ).map((row) => (
+                            <div key={row.k} className="flex justify-between gap-3">
+                              <span className="text-muted-foreground">{row.k}</span>
+                              <span className="min-w-0 text-right font-medium text-foreground">{row.v}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {canEdit && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="touch-manipulation"
+                            onClick={() => setPackagingDispatchEditing(true)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Type</Label>
+                            <Select
+                              value={packType === '' ? 'none' : packType}
+                              onValueChange={(v) => setPackType(v === 'none' ? '' : (v as TomatoPackagingType))}
+                              disabled={!canEdit}
+                            >
+                              <SelectTrigger className="min-h-10 rounded-lg">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">—</SelectItem>
+                                <SelectItem value="crates">Crates</SelectItem>
+                                <SelectItem value="wooden_boxes">Wooden boxes</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Total</Label>
+                            <Input
+                              inputMode="numeric"
+                              value={packCount}
+                              onChange={(e) => setPackCount(e.target.value)}
+                              disabled={!canEdit}
+                              className="min-h-10 rounded-lg"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-border/50 bg-muted/15 p-2.5 sm:p-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Market</Label>
+                            <Select
+                              value={marketSelect || '__none__'}
+                              onValueChange={(v) => setMarketSelect(v === '__none__' ? '' : v)}
+                              disabled={!canEdit}
+                            >
+                              <SelectTrigger className="min-h-10 rounded-lg">
+                                <SelectValue placeholder="Select market" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">—</SelectItem>
+                                {marketOptions.map((m) => (
+                                  <SelectItem key={m} value={m}>
+                                    {m}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-full sm:w-auto touch-manipulation text-xs"
+                            disabled={!canEdit}
+                            onClick={() => setAddMarketOpen(true)}
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1" />
+                            Add
+                          </Button>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Broker</Label>
+                            <Select
+                              value={brokerEmployeeId || '__none__'}
+                              onValueChange={(v) => setBrokerEmployeeId(v === '__none__' ? '' : v)}
+                              disabled={!canEdit}
+                            >
+                              <SelectTrigger className="min-h-10 rounded-lg">
+                                <SelectValue placeholder={brokerEmployees.length ? 'Select broker' : 'No brokers yet'} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">—</SelectItem>
+                                {brokerEmployees.map((e) => (
+                                  <SelectItem key={e.id} value={e.id}>
+                                    {e.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {brokerEmployees.length === 0 && (
+                              <p className="text-[10px] text-muted-foreground">Add Sales (Broker) on Employees.</p>
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Sent</Label>
+                            <Input
+                              inputMode="numeric"
+                              value={marketContainersSent}
+                              onChange={(e) => setMarketContainersSent(e.target.value)}
+                              disabled={!canEdit}
+                              className="min-h-10 rounded-lg"
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="touch-manipulation"
+                          onClick={() => setPackagingDispatchEditing(false)}
+                        >
+                          Done
+                        </Button>
+                      </>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
               )}
 
               {canViewHarvestFinancials &&
@@ -1489,6 +1863,27 @@ export default function TomatoHarvestSessionDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EditMarketSalesBuyerDialog
+        open={editingBuyerEntry != null}
+        onOpenChange={(o) => {
+          if (!o) setEditingBuyerEntry(null);
+        }}
+        entry={
+          editingBuyerEntry
+            ? {
+                id: editingBuyerEntry.id,
+                buyer_label: editingBuyerEntry.buyer_label,
+                quantity: editingBuyerEntry.quantity,
+                price_per_unit: editingBuyerEntry.price_per_unit,
+              }
+            : null
+        }
+        unitLabel={tomatoNotebookUnitLabelFromPackaging(packType)}
+        quantityMode="int"
+        onSave={saveTomatoBuyerLineEdit}
+        isSaving={savingBuyerEdit}
+      />
     </div>
   );
 }

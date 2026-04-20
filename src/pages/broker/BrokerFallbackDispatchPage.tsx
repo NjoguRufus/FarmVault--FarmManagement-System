@@ -17,25 +17,22 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useBrokerTomatoRealtime } from '@/hooks/useBrokerTomatoRealtime';
+import { fetchFallbackMarketDispatchByIdForBroker } from '@/services/brokerFallbackMarketService';
 import {
-  applyTomatoMarketExpenseTemplateUsage,
-  fetchTomatoMarketDispatchById,
-  insertTomatoMarketExpenseLines,
-  insertTomatoMarketSalesEntry,
-  listTomatoMarketExpenseLines,
-  listTomatoMarketExpenseTemplates,
-  listTomatoMarketSalesEntries,
-  type TomatoMarketSalesEntryRow,
-  updateTomatoMarketDispatchStatus,
-  updateTomatoMarketSalesEntry,
-  updateTomatoMarketSalesEntryBrokerRecord,
-} from '@/services/brokerTomatoMarketService';
-import { fetchTomatoSession } from '@/services/tomatoHarvestService';
+  addFallbackMarketExpenseLines,
+  addFallbackMarketSalesEntry,
+  updateFallbackMarketSalesEntry,
+  updateFallbackMarketSalesEntryBrokerRecord,
+  fetchFallbackSession,
+  listFallbackExpenseTemplates,
+  listFallbackMarketExpenseLines,
+  listFallbackMarketSalesEntries,
+  recordFallbackExpenseTemplateUsage,
+  updateFallbackMarketDispatchStatus,
+  type FallbackMarketSalesEntryRow,
+} from '@/services/fallbackHarvestService';
 import { cn } from '@/lib/utils';
-import {
-  MarketNotebookBuyerRow,
-  tomatoNotebookUnitLabelFromPackaging,
-} from '@/components/harvest/MarketNotebookBuyerRow';
+import { MarketNotebookBuyerRow } from '@/components/harvest/MarketNotebookBuyerRow';
 import { EditMarketSalesBuyerDialog } from '@/components/harvest/EditMarketSalesBuyerDialog';
 import { BrokerBuyerLedgerDialog } from '@/components/broker/BrokerBuyerLedgerDialog';
 import { brokerBuyerSearchMatches } from '@/lib/brokerBuyerSearch';
@@ -46,9 +43,15 @@ function kes(n: number) {
   return formatKes(n);
 }
 
+function fmtUnits(n: number): string {
+  if (!Number.isFinite(n)) return '0';
+  if (Number.isInteger(n)) return n.toLocaleString('en-KE');
+  return (Math.round(n * 100) / 100).toLocaleString('en-KE', { maximumFractionDigits: 2 });
+}
+
 type ExpenseDraftRow = { id: string; name: string; amount: string };
 
-export default function BrokerTomatoDispatchPage() {
+export default function BrokerFallbackDispatchPage() {
   const { dispatchId } = useParams<{ dispatchId: string }>();
   const { user } = useAuth();
   const editorUserId = user?.id ?? null;
@@ -62,47 +65,47 @@ export default function BrokerTomatoDispatchPage() {
   const inv = () => {
     if (!companyId || !dispatchId) return;
     void queryClient.invalidateQueries({ queryKey: ['broker-assigned-dispatches', companyId] });
-    void queryClient.invalidateQueries({ queryKey: ['broker-tomato-dispatch', companyId, dispatchId] });
-    void queryClient.invalidateQueries({ queryKey: ['broker-tomato-sales', companyId, dispatchId] });
-    void queryClient.invalidateQueries({ queryKey: ['broker-tomato-expenses', companyId, dispatchId] });
+    void queryClient.invalidateQueries({ queryKey: ['broker-fallback-dispatch', companyId, dispatchId] });
+    void queryClient.invalidateQueries({ queryKey: ['broker-fallback-sales', companyId, dispatchId] });
+    void queryClient.invalidateQueries({ queryKey: ['broker-fallback-expenses', companyId, dispatchId] });
   };
 
   const { data: dispatch, isLoading: loadD } = useQuery({
-    queryKey: ['broker-tomato-dispatch', companyId ?? '', dispatchId ?? ''],
-    queryFn: () => fetchTomatoMarketDispatchById({ companyId: companyId!, dispatchId: dispatchId! }),
+    queryKey: ['broker-fallback-dispatch', companyId ?? '', dispatchId ?? ''],
+    queryFn: () => fetchFallbackMarketDispatchByIdForBroker({ companyId: companyId!, dispatchId: dispatchId! }),
     enabled: Boolean(companyId && dispatchId),
   });
 
-  const { data: tomatoHarvestSession } = useQuery({
-    queryKey: ['tomato-harvest-session', companyId, dispatch?.harvest_session_id],
+  const { data: fallbackSession } = useQuery({
+    queryKey: ['fallback-harvest-session', companyId, dispatch?.harvest_session_id],
     queryFn: () =>
-      fetchTomatoSession({ companyId: companyId!, sessionId: dispatch!.harvest_session_id! }),
+      fetchFallbackSession({ companyId: companyId!, sessionId: dispatch!.harvest_session_id }),
     enabled: Boolean(companyId && dispatch?.harvest_session_id),
   });
 
-  const buyerUnitLabel = tomatoNotebookUnitLabelFromPackaging(tomatoHarvestSession?.packaging_type);
+  const buyerUnitLabel = (fallbackSession?.unit_type || 'units').trim().toLowerCase() || 'units';
 
   const { data: entries = [], isLoading: loadE } = useQuery({
-    queryKey: ['broker-tomato-sales', companyId ?? '', dispatchId ?? ''],
-    queryFn: () => listTomatoMarketSalesEntries({ companyId: companyId!, dispatchId: dispatchId! }),
+    queryKey: ['broker-fallback-sales', companyId ?? '', dispatchId ?? ''],
+    queryFn: () => listFallbackMarketSalesEntries({ companyId: companyId!, dispatchId: dispatchId! }),
     enabled: Boolean(companyId && dispatchId),
   });
 
   const { data: expenseLines = [], isLoading: loadX } = useQuery({
-    queryKey: ['broker-tomato-expenses', companyId ?? '', dispatchId ?? ''],
-    queryFn: () => listTomatoMarketExpenseLines({ companyId: companyId!, dispatchId: dispatchId! }),
+    queryKey: ['broker-fallback-expenses', companyId ?? '', dispatchId ?? ''],
+    queryFn: () => listFallbackMarketExpenseLines({ companyId: companyId!, dispatchId: dispatchId! }),
     enabled: Boolean(companyId && dispatchId),
   });
 
   const { data: templates = [] } = useQuery({
-    queryKey: ['broker-tomato-templates', companyId ?? ''],
-    queryFn: () => listTomatoMarketExpenseTemplates(companyId!),
+    queryKey: ['broker-fallback-templates', companyId ?? ''],
+    queryFn: () => listFallbackExpenseTemplates({ companyId: companyId!, limit: 80 }),
     enabled: Boolean(companyId),
   });
 
-  const cratesSold = useMemo(() => entries.reduce((s, e) => s + e.quantity, 0), [entries]);
-  const sent = dispatch?.containers_sent ?? 0;
-  const remaining = Math.max(0, sent - cratesSold);
+  const unitsSold = useMemo(() => entries.reduce((s, e) => s + e.quantity, 0), [entries]);
+  const sent = dispatch?.units_sent ?? 0;
+  const remaining = Math.max(0, sent - unitsSold);
 
   const priceStats = useMemo(() => {
     if (!entries.length) return { avg: 0, min: 0, max: 0 };
@@ -115,7 +118,6 @@ export default function BrokerTomatoDispatchPage() {
     };
   }, [entries]);
 
-  /** Live totals from notebook lines (updates immediately; matches DB triggers after sync). */
   const liveRevenue = useMemo(
     () => entries.reduce((s, e) => s + (Number.isFinite(e.line_total) ? e.line_total : 0), 0),
     [entries],
@@ -142,10 +144,10 @@ export default function BrokerTomatoDispatchPage() {
 
   const [statusSaving, setStatusSaving] = useState(false);
 
-  const [editingEntry, setEditingEntry] = useState<TomatoMarketSalesEntryRow | null>(null);
+  const [editingEntry, setEditingEntry] = useState<FallbackMarketSalesEntryRow | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const [ledgerEntry, setLedgerEntry] = useState<TomatoMarketSalesEntryRow | null>(null);
+  const [ledgerEntry, setLedgerEntry] = useState<FallbackMarketSalesEntryRow | null>(null);
   const [savingLedger, setSavingLedger] = useState(false);
 
   const filteredEntries = useMemo(
@@ -156,14 +158,18 @@ export default function BrokerTomatoDispatchPage() {
   const addBuyer = async () => {
     if (!companyId || !dispatchId) return;
     const price = Number(buyerPrice);
-    const qty = Math.max(1, Math.floor(Number(buyerQty) || 1));
+    const qty = Math.max(0, Number(buyerQty) || 0);
     if (!Number.isFinite(price) || price < 0) {
       toast({ title: 'Enter a valid price', variant: 'destructive' });
       return;
     }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: 'Enter a valid quantity', variant: 'destructive' });
+      return;
+    }
     setSavingBuyer(true);
     try {
-      await insertTomatoMarketSalesEntry({
+      await addFallbackMarketSalesEntry({
         companyId,
         dispatchId,
         buyerLabel: buyerLabel.trim() || null,
@@ -198,7 +204,7 @@ export default function BrokerTomatoDispatchPage() {
     if (!companyId || !editingEntry) return;
     setSavingEdit(true);
     try {
-      await updateTomatoMarketSalesEntry({
+      await updateFallbackMarketSalesEntry({
         companyId,
         entryId: editingEntry.id,
         buyerLabel: payload.buyerLabel,
@@ -230,7 +236,7 @@ export default function BrokerTomatoDispatchPage() {
           ? Math.max(0, Number(ledgerEntry.broker_collected_amount) || 0)
           : 0;
       const next = prev + Math.max(0, Math.round(Number(payload.amountPaidNow) || 0));
-      await updateTomatoMarketSalesEntryBrokerRecord({
+      await updateFallbackMarketSalesEntryBrokerRecord({
         companyId,
         entryId: ledgerEntry.id,
         buyerPhone: payload.buyerPhone,
@@ -255,7 +261,7 @@ export default function BrokerTomatoDispatchPage() {
     if (!companyId || !ledgerEntry) return;
     setSavingLedger(true);
     try {
-      await updateTomatoMarketSalesEntryBrokerRecord({
+      await updateFallbackMarketSalesEntryBrokerRecord({
         companyId,
         entryId: ledgerEntry.id,
         buyerPhone: payload.buyerPhone,
@@ -280,7 +286,7 @@ export default function BrokerTomatoDispatchPage() {
     if (!companyId || !ledgerEntry) return;
     setSavingLedger(true);
     try {
-      await updateTomatoMarketSalesEntryBrokerRecord({
+      await updateFallbackMarketSalesEntryBrokerRecord({
         companyId,
         entryId: ledgerEntry.id,
         buyerPhone: payload.buyerPhone,
@@ -315,12 +321,11 @@ export default function BrokerTomatoDispatchPage() {
     }
     setSavingExp(true);
     try {
-      await insertTomatoMarketExpenseLines({ companyId, dispatchId, lines });
-      await applyTomatoMarketExpenseTemplateUsage({
-        companyId,
-        lines: lines.map((l) => ({ name: l.category, amount: l.amount })),
-      });
-      void queryClient.invalidateQueries({ queryKey: ['broker-tomato-templates', companyId] });
+      await addFallbackMarketExpenseLines({ companyId, dispatchId, lines });
+      for (const l of lines) {
+        await recordFallbackExpenseTemplateUsage({ companyId, name: l.category, lastUsedAmount: l.amount });
+      }
+      void queryClient.invalidateQueries({ queryKey: ['broker-fallback-templates', companyId] });
       inv();
       setExpOpen(false);
       setExpRows([{ id: crypto.randomUUID(), name: '', amount: '' }]);
@@ -340,7 +345,7 @@ export default function BrokerTomatoDispatchPage() {
     if (!companyId || !dispatchId || !dispatch) return;
     setStatusSaving(true);
     try {
-      await updateTomatoMarketDispatchStatus({
+      await updateFallbackMarketDispatchStatus({
         companyId,
         dispatchId,
         status: dispatch.status === 'completed' ? 'pending' : 'completed',
@@ -390,7 +395,7 @@ export default function BrokerTomatoDispatchPage() {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-4">
         <div>
           <h1 className="text-xl font-semibold">{dispatch!.market_name}</h1>
-          <p className="text-sm text-muted-foreground">Notebook · crates sold vs sent</p>
+          <p className="text-sm text-muted-foreground">Notebook · units sold vs sent</p>
         </div>
       </div>
 
@@ -403,7 +408,7 @@ export default function BrokerTomatoDispatchPage() {
         <SimpleStatCard
           layout="mobile-compact"
           title="Sold / sent"
-          value={`${cratesSold}${sent > 0 ? ` / ${sent}` : ''}`}
+          value={`${fmtUnits(unitsSold)}${sent > 0 ? ` / ${fmtUnits(sent)}` : ''}`}
           icon={Truck}
           iconVariant="primary"
           className={statCardClass}
@@ -411,7 +416,7 @@ export default function BrokerTomatoDispatchPage() {
         <SimpleStatCard
           layout="mobile-compact"
           title="Remaining"
-          value={String(remaining)}
+          value={fmtUnits(remaining)}
           icon={Package}
           iconVariant="primary"
           className={statCardClass}
@@ -574,7 +579,7 @@ export default function BrokerTomatoDispatchPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Price per crate (KES)</Label>
+              <Label className="text-xs">Price per unit (KES)</Label>
               <Input
                 inputMode="decimal"
                 value={buyerPrice}
@@ -583,8 +588,8 @@ export default function BrokerTomatoDispatchPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Quantity (crates)</Label>
-              <Input inputMode="numeric" value={buyerQty} onChange={(e) => setBuyerQty(e.target.value)} />
+              <Label className="text-xs">Quantity</Label>
+              <Input inputMode="decimal" value={buyerQty} onChange={(e) => setBuyerQty(e.target.value)} />
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -639,7 +644,7 @@ export default function BrokerTomatoDispatchPage() {
             : null
         }
         unitLabel={buyerUnitLabel}
-        quantityMode="int"
+        quantityMode="decimal"
         onSave={saveEditedBuyer}
         isSaving={savingEdit}
       />
@@ -650,7 +655,7 @@ export default function BrokerTomatoDispatchPage() {
             <DialogTitle>Market expenses</DialogTitle>
             <p className="text-xs text-muted-foreground">Add one or more lines. Names are remembered for next time.</p>
           </DialogHeader>
-          <datalist id="broker-expense-templates">
+          <datalist id="broker-fallback-expense-templates">
             {templates.map((t) => (
               <option key={t.id} value={t.name} />
             ))}
@@ -661,7 +666,7 @@ export default function BrokerTomatoDispatchPage() {
                 <div className="col-span-3 space-y-1">
                   {idx === 0 ? <Label className="text-xs">Name</Label> : <span className="text-xs block h-4" />}
                   <Input
-                    list="broker-expense-templates"
+                    list="broker-fallback-expense-templates"
                     value={row.name}
                     placeholder="Storage"
                     onChange={(e) => {

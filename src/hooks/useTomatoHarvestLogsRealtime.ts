@@ -1,8 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { debounce } from '@/lib/debounce';
+
+const NOTIFY_DEBOUNCE_MS = 400;
 
 /**
  * Subscribes to INSERT/DELETE on tomato picker bucket logs for a session (multi-device tally sync).
+ * Debounces UI refetch so rapid bucket taps do not enqueue one network round-trip per log row.
  */
 export function useTomatoHarvestLogsRealtime(
   sessionId: string | null | undefined,
@@ -14,6 +18,10 @@ export function useTomatoHarvestLogsRealtime(
   useEffect(() => {
     if (!sessionId) return;
 
+    const notify = debounce(() => {
+      cbRef.current();
+    }, NOTIFY_DEBOUNCE_MS);
+
     const channel = supabase
       .channel(`tomato-harvest-logs:${sessionId}`)
       .on(
@@ -24,9 +32,7 @@ export function useTomatoHarvestLogsRealtime(
           table: 'tomato_harvest_picker_logs',
           filter: `harvest_session_id=eq.${sessionId}`,
         },
-        () => {
-          cbRef.current();
-        },
+        () => notify(),
       )
       .on(
         'postgres_changes',
@@ -36,9 +42,7 @@ export function useTomatoHarvestLogsRealtime(
           table: 'tomato_harvest_picker_logs',
           filter: `harvest_session_id=eq.${sessionId}`,
         },
-        () => {
-          cbRef.current();
-        },
+        () => notify(),
       )
       .on(
         'postgres_changes',
@@ -48,9 +52,7 @@ export function useTomatoHarvestLogsRealtime(
           table: 'tomato_harvest_sessions',
           filter: `id=eq.${sessionId}`,
         },
-        () => {
-          cbRef.current();
-        },
+        () => notify(),
       )
       .on(
         'postgres_changes',
@@ -60,13 +62,12 @@ export function useTomatoHarvestLogsRealtime(
           table: 'tomato_market_dispatches',
           filter: `harvest_session_id=eq.${sessionId}`,
         },
-        () => {
-          cbRef.current();
-        },
+        () => notify(),
       )
       .subscribe();
 
     return () => {
+      notify.cancel();
       void supabase.removeChannel(channel);
     };
   }, [sessionId]);

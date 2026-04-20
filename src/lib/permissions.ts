@@ -621,6 +621,7 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/staff/operations', module: 'operations' },
   { prefix: '/staff/reports', module: 'reports' },
   { prefix: '/broker/harvest-sales', module: 'harvest' },
+  { prefix: '/broker/harvest-fallback', module: 'harvest' },
   { prefix: '/broker/harvest', module: 'harvest' },
   { prefix: '/broker/expenses', module: 'expenses' },
   { prefix: '/driver', module: 'harvest' },

@@ -19,7 +19,8 @@ import type { NotificationSoundFile } from '@/services/notificationSoundService'
 import type { RealtimeChannel, RealtimePostgresInsertPayload } from '@supabase/supabase-js';
 
 const NOTIFICATION_PREFS_KEY_PREFIX = 'farmvault:notification-prefs:v1:';
-const POLL_INTERVAL_MS = 10000; // Fallback polling every 10 seconds
+/** Fallback when Realtime is unavailable — keep conservative to avoid read amplification. */
+const POLL_INTERVAL_MS = 45_000;
 const POLL_ERROR_LOG_COOLDOWN_MS = 120_000; // Avoid spamming console on flaky networks
 
 function isLikelyNetworkFailure(err: unknown): boolean {

@@ -1,11 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ArrowRight, TrendingUp, Wallet, Package } from 'lucide-react';
+import { Plus, TrendingUp, Wallet, Package, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
@@ -19,6 +18,23 @@ import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
+
+function fallbackStatusMeta(s: FallbackHarvestSessionRow): { label: string; emoji: string; badgeClass: string } {
+  if (s.status === 'collecting' && s.destination === 'MARKET') {
+    return { label: 'Pending', emoji: '🟡', badgeClass: 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/30' };
+  }
+  if (s.status === 'collecting') {
+    return { label: 'Collecting', emoji: '🟠', badgeClass: 'bg-orange-500/15 text-orange-800 dark:text-orange-200 border-orange-500/30' };
+  }
+  if (s.destination === 'MARKET') {
+    return { label: 'Market', emoji: '🔵', badgeClass: 'bg-sky-500/15 text-sky-800 dark:text-sky-200 border-sky-500/30' };
+  }
+  return { label: 'Sold', emoji: '🟢', badgeClass: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border-emerald-500/30' };
+}
+
+function destinationLabel(dest: string): string {
+  return dest === 'MARKET' ? 'Market' : 'Farm';
+}
 
 export default function FallbackHarvestListPage() {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
@@ -89,7 +105,7 @@ export default function FallbackHarvestListPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6 px-3 sm:px-4 lg:px-6 py-3 sm:py-4 animate-fade-in w-full">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Harvest</h1>
@@ -101,69 +117,144 @@ export default function FallbackHarvestListPage() {
         </Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SimpleStatCard title="Total units" value={String(Math.round(totals.units)).toLocaleString('en-KE')} icon={Package} />
-        <SimpleStatCard title="Revenue" value={formatKes(totals.revenue)} icon={TrendingUp} />
-        <SimpleStatCard title="Expenses" value={formatKes(totals.expenses)} icon={Wallet} />
-        <SimpleStatCard title="Net" value={formatKes(totals.net)} icon={TrendingUp} />
+      <div
+        className={cn(
+          'grid gap-2 sm:gap-3',
+          'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4',
+        )}
+      >
+        <SimpleStatCard
+          layout="mobile-compact"
+          title="Total units"
+          value={String(Math.round(totals.units)).toLocaleString('en-KE')}
+          icon={Package}
+          iconVariant="primary"
+          className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+        />
+        <SimpleStatCard
+          layout="mobile-compact"
+          title="Revenue"
+          value={formatKes(totals.revenue)}
+          icon={TrendingUp}
+          iconVariant="gold"
+          valueVariant="success"
+          className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+        />
+        <SimpleStatCard
+          layout="mobile-compact"
+          title="Expenses"
+          value={formatKes(totals.expenses)}
+          icon={Wallet}
+          iconVariant="muted"
+          className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+        />
+        <SimpleStatCard
+          layout="mobile-compact"
+          title="Net profit"
+          value={formatKes(totals.net)}
+          icon={BarChart3}
+          iconVariant="muted"
+          valueVariant={totals.net > 0 ? 'success' : totals.net < 0 ? 'destructive' : 'default'}
+          className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+        />
       </div>
 
-      <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground sm:col-span-2 xl:col-span-3">Loading…</p>
         ) : sessions.length === 0 ? (
-          <Card className="border-border/60 bg-card/40">
-            <CardContent className="p-4">
-              <p className="text-sm font-medium">No harvest sessions yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">Create your first modular harvest session for this project.</p>
-              <div className="mt-3">
-                <Button onClick={onCreateSession} disabled={creating}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create session
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="fv-card p-8 sm:col-span-2 xl:col-span-3 text-center space-y-4 border-dashed">
+            <p className="text-4xl" aria-hidden>
+              📦
+            </p>
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">No harvest sessions yet</p>
+              <p className="text-sm text-muted-foreground">Start by recording your first harvest.</p>
+            </div>
+            <Button className="fv-btn" onClick={onCreateSession} disabled={creating}>
+              <Plus className="mr-2 h-4 w-4" />
+              New session
+            </Button>
+          </div>
         ) : (
-          sessions.map((s: FallbackHarvestSessionRow) => (
-            <button
-              key={s.id}
-              type="button"
-              className={cn(
-                'w-full text-left rounded-xl border border-border/60 bg-card/40 hover:bg-muted/20 transition-colors',
-              )}
-              onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}/session/${s.id}`)}
-            >
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{formatDate(s.session_date)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {s.destination === 'MARKET' ? 'Going to market' : 'Sold from farm'} • {Math.round(s.total_units)} {s.unit_type}
+          sessions.map((s: FallbackHarvestSessionRow, idx: number) => {
+            const st = fallbackStatusMeta(s);
+            const net = Number(s.net_profit ?? 0);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={cn(
+                  'fv-card group w-full text-left p-4 sm:p-5 transition-all duration-200',
+                  'rounded-xl border border-border/60 bg-card/80 shadow-sm',
+                  'hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-md',
+                  idx === 0 && 'ring-1 ring-primary/20 bg-primary/[0.03]',
+                )}
+                onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}/session/${s.id}`)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      <span aria-hidden>🗓</span> {formatDate(s.session_date)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {s.destination === 'MARKET' ? 'Going to market' : 'Sold from farm'}
                     </p>
                   </div>
-                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                  <span
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                      st.badgeClass,
+                    )}
+                  >
+                    <span aria-hidden>{st.emoji}</span>
+                    {st.label}
+                  </span>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <Mini label="Revenue" value={formatKes(s.total_revenue)} />
-                  <Mini label="Expenses" value={formatKes(s.total_expenses)} />
-                  <Mini label="Net" value={formatKes(s.net_profit)} />
+                <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                  <MetricCell icon="📦" label="Units" value={`${Math.round(s.total_units).toLocaleString('en-KE')} ${s.unit_type}`} />
+                  <MetricCell icon="💰" label="Revenue" value={formatKes(s.total_revenue)} />
+                  <MetricCell icon="💸" label="Expenses" value={formatKes(s.total_expenses)} />
+                  <MetricCell
+                    icon="📊"
+                    label="Net"
+                    value={formatKes(net)}
+                    valueClass={net > 0 ? 'text-fv-success' : net < 0 ? 'text-destructive' : 'text-muted-foreground'}
+                  />
                 </div>
-              </div>
-            </button>
-          ))
+
+                <p className="mt-4 border-t border-border/50 pt-3 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{destinationLabel(s.destination)}</span>
+                  <span className="mx-1.5 text-border">•</span>
+                  <span className="capitalize">{s.container_type}</span>
+                </p>
+              </button>
+            );
+          })
         )}
       </div>
     </div>
   );
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
+function MetricCell({
+  icon,
+  label,
+  value,
+  valueClass,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
   return (
-    <div className="rounded-lg border border-border/60 bg-background/40 p-2">
-      <p className="text-[10px] font-medium text-muted-foreground">{label}</p>
-      <p className="text-xs font-semibold tabular-nums">{value}</p>
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span aria-hidden>{icon}</span> {label}
+      </p>
+      <p className={cn('truncate font-semibold tabular-nums text-foreground', valueClass)}>{value}</p>
     </div>
   );
 }

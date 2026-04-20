@@ -11,6 +11,7 @@ import {
   getAmountFromMatrix,
   computeBundleSavingsFromMatrix,
 } from '@/services/billingPricesService';
+import { debounce } from '@/lib/debounce';
 
 export interface UseBillingPricesResult {
   rows: BillingPriceRow[] | undefined;
@@ -29,25 +30,28 @@ export function useBillingPrices(options?: { enabled?: boolean }): UseBillingPri
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: BILLING_PRICES_QUERY_KEY,
     queryFn: () => fetchBillingPrices(supabase),
-    staleTime: 30_000,
+    staleTime: 60 * 60 * 1000,
     enabled,
   });
 
   useEffect(() => {
     if (!enabled) return;
 
+    const flush = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: BILLING_PRICES_QUERY_KEY });
+    }, 600);
+
     const channel = supabase
       .channel('core_billing_prices')
       .on(
         'postgres_changes',
         { event: '*', schema: 'core', table: 'billing_prices' },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: BILLING_PRICES_QUERY_KEY });
-        },
+        () => flush(),
       )
       .subscribe();
 
     return () => {
+      flush.cancel();
       void supabase.removeChannel(channel);
     };
   }, [enabled, queryClient]);

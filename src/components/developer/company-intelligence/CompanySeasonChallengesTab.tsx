@@ -131,9 +131,9 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
         supabaseUrl: String(import.meta.env.VITE_SUPABASE_URL ?? ''),
       };
     },
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
   });
 
@@ -162,8 +162,8 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
         isDevErr: isDevErr ? (isDevErr as any).message ?? String(isDevErr) : null,
       };
     },
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: 120_000,
+    gcTime: 5 * 60_000,
   });
 
   const {
@@ -210,9 +210,9 @@ export function CompanySeasonChallengesTab({ companyId, active }: Props) {
       if (error) throw error;
       return (data ?? []) as SeasonChallengeRow[];
     },
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
   });
 

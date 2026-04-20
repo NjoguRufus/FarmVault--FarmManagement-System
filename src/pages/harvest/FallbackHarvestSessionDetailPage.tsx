@@ -1,7 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Plus, Truck, Wallet, TrendingUp, Package, Users } from 'lucide-react';
+import {
+  Banknote,
+  BarChart3,
+  ChevronDown,
+  ChevronLeft,
+  Plus,
+  Truck,
+  UserPlus,
+  Wallet,
+  TrendingUp,
+  Package,
+  Users,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { Button } from '@/components/ui/button';
@@ -12,6 +24,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
+import { MarketNotebookBuyerRow } from '@/components/harvest/MarketNotebookBuyerRow';
+import { EditMarketSalesBuyerDialog } from '@/components/harvest/EditMarketSalesBuyerDialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { listEmployees } from '@/services/employeesSupabaseService';
@@ -32,14 +47,17 @@ import {
   listFallbackPickerLogs,
   listFallbackPickers,
   recordFallbackExpenseTemplateUsage,
+  updateFallbackMarketSalesEntry,
   updateFallbackSession,
   upsertFallbackMarketDispatch,
   type FallbackHarvestSessionRow,
   type FallbackMarketDispatchRow,
+  type FallbackMarketSalesEntryRow,
   type FallbackPickerRow,
 } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import { formatDate } from '@/lib/dateUtils';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
 
@@ -60,6 +78,7 @@ export default function FallbackHarvestSessionDetailPage() {
 
   const companyId = user?.companyId ?? null;
   const farmId = activeProject?.farmId ?? null;
+  const editorUserId = user?.id ?? null;
 
   useFallbackHarvestRealtime({ companyId, projectId });
 
@@ -120,6 +139,23 @@ export default function FallbackHarvestSessionDetailPage() {
     });
   }, [employees]);
 
+  const liveFallbackMarketSales = useMemo(
+    () =>
+      buyerLines.reduce((s, e) => s + (Number.isFinite(e.line_total) ? e.line_total : 0), 0),
+    [buyerLines],
+  );
+  const liveFallbackMarketExpenses = useMemo(
+    () =>
+      marketExpenses.reduce((s, x) => s + (Number.isFinite(x.amount) ? x.amount : 0), 0),
+    [marketExpenses],
+  );
+
+  const fallbackBrokerDisplayName = useMemo(() => {
+    const bid = dispatch?.broker_employee_id;
+    if (!bid) return '—';
+    return employees.find((e: Employee) => e.id === bid)?.name ?? '—';
+  }, [dispatch?.broker_employee_id, employees]);
+
   const summary = useMemo(() => {
     const s = session;
     if (!s) return null;
@@ -137,14 +173,34 @@ export default function FallbackHarvestSessionDetailPage() {
   const [buyerName, setBuyerName] = useState('');
   const [buyerPrice, setBuyerPrice] = useState('');
   const [buyerQty, setBuyerQty] = useState('1');
-  const [showAddMarketExpense, setShowAddMarketExpense] = useState(false);
   const [expenseRows, setExpenseRows] = useState<Array<{ category: string; amount: string }>>([{ category: '', amount: '' }]);
-  const [showAddSessionExpense, setShowAddSessionExpense] = useState(false);
+  const [workflowTab, setWorkflowTab] = useState('intake');
+
+  /** Default to Packaging & sales only when a market dispatch row exists. */
+  const fulfillmentTabDefaultedKey = useRef<string | null>(null);
+  useEffect(() => {
+    fulfillmentTabDefaultedKey.current = null;
+  }, [sessionId]);
+
+  useEffect(() => {
+    setEditingBuyerEntry(null);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!session || session.destination !== 'MARKET' || !dispatch) return;
+    const key = `${session.id}:${dispatch.id}`;
+    if (fulfillmentTabDefaultedKey.current === key) return;
+    fulfillmentTabDefaultedKey.current = key;
+    setWorkflowTab('fulfillment');
+  }, [session?.id, session?.destination, dispatch?.id]);
   const [sessionExpenseRows, setSessionExpenseRows] = useState<Array<{ category: string; amount: string; note: string }>>([
     { category: 'transport', amount: '', note: '' },
   ]);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const [pickerName, setPickerName] = useState('');
+
+  const [editingBuyerEntry, setEditingBuyerEntry] = useState<FallbackMarketSalesEntryRow | null>(null);
+  const [savingBuyerEdit, setSavingBuyerEdit] = useState(false);
 
   async function patchSession(patch: Partial<FallbackHarvestSessionRow>) {
     if (!companyId || !sessionId) return;
@@ -154,6 +210,39 @@ export default function FallbackHarvestSessionDetailPage() {
       void qc.invalidateQueries({ queryKey: ['fallback-harvest-sessions'], exact: false });
     } catch (e: any) {
       toast({ title: 'Update failed', description: e?.message ?? String(e), variant: 'destructive' });
+    }
+  }
+
+  async function saveFallbackBuyerLineEdit(payload: {
+    buyerLabel: string | null;
+    quantity: number;
+    pricePerUnit: number;
+    editReason: string;
+  }) {
+    if (!companyId || !editingBuyerEntry) return;
+    setSavingBuyerEdit(true);
+    try {
+      await updateFallbackMarketSalesEntry({
+        companyId,
+        entryId: editingBuyerEntry.id,
+        buyerLabel: payload.buyerLabel,
+        quantity: payload.quantity,
+        pricePerUnit: payload.pricePerUnit,
+        editReason: payload.editReason,
+        editorUserId,
+      });
+      void qc.invalidateQueries({ queryKey: ['fallback-market-sales', companyId, editingBuyerEntry.market_dispatch_id] });
+      void qc.invalidateQueries({ queryKey: ['fallback-harvest-session', companyId, sessionId] });
+      setEditingBuyerEntry(null);
+      toast({ title: 'Buyer line updated' });
+    } catch (e: any) {
+      toast({
+        title: 'Could not save',
+        description: e?.message ?? String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingBuyerEdit(false);
     }
   }
 
@@ -221,7 +310,6 @@ export default function FallbackHarvestSessionDetailPage() {
         await recordFallbackExpenseTemplateUsage({ companyId, name: l.category, lastUsedAmount: l.amount });
       }
       setExpenseRows([{ category: '', amount: '' }]);
-      setShowAddMarketExpense(false);
       void qc.invalidateQueries({ queryKey: ['fallback-market-expenses', companyId, d.id] });
       void qc.invalidateQueries({ queryKey: ['fallback-market-expense-templates', companyId] });
     } catch (e: any) {
@@ -254,7 +342,6 @@ export default function FallbackHarvestSessionDetailPage() {
           sessionId: session.id,
         });
       }
-      setShowAddSessionExpense(false);
       setSessionExpenseRows([{ category: 'transport', amount: '', note: '' }]);
       void qc.invalidateQueries({ queryKey: ['fallback-harvest-session', companyId, session.id] });
       void qc.invalidateQueries({ queryKey: ['expenses'], exact: false });
@@ -310,100 +397,117 @@ export default function FallbackHarvestSessionDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-3 sm:px-4 lg:px-6 py-3 sm:py-4 animate-fade-in w-full">
       <div className="flex items-center justify-between gap-3">
         <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}`)}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </Button>
-        <div className="text-right">
-          <p className="text-sm font-semibold">Harvest session</p>
-          <p className="text-xs text-muted-foreground">{session.session_date}</p>
+        <div className="text-right space-y-0.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Harvest session</p>
+          <p className="text-sm font-semibold">
+            <span aria-hidden>🗓</span> {formatDate(session.session_date)}
+          </p>
         </div>
       </div>
 
       {summary && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <SimpleStatCard title="Total units" value={`${summary.units.toLocaleString('en-KE')} ${summary.unitType}`} icon={Package} />
-          <SimpleStatCard title="Revenue" value={formatKes(summary.revenue)} icon={TrendingUp} />
-          <SimpleStatCard title="Expenses" value={formatKes(summary.expenses)} icon={Wallet} />
-          <SimpleStatCard title="Net" value={formatKes(summary.net)} icon={TrendingUp} />
+        <div className="grid gap-2 sm:gap-3 grid-cols-2 sm:grid-cols-2 lg:grid-cols-4">
+          <SimpleStatCard
+            layout="mobile-compact"
+            title="Total units"
+            value={`${summary.units.toLocaleString('en-KE')} ${summary.unitType}`}
+            icon={Package}
+            iconVariant="primary"
+            className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+          />
+          <SimpleStatCard
+            layout="mobile-compact"
+            title="Revenue"
+            value={formatKes(summary.revenue)}
+            icon={TrendingUp}
+            iconVariant="gold"
+            valueVariant="success"
+            className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+          />
+          <SimpleStatCard
+            layout="mobile-compact"
+            title="Expenses"
+            value={formatKes(summary.expenses)}
+            icon={Wallet}
+            iconVariant="muted"
+            className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+          />
+          <SimpleStatCard
+            layout="mobile-compact"
+            title="Net profit"
+            value={formatKes(summary.net)}
+            icon={BarChart3}
+            iconVariant="muted"
+            valueVariant={summary.net > 0 ? 'success' : summary.net < 0 ? 'destructive' : 'default'}
+            className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
+          />
         </div>
       )}
 
-      {/* Intake */}
-      <Card className="border-border/60 bg-card/40">
-        <CardContent className="p-4 space-y-4">
-          <div className="flex items-center justify-between">
+      <Tabs value={workflowTab} onValueChange={setWorkflowTab} className="w-full space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-3 gap-1.5 rounded-xl border border-border/50 bg-muted/30 p-1.5">
+          <TabsTrigger value="intake" className="rounded-lg px-2 py-2.5 text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm sm:px-3">
+            Intake
+          </TabsTrigger>
+          <TabsTrigger value="fulfillment" className="rounded-lg px-2 py-2.5 text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm sm:px-3">
+            Packaging &amp; sales
+          </TabsTrigger>
+          <TabsTrigger value="expenses" className="rounded-lg px-2 py-2.5 text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm sm:px-3">
+            Expenses
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="intake" className="mt-0 space-y-4 outline-none">
+          <div className="fv-card p-4 sm:p-5 space-y-4">
             <div>
-              <p className="text-sm font-semibold">Intake</p>
-              <p className="text-xs text-muted-foreground">Direct input or use pickers (optional).</p>
+              <p className="text-sm font-semibold">Record intake</p>
+              <p className="text-xs text-muted-foreground">Direct entry or picker-based logging (same flow as tomato harvest).</p>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
+
+            <div
+              className="flex w-full max-w-md rounded-lg bg-muted/60 p-0.5 gap-0.5"
+              role="tablist"
+              aria-label="Intake mode"
+            >
+              <button
                 type="button"
-                size="sm"
-                variant={session.use_pickers ? 'outline' : 'default'}
+                role="tab"
+                aria-selected={!session.use_pickers}
+                className={cn(
+                  'flex min-h-9 flex-1 items-center justify-center rounded-md px-3 py-2 text-xs font-medium transition-colors touch-manipulation sm:text-sm',
+                  !session.use_pickers ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
                 onClick={() => patchSession({ use_pickers: false })}
               >
                 Direct
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                size="sm"
-                variant={session.use_pickers ? 'default' : 'outline'}
+                role="tab"
+                aria-selected={session.use_pickers}
+                className={cn(
+                  'flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors touch-manipulation sm:text-sm',
+                  session.use_pickers ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
                 onClick={() => patchSession({ use_pickers: true })}
               >
+                <Users className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" />
                 Pickers
-              </Button>
+              </button>
             </div>
-          </div>
 
-          {!session.use_pickers ? (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="sm:col-span-1">
-                <Label>Unit type</Label>
-                <Select value={session.unit_type} onValueChange={(v) => patchSession({ unit_type: v })}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {UNIT_PRESETS.map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="sm:col-span-1">
-                <Label>Add units</Label>
-                <Input className="mt-1" inputMode="numeric" value={intakeUnits} onChange={(e) => setIntakeUnits(e.target.value)} />
-              </div>
-              <div className="sm:col-span-1 flex items-end">
-                <Button className="w-full" onClick={onAddUnits}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Picker rate per unit</Label>
-                  <Input
-                    className="mt-1"
-                    inputMode="numeric"
-                    value={String(session.picker_rate_per_unit ?? 0)}
-                    onChange={(e) => patchSession({ picker_rate_per_unit: Number(e.target.value || 0) })}
-                  />
-                  <p className="mt-1 text-[11px] text-muted-foreground">This auto-generates an immutable labour expense.</p>
-                </div>
-                <div>
-                  <Label>Unit type</Label>
+            {!session.use_pickers ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-1">
+                  <Label className="text-xs text-muted-foreground">Unit type</Label>
                   <Select value={session.unit_type} onValueChange={(v) => patchSession({ unit_type: v })}>
-                    <SelectTrigger className="mt-1">
+                    <SelectTrigger className="mt-1.5 min-h-11 rounded-lg">
                       <SelectValue placeholder="Select unit" />
                     </SelectTrigger>
                     <SelectContent>
@@ -415,311 +519,607 @@ export default function FallbackHarvestSessionDetailPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Pickers
-                </p>
-                <Button size="sm" onClick={() => setShowAddPicker(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add picker
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                {pickers.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No pickers added yet.</p>
-                ) : (
-                  pickers.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
-                      <div>
-                        <p className="text-sm font-semibold">
-                          #{p.picker_number} {p.name}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Logged: {pickerLogs.filter((l) => l.picker_id === p.id).reduce((sum, l) => sum + Number(l.units ?? 0), 0)} {session.unit_type}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline" onClick={() => onLogPickerUnits(p, 1)}>
-                          +1
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => onLogPickerUnits(p, 5)}>
-                          +5
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Packaging */}
-      <Card className="border-border/60 bg-card/40">
-        <CardContent className="p-4 space-y-3">
-          <div>
-            <p className="text-sm font-semibold">Packaging</p>
-            <p className="text-xs text-muted-foreground">How the harvest is grouped.</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label>Container type</Label>
-              <Select value={session.container_type} onValueChange={(v) => patchSession({ container_type: v })}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select container" />
-                </SelectTrigger>
-                <SelectContent>
-                  {UNIT_PRESETS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Total containers</Label>
-              <Input
-                className="mt-1"
-                inputMode="numeric"
-                value={String(session.total_containers ?? 0)}
-                onChange={(e) => patchSession({ total_containers: Number(e.target.value || 0) })}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Sales */}
-      <Card className="border-border/60 bg-card/40">
-        <CardContent className="p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Sales</p>
-              <p className="text-xs text-muted-foreground">Farm-gate or market dispatch (broker workflow).</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {DESTINATIONS.map((d) => (
-                <Button
-                  key={d.id}
-                  size="sm"
-                  variant={session.destination === d.id ? 'default' : 'outline'}
-                  onClick={() => patchSession({ destination: d.id as any })}
-                >
-                  {d.id === 'FARM' ? 'Farm' : 'Market'}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {session.destination === 'FARM' ? (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <Label>Price per unit</Label>
-                <Input
-                  className="mt-1"
-                  inputMode="numeric"
-                  value={String(session.price_per_unit ?? '')}
-                  onChange={(e) => patchSession({ price_per_unit: e.target.value ? Number(e.target.value) : null })}
-                />
-              </div>
-              <div>
-                <Label>Units sold</Label>
-                <Input
-                  className="mt-1"
-                  inputMode="numeric"
-                  value={String(session.units_sold ?? '')}
-                  onChange={(e) => patchSession({ auto_units_sold: false, units_sold: e.target.value ? Number(e.target.value) : null })}
-                />
-                <div className="mt-2 flex items-center gap-2">
-                  <Button size="sm" variant={session.auto_units_sold ? 'default' : 'outline'} onClick={() => patchSession({ auto_units_sold: true })}>
-                    Auto
-                  </Button>
-                  <p className="text-[11px] text-muted-foreground">Auto keeps units sold = total units.</p>
-                </div>
-              </div>
-              <div className="flex items-end">
-                <div className="w-full rounded-lg border border-border/60 bg-background/40 p-3">
-                  <p className="text-[10px] font-medium text-muted-foreground">Revenue (auto)</p>
-                  <p className="text-sm font-semibold tabular-nums">{formatKes(session.total_revenue)}</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-1">
-                  <Label>Market</Label>
+                  <Label className="text-xs text-muted-foreground">Add units</Label>
                   <Input
-                    className="mt-1"
-                    value={dispatch?.market_name ?? ''}
-                    placeholder="e.g. Wakulima"
-                    onChange={(e) => {
-                      void upsertFallbackMarketDispatch({
-                        companyId: companyId ?? '',
-                        sessionId: session.id,
-                        marketName: e.target.value,
-                        brokerEmployeeId: dispatch?.broker_employee_id ?? null,
-                        unitsSent: Number(session.total_units ?? 0),
-                      }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
-                    }}
+                    className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
+                    inputMode="numeric"
+                    value={intakeUnits}
+                    onChange={(e) => setIntakeUnits(e.target.value)}
                   />
                 </div>
-                <div className="sm:col-span-1">
-                  <Label>Assign broker</Label>
-                  <Select
-                    value={dispatch?.broker_employee_id ?? 'none'}
-                    onValueChange={(v) => {
-                      const brokerEmployeeId = v === 'none' ? null : v;
-                      void upsertFallbackMarketDispatch({
-                        companyId: companyId ?? '',
-                        sessionId: session.id,
-                        marketName: dispatch?.market_name ?? 'Market',
-                        brokerEmployeeId,
-                        unitsSent: Number(session.total_units ?? 0),
-                      }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
-                    }}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select broker" />
+                <div className="sm:col-span-1 flex items-end">
+                  <Button className="w-full min-h-11 rounded-lg touch-manipulation" onClick={onAddUnits}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Picker rate per unit</Label>
+                    <Input
+                      className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
+                      inputMode="numeric"
+                      value={String(session.picker_rate_per_unit ?? 0)}
+                      onChange={(e) => patchSession({ picker_rate_per_unit: Number(e.target.value || 0) })}
+                    />
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">This auto-generates an immutable labour expense.</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Unit type</Label>
+                    <Select value={session.unit_type} onValueChange={(v) => patchSession({ unit_type: v })}>
+                      <SelectTrigger className="mt-1.5 min-h-11 rounded-lg">
+                        <SelectValue placeholder="Select unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNIT_PRESETS.map((u) => (
+                          <SelectItem key={u} value={u}>
+                            {u}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" className="min-h-9 rounded-lg touch-manipulation" onClick={() => setShowAddPicker(true)}>
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Add picker
+                  </Button>
+                </div>
+
+                <div className="space-y-2 max-h-[min(28rem,55vh)] overflow-y-auto pr-0.5">
+                  {pickers.length === 0 ? (
+                    <div className="space-y-2 rounded-xl border border-border bg-background p-3">
+                      <p className="text-sm text-muted-foreground">No pickers added yet.</p>
+                      <Button type="button" size="sm" onClick={() => setShowAddPicker(true)}>
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add picker
+                      </Button>
+                    </div>
+                  ) : (
+                    pickers.map((p) => {
+                      const logged = pickerLogs.filter((l) => l.picker_id === p.id).reduce((sum, l) => sum + Number(l.units ?? 0), 0);
+                      return (
+                        <Card key={p.id} className="relative overflow-hidden rounded-xl border-border/80 shadow-sm">
+                          <CardContent className="flex items-stretch gap-2 p-2 sm:p-3">
+                            <div className="relative shrink-0">
+                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-base font-bold tabular-nums text-primary-foreground shadow-lg ring-2 ring-background">
+                                {p.picker_number}
+                              </div>
+                              <div className="absolute -right-1 -top-1 flex h-4 min-w-[1.125rem] items-center justify-center rounded-full border border-border bg-muted px-1 text-[9px] font-bold tabular-nums">
+                                {Math.round(logged)}
+                              </div>
+                            </div>
+                            <div className="min-w-0 flex-1 py-0.5">
+                              <p className="truncate text-sm font-semibold text-foreground">{p.name || '—'}</p>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                Logged {Math.round(logged)} {session.unit_type}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5 self-center">
+                              <Button size="sm" variant="secondary" className="touch-manipulation" onClick={() => onLogPickerUnits(p, 1)}>
+                                +1
+                              </Button>
+                              <Button size="sm" variant="secondary" className="touch-manipulation" onClick={() => onLogPickerUnits(p, 5)}>
+                                +5
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="fulfillment" className="mt-0 space-y-4 outline-none">
+          <div className="fv-card p-4 sm:p-5 space-y-6">
+            <section className="space-y-3">
+              <div className="flex items-start gap-2">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                  <Package className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">Packaging</p>
+                  <p className="text-xs text-muted-foreground">How the harvest is grouped for handling.</p>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Container type</Label>
+                  <Select value={session.container_type} onValueChange={(v) => patchSession({ container_type: v })}>
+                    <SelectTrigger className="mt-1.5 min-h-11 rounded-lg">
+                      <SelectValue placeholder="Select container" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No broker</SelectItem>
-                      {brokerEmployees.map((e: Employee) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {e.name} ({String((e as any)?.role ?? (e as any)?.employeeRole ?? 'employee')})
+                      {UNIT_PRESETS.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {u}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="sm:col-span-1">
-                  <Label>Units sent</Label>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Total containers</Label>
                   <Input
-                    className="mt-1"
+                    className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
                     inputMode="numeric"
-                    value={String(dispatch?.units_sent ?? Math.round(session.total_units))}
-                    onChange={(e) => {
-                      void upsertFallbackMarketDispatch({
-                        companyId: companyId ?? '',
-                        sessionId: session.id,
-                        marketName: dispatch?.market_name ?? 'Market',
-                        brokerEmployeeId: dispatch?.broker_employee_id ?? null,
-                        unitsSent: Number(e.target.value || 0),
-                      }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
-                    }}
+                    value={String(session.total_containers ?? 0)}
+                    onChange={(e) => patchSession({ total_containers: Number(e.target.value || 0) })}
                   />
                 </div>
               </div>
+            </section>
 
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Truck className="h-4 w-4" />
-                Revenue comes from broker notebook (buyers + market expenses) and updates in real-time.
-              </div>
+            <div className="border-t border-border/50 pt-5">
+              <section className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-2">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                      <Truck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">Sales</p>
+                      <p className="text-xs text-muted-foreground">Farm-gate pricing or market dispatch.</p>
+                    </div>
+                  </div>
+                  <div className="flex w-full max-w-md rounded-lg bg-muted/60 p-0.5 gap-0.5 sm:w-auto">
+                    {DESTINATIONS.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className={cn(
+                          'min-h-9 flex-1 rounded-md px-3 py-2 text-xs font-medium transition-colors touch-manipulation sm:flex-none sm:text-sm',
+                          session.destination === d.id
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        onClick={() => patchSession({ destination: d.id as 'FARM' | 'MARKET' })}
+                      >
+                        {d.id === 'FARM' ? 'Farm' : 'Market'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {session.destination === 'FARM' ? (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Price per unit</Label>
+                      <Input
+                        className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
+                        inputMode="numeric"
+                        value={String(session.price_per_unit ?? '')}
+                        onChange={(e) => patchSession({ price_per_unit: e.target.value ? Number(e.target.value) : null })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Units sold</Label>
+                      <Input
+                        className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
+                        inputMode="numeric"
+                        value={String(session.units_sold ?? '')}
+                        onChange={(e) => patchSession({ auto_units_sold: false, units_sold: e.target.value ? Number(e.target.value) : null })}
+                      />
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant={session.auto_units_sold ? 'default' : 'outline'} onClick={() => patchSession({ auto_units_sold: true })}>
+                          Auto-fill
+                        </Button>
+                        <p className="text-[11px] text-muted-foreground">Auto matches units sold to total intake.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-end">
+                      <div className="w-full rounded-lg border border-border/60 bg-background/40 p-3">
+                        <p className="text-[10px] font-medium text-muted-foreground">Revenue</p>
+                        <p className="text-sm font-semibold tabular-nums">{formatKes(session.total_revenue)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="sm:col-span-1">
+                        <Label className="text-xs text-muted-foreground">Market</Label>
+                        <Input
+                          className="mt-1.5 min-h-11 rounded-lg"
+                          value={dispatch?.market_name ?? ''}
+                          placeholder="e.g. Wakulima"
+                          onChange={(e) => {
+                            void upsertFallbackMarketDispatch({
+                              companyId: companyId ?? '',
+                              sessionId: session.id,
+                              marketName: e.target.value,
+                              brokerEmployeeId: dispatch?.broker_employee_id ?? null,
+                              unitsSent: Number(session.total_units ?? 0),
+                            }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
+                          }}
+                        />
+                      </div>
+                      <div className="sm:col-span-1">
+                        <Label className="text-xs text-muted-foreground">Assign broker</Label>
+                        <Select
+                          value={dispatch?.broker_employee_id ?? 'none'}
+                          onValueChange={(v) => {
+                            const brokerEmployeeId = v === 'none' ? null : v;
+                            void upsertFallbackMarketDispatch({
+                              companyId: companyId ?? '',
+                              sessionId: session.id,
+                              marketName: dispatch?.market_name ?? 'Market',
+                              brokerEmployeeId,
+                              unitsSent: Number(session.total_units ?? 0),
+                            }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
+                          }}
+                        >
+                          <SelectTrigger className="mt-1.5 min-h-11 rounded-lg">
+                            <SelectValue placeholder="Select broker" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No broker</SelectItem>
+                            {brokerEmployees.map((e: Employee) => (
+                              <SelectItem key={e.id} value={e.id}>
+                                {e.name} ({String((e as any)?.role ?? (e as any)?.employeeRole ?? 'employee')})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="sm:col-span-1">
+                        <Label className="text-xs text-muted-foreground">Units sent</Label>
+                        <Input
+                          className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
+                          inputMode="numeric"
+                          value={String(dispatch?.units_sent ?? Math.round(session.total_units))}
+                          onChange={(e) => {
+                            void upsertFallbackMarketDispatch({
+                              companyId: companyId ?? '',
+                              sessionId: session.id,
+                              marketName: dispatch?.market_name ?? 'Market',
+                              brokerEmployeeId: dispatch?.broker_employee_id ?? null,
+                              unitsSent: Number(e.target.value || 0),
+                            }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 border-t border-border/50 pt-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">Buyers</p>
+                          <p className="text-xs text-muted-foreground">Notebook-style sales entries (price × quantity).</p>
+                        </div>
+                        <Button size="sm" className="rounded-lg touch-manipulation" onClick={() => setShowAddBuyer(true)}>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add buyer
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {buyerLines.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No buyer entries yet.</p>
+                        ) : (
+                          buyerLines.map((l) => (
+                            <MarketNotebookBuyerRow
+                              key={l.id}
+                              entryNumber={l.entry_number}
+                              buyerLabel={l.buyer_label}
+                              quantity={l.quantity}
+                              pricePerUnit={l.price_per_unit}
+                              lineTotal={l.line_total}
+                              unitLabel={(session.unit_type || 'units').trim().toLowerCase() || 'units'}
+                              formatKes={formatKes}
+                              onEdit={() => setEditingBuyerEntry(l)}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <Collapsible defaultOpen={false} className="rounded-lg border border-border/60 bg-background/80">
+                      <CollapsibleTrigger
+                        type="button"
+                        className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-left hover:bg-muted/40 touch-manipulation [&[data-state=open]>svg]:rotate-180"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="text-sm font-semibold text-foreground">Broker market (live)</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            Dispatch summary &amp; totals — expand to view.
+                          </p>
+                        </div>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
+                        <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/15 px-3 py-2.5 text-[11px] sm:text-xs">
+                          {(
+                            [
+                              { k: 'Type', v: session.unit_type || '—' },
+                              { k: 'Total', v: String(Math.max(0, Math.round(Number(session.total_containers ?? 0)))) },
+                              { k: 'Market', v: (dispatch?.market_name ?? '').trim() || '—' },
+                              { k: 'Broker', v: fallbackBrokerDisplayName },
+                              {
+                                k: 'Sent',
+                                v: String(
+                                  Math.max(
+                                    0,
+                                    Math.round(
+                                      dispatch?.units_sent != null
+                                        ? Number(dispatch.units_sent)
+                                        : Number(session.total_units ?? 0),
+                                    ),
+                                  ),
+                                ),
+                              },
+                            ] as const
+                          ).map((row) => (
+                            <div key={row.k} className="flex justify-between gap-3">
+                              <span className="text-muted-foreground">{row.k}</span>
+                              <span className="min-w-0 text-right font-medium text-foreground">{row.v}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <SimpleStatCard
+                            layout="mobile-compact"
+                            title="Sales"
+                            value={formatKes(Math.round(liveFallbackMarketSales))}
+                            icon={TrendingUp}
+                            iconVariant="gold"
+                            valueVariant="success"
+                            className="py-3 px-3 text-sm min-h-[3.25rem] touch-manipulation"
+                          />
+                          <SimpleStatCard
+                            layout="mobile-compact"
+                            title="Market expenses"
+                            value={formatKes(Math.round(liveFallbackMarketExpenses))}
+                            icon={Wallet}
+                            iconVariant="muted"
+                            className="py-3 px-3 text-sm min-h-[3.25rem] touch-manipulation"
+                          />
+                          <SimpleStatCard
+                            layout="mobile-compact"
+                            title="Net (market)"
+                            value={formatKes(Math.round(liveFallbackMarketSales - liveFallbackMarketExpenses))}
+                            icon={Banknote}
+                            iconVariant="muted"
+                            valueVariant={
+                              liveFallbackMarketSales - liveFallbackMarketExpenses >= 0 ? 'info' : 'destructive'
+                            }
+                            className="py-3 px-3 text-sm min-h-[3.25rem] touch-manipulation"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Truck className="h-4 w-4 shrink-0" />
+                          Revenue rolls up from buyer lines minus market-side costs. Session summary updates after saves.
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                )}
+              </section>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Expenses + Market notebook */}
-      <Tabs defaultValue="session-expenses" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="session-expenses">Expenses</TabsTrigger>
-          <TabsTrigger value="buyers" disabled={session.destination !== 'MARKET'}>
-            Buyers
-          </TabsTrigger>
-          <TabsTrigger value="market-expenses" disabled={session.destination !== 'MARKET'}>
-            Market expenses
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="session-expenses" className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Session expenses</p>
-              <p className="text-xs text-muted-foreground">These are finance expenses linked to this harvest session.</p>
-            </div>
-            <Button size="sm" onClick={() => setShowAddSessionExpense(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add expense
-            </Button>
           </div>
+        </TabsContent>
 
-          <Card className="border-border/60 bg-card/40">
-            <CardContent className="p-4">
+        <TabsContent value="expenses" className="mt-0 outline-none">
+          <div className="fv-card p-4 sm:p-5 space-y-8">
+            <div>
+              <p className="text-sm font-semibold">Expenses</p>
               <p className="text-xs text-muted-foreground">
-                Totals are included in the Summary card automatically. (Viewing detailed linked expense rows will be added in the reports/expenses screens.)
+                On-farm costs are saved to finance and linked to this session. Market costs apply when you sell via market dispatch. Summary cards update
+                after each save.
+                {!farmId ? ' This project needs a farm assigned to save on-farm expenses.' : ''}
               </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="buyers" className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Buyers</p>
-              <p className="text-xs text-muted-foreground">Notebook-style sales entries.</p>
             </div>
-            <Button size="sm" onClick={() => setShowAddBuyer(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add buyer
-            </Button>
-          </div>
 
-          <div className="space-y-2">
-            {buyerLines.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No buyer entries yet.</p>
-            ) : (
-              buyerLines.map((l) => (
-                <div key={l.id} className="rounded-lg border border-border/60 bg-card/40 p-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">
-                      {l.entry_number}. {l.buyer_label || `Buyer ${l.entry_number}`}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {Math.round(l.quantity)} × {formatKes(l.price_per_unit)} = {formatKes(l.line_total)}
-                    </p>
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+                <Wallet className="h-4 w-4 text-primary shrink-0" />
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">On-farm</h3>
+              </div>
+
+              <datalist id="fallback-session-expense-suggestions">
+                {templates.map((t) => (
+                  <option key={t.id} value={t.name} />
+                ))}
+              </datalist>
+
+              <div className="space-y-3">
+                {sessionExpenseRows.map((r, idx) => (
+                  <div key={idx} className="grid gap-2 sm:grid-cols-6">
+                    <div className="sm:col-span-2">
+                      <Label className={cn(idx > 0 && 'sr-only', 'text-xs text-muted-foreground')}>Category</Label>
+                      <Input
+                        className="mt-1.5 min-h-10 rounded-lg"
+                        list="fallback-session-expense-suggestions"
+                        value={r.category}
+                        onChange={(e) =>
+                          setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, category: e.target.value } : p)))
+                        }
+                        placeholder="transport"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className={cn(idx > 0 && 'sr-only', 'text-xs text-muted-foreground')}>Amount</Label>
+                      <Input
+                        className="mt-1.5 min-h-10 rounded-lg tabular-nums"
+                        inputMode="numeric"
+                        value={r.amount}
+                        onChange={(e) =>
+                          setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, amount: e.target.value } : p)))
+                        }
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label className={cn(idx > 0 && 'sr-only', 'text-xs text-muted-foreground')}>Note</Label>
+                      <Input
+                        className="mt-1.5 min-h-10 rounded-lg"
+                        value={r.note}
+                        onChange={(e) =>
+                          setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, note: e.target.value } : p)))
+                        }
+                        placeholder="optional"
+                      />
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-semibold tabular-nums">{formatKes(l.line_total)}</p>
+                ))}
+              </div>
+
+              {templates.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[11px] font-medium text-muted-foreground">Suggested</p>
+                  <div className="flex flex-wrap gap-2">
+                    {templates.slice(0, 12).map((t) => (
+                      <Button
+                        key={t.id}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-full text-xs"
+                        onClick={() =>
+                          setSessionExpenseRows((prev) => [
+                            ...prev,
+                            {
+                              category: t.name,
+                              amount: t.last_used_amount != null ? String(t.last_used_amount) : '',
+                              note: '',
+                            },
+                          ])
+                        }
+                      >
+                        {t.name}
+                      </Button>
+                    ))}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </TabsContent>
+              )}
 
-        <TabsContent value="market-expenses" className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Market expenses</p>
-              <p className="text-xs text-muted-foreground">Storage, watchman, transport, etc.</p>
-            </div>
-            <Button size="sm" onClick={() => setShowAddMarketExpense(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add expenses
-            </Button>
-          </div>
+              <div className="flex flex-col gap-3 border-t border-border/50 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <Button type="button" variant="outline" onClick={() => setSessionExpenseRows((prev) => [...prev, { category: '', amount: '', note: '' }])}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add row
+                </Button>
+                <p className="text-sm font-medium tabular-nums text-muted-foreground">
+                  Draft (farm):{' '}
+                  <span className="text-foreground">
+                    {formatKes(sessionExpenseRows.reduce((sum, r) => sum + (Number.isFinite(Number(r.amount)) ? Number(r.amount) : 0), 0))}
+                  </span>
+                </p>
+              </div>
 
-          <div className="space-y-2">
-            {marketExpenses.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No market expenses yet.</p>
-            ) : (
-              marketExpenses.map((l) => (
-                <div key={l.id} className="rounded-lg border border-border/60 bg-card/40 p-3 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold">{l.category}</p>
-                  <p className="text-sm font-semibold tabular-nums">{formatKes(l.amount)}</p>
+              <Button className="w-full sm:w-auto" onClick={() => void onSaveSessionExpenses()} disabled={!farmId}>
+                Save farm expenses
+              </Button>
+            </section>
+
+            {session.destination === 'MARKET' && (
+              <section className="space-y-4 border-t border-border/50 pt-6">
+                <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+                  <Truck className="h-4 w-4 text-primary shrink-0" />
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">At market</h3>
                 </div>
-              ))
+                <p className="text-xs text-muted-foreground">Recorded against the market dispatch (storage, watchman, transport, etc.).</p>
+
+                <div className="space-y-2">
+                  {marketExpenses.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No market expenses recorded yet.</p>
+                  ) : (
+                    marketExpenses.map((l) => (
+                      <div key={l.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
+                        <p className="text-sm font-semibold">{l.category}</p>
+                        <p className="text-sm font-semibold tabular-nums">{formatKes(l.amount)}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {expenseRows.map((r, idx) => (
+                    <div key={idx} className="grid gap-2 sm:grid-cols-5">
+                      <div className="sm:col-span-3">
+                        <Label className={cn(idx > 0 && 'sr-only', 'text-xs text-muted-foreground')}>Expense</Label>
+                        <Input
+                          className="mt-1.5 min-h-10 rounded-lg"
+                          list="fallback-expense-templates"
+                          value={r.category}
+                          onChange={(e) =>
+                            setExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, category: e.target.value } : p)))
+                          }
+                          placeholder="storage, watchman…"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className={cn(idx > 0 && 'sr-only', 'text-xs text-muted-foreground')}>Amount</Label>
+                        <Input
+                          className="mt-1.5 min-h-10 rounded-lg tabular-nums"
+                          inputMode="numeric"
+                          value={r.amount}
+                          onChange={(e) =>
+                            setExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, amount: e.target.value } : p)))
+                          }
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <datalist id="fallback-expense-templates">
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.name} />
+                    ))}
+                  </datalist>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <Button type="button" variant="outline" onClick={() => setExpenseRows((prev) => [...prev, { category: '', amount: '' }])}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add row
+                    </Button>
+                    <p className="text-sm font-medium tabular-nums text-muted-foreground">
+                      Draft (market):{' '}
+                      <span className="text-foreground">
+                        {formatKes(expenseRows.reduce((sum, r) => sum + (Number.isFinite(Number(r.amount)) ? Number(r.amount) : 0), 0))}
+                      </span>
+                    </p>
+                  </div>
+                  <Button className="w-full sm:w-auto" onClick={() => void onSaveMarketExpenses()}>
+                    Save market expenses
+                  </Button>
+                </div>
+              </section>
             )}
           </div>
         </TabsContent>
       </Tabs>
+
+      <EditMarketSalesBuyerDialog
+        open={editingBuyerEntry != null}
+        onOpenChange={(o) => {
+          if (!o) setEditingBuyerEntry(null);
+        }}
+        entry={
+          editingBuyerEntry
+            ? {
+                id: editingBuyerEntry.id,
+                buyer_label: editingBuyerEntry.buyer_label,
+                quantity: editingBuyerEntry.quantity,
+                price_per_unit: editingBuyerEntry.price_per_unit,
+              }
+            : null
+        }
+        unitLabel={(session?.unit_type || 'units').trim().toLowerCase() || 'units'}
+        quantityMode="decimal"
+        onSave={saveFallbackBuyerLineEdit}
+        isSaving={savingBuyerEdit}
+      />
 
       {/* Add picker modal */}
       <Dialog open={showAddPicker} onOpenChange={setShowAddPicker}>
@@ -769,143 +1169,6 @@ export default function FallbackHarvestSessionDetailPage() {
               Cancel
             </Button>
             <Button onClick={onAddBuyer}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add market expenses modal */}
-      <Dialog open={showAddMarketExpense} onOpenChange={setShowAddMarketExpense}>
-        <DialogContent className="sm:max-w-[560px]">
-          <DialogHeader>
-            <DialogTitle>Add market expenses</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {expenseRows.map((r, idx) => (
-              <div key={idx} className="grid gap-2 sm:grid-cols-5">
-                <div className="sm:col-span-3">
-                  <Label className={cn(idx > 0 && 'sr-only')}>Expense</Label>
-                  <Input
-                    className="mt-1"
-                    list="fallback-expense-templates"
-                    value={r.category}
-                    onChange={(e) =>
-                      setExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, category: e.target.value } : p)))
-                    }
-                    placeholder="storage, watchman…"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Label className={cn(idx > 0 && 'sr-only')}>Amount</Label>
-                  <Input
-                    className="mt-1"
-                    inputMode="numeric"
-                    value={r.amount}
-                    onChange={(e) =>
-                      setExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, amount: e.target.value } : p)))
-                    }
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-            ))}
-            <datalist id="fallback-expense-templates">
-              {templates.map((t) => (
-                <option key={t.id} value={t.name} />
-              ))}
-            </datalist>
-            <div className="flex items-center justify-between gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setExpenseRows((prev) => [...prev, { category: '', amount: '' }])}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add row
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Total:{' '}
-                {formatKes(
-                  expenseRows.reduce((sum, r) => sum + (Number.isFinite(Number(r.amount)) ? Number(r.amount) : 0), 0),
-                )}
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddMarketExpense(false)}>
-              Cancel
-            </Button>
-            <Button onClick={onSaveMarketExpenses}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add session expenses modal (finance.expenses + expense_links) */}
-      <Dialog open={showAddSessionExpense} onOpenChange={setShowAddSessionExpense}>
-        <DialogContent className="sm:max-w-[640px]">
-          <DialogHeader>
-            <DialogTitle>Add expenses</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {sessionExpenseRows.map((r, idx) => (
-              <div key={idx} className="grid gap-2 sm:grid-cols-6">
-                <div className="sm:col-span-2">
-                  <Label className={cn(idx > 0 && 'sr-only')}>Category</Label>
-                  <Input
-                    className="mt-1"
-                    value={r.category}
-                    onChange={(e) =>
-                      setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, category: e.target.value } : p)))
-                    }
-                    placeholder="transport"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Label className={cn(idx > 0 && 'sr-only')}>Amount</Label>
-                  <Input
-                    className="mt-1"
-                    inputMode="numeric"
-                    value={r.amount}
-                    onChange={(e) =>
-                      setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, amount: e.target.value } : p)))
-                    }
-                    placeholder="0"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Label className={cn(idx > 0 && 'sr-only')}>Note</Label>
-                  <Input
-                    className="mt-1"
-                    value={r.note}
-                    onChange={(e) =>
-                      setSessionExpenseRows((prev) => prev.map((p, i) => (i === idx ? { ...p, note: e.target.value } : p)))
-                    }
-                    placeholder="optional"
-                  />
-                </div>
-              </div>
-            ))}
-            <div className="flex items-center justify-between">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSessionExpenseRows((prev) => [...prev, { category: '', amount: '', note: '' }])}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add row
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Total:{' '}
-                {formatKes(
-                  sessionExpenseRows.reduce((sum, r) => sum + (Number.isFinite(Number(r.amount)) ? Number(r.amount) : 0), 0),
-                )}
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddSessionExpense(false)}>
-              Cancel
-            </Button>
-            <Button onClick={onSaveSessionExpenses}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

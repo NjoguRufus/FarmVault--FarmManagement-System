@@ -53,6 +53,75 @@ export async function getRoleTemplatePermissionKeys(
   return new Set(defaults);
 }
 
+function normalizeRoleTemplateKey(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s]+/g, '_')
+    .replace(/-+/g, '_')
+    .replace(/_+/g, '_');
+}
+
+export type CompanyRoleTemplate = { key: string; label: string };
+
+/** List company-saved custom role templates (excluding built-in roles). */
+export async function listCompanyRoleTemplates(companyId: string): Promise<CompanyRoleTemplate[]> {
+  const { data, error } = await db
+    .public()
+    .from('role_permission_templates')
+    .select('role')
+    .eq('company_id', companyId);
+
+  if (error) throw new Error(error.message ?? 'Failed to load role templates');
+
+  const builtIns = new Set(['admin', 'operations-manager', 'sales-broker', 'custom']);
+  const roles = Array.from(
+    new Set(
+      (data ?? [])
+        .map((r) => (r as { role?: unknown }).role)
+        .filter((r): r is string => typeof r === 'string' && r.trim() !== '')
+        .map((r) => normalizeRoleTemplateKey(r))
+        .filter((r) => !builtIns.has(r))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  return roles.map((key) => ({
+    key,
+    label: key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()),
+  }));
+}
+
+/**
+ * Save/replace a company role template.
+ * Stores allowed boolean per permission key for consistency.
+ */
+export async function saveCompanyRoleTemplate(params: {
+  companyId: string;
+  roleKey: string;
+  allowedKeys: Set<string>;
+}): Promise<void> {
+  const roleKey = normalizeRoleTemplateKey(params.roleKey);
+  if (!roleKey) throw new Error('Role name is required.');
+
+  await db
+    .public()
+    .from('role_permission_templates')
+    .delete()
+    .eq('company_id', params.companyId)
+    .eq('role', roleKey);
+
+  const rows = PERMISSION_KEYS.map((permission_key) => ({
+    company_id: params.companyId,
+    role: roleKey,
+    permission_key,
+    allowed: params.allowedKeys.has(permission_key),
+  }));
+
+  const { error } = await db.public().from('role_permission_templates').insert(rows);
+  if (error) throw new Error(error.message ?? 'Failed to save role template');
+}
+
 /** Get employee permission overrides from DB. */
 export async function getEmployeePermissionOverrides(
   companyId: string,

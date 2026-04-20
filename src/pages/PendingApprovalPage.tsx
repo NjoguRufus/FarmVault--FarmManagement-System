@@ -33,10 +33,10 @@ export default function PendingApprovalPage() {
     queryFn: () => getSubscriptionGateState(),
     enabled: authReady && !!user,
     staleTime: 0,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchInterval: (q) => {
       const s = (q.state.data?.status ?? 'pending_approval').toLowerCase();
-      return s === 'pending_approval' ? 2_000 : false;
+      return s === 'pending_approval' ? 12_000 : false;
     },
   });
 

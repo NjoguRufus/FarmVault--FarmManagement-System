@@ -65,6 +65,7 @@ export default function AdminOperationsPage() {
     queryKey: ['work-cards', companyId],
     queryFn: () => getWorkCardsForCompany({ companyId: companyId! }),
     enabled: !!companyId,
+    staleTime: 60_000,
   });
 
   // Fetch today's inventory usage
@@ -72,6 +73,7 @@ export default function AdminOperationsPage() {
     queryKey: ['today-inventory-usage', companyId],
     queryFn: () => getTodayInventoryUsage(companyId!),
     enabled: !!companyId,
+    staleTime: 60_000,
   });
 
   // Fetch recent audit logs for activity feed
@@ -79,7 +81,8 @@ export default function AdminOperationsPage() {
     queryKey: ['recent-audit-logs', companyId],
     queryFn: () => getRecentAuditLogs(companyId!, 50),
     enabled: !!companyId,
-    refetchInterval: 30000,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
   });
 
   // Filter work cards

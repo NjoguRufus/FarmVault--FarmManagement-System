@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
+import { debounce } from '@/lib/debounce';
 import { cn } from '@/lib/utils';
 import { DEVELOPER_NOTEBOOK_DEFAULT_CROPS, type RecordCropCard } from '@/services/recordsService';
 import { fetchDeveloperCompanies } from '@/services/developerService';
@@ -226,17 +227,22 @@ export default function DeveloperRecordsPage() {
       if (error) throw error;
       return (data as FarmNotebookEntrySlim[]) ?? [];
     },
-    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
+    const flush = debounce(() => {
+      void queryClient.invalidateQueries({ queryKey: ['developer', 'records', 'farm_notebook_entries'] });
+    }, 700);
     const channel = supabase
       .channel('developer-records-farm-notebook-entries')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_notebook_entries' }, () => {
-        void queryClient.invalidateQueries({ queryKey: ['developer', 'records', 'farm_notebook_entries'] });
+        flush();
       })
       .subscribe();
     return () => {
+      flush.cancel();
       void supabase.removeChannel(channel);
     };
   }, [queryClient]);

@@ -1,8 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { companyWorkspaceStatusQueryKey } from '@/hooks/useCompanyWorkspaceApprovalStatus';
 import { logger } from "@/lib/logger";
+import { debounce } from '@/lib/debounce';
+
+const BILLING_REFETCH_DEBOUNCE_MS = 500;
 
 /** Force in-flight network refetch so plan/status update on screen immediately (not next stale window). */
 function refetchWorkspaceBillingQueries(queryClient: QueryClient, companyId: string) {
@@ -24,9 +27,15 @@ function refetchWorkspaceBillingQueries(queryClient: QueryClient, companyId: str
  */
 export function useCompanySubscriptionRealtime(companyId: string | null | undefined, enabled: boolean) {
   const queryClient = useQueryClient();
+  const qcRef = useRef(queryClient);
+  qcRef.current = queryClient;
 
   useEffect(() => {
     if (!companyId || !enabled) return;
+
+    const scheduleBillingRefetch = debounce(() => {
+      refetchWorkspaceBillingQueries(qcRef.current, companyId);
+    }, BILLING_REFETCH_DEBOUNCE_MS);
 
     const cid = companyId.trim().toLowerCase();
     const subFilter = `company_id=eq.${cid}`;
@@ -48,7 +57,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
               event: payload.eventType,
             });
           }
-          refetchWorkspaceBillingQueries(queryClient, companyId);
+          scheduleBillingRefetch();
         },
       )
       .on(
@@ -62,7 +71,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
               event: payload.eventType,
             });
           }
-          refetchWorkspaceBillingQueries(queryClient, companyId);
+          scheduleBillingRefetch();
         },
       )
       .on(
@@ -76,7 +85,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
               event: payload.eventType,
             });
           }
-          refetchWorkspaceBillingQueries(queryClient, companyId);
+          scheduleBillingRefetch();
         },
       )
       .on(
@@ -90,7 +99,7 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
               event: payload.eventType,
             });
           }
-          refetchWorkspaceBillingQueries(queryClient, companyId);
+          scheduleBillingRefetch();
         },
       )
       .subscribe((status) => {
@@ -101,7 +110,8 @@ export function useCompanySubscriptionRealtime(companyId: string | null | undefi
       });
 
     return () => {
+      scheduleBillingRefetch.cancel();
       void supabase.removeChannel(channel);
     };
-  }, [companyId, enabled, queryClient]);
+  }, [companyId, enabled]);
 }

@@ -67,3 +67,19 @@ export function parseQuantityOrFraction(str: string): number {
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
 }
+
+/** Supabase/PostgREST errors are often plain objects with `message`, not `Error` instances. */
+export function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null) {
+    const o = err as { message?: unknown; details?: unknown; hint?: unknown };
+    if (typeof o.message === 'string' && o.message.length > 0) {
+      const parts = [o.message];
+      if (typeof o.details === 'string' && o.details.trim().length > 0) parts.push(o.details.trim());
+      if (typeof o.hint === 'string' && o.hint.trim().length > 0) parts.push(o.hint.trim());
+      return parts.join(' — ');
+    }
+  }
+  if (typeof err === 'string') return err;
+  return 'Something went wrong. Please try again.';
+}

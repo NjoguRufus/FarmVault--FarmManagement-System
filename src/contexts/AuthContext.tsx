@@ -33,7 +33,7 @@ import {
   pickFirstExistingMembershipCompany,
   repairProfileActiveCompany,
 } from '@/lib/auth/tenantMembershipRecovery';
-import { fetchPlatformUserProfile } from '@/lib/auth/fetchPlatformUserProfile';
+import { fetchBootstrapCoreProfile, type AuthCoreProfileRow } from '@/lib/auth/fetchPlatformUserProfile';
 import { logger } from "@/lib/logger";
 import {
   readStoredEmergencyServerSession,
@@ -824,7 +824,10 @@ export function AuthProvider({
         // 3) Developer delete (user or company) inserts admin.reset_users so we do not resurrect stale sessions.
         // When re-signup is blocked: sign out + home. When allowed: keep Clerk session and send users to onboarding
         // (or continue on auth handoff routes) so consume_reset_user_for_signup can run — never /sign-in?account-reset (loop).
-        const { data: resetState, error: resetError } = await supabase.rpc('get_reset_user_state');
+        const [{ data: resetState, error: resetError }, earlyProfile] = await Promise.all([
+          supabase.rpc('get_reset_user_state'),
+          fetchBootstrapCoreProfile(userId, { backoff: 'fast' }),
+        ]);
         const resetPayload = (resetState ?? {}) as {
           has_reset_row?: boolean;
           is_blocked?: boolean;
@@ -890,13 +893,8 @@ export function AuthProvider({
           return ambassadorAccessThisBootstrap;
         };
 
-        let hasCoreProfile = false;
-        try {
-          const profile = await fetchPlatformUserProfile(userId);
-          hasCoreProfile = !!profile?.clerk_user_id;
-        } catch {
-          hasCoreProfile = false;
-        }
+        let bootstrapProfile: AuthCoreProfileRow | null = earlyProfile;
+        let hasCoreProfile = !!bootstrapProfile?.clerk_user_id;
 
         if (!hasCoreProfile) {
           if (isExplicitOnboardingRoute()) {
@@ -935,21 +933,18 @@ export function AuthProvider({
           }
 
           try {
-            const { data: r2 } = await db
-              .core()
-              .from('profiles')
-              .select('clerk_user_id')
-              .eq('clerk_user_id', userId)
-              .maybeSingle();
-            hasCoreProfile = !!r2?.clerk_user_id;
+            bootstrapProfile = await fetchBootstrapCoreProfile(userId, { backoff: 'fast' });
+            hasCoreProfile = !!bootstrapProfile?.clerk_user_id;
           } catch {
             hasCoreProfile = false;
           }
         }
 
         if (!hasCoreProfile) {
-          const companyMembership = await pickFirstExistingMembershipCompany(userId);
-          const ambassadorRole = await getAmbassadorAccessThisBootstrap();
+          const [companyMembership, ambassadorRole] = await Promise.all([
+            pickFirstExistingMembershipCompany(userId),
+            getAmbassadorAccessThisBootstrap(),
+          ]);
 
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -977,13 +972,8 @@ export function AuthProvider({
               console.warn('[Auth] Profile upsert (membership/ambassador fallback):', upsertError2);
             }
             try {
-              const { data: r3 } = await db
-                .core()
-                .from('profiles')
-                .select('clerk_user_id')
-                .eq('clerk_user_id', userId)
-                .maybeSingle();
-              hasCoreProfile = !!r3?.clerk_user_id;
+              bootstrapProfile = await fetchBootstrapCoreProfile(userId, { backoff: 'fast' });
+              hasCoreProfile = !!bootstrapProfile?.clerk_user_id;
             } catch {
               hasCoreProfile = false;
             }
@@ -1022,25 +1012,26 @@ export function AuthProvider({
           }
         }
 
-        // 3b) Load profile full_name + avatar_url + user_type (user display + avatar priority + role)
-        let profileAvatarUrl: string | null = null;
-        let profileFullName: string | null = null;
-        let profileUserType: string | null = null;
-        try {
-          const { data: profileRow } = await db
-            .core()
-            .from('profiles')
-            .select('avatar_url, full_name, user_type')
-            .eq('clerk_user_id', userId)
-            .maybeSingle();
-          profileAvatarUrl = profileRow?.avatar_url ?? null;
-          profileFullName =
-            profileRow?.full_name != null && String(profileRow.full_name).trim().length > 0
-              ? String(profileRow.full_name)
-              : null;
-          profileUserType = (profileRow as { user_type?: string | null } | null)?.user_type ?? null;
-        } catch {
-          // Non-blocking; fall back to Clerk image
+        // 3b) Profile display fields — reuse bootstrap fetch (parallel with reset) to skip a duplicate round-trip.
+        let profileAvatarUrl: string | null = bootstrapProfile?.avatar_url ?? null;
+        let profileFullName: string | null =
+          bootstrapProfile?.full_name != null && String(bootstrapProfile.full_name).trim().length > 0
+            ? String(bootstrapProfile.full_name).trim()
+            : null;
+        let profileUserType: string | null = bootstrapProfile?.user_type ?? null;
+        if (hasCoreProfile && !bootstrapProfile) {
+          try {
+            const fill = await fetchBootstrapCoreProfile(userId, { backoff: 'fast' });
+            if (fill) {
+              bootstrapProfile = fill;
+              profileAvatarUrl = fill.avatar_url;
+              profileFullName =
+                fill.full_name != null && String(fill.full_name).trim().length > 0 ? String(fill.full_name).trim() : null;
+              profileUserType = fill.user_type;
+            }
+          } catch {
+            // Non-blocking; fall back to Clerk image
+          }
         }
 
         if (!profileFullName) {
@@ -1340,15 +1331,13 @@ export function AuthProvider({
         }
         if (cancelled) return;
 
-        try {
-          await mirrorPublicProfileForClerkUser(
-            userId,
-            fallbackEmail,
-            effectiveCompanyId != null && effectiveCompanyId !== '' ? effectiveCompanyId : null,
-          );
-        } catch {
+        void mirrorPublicProfileForClerkUser(
+          userId,
+          fallbackEmail,
+          effectiveCompanyId != null && effectiveCompanyId !== '' ? effectiveCompanyId : null,
+        ).catch(() => {
           // non-blocking; core.profiles remains canonical
-        }
+        });
 
         const hasEffectiveCompany = effectiveCompanyId != null && effectiveCompanyId !== '';
         const needsAmbassadorCheck = setupIncompleteFlag && !hasEffectiveCompany;
@@ -1612,7 +1601,10 @@ export function AuthProvider({
       throw err;
     }
     if (!signInLoaded || !signIn || !setActiveSignIn) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      for (let i = 0; i < 24; i++) {
+        if (signInLoaded && signIn && setActiveSignIn) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       if (!signInLoaded || !signIn || !setActiveSignIn) {
         const err: any = new Error('Sign in is temporarily unavailable. Please refresh the page and try again.');
         throw err;

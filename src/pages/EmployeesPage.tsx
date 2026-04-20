@@ -65,18 +65,19 @@ import { getDefaultPermissions, resolvePermissions, expandFlatPermissions } from
 import { getPresetPermissions as getEmployeePresetPermissions } from '@/lib/employees/permissionPresets';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
-import { EMPLOYEE_ROLES, PERMISSION_GROUPS, type EmployeeRoleKey, type PermissionKey } from '@/config/accessControl';
+import { EMPLOYEE_ROLES, PERMISSION_KEYS, type EmployeeRoleKey, type PermissionKey } from '@/config/accessControl';
 import { ROLE_PRESET_LABELS, ROLE_PRESET_KEYS, roleToPreset, presetToLegacyRole } from '@/lib/access';
-import { logActivity } from '@/services/employeeAccessService';
+import { listCompanyRoleTemplates, saveCompanyRoleTemplate, getRoleTemplatePermissionKeys, logActivity } from '@/services/employeeAccessService';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { BASIC_LIMITS } from '@/config/basicLimits';
 import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { logger } from "@/lib/logger";
+import { debounce } from '@/lib/debounce';
 
-type ManagedEmployeeRole = 'operations-manager' | 'logistics-driver' | 'sales-broker' | EmployeeRoleKey;
-type EmployeeRoleSelection = ManagedEmployeeRole | 'none';
+type ManagedEmployeeRole = 'operations-manager' | 'sales-broker' | EmployeeRoleKey;
+type EmployeeRoleSelection = ManagedEmployeeRole | 'none' | string;
 type PermissionEditorPreset = PermissionPresetKey | 'custom';
 
 function labelForPermissionKey(key: PermissionKey): string {
@@ -95,6 +96,46 @@ function normalizeFlatPermissions(input: unknown): Record<string, boolean> {
   return out;
 }
 
+function normalizeCompanyRoleKey(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s]+/g, '_')
+    .replace(/-+/g, '_')
+    .replace(/_+/g, '_');
+}
+
+const EMPLOYEE_CREATE_PERMISSION_GROUPS: Array<{ id: string; label: string; keys: PermissionKey[] }> = [
+  { id: 'dashboard', label: '📊 Dashboard', keys: PERMISSION_KEYS.filter((k) => k.startsWith('dashboard.')) },
+  {
+    id: 'projects_ops',
+    label: '🌱 Projects & Operations',
+    keys: PERMISSION_KEYS.filter(
+      (k) =>
+        k.startsWith('projects.') ||
+        k.startsWith('operations.') ||
+        k.startsWith('crop_monitoring.') ||
+        k.startsWith('suppliers.')
+    ),
+  },
+  { id: 'inventory', label: '📦 Inventory', keys: PERMISSION_KEYS.filter((k) => k.startsWith('inventory.')) },
+  {
+    id: 'harvest',
+    label: '🚜 Harvest',
+    keys: PERMISSION_KEYS.filter((k) => k.startsWith('harvest.') || k.startsWith('harvest_collections.')),
+  },
+  { id: 'records', label: '📁 Records', keys: PERMISSION_KEYS.filter((k) => k.startsWith('records.')) },
+  {
+    id: 'finance',
+    label: '💰 Finance',
+    keys: PERMISSION_KEYS.filter((k) => k.startsWith('expenses.') || k.startsWith('financials.') || k.startsWith('reports.')),
+  },
+  { id: 'logistics', label: '🚚 Logistics', keys: PERMISSION_KEYS.filter((k) => k.startsWith('logistics.')) },
+  { id: 'employees', label: '👥 Employees', keys: PERMISSION_KEYS.filter((k) => k.startsWith('employees.')) },
+  { id: 'settings', label: '⚙️ Settings', keys: PERMISSION_KEYS.filter((k) => k.startsWith('settings.')) },
+].filter((g) => g.keys.length > 0);
+
 // Role options: new preset labels with legacy DB values for backward-safe save.
 const ROLE_OPTIONS: Array<{
   value: ManagedEmployeeRole | string;
@@ -103,12 +144,8 @@ const ROLE_OPTIONS: Array<{
 }> = [
   { value: 'admin', label: ROLE_PRESET_LABELS.administrator, department: 'Admin' },
   { value: 'operations-manager', label: ROLE_PRESET_LABELS.operations_manager, department: 'Operations' },
-  { value: 'inventory_officer', label: ROLE_PRESET_LABELS.inventory_staff, department: 'Inventory' },
-  { value: 'weighing_clerk', label: ROLE_PRESET_LABELS.harvest_staff, department: 'Harvest' },
-  { value: 'finance_officer', label: ROLE_PRESET_LABELS.finance_staff, department: 'Finance' },
-  { value: 'custom', label: ROLE_PRESET_LABELS.custom, department: 'General' },
-  { value: 'logistics-driver', label: 'Logistics (Driver)', department: 'Logistics' },
   { value: 'sales-broker', label: 'Sales (Broker)', department: 'Sales' },
+  { value: 'custom', label: '+ Add New Role', department: 'General' },
 ];
 
 const DEFAULT_PERMISSIONS = resolvePermissions(null, getDefaultPermissions());
@@ -125,7 +162,6 @@ function normalizeEmployeeRole(role: string | null | undefined): ManagedEmployee
   if (!role) return null;
   if (EMPLOYEE_ROLES.includes(role as EmployeeRoleKey)) return role as ManagedEmployeeRole;
   if (role === 'operations-manager' || role === 'manager') return 'operations-manager';
-  if (role === 'logistics-driver' || role === 'driver') return 'logistics-driver';
   if (role === 'sales-broker' || role === 'broker') return 'sales-broker';
   return null;
 }
@@ -188,6 +224,8 @@ export default function EmployeesPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState<EmployeeRoleSelection>('none');
+  const [companyRoleTemplates, setCompanyRoleTemplates] = useState<Array<{ key: string; label: string }>>([]);
+  const [newRoleName, setNewRoleName] = useState('');
   const [department, setDepartment] = useState('');
   const [contact, setContact] = useState('');
   const [email, setEmail] = useState('');
@@ -211,6 +249,54 @@ export default function EmployeesPage() {
       route_path: '/employees',
     });
   }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || !isEmployeesSupabase) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const roles = await listCompanyRoleTemplates(companyId);
+        if (!cancelled) setCompanyRoleTemplates(roles);
+      } catch {
+        // non-blocking
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, isEmployeesSupabase]);
+
+  const autosaveRoleTemplate = React.useMemo(
+    () =>
+      debounce(async (params: { roleKey: string; flat: Record<string, boolean> }) => {
+        if (!companyId || !isEmployeesSupabase) return;
+        const allowed = new Set(Object.entries(params.flat).filter(([, v]) => v === true).map(([k]) => k));
+        if (allowed.size === 0) return;
+        try {
+          await saveCompanyRoleTemplate({ companyId, roleKey: params.roleKey, allowedKeys: allowed });
+          const roles = await listCompanyRoleTemplates(companyId);
+          setCompanyRoleTemplates(roles);
+        } catch {
+          // non-blocking
+        }
+      }, 900),
+    [companyId, isEmployeesSupabase]
+  );
+
+  useEffect(() => {
+    if (!companyId || !isEmployeesSupabase) return;
+
+    // Autosave permissions into the role template (company-wide) when:
+    // - Creating a new role (role === 'custom' with a valid name)
+    // - Editing an existing company-saved role template (role matches a template key)
+    const isCompanyTemplate = typeof role === 'string' && companyRoleTemplates.some((r) => r.key === role);
+    const creatingNew = role === 'custom';
+    const key = creatingNew ? normalizeCompanyRoleKey(newRoleName) : (isCompanyTemplate ? role : '');
+    if (!key) return;
+
+    autosaveRoleTemplate({ roleKey: key, flat: permissionsFlat });
+    return () => autosaveRoleTemplate.cancel();
+  }, [companyId, isEmployeesSupabase, role, newRoleName, permissionsFlat, companyRoleTemplates, autosaveRoleTemplate]);
   const { data: employees = [], isLoading } = useCollection<Employee>('employees', 'employees', scope);
   const { data: allUsers = [] } = useCollection<User>('employees-page-users', 'users', scope);
 
@@ -380,6 +466,7 @@ export default function EmployeesPage() {
   const resetAddForm = () => {
     setName('');
     setRole('none');
+    setNewRoleName('');
     setDepartment('');
     setContact('');
     setEmail('');
@@ -393,6 +480,28 @@ export default function EmployeesPage() {
   };
 
   const handleRoleChange = (value: string) => {
+    // Company-saved custom role template (not part of EMPLOYEE_ROLES).
+    if (isEmployeesSupabase && companyRoleTemplates.some((r) => r.key === value)) {
+      setRole(value);
+      setNewRoleName('');
+      setDepartment('General');
+      setPermissionPreset('custom');
+      if (!companyId) return;
+      (async () => {
+        try {
+          const allowed = await getRoleTemplatePermissionKeys(companyId, value);
+          const flat: Record<string, boolean> = {};
+          PERMISSION_KEYS.forEach((k) => {
+            flat[k] = allowed.has(k);
+          });
+          setPermissionsFlat(flat);
+        } catch {
+          setPermissionsFlat({});
+        }
+      })();
+      return;
+    }
+
     const normalized = value === 'none' ? null : normalizeEmployeeRole(value);
     setRole((normalized ?? 'none') as EmployeeRoleSelection);
     setDepartment(getDepartmentFromRole(normalized));
@@ -400,11 +509,19 @@ export default function EmployeesPage() {
       if (!normalized) {
         setPermissionPreset('custom');
         setPermissionsFlat({});
+        setNewRoleName('');
         return;
       }
-      const asRoleKey = EMPLOYEE_ROLES.includes(normalized as EmployeeRoleKey)
-        ? (normalized as EmployeeRoleKey)
-        : 'viewer';
+      // For the simplified role system:
+      // - Administrator / Operations Manager / Sales (Broker): preset permissions, no manual toggles required.
+      // - Add Role (custom): start empty; permissions selected in step 2.
+      if (normalized === 'custom') {
+        setPermissionPreset('custom');
+        setPermissionsFlat({});
+        setNewRoleName('');
+        return;
+      }
+      const asRoleKey = normalized as EmployeeRoleKey;
       setPermissionPreset(asRoleKey);
       setPermissionsFlat(getEmployeePresetPermissions(asRoleKey));
     } else {
@@ -423,9 +540,12 @@ export default function EmployeesPage() {
         setEditPermissionsFlat({});
         return;
       }
-      const asRoleKey = EMPLOYEE_ROLES.includes(normalized as EmployeeRoleKey)
-        ? (normalized as EmployeeRoleKey)
-        : 'viewer';
+      if (normalized === 'custom') {
+        setEditPermissionPreset('custom');
+        setEditPermissionsFlat({});
+        return;
+      }
+      const asRoleKey = normalized as EmployeeRoleKey;
       setEditPermissionPreset(asRoleKey);
       setEditPermissionsFlat(getEmployeePresetPermissions(asRoleKey));
       return;
@@ -568,9 +688,10 @@ export default function EmployeesPage() {
     }
   };
 
-  const handleAddEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isEmployeesSupabase && addStep !== 2) {
+  const handleAddEmployee = async (e?: React.FormEvent) => {
+    e?.preventDefault?.();
+    if (isEmployeesSupabase && (role === 'custom' || role === 'operations-manager') && addStep !== 2) {
+      // Add Role requires explicit permissions selection step.
       return;
     }
     if (!canCreateEmployees) {
@@ -602,13 +723,28 @@ export default function EmployeesPage() {
       }
 
       if (isEmployeesSupabase) {
-        const selectedRole = role === 'none' ? null : role;
+        const selectedRole = role === 'none' ? null : role === 'custom' ? normalizeCompanyRoleKey(newRoleName) : role;
+        if (role === 'custom') {
+          const roleKey = normalizeCompanyRoleKey(newRoleName);
+          if (!roleKey) {
+            toast.error('Role name required', { description: 'Enter a name for the new role.' });
+            return;
+          }
+          const allowed = new Set(Object.entries(permissionsFlat).filter(([, v]) => v === true).map(([k]) => k));
+          await saveCompanyRoleTemplate({ companyId: effectiveCompanyId!, roleKey, allowedKeys: allowed });
+          try {
+            const roles = await listCompanyRoleTemplates(effectiveCompanyId!);
+            setCompanyRoleTemplates(roles);
+          } catch {
+            // ignore
+          }
+        }
         const effectivePermissionPreset: EmployeeRoleKey =
           permissionPreset !== 'custom'
             ? permissionPreset
             : selectedRole && EMPLOYEE_ROLES.includes(selectedRole as EmployeeRoleKey)
             ? (selectedRole as EmployeeRoleKey)
-            : 'viewer';
+            : 'custom';
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           logger.log('[EmployeesPage] inviteEmployee payload', {
@@ -867,6 +1003,38 @@ export default function EmployeesPage() {
     );
   };
 
+  const getAddDraftPermissionPayload = (): {
+    permissionPreset: EmployeeRoleKey;
+    permissionsFlat: Record<string, boolean>;
+    roleKeyOverride?: string;
+  } => {
+    const selectedRole = role === 'none' ? null : role;
+    if (!selectedRole) return { permissionPreset: 'custom', permissionsFlat: {} };
+
+    if (selectedRole === 'custom') {
+      const roleKey = normalizeCompanyRoleKey(newRoleName);
+      return { permissionPreset: 'custom', permissionsFlat, roleKeyOverride: roleKey || undefined };
+    }
+
+    if (selectedRole === 'operations-manager') {
+      return {
+        permissionPreset: 'operations-manager',
+        permissionsFlat: { ...getEmployeePresetPermissions('operations-manager'), ...permissionsFlat },
+      };
+    }
+
+    if (selectedRole === 'admin') {
+      return { permissionPreset: 'admin', permissionsFlat: getEmployeePresetPermissions('admin') };
+    }
+
+    if (selectedRole === 'sales-broker') {
+      return { permissionPreset: 'sales-broker', permissionsFlat: getEmployeePresetPermissions('sales-broker') };
+    }
+
+    // Company-saved role templates: treat as custom preset but keep overrides.
+    return { permissionPreset: 'custom', permissionsFlat };
+  };
+
   const handleAddDialogOpenChange = async (open: boolean) => {
     if (open) {
       setCurrentDraftEmployeeId(null);
@@ -889,21 +1057,19 @@ export default function EmployeesPage() {
     }
 
     try {
+      const perm = getAddDraftPermissionPayload();
       await saveEmployeeDraft({
         id: currentDraftEmployeeId || undefined,
         companyId,
         fullName: name.trim() || email.trim(),
         email: email.trim().toLowerCase() || undefined,
         phone: contact.trim() || undefined,
-        role: role === 'none' ? null : role,
+        role: role === 'none' ? null : role === 'custom' ? (perm.roleKeyOverride ?? null) : role,
         department: department.trim() || undefined,
-        permissionPreset,
+        permissionPreset: perm.permissionPreset,
         permissions: (() => {
-          const base =
-            permissionPreset === 'custom'
-              ? {}
-              : getEmployeePresetPermissions(permissionPreset);
-          return { ...base, ...permissionsFlat };
+          const base = perm.permissionPreset === 'custom' ? {} : getEmployeePresetPermissions(perm.permissionPreset);
+          return { ...base, ...perm.permissionsFlat };
         })() as unknown as PermissionMap,
       });
       toast.success('Draft saved');
@@ -972,7 +1138,8 @@ export default function EmployeesPage() {
                   </div>
                 </div>
               </div>
-              <form onSubmit={handleAddEmployee} className="space-y-4">
+              {/* Intentionally NOT a <form>: accordion triggers and switches contain buttons which can accidentally submit forms. */}
+              <div className="space-y-4">
                 {addStep === 1 && (
                   <>
                     <div className="space-y-1">
@@ -984,22 +1151,55 @@ export default function EmployeesPage() {
                         placeholder="Full name"
                       />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <label className="text-sm font-medium text-foreground">Role (optional)</label>
-                        <Select value={role} onValueChange={handleRoleChange}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="No role (custom permissions)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No role (custom permissions)</SelectItem>
-                            {ROLE_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <label className="text-sm font-medium text-foreground">Role</label>
+                        {role === 'custom' ? (
+                          <div className="flex gap-2">
+                            <input
+                              className="fv-input flex-1"
+                              value={newRoleName}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setNewRoleName(v);
+                                setDepartment(v);
+                              }}
+                              placeholder="New role name (e.g. Assistant Manager)"
+                            />
+                            <button
+                              type="button"
+                              className="fv-btn fv-btn--ghost shrink-0"
+                              onClick={() => {
+                                setRole('none');
+                                setNewRoleName('');
+                                setDepartment('');
+                                setPermissionPreset('custom');
+                                setPermissionsFlat({});
+                              }}
+                            >
+                              Change
+                            </button>
+                          </div>
+                        ) : (
+                          <Select value={role} onValueChange={handleRoleChange}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ROLE_OPTIONS.filter((o) => o.value !== 'custom').map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                              {companyRoleTemplates.map((r) => (
+                                <SelectItem key={r.key} value={r.key}>
+                                  {r.label}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="custom">+ Add New Role</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-foreground">Department</label>
@@ -1038,36 +1238,20 @@ export default function EmployeesPage() {
                 {addStep === 2 && (
                   <>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-foreground">Permission preset</label>
-                      <Select
-                        value={permissionPreset}
-                        onValueChange={(val) => {
-                          const next = val as EmployeeRoleKey;
-                          setPermissionPreset(next);
-                          if (next === 'custom') return;
-                          setPermissionsFlat(getEmployeePresetPermissions(next));
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Custom" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="custom">Custom</SelectItem>
-                          {EMPLOYEE_ROLES.filter((r) => r !== 'custom').map((r) => (
-                            <SelectItem key={r} value={r}>
-                              {ROLE_PRESET_LABELS[roleToPreset(r)]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <p className="text-sm font-medium text-foreground">Permissions</p>
+                      <p className="text-xs text-muted-foreground">
+                        Choose what this employee can access. Nothing is saved until you click Save employee.
+                      </p>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3">
                       <Accordion type="multiple" className="w-full">
-                        {PERMISSION_GROUPS.map((group) => {
-                          const viewKey = `${group.module}.view`;
-                          const canView = Boolean(permissionsFlat[viewKey]);
+                        {EMPLOYEE_CREATE_PERMISSION_GROUPS.map((group) => {
+                          const viewKeys = group.keys.filter((k) => k.endsWith('.view'));
+                          const editKeys = group.keys.filter((k) => !k.endsWith('.view'));
+                          const canViewAll = viewKeys.length ? viewKeys.every((k) => Boolean(permissionsFlat[k])) : false;
+                          const canEditAll = editKeys.length ? editKeys.every((k) => Boolean(permissionsFlat[k])) : false;
                           return (
-                            <AccordionItem key={group.module} value={group.module} className="border-border/50">
+                            <AccordionItem key={group.id} value={group.id} className="border-border/50">
                               <div className="flex items-center gap-3">
                                 <AccordionTrigger className="py-3 hover:no-underline">
                                   <span className="text-sm font-medium text-foreground">{group.label}</span>
@@ -1075,18 +1259,40 @@ export default function EmployeesPage() {
                                 <div className="flex shrink-0 items-center gap-2">
                                   <span className="text-xs text-muted-foreground">View</span>
                                   <Switch
-                                    checked={canView}
+                                    checked={canViewAll}
+                                    disabled={viewKeys.length === 0}
                                     onCheckedChange={(checked) =>
-                                      setPermissionsFlat((prev) => ({ ...prev, [viewKey]: Boolean(checked) }))
+                                      setPermissionsFlat((prev) => {
+                                        const next = { ...prev };
+                                        viewKeys.forEach((k) => {
+                                          next[k] = Boolean(checked);
+                                        });
+                                        return next;
+                                      })
                                     }
                                     aria-label={`${group.label} view permission`}
+                                  />
+                                  <span className="text-xs text-muted-foreground">Edit</span>
+                                  <Switch
+                                    checked={canEditAll}
+                                    disabled={editKeys.length === 0}
+                                    onCheckedChange={(checked) =>
+                                      setPermissionsFlat((prev) => {
+                                        const next = { ...prev };
+                                        editKeys.forEach((k) => {
+                                          next[k] = Boolean(checked);
+                                        });
+                                        return next;
+                                      })
+                                    }
+                                    aria-label={`${group.label} edit permissions`}
                                   />
                                 </div>
                               </div>
                               <AccordionContent className="pt-1 pb-3">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {group.keys
-                                    .filter((k) => k !== (viewKey as PermissionKey))
+                                    .filter((k) => !k.endsWith('.view'))
                                     .map((key) => {
                                       const checked = Boolean(permissionsFlat[key]);
                                       return (
@@ -1113,7 +1319,7 @@ export default function EmployeesPage() {
                     </div>
                   </>
                 )}
-                <DialogFooter>
+                <DialogFooter className="flex-row justify-end gap-2 sm:gap-0">
                   {addStep === 2 && (
                     <button
                       type="button"
@@ -1134,88 +1340,58 @@ export default function EmployeesPage() {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    disabled={saving}
-                    className="fv-btn fv-btn--ghost"
-                    onClick={async () => {
-                      if (!companyId) {
-                        toast.error('No company selected', {
-                          description: 'Cannot save draft without an active company.',
-                        });
-                        return;
-                      }
-                      if (!hasMeaningfulAddFormData()) {
-                        toast.error('Nothing to save', {
-                          description: 'Add some details before saving a draft.',
-                        });
-                        return;
-                      }
-                      setSaving(true);
-                      try {
-                        await saveEmployeeDraft({
-                          id: currentDraftEmployeeId || undefined,
-                          companyId,
-                          fullName: name.trim() || email.trim(),
-                          email: email.trim().toLowerCase() || undefined,
-                          phone: contact.trim() || undefined,
-                          role:
-                            role === 'none' || !EMPLOYEE_ROLES.includes(role as EmployeeRoleKey)
-                              ? null
-                              : (role as EmployeeRoleKey),
-                          department: department.trim() || undefined,
-                          permissionPreset,
-                          permissions: (() => {
-                            const base =
-                              permissionPreset === 'custom'
-                                ? {}
-                                : getEmployeePresetPermissions(permissionPreset);
-                            return { ...base, ...permissionsFlat };
-                          })() as unknown as PermissionMap,
-                        });
-                        await refetchSupabaseEmployees();
-                        toast.success('Draft saved');
-                        setAddOpen(false);
-                        resetAddForm();
-                        setCurrentDraftEmployeeId(null);
-                      } catch (err: unknown) {
-                        const message = (err as { message?: string })?.message ?? 'Failed to save draft';
-                        toast.error('Draft not saved', { description: message });
-                      } finally {
-                        setSaving(false);
-                      }
-                    }}
-                  >
-                    Save Draft
-                  </button>
                   {addStep === 1 ? (
                     <button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || role === 'none'}
                       className="fv-btn fv-btn--primary"
-                      onClick={() => {
+                      onClick={async () => {
                         if (!email.trim()) {
                           toast.error('Email required', {
                             description: 'Add an email so we can send the invite.',
                           });
                           return;
                         }
-                        setAddStep(2);
+                        if (role === 'none') {
+                          toast.error('Role required', {
+                            description: 'Select a role before continuing.',
+                          });
+                          return;
+                        }
+                        // Add Role and Operations Manager allow permission review/edit.
+                        if (role === 'custom') {
+                          if (!newRoleName.trim()) {
+                            toast.error('Role name required', {
+                              description: 'Enter a name for the new role.',
+                            });
+                            return;
+                          }
+                          setAddStep(2);
+                          return;
+                        }
+                        if (role === 'operations-manager' || companyRoleTemplates.some((r) => r.key === role)) {
+                          setAddStep(2);
+                          return;
+                        }
+                        await handleAddEmployee();
                       }}
                     >
-                      Continue
+                      {saving ? 'Saving…' : role === 'custom' || role === 'operations-manager' || companyRoleTemplates.some((r) => r.key === role) ? 'Continue' : 'Save employee'}
                     </button>
                   ) : (
                     <button
-                      type="submit"
-                      disabled={saving}
+                      type="button"
+                      disabled={saving || Object.values(permissionsFlat).every((v) => v !== true)}
                       className="fv-btn fv-btn--primary"
+                      onClick={async () => {
+                        await handleAddEmployee();
+                      }}
                     >
-                      {saving ? 'Sending…' : 'Send Invite'}
+                      {saving ? 'Saving…' : 'Save employee'}
                     </button>
                   )}
                 </DialogFooter>
-              </form>
+              </div>
             </DialogContent>
           ) : (
             <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -1232,7 +1408,7 @@ export default function EmployeesPage() {
                     required
                   />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-foreground">Role (optional)</label>
                     <Select value={role} onValueChange={handleRoleChange}>
@@ -1486,11 +1662,13 @@ export default function EmployeesPage() {
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3">
                       <Accordion type="multiple" className="w-full">
-                        {PERMISSION_GROUPS.map((group) => {
-                          const viewKey = `${group.module}.view`;
-                          const canView = Boolean(editPermissionsFlat[viewKey]);
+                        {EMPLOYEE_CREATE_PERMISSION_GROUPS.map((group) => {
+                          const viewKeys = group.keys.filter((k) => k.endsWith('.view'));
+                          const editKeys = group.keys.filter((k) => !k.endsWith('.view'));
+                          const canViewAll = viewKeys.length ? viewKeys.every((k) => Boolean(editPermissionsFlat[k])) : false;
+                          const canEditAll = editKeys.length ? editKeys.every((k) => Boolean(editPermissionsFlat[k])) : false;
                           return (
-                            <AccordionItem key={group.module} value={group.module} className="border-border/50">
+                            <AccordionItem key={group.id} value={group.id} className="border-border/50">
                               <div className="flex items-center gap-3">
                                 <AccordionTrigger className="py-3 hover:no-underline">
                                   <span className="text-sm font-medium text-foreground">{group.label}</span>
@@ -1498,18 +1676,40 @@ export default function EmployeesPage() {
                                 <div className="flex shrink-0 items-center gap-2">
                                   <span className="text-xs text-muted-foreground">View</span>
                                   <Switch
-                                    checked={canView}
+                                    checked={canViewAll}
+                                    disabled={viewKeys.length === 0}
                                     onCheckedChange={(checked) =>
-                                      setEditPermissionsFlat((prev) => ({ ...prev, [viewKey]: Boolean(checked) }))
+                                      setEditPermissionsFlat((prev) => {
+                                        const next = { ...prev };
+                                        viewKeys.forEach((k) => {
+                                          next[k] = Boolean(checked);
+                                        });
+                                        return next;
+                                      })
                                     }
                                     aria-label={`${group.label} view permission`}
+                                  />
+                                  <span className="text-xs text-muted-foreground">Edit</span>
+                                  <Switch
+                                    checked={canEditAll}
+                                    disabled={editKeys.length === 0}
+                                    onCheckedChange={(checked) =>
+                                      setEditPermissionsFlat((prev) => {
+                                        const next = { ...prev };
+                                        editKeys.forEach((k) => {
+                                          next[k] = Boolean(checked);
+                                        });
+                                        return next;
+                                      })
+                                    }
+                                    aria-label={`${group.label} edit permissions`}
                                   />
                                 </div>
                               </div>
                               <AccordionContent className="pt-1 pb-3">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {group.keys
-                                    .filter((k) => k !== (viewKey as PermissionKey))
+                                    .filter((k) => !k.endsWith('.view'))
                                     .map((key) => {
                                       const checked = Boolean(editPermissionsFlat[key]);
                                       return (
@@ -2043,7 +2243,7 @@ export default function EmployeesPage() {
                               if (!companyId || !isEmployeesSupabase) return;
                               try {
                                 const selectedRole = getEmployeeRole(employee);
-                                const permissionPreset = (selectedRole ?? 'viewer') as string;
+                                const permissionPreset = (selectedRole ?? 'custom') as string;
                                 await inviteEmployee({
                                   companyId,
                                   fullName: getEmployeeName(employee),
@@ -2452,7 +2652,7 @@ export default function EmployeesPage() {
                             if (!companyId || !isEmployeesSupabase) return;
                             try {
                               const selectedRole = getEmployeeRole(employee);
-                              const permissionPreset = (selectedRole ?? 'viewer') as string;
+                              const permissionPreset = (selectedRole ?? 'custom') as string;
                               await inviteEmployee({
                                 companyId,
                                 fullName: getEmployeeName(employee),
