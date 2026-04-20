@@ -87,8 +87,9 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { FeatureGate } from '@/components/subscription';
 import { logger } from "@/lib/logger";
 import { hasTomatoHarvestModule } from '@/lib/cropModules';
-import { fetchTomatoCompanyAggregate } from '@/services/tomatoHarvestService';
+import { getTomatoDashboardSummary } from '@/services/tomatoHarvestService';
 import { useTomatoHarvestDashboardRealtime } from '@/hooks/useTomatoHarvestDashboardRealtime';
+import { getFallbackDashboardSummary } from '@/services/fallbackHarvestService';
 
 function isActivityToday(log: ActivityLogDoc): boolean {
   const d = log.createdAt ?? (log.clientCreatedAt ? new Date(log.clientCreatedAt) : null);
@@ -411,9 +412,18 @@ export function CompanyDashboard() {
   useTomatoHarvestDashboardRealtime(queryCompanyId, queryClient);
 
   const { data: tomatoDashboardAgg } = useQuery({
-    queryKey: ['tomato-dashboard-totals', queryCompanyId ?? '', statCardsScopeValid ?? 'all'],
-    queryFn: () => fetchTomatoCompanyAggregate(queryCompanyId!, statCardsScopeValid ?? null),
+    queryKey: ['tomato-dashboard-summary', queryCompanyId ?? '', statCardsScopeValid ?? 'all'],
+    queryFn: () =>
+      getTomatoDashboardSummary({ companyId: queryCompanyId!, projectId: statCardsScopeValid ?? null }),
     enabled: Boolean(queryCompanyId && hasTomatoProjects),
+    staleTime: 30_000,
+  });
+
+  const { data: fallbackDashboardAgg } = useQuery({
+    queryKey: ['fallback-dashboard-summary', queryCompanyId ?? '', statCardsScopeValid ?? 'all'],
+    queryFn: () =>
+      getFallbackDashboardSummary({ companyId: queryCompanyId!, projectId: statCardsScopeValid ?? null }),
+    enabled: Boolean(queryCompanyId),
     staleTime: 30_000,
   });
 
@@ -798,9 +808,18 @@ export function CompanyDashboard() {
     activeProject && companyProjects.some((p) => p.id === activeProject.id) ? activeProject.id : null;
 
   const { data: tomatoGlobalAgg } = useQuery({
-    queryKey: ['tomato-dashboard-totals', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all-global'],
-    queryFn: () => fetchTomatoCompanyAggregate(queryCompanyId!, harvestFinancialsProjectIdGlobal),
+    queryKey: ['tomato-dashboard-summary', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all-global'],
+    queryFn: () =>
+      getTomatoDashboardSummary({ companyId: queryCompanyId!, projectId: harvestFinancialsProjectIdGlobal }),
     enabled: Boolean(queryCompanyId && hasTomatoProjects),
+    staleTime: 30_000,
+  });
+
+  const { data: fallbackGlobalAgg } = useQuery({
+    queryKey: ['fallback-dashboard-summary', queryCompanyId ?? '', harvestFinancialsProjectIdGlobal ?? 'all-global'],
+    queryFn: () =>
+      getFallbackDashboardSummary({ companyId: queryCompanyId!, projectId: harvestFinancialsProjectIdGlobal }),
+    enabled: Boolean(queryCompanyId),
     staleTime: 30_000,
   });
 
@@ -867,12 +886,15 @@ export function CompanyDashboard() {
   const hookLedgerExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
   const hookLedgerSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
   const totalRevenue =
-    hookLedgerSales + (fbTotalsGlobal?.totalRevenue ?? 0) + (tomatoGlobalAgg?.totalRevenue ?? 0);
+    hookLedgerSales +
+    (fbTotalsGlobal?.totalRevenue ?? 0) +
+    (tomatoGlobalAgg?.totalRevenue ?? 0) +
+    (fallbackGlobalAgg?.totalRevenue ?? 0);
   const totalExpenses =
     hookLedgerExpenses +
     (fbTotalsGlobal?.totalExpenses ?? 0) +
-    (tomatoGlobalAgg?.pickerCost ?? 0) +
-    (tomatoGlobalAgg?.totalMarketExpenses ?? 0);
+    (tomatoGlobalAgg?.totalExpenses ?? 0) +
+    (fallbackGlobalAgg?.totalExpenses ?? 0);
   const profitLoss = totalRevenue - totalExpenses;
   const netBalance = profitLoss;
   const totalSales = totalRevenue;
@@ -884,14 +906,14 @@ export function CompanyDashboard() {
   const displayTotalRevenue =
     statCardsHookSales +
     (effectiveFbTotalsForStatCards?.totalRevenue ?? 0) +
-    (tomatoDashboardAgg?.totalRevenue ?? 0);
-  const revenuePendingRibbon =
-    hasTomatoProjects && (tomatoDashboardAgg?.pendingMarketDispatches ?? 0) > 0 ? 'Pending' : undefined;
+    (tomatoDashboardAgg?.totalRevenue ?? 0) +
+    (fallbackDashboardAgg?.totalRevenue ?? 0);
+  const revenuePendingRibbon = undefined;
   const displayTotalExpenses =
     statCardsHookExpenses +
     (effectiveFbTotalsForStatCards?.totalExpenses ?? 0) +
-    (tomatoDashboardAgg?.pickerCost ?? 0) +
-    (tomatoDashboardAgg?.totalMarketExpenses ?? 0);
+    (tomatoDashboardAgg?.totalExpenses ?? 0) +
+    (fallbackDashboardAgg?.totalExpenses ?? 0);
   const displayNetBalance = displayTotalRevenue - displayTotalExpenses;
   const displayRemainingBudget = statCardsBudgetTotal - displayTotalExpenses;
 

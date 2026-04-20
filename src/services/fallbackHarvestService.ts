@@ -117,6 +117,65 @@ export type FallbackPickerLogRow = {
   recorded_by: string;
 };
 
+export type FallbackSessionComputedSummary = {
+  totalUnits: number;
+  totalContainers: number;
+  revenueTotal: number;
+  expensesTotal: number;
+  netProfit: number;
+};
+
+export async function getFallbackSessionSummary(params: {
+  companyId: string;
+  sessionId: string;
+}): Promise<FallbackSessionComputedSummary> {
+  const cid = requireCompanyId(params.companyId);
+  const { data, error } = await harvest().rpc('get_fallback_session_summary', {
+    p_session_id: params.sessionId,
+  });
+  if (error || !data || !Array.isArray(data) || data.length === 0) {
+    return { totalUnits: 0, totalContainers: 0, revenueTotal: 0, expensesTotal: 0, netProfit: 0 };
+  }
+  const row = data[0] as Record<string, unknown>;
+  return {
+    totalUnits: num(row.total_units),
+    totalContainers: num(row.total_containers),
+    revenueTotal: num(row.revenue_total),
+    expensesTotal: num(row.expenses_total),
+    netProfit: num(row.net_profit),
+  };
+}
+
+export type FallbackDashboardComputedSummary = {
+  totalUnits: number;
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+};
+
+export async function getFallbackDashboardSummary(params: {
+  companyId: string;
+  projectId?: string | null;
+}): Promise<FallbackDashboardComputedSummary> {
+  const cid = requireCompanyId(params.companyId);
+  const { data, error } = await harvest().rpc('get_fallback_dashboard_summary', {
+    p_company_id: cid,
+    p_project_id: params.projectId ?? null,
+  });
+  if (error || !data || !Array.isArray(data) || data.length === 0) {
+    return { totalUnits: 0, totalRevenue: 0, totalExpenses: 0, netProfit: 0 };
+  }
+  const row = data[0] as Record<string, unknown>;
+  const totalRevenue = num(row.total_revenue);
+  const totalExpenses = num(row.total_expenses);
+  return {
+    totalUnits: num(row.total_units),
+    totalRevenue,
+    totalExpenses,
+    netProfit: num(row.net_profit ?? totalRevenue - totalExpenses),
+  };
+}
+
 export function rowToFallbackHarvestSession(r: Record<string, unknown>): FallbackHarvestSessionRow {
   return {
     id: String(r.id),

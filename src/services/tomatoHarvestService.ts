@@ -779,6 +779,75 @@ export async function fetchTomatoMonthlyRevenueByCompany(companyId: string): Pro
   }));
 }
 
+export type TomatoSessionComputedSummary = {
+  buckets: number;
+  crates: number;
+  pickersCount: number;
+  revenueTotal: number;
+  marketExpensesTotal: number;
+  pickerCostTotal: number;
+  totalExpenses: number;
+  netProfit: number;
+};
+
+export async function getTomatoSessionSummary(params: {
+  companyId: string;
+  sessionId: string;
+}): Promise<TomatoSessionComputedSummary> {
+  const cid = requireCompanyId(params.companyId);
+  const { data, error } = await harvestSchema().rpc('get_tomato_session_summary', {
+    p_session_id: params.sessionId,
+  });
+  if (error || !data || !Array.isArray(data) || data.length === 0) {
+    // If the session doesn't exist or RLS blocks it, return zeros (UI treats as empty).
+    return {
+      buckets: 0,
+      crates: 0,
+      pickersCount: 0,
+      revenueTotal: 0,
+      marketExpensesTotal: 0,
+      pickerCostTotal: 0,
+      totalExpenses: 0,
+      netProfit: 0,
+    };
+  }
+  const row = data[0] as Record<string, unknown>;
+  return {
+    buckets: num(row.buckets),
+    crates: num(row.crates),
+    pickersCount: num(row.pickers_count),
+    revenueTotal: num(row.revenue_total),
+    marketExpensesTotal: num(row.market_expenses_total),
+    pickerCostTotal: num(row.picker_cost_total),
+    totalExpenses: num(row.total_expenses),
+    netProfit: num(row.net_profit),
+  };
+}
+
+export type TomatoDashboardComputedSummary = {
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+};
+
+export async function getTomatoDashboardSummary(params: {
+  companyId: string;
+  projectId?: string | null;
+}): Promise<TomatoDashboardComputedSummary> {
+  const cid = requireCompanyId(params.companyId);
+  const { data, error } = await harvestSchema().rpc('get_tomato_dashboard_summary', {
+    p_company_id: cid,
+    p_project_id: params.projectId ?? null,
+  });
+  if (error || !data || !Array.isArray(data) || data.length === 0) {
+    return { totalRevenue: 0, totalExpenses: 0, netProfit: 0 };
+  }
+  const row = data[0] as Record<string, unknown>;
+  const totalRevenue = num(row.total_revenue);
+  const totalExpenses = num(row.total_expenses);
+  return { totalRevenue, totalExpenses, netProfit: num(row.net_profit ?? totalRevenue - totalExpenses) };
+}
+
 export function sessionDisplayTitle(session: TomatoHarvestSessionRow): string {
   return harvestOrdinalTitle(session.harvest_number);
 }

@@ -15,6 +15,7 @@ import {
   type FallbackHarvestSessionRow,
 } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
+import { useFallbackSessionSummaries } from '@/hooks/useFallbackSessionSummary';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
@@ -60,20 +61,24 @@ export default function FallbackHarvestListPage() {
       }),
   });
 
+  const sessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
+  const { bySessionId: computedSummariesBySession } = useFallbackSessionSummaries(companyId, sessionIds);
+
   const [creating, setCreating] = useState(false);
 
   const totals = useMemo(() => {
     return sessions.reduce(
       (acc, s) => {
-        acc.units += Number(s.total_units ?? 0);
-        acc.revenue += Number(s.total_revenue ?? 0);
-        acc.expenses += Number(s.total_expenses ?? 0);
-        acc.net += Number(s.net_profit ?? 0);
+        const computed = computedSummariesBySession.get(s.id);
+        acc.units += Number(computed?.totalUnits ?? 0);
+        acc.revenue += Number(computed?.revenueTotal ?? 0);
+        acc.expenses += Number(computed?.expensesTotal ?? 0);
+        acc.net += Number(computed?.netProfit ?? 0);
         return acc;
       },
       { units: 0, revenue: 0, expenses: 0, net: 0 },
     );
-  }, [sessions]);
+  }, [sessions, computedSummariesBySession]);
 
   async function onCreateSession() {
     if (!companyId || !projectId) return;
@@ -179,7 +184,12 @@ export default function FallbackHarvestListPage() {
         ) : (
           sessions.map((s: FallbackHarvestSessionRow, idx: number) => {
             const st = fallbackStatusMeta(s);
-            const net = Number(s.net_profit ?? 0);
+            const computed = computedSummariesBySession.get(s.id);
+            const net = Number(computed?.netProfit ?? 0);
+            const revenue = Number(computed?.revenueTotal ?? 0);
+            const expenses = Number(computed?.expensesTotal ?? 0);
+            const units = Number(computed?.totalUnits ?? 0);
+            const revenuePending = s.destination === 'MARKET' && revenue <= 0;
             return (
               <button
                 key={s.id}
@@ -213,9 +223,9 @@ export default function FallbackHarvestListPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                  <MetricCell icon="📦" label="Units" value={`${Math.round(s.total_units).toLocaleString('en-KE')} ${s.unit_type}`} />
-                  <MetricCell icon="💰" label="Revenue" value={formatKes(s.total_revenue)} />
-                  <MetricCell icon="💸" label="Expenses" value={formatKes(s.total_expenses)} />
+                  <MetricCell icon="📦" label="Units" value={`${Math.round(units).toLocaleString('en-KE')} ${s.unit_type}`} />
+                  <MetricCell icon="💰" label="Revenue" value={revenuePending ? 'Pending' : formatKes(revenue)} />
+                  <MetricCell icon="💸" label="Expenses" value={formatKes(expenses)} />
                   <MetricCell
                     icon="📊"
                     label="Net"

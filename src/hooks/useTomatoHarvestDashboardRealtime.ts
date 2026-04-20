@@ -11,9 +11,10 @@ const PICKER_LOG_DEBOUNCE_MS = 900;
 const SESSION_DEBOUNCE_MS = 1600;
 
 function invalidatePickerHeavyViews(qc: QueryClient, cid: string) {
-  void qc.invalidateQueries({ queryKey: ['tomato-dashboard-totals', cid] });
+  void qc.invalidateQueries({ queryKey: ['tomato-dashboard-summary', cid] });
   void qc.invalidateQueries({ queryKey: ['tomato-harvest-sessions', cid] });
   void qc.invalidateQueries({ queryKey: ['tomato-harvest-session', cid] });
+  void qc.invalidateQueries({ queryKey: ['tomato-session-summary', cid], exact: false });
 }
 
 function invalidateSessionScopedCaches(qc: QueryClient, cid: string) {
@@ -80,6 +81,26 @@ export function useTomatoHarvestDashboardRealtime(
           event: '*',
           schema: 'harvest',
           table: 'tomato_market_dispatches',
+          filter: `company_id=eq.${cid}`,
+        },
+        () => onSessionScopedBurst(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'harvest',
+          table: 'tomato_market_sales_entries',
+          filter: `company_id=eq.${cid}`,
+        },
+        () => onSessionScopedBurst(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'harvest',
+          table: 'tomato_market_expense_lines',
           filter: `company_id=eq.${cid}`,
         },
         () => onSessionScopedBurst(),
