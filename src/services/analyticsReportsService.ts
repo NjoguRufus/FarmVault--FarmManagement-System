@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase';
-import { fetchTomatoCompanyAggregate, fetchTomatoMonthlyRevenueByCompany } from '@/services/tomatoHarvestService';
+import {
+  getTomatoDashboardSummary,
+  fetchTomatoMonthlyRevenueByCompany,
+} from '@/services/tomatoHarvestService';
 
 export type AnalyticsCropProfitRow = {
   crop: string | null;
@@ -62,7 +65,7 @@ function isTomatoesCropName(c: string | null): boolean {
 export async function fetchAnalyticsCropProfit(companyId: string): Promise<AnalyticsCropProfitRow[]> {
   const [{ data, error }, tomatoAgg] = await Promise.all([
     supabase.rpc('analytics_crop_profit', { p_company_id: companyId }),
-    fetchTomatoCompanyAggregate(companyId, null).catch(() => null),
+    getTomatoDashboardSummary({ companyId, projectId: null }).catch(() => null),
   ]);
   if (error) {
     logSupabaseError({ op: 'rpc', fn: 'analytics_crop_profit', p_company_id: companyId }, error);
@@ -77,22 +80,22 @@ export async function fetchAnalyticsCropProfit(companyId: string): Promise<Analy
   }));
 
   const tomatoRev = tomatoAgg?.totalRevenue ?? 0;
-  if (tomatoRev > 0) {
+  const tomatoExp = tomatoAgg?.totalExpenses ?? 0;
+  if (tomatoRev > 0 || tomatoExp > 0) {
     const idx = mapped.findIndex((r) => isTomatoesCropName(r.crop));
     if (idx >= 0) {
-      const ex = mapped[idx].total_expenses;
       mapped[idx] = {
         crop: mapped[idx].crop,
         total_revenue: tomatoRev,
-        total_expenses: ex,
-        profit: tomatoRev - ex,
+        total_expenses: tomatoExp,
+        profit: tomatoRev - tomatoExp,
       };
     } else {
       mapped.push({
         crop: 'tomatoes',
         total_revenue: tomatoRev,
-        total_expenses: 0,
-        profit: tomatoRev,
+        total_expenses: tomatoExp,
+        profit: tomatoRev - tomatoExp,
       });
     }
   }

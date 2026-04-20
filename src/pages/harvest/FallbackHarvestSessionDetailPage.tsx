@@ -56,6 +56,7 @@ import {
   type FallbackPickerRow,
 } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
+import { useFallbackSessionSummary } from '@/hooks/useFallbackSessionSummary';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 import { formatDate } from '@/lib/dateUtils';
 
@@ -87,6 +88,8 @@ export default function FallbackHarvestSessionDetailPage() {
     enabled: Boolean(companyId && sessionId),
     queryFn: () => fetchFallbackSession({ companyId: companyId ?? '', sessionId: sessionId ?? '' }),
   });
+
+  const { data: computedSummary } = useFallbackSessionSummary(companyId, sessionId);
 
   const { data: dispatch } = useQuery({
     queryKey: ['fallback-market-dispatch', companyId, sessionId],
@@ -150,6 +153,9 @@ export default function FallbackHarvestSessionDetailPage() {
     [marketExpenses],
   );
 
+  const revenuePending =
+    session?.destination === 'MARKET' && buyerLines.length === 0 && (computedSummary?.revenueTotal ?? 0) <= 0;
+
   const fallbackBrokerDisplayName = useMemo(() => {
     const bid = dispatch?.broker_employee_id;
     if (!bid) return '—';
@@ -157,16 +163,15 @@ export default function FallbackHarvestSessionDetailPage() {
   }, [dispatch?.broker_employee_id, employees]);
 
   const summary = useMemo(() => {
-    const s = session;
-    if (!s) return null;
+    if (!session) return null;
     return {
-      units: Math.round(Number(s.total_units ?? 0)),
-      unitType: s.unit_type,
-      revenue: Number(s.total_revenue ?? 0),
-      expenses: Number(s.total_expenses ?? 0),
-      net: Number(s.net_profit ?? 0),
+      units: Math.round(Number(computedSummary?.totalUnits ?? 0)),
+      unitType: session.unit_type,
+      revenue: Number(computedSummary?.revenueTotal ?? 0),
+      expenses: Number(computedSummary?.expensesTotal ?? 0),
+      net: Number(computedSummary?.netProfit ?? 0),
     };
-  }, [session]);
+  }, [session, computedSummary]);
 
   const [intakeUnits, setIntakeUnits] = useState('1');
   const [showAddBuyer, setShowAddBuyer] = useState(false);
@@ -248,12 +253,13 @@ export default function FallbackHarvestSessionDetailPage() {
 
   async function ensureDispatchOrThrow(s: FallbackHarvestSessionRow): Promise<FallbackMarketDispatchRow> {
     if (!companyId || !projectId) throw new Error('Missing company/project');
+    const effectiveUnitsSent = Number(computedSummary?.totalUnits ?? 0);
     const d = await upsertFallbackMarketDispatch({
       companyId,
       sessionId: s.id,
       marketName: dispatch?.market_name ?? 'Market',
       brokerEmployeeId: dispatch?.broker_employee_id ?? null,
-      unitsSent: Number(s.total_units ?? 0),
+      unitsSent: effectiveUnitsSent,
     });
     void qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, s.id] });
     return d;
@@ -424,10 +430,10 @@ export default function FallbackHarvestSessionDetailPage() {
           <SimpleStatCard
             layout="mobile-compact"
             title="Revenue"
-            value={formatKes(summary.revenue)}
+            value={revenuePending ? 'Pending' : formatKes(summary.revenue)}
             icon={TrendingUp}
             iconVariant="gold"
-            valueVariant="success"
+            valueVariant={revenuePending ? 'warning' : 'success'}
             className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
           />
           <SimpleStatCard
@@ -720,7 +726,9 @@ export default function FallbackHarvestSessionDetailPage() {
                     <div className="flex items-end">
                       <div className="w-full rounded-lg border border-border/60 bg-background/40 p-3">
                         <p className="text-[10px] font-medium text-muted-foreground">Revenue</p>
-                        <p className="text-sm font-semibold tabular-nums">{formatKes(session.total_revenue)}</p>
+                        <p className="text-sm font-semibold tabular-nums">
+                          {revenuePending ? 'Pending' : formatKes(summary?.revenue ?? 0)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -739,7 +747,7 @@ export default function FallbackHarvestSessionDetailPage() {
                               sessionId: session.id,
                               marketName: e.target.value,
                               brokerEmployeeId: dispatch?.broker_employee_id ?? null,
-                              unitsSent: Number(session.total_units ?? 0),
+                              unitsSent: Number(computedSummary?.totalUnits ?? 0),
                             }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
                           }}
                         />
@@ -755,7 +763,7 @@ export default function FallbackHarvestSessionDetailPage() {
                               sessionId: session.id,
                               marketName: dispatch?.market_name ?? 'Market',
                               brokerEmployeeId,
-                              unitsSent: Number(session.total_units ?? 0),
+                              unitsSent: Number(computedSummary?.totalUnits ?? 0),
                             }).then(() => qc.invalidateQueries({ queryKey: ['fallback-market-dispatch', companyId, session.id] }));
                           }}
                         >
@@ -777,7 +785,7 @@ export default function FallbackHarvestSessionDetailPage() {
                         <Input
                           className="mt-1.5 min-h-11 rounded-lg text-base tabular-nums"
                           inputMode="numeric"
-                          value={String(dispatch?.units_sent ?? Math.round(session.total_units))}
+                          value={String(dispatch?.units_sent ?? Math.round(Number(computedSummary?.totalUnits ?? 0)))}
                           onChange={(e) => {
                             void upsertFallbackMarketDispatch({
                               companyId: companyId ?? '',
@@ -853,7 +861,7 @@ export default function FallbackHarvestSessionDetailPage() {
                                     Math.round(
                                       dispatch?.units_sent != null
                                         ? Number(dispatch.units_sent)
-                                        : Number(session.total_units ?? 0),
+                                        : Number(computedSummary?.totalUnits ?? 0),
                                     ),
                                   ),
                                 ),

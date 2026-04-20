@@ -19,6 +19,8 @@ export function useFallbackHarvestRealtime(params: { companyId: string | null; p
     const flush = debounce(() => {
       void qc.invalidateQueries({ queryKey: ['fallback-harvest-sessions'], exact: false });
       void qc.invalidateQueries({ queryKey: ['fallback-harvest-session'], exact: false });
+      void qc.invalidateQueries({ queryKey: ['fallback-session-summary', cid], exact: false });
+      void qc.invalidateQueries({ queryKey: ['fallback-dashboard-summary', cid], exact: false });
       void qc.invalidateQueries({ queryKey: ['reports'], exact: false });
       void qc.invalidateQueries({ queryKey: ['fallback-market-dispatch'], exact: false });
       void qc.invalidateQueries({ queryKey: ['fallback-market-sales'], exact: false });
@@ -46,6 +48,21 @@ export function useFallbackHarvestRealtime(params: { companyId: string | null; p
       .on(
         'postgres_changes',
         { event: '*', schema: 'harvest', table: 'fallback_market_expense_lines', filter: `company_id=eq.${cid}` },
+        () => flush(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'harvest', table: 'fallback_harvest_units', filter: `company_id=eq.${cid}` },
+        () => flush(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'harvest', table: 'fallback_session_pickers', filter: `company_id=eq.${cid}` },
+        () => flush(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'harvest', table: 'fallback_session_picker_logs', filter: `company_id=eq.${cid}` },
         () => flush(),
       )
       .on(

@@ -49,6 +49,7 @@ import { useToast } from '@/hooks/use-toast';
 import { readStoredNotificationPrefs } from '@/hooks/useNotificationPreferences';
 import { useTomatoHarvestLogsRealtime } from '@/hooks/useTomatoHarvestLogsRealtime';
 import { useBrokerTomatoRealtime } from '@/hooks/useBrokerTomatoRealtime';
+import { useTomatoSessionSummary } from '@/hooks/useTomatoSessionSummary';
 import { playNotificationSound } from '@/services/notificationSoundService';
 import { fetchDisplayNamesByClerkUserIds } from '@/services/profileClerkDisplayNames';
 import { listEmployees } from '@/services/employeesSupabaseService';
@@ -232,48 +233,19 @@ export default function TomatoHarvestSessionDetailPage() {
   const totalBuckets = useMemo(() => pickersMerged.reduce((s, p) => s + p.bucketCount, 0), [pickersMerged]);
   const pickerCost = session ? computePickerCost(totalBuckets, Number(session.picker_rate_per_bucket)) : 0;
 
-  const liveNotebookSalesSum = useMemo(
-    () =>
-      tomatoMarketSalesEntries.reduce(
-        (s, e) => s + (Number.isFinite(e.line_total) ? e.line_total : 0),
-        0,
-      ),
-    [tomatoMarketSalesEntries],
-  );
-  const liveNotebookExpenseSum = useMemo(
-    () =>
-      tomatoMarketExpenseLines.reduce(
-        (s, x) => s + (Number.isFinite(x.amount) ? x.amount : 0),
-        0,
-      ),
-    [tomatoMarketExpenseLines],
-  );
+  const { data: computedSummary } = useTomatoSessionSummary(companyId, sessionId);
 
-  const revenue = useMemo(() => {
-    if (!session) return 0;
-    if (session.sale_mode === 'market' && dispatch) {
-      return Math.round(liveNotebookSalesSum);
-    }
-    return computeRevenue(session, dispatch);
-  }, [session, dispatch, liveNotebookSalesSum]);
-
-  const marketExpensesTotal = useMemo(() => {
-    if (session?.sale_mode === 'market' && dispatch) {
-      return Math.round(liveNotebookExpenseSum);
-    }
-    return dispatch?.market_expenses_total != null ? Number(dispatch.market_expenses_total) : 0;
-  }, [session?.sale_mode, dispatch, liveNotebookExpenseSum]);
-
-  const net =
-    session && session.sale_mode === 'market' && dispatch
-      ? Math.round(revenue - pickerCost - marketExpensesTotal)
-      : computeNet(revenue, pickerCost);
+  const computedBuckets = computedSummary?.buckets ?? totalBuckets;
+  const computedPickerCost = computedSummary?.pickerCostTotal ?? pickerCost;
+  const computedRevenue = computedSummary?.revenueTotal ?? 0;
+  const computedMarketExpenses = computedSummary?.marketExpensesTotal ?? 0;
+  const computedNet = computedSummary?.netProfit ?? 0;
 
   const revenuePendingDisplay =
     session?.sale_mode === 'market' &&
     dispatch?.status === 'pending' &&
     tomatoMarketSalesEntries.length === 0 &&
-    liveNotebookSalesSum <= 0 &&
+    (computedSummary?.revenueTotal ?? 0) <= 0 &&
     (dispatch?.total_revenue == null || Number(dispatch.total_revenue) <= 0);
 
   const marketPathCommitted = useMemo(
@@ -797,7 +769,7 @@ export default function TomatoHarvestSessionDetailPage() {
           <SimpleStatCard
             layout="mobile-compact"
             title="Buckets"
-            value={totalBuckets.toLocaleString()}
+            value={computedBuckets.toLocaleString()}
             icon={Layers}
             iconVariant="primary"
             className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
@@ -814,15 +786,15 @@ export default function TomatoHarvestSessionDetailPage() {
             <SimpleStatCard
               layout="mobile-compact"
               title="Revenue"
-              value={revenuePendingDisplay ? 'Pending' : formatKes(revenue)}
+              value={revenuePendingDisplay ? 'Pending' : formatKes(computedRevenue)}
               subtitle={
                 revenuePendingDisplay
                   ? 'To be updated after market sale'
-                  : session.sale_mode === 'market' && tomatoMarketSalesEntries.length > 0
-                    ? 'Live total from broker notebook'
-                    : session.sale_mode === 'market' && dispatch?.status === 'pending'
-                      ? 'Live total from broker sales'
-                      : undefined
+                  : session.sale_mode === 'market'
+                    ? computedRevenue > 0
+                      ? 'Revenue (Live from broker)'
+                      : 'No sales recorded yet'
+                    : undefined
               }
               icon={TrendingUp}
               iconVariant="gold"
@@ -833,7 +805,7 @@ export default function TomatoHarvestSessionDetailPage() {
           <SimpleStatCard
             layout="mobile-compact"
             title="Picker cost"
-            value={formatKes(pickerCost)}
+            value={formatKes(computedPickerCost)}
             icon={Banknote}
             iconVariant="primary"
             className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation"
@@ -842,10 +814,10 @@ export default function TomatoHarvestSessionDetailPage() {
             <SimpleStatCard
               layout="mobile-compact"
               title="Net profit"
-              value={formatKes(net)}
+              value={formatKes(computedNet)}
               icon={Wallet}
               iconVariant="muted"
-              valueVariant={net >= 0 ? 'info' : 'destructive'}
+              valueVariant={computedNet >= 0 ? 'info' : 'destructive'}
               className="py-3 px-3 text-sm sm:py-2 sm:px-2 min-h-[3.25rem] touch-manipulation col-span-2 sm:col-span-1 lg:col-span-1"
             />
           )}
@@ -1372,7 +1344,7 @@ export default function TomatoHarvestSessionDetailPage() {
                         layout="mobile-compact"
                         responsive={false}
                         title="Sales"
-                        value={formatKes(Math.round(liveNotebookSalesSum))}
+                        value={formatKes(computedRevenue)}
                         icon={TrendingUp}
                         iconVariant="gold"
                         valueVariant="success"
@@ -1382,7 +1354,7 @@ export default function TomatoHarvestSessionDetailPage() {
                         layout="mobile-compact"
                         responsive={false}
                         title="Market expenses"
-                        value={formatKes(Math.round(liveNotebookExpenseSum))}
+                        value={formatKes(computedMarketExpenses)}
                         icon={Wallet}
                         iconVariant="muted"
                         className="min-h-0 py-2 px-2 [&_div.mb-2]:mb-1 [&_div.flex]:gap-1 [&_svg]:!h-2.5 [&_svg]:!w-2.5 [&_p.font-heading]:!text-sm [&_p.font-heading]:!leading-tight [&_p.text-muted-foreground]:!text-[9px]"
@@ -1391,11 +1363,11 @@ export default function TomatoHarvestSessionDetailPage() {
                         layout="mobile-compact"
                         responsive={false}
                         title="Net (market)"
-                        value={formatKes(Math.round(liveNotebookSalesSum - liveNotebookExpenseSum))}
+                        value={formatKes(Math.round(computedRevenue - computedMarketExpenses))}
                         icon={Banknote}
                         iconVariant="muted"
                         valueVariant={
-                          Math.round(liveNotebookSalesSum - liveNotebookExpenseSum) >= 0 ? 'info' : 'destructive'
+                          Math.round(computedRevenue - computedMarketExpenses) >= 0 ? 'info' : 'destructive'
                         }
                         className="min-h-0 py-2 px-2 [&_div.mb-2]:mb-1 [&_div.flex]:gap-1 [&_svg]:!h-2.5 [&_svg]:!w-2.5 [&_p.font-heading]:!text-sm [&_p.font-heading]:!leading-tight [&_p.text-muted-foreground]:!text-[9px]"
                       />

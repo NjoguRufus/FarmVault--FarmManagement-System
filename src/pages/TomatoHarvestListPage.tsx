@@ -30,6 +30,7 @@ import { useToast } from '@/hooks/use-toast';
 import { hasTomatoHarvestModule } from '@/lib/cropModules';
 import { format } from 'date-fns';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import { useTomatoSessionSummaries } from '@/hooks/useTomatoSessionSummary';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
 
@@ -84,18 +85,23 @@ export default function TomatoHarvestListPage() {
     gcTime: 5 * 60_000,
   });
 
+  const sessionIds = useMemo(() => summaries.map((s) => s.session.id), [summaries]);
+  const { bySessionId: computedSummariesBySession } = useTomatoSessionSummaries(companyId, sessionIds);
+
   const totals = useMemo(() => {
     return summaries.reduce(
       (acc, s) => {
-        acc.buckets += s.totalBuckets;
-        acc.crates += s.session.packaging_count ?? 0;
-        acc.revenue += s.revenue;
-        acc.net += s.netProfit;
+        const computed = computedSummariesBySession.get(s.session.id);
+        acc.buckets += computed?.buckets ?? s.totalBuckets;
+        acc.crates += computed?.crates ?? (s.session.packaging_count ?? 0);
+        acc.revenue += computed?.revenueTotal ?? 0;
+        acc.expenses += computed?.totalExpenses ?? 0;
+        acc.net += computed?.netProfit ?? 0;
         return acc;
       },
-      { buckets: 0, crates: 0, revenue: 0, net: 0 },
+      { buckets: 0, crates: 0, revenue: 0, expenses: 0, net: 0 },
     );
-  }, [summaries]);
+  }, [summaries, computedSummariesBySession]);
 
   const [newOpen, setNewOpen] = useState(false);
   const [newDate, setNewDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
@@ -245,6 +251,12 @@ export default function TomatoHarvestListPage() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {summaries.map((s) => (
+                (() => {
+                  const computed = computedSummariesBySession.get(s.session.id);
+                  const cardRevenue = computed?.revenueTotal ?? 0;
+                  const cardNet = computed?.netProfit ?? 0;
+                  const cardPickers = computed?.pickersCount ?? s.pickerCount;
+                  return (
                 <button
                   key={s.session.id}
                   type="button"
@@ -274,24 +286,26 @@ export default function TomatoHarvestListPage() {
                     <span className="text-muted-foreground">Crates</span>
                     <span className="font-medium text-right">{s.session.packaging_count}</span>
                     <span className="text-muted-foreground">Pickers</span>
-                    <span className="font-medium text-right">{s.pickerCount}</span>
+                    <span className="font-medium text-right">{cardPickers}</span>
                     {canViewHarvestFinancials && (
                       <>
                         <span className="text-muted-foreground">Revenue</span>
-                        <span className="font-medium text-right">{formatKes(s.revenue)}</span>
+                        <span className="font-medium text-right">{formatKes(cardRevenue)}</span>
                         <span className="text-muted-foreground">Net</span>
                         <span
                           className={cn(
                             'font-medium text-right',
-                            s.netProfit >= 0 ? 'text-fv-info' : 'text-destructive',
+                            cardNet >= 0 ? 'text-fv-info' : 'text-destructive',
                           )}
                         >
-                          {formatKes(s.netProfit)}
+                          {formatKes(cardNet)}
                         </span>
                       </>
                     )}
                   </div>
                 </button>
+                  );
+                })()
               ))}
             </div>
           )}
