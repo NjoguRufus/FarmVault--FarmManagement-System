@@ -134,7 +134,13 @@ export default function FullKnowledgePage() {
           <Button
             variant="ghost"
             className="rounded-xl"
-            onClick={() => navigate(`/developer/records/${encodeURIComponent(cropSlug)}`)}
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate(`/developer/records/${encodeURIComponent(cropSlug)}`);
+              }
+            }}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back

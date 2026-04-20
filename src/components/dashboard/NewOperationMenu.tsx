@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, Wrench, Receipt, Package, TrendingUp, FolderPlus } from 'lucide-react';
+import { Zap, Wrench, Receipt, Package, NotebookPen, FolderPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -14,8 +14,7 @@ const OPTIONS = [
   { label: 'Add expense', path: '/expenses?add=1', icon: Receipt },
   { label: 'Plan / Record daily work', path: '/operations?add=1', icon: Wrench },
   { label: 'Add inventory item', path: '/inventory?add=1', icon: Package },
-  { label: 'Record harvest', path: '/harvest?harvest=1', icon: TrendingUp },
-  { label: 'Add sale', path: '/harvest?sale=1', icon: TrendingUp },
+  { label: 'Add a note', path: '/records?add=1', icon: NotebookPen },
   { label: 'Add project', path: '/projects/new', icon: FolderPlus },
 ] as const;
 

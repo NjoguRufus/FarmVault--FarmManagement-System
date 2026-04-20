@@ -588,13 +588,17 @@ export default function NotebookPage() {
         <Button
           variant="ghost"
           className="rounded-xl"
-          onClick={() =>
+          onClick={() => {
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              navigate(-1);
+              return;
+            }
             navigate(
               isGeneralFarmNotebook
                 ? `${isDeveloperRoute ? "/developer/records" : "/records"}`
                 : `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}`,
-            )
-          }
+            );
+          }}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back
