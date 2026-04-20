@@ -81,6 +81,11 @@ export default function NotebookPage() {
   const [currentNoteCompanyId, setCurrentNoteCompanyId] = useState<string | null>(null);
   const [noteSource, setNoteSource] = useState<string | null>(null);
   const [editorHydrate, setEditorHydrate] = useState(0);
+  const [draftAttachmentScopeId] = useState(() => {
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? (crypto as any).randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  });
 
   const lastSavedRef = useRef<{ title: string; content: string; attachmentsKey: string } | null>(null);
   const inflightRef = useRef<Promise<void> | null>(null);
@@ -290,16 +295,33 @@ export default function NotebookPage() {
   }, [noteIdParam, companyId, cropSlug, isDeveloperRoute, isGeneralFarmNotebook]);
 
   async function uploadNoteAttachment(file: File) {
-    const fileExt = file.name.split(".").pop();
-    const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
-    const filePath = `notes/${fileName}`;
+    const originalName = String(file.name ?? "attachment").trim() || "attachment";
+    const farmId = activeProject?.farmId ?? activeFarmId ?? "no-farm";
+    const projectId = activeProject?.id ?? "no-project";
+    const companyKey = companyId ?? developerNoteCompanyId ?? "no-company";
+    const noteKey = noteId ?? `draft-${draftAttachmentScopeId}`;
+    const ts = Date.now();
+    const safeName = originalName.replace(/[^\w.\-()\s]/g, "_").slice(0, 140);
 
-    const { error } = await supabase.storage.from("farm-notes").upload(filePath, file);
+    // Keep everything under a single bucket used by Records to avoid policy drift.
+    const filePath = [
+      "farm-notebook",
+      encodeURIComponent(companyKey),
+      encodeURIComponent(String(farmId)),
+      encodeURIComponent(String(projectId)),
+      encodeURIComponent(isGeneralFarmNotebook ? "general" : cropSlug || "unknown-crop"),
+      encodeURIComponent(String(noteKey)),
+      `${ts}-${safeName}`,
+    ].join("/");
 
+    const { error } = await supabase.storage.from("record-notes").upload(filePath, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
     if (error) throw error;
 
-    const { data } = supabase.storage.from("farm-notes").getPublicUrl(filePath);
-
+    const { data } = supabase.storage.from("record-notes").getPublicUrl(filePath);
     return data.publicUrl;
   }
 
@@ -337,8 +359,9 @@ export default function NotebookPage() {
         });
         toast.success("Uploaded attachments");
       }
-    } catch {
-      toast.error("Attachment upload failed. Check storage bucket.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Attachment upload failed";
+      toast.error(msg);
     } finally {
       setUploading(false);
       // allow selecting same file again

@@ -87,7 +87,13 @@ export default function AdminRecordsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
   const initialTab =
-    urlTab === 'challenges' ? 'challenges' : urlTab === 'notes' ? 'notes' : urlTab === 'admin' ? 'admin' : 'crops';
+    urlTab === 'challenges'
+      ? 'challenges'
+      : urlTab === 'crops'
+        ? 'crops'
+        : urlTab === 'admin'
+          ? 'admin'
+          : 'notes';
   const [tab, setTab] = useState<'crops' | 'notes' | 'admin' | 'challenges'>(initialTab);
   const [fabOpen, setFabOpen] = useState(false);
   const [addCropOpen, setAddCropOpen] = useState(false);
@@ -109,11 +115,11 @@ export default function AdminRecordsPage() {
     const next =
       nextUrlTab === 'challenges'
         ? 'challenges'
-        : nextUrlTab === 'notes'
-          ? 'notes'
+        : nextUrlTab === 'crops'
+          ? 'crops'
           : nextUrlTab === 'admin'
             ? 'admin'
-            : 'crops';
+            : 'notes';
     setTab(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -556,7 +562,7 @@ export default function AdminRecordsPage() {
             const next = v as typeof tab;
             setTab(next);
             const params = new URLSearchParams(searchParams);
-            if (next === 'crops') params.delete('tab');
+            if (next === 'notes') params.delete('tab');
             else params.set('tab', next);
             setSearchParams(params, { replace: true });
           }}
@@ -570,16 +576,16 @@ export default function AdminRecordsPage() {
           >
             <TabsList className="h-11 inline-flex w-max min-h-[2.75rem] flex-nowrap items-stretch justify-start gap-1 rounded-xl bg-muted/40 p-1 sm:w-auto sm:min-w-0">
               <TabsTrigger
-                value="crops"
-                className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              >
-                Crops
-              </TabsTrigger>
-              <TabsTrigger
                 value="notes"
                 className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
               >
                 Notes
+              </TabsTrigger>
+              <TabsTrigger
+                value="crops"
+                className="shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                Crops
               </TabsTrigger>
               <TabsTrigger
                 value="challenges"
