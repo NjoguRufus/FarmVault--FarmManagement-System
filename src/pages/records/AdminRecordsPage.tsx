@@ -95,6 +95,7 @@ export default function AdminRecordsPage() {
           ? 'admin'
           : 'notes';
   const [tab, setTab] = useState<'crops' | 'notes' | 'admin' | 'challenges'>(initialTab);
+  const [autoTabApplied, setAutoTabApplied] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const [addCropOpen, setAddCropOpen] = useState(false);
   const [cropCatalogSaving, setCropCatalogSaving] = useState(false);
@@ -121,6 +122,8 @@ export default function AdminRecordsPage() {
             ? 'admin'
             : 'notes';
     setTab(next);
+    // When the user explicitly sets tab via URL, stop auto-defaulting.
+    if (nextUrlTab) setAutoTabApplied(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -190,6 +193,18 @@ export default function AdminRecordsPage() {
 
   const companyReady = isDeveloper ? true : !!(scopeCompanyId && String(scopeCompanyId).trim());
   const needsCompany = !isDeveloper && !companyReady;
+
+  // Quick Access hook: allow /records?add=1 to open the "Add new note" modal.
+  useEffect(() => {
+    if (!authReady || !companyReady) return;
+    if (searchParams.get('add') !== '1') return;
+    openAddNoteModal();
+    setSearchParams((p) => {
+      p.delete('add');
+      return p;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, companyReady, searchParams, setSearchParams]);
 
   function slugify(input: string): string {
     return String(input || '')
@@ -308,6 +323,27 @@ export default function AdminRecordsPage() {
       return (data as NotebookEntryRow[]) ?? [];
     },
   });
+
+  // If there are no notes yet, default to Crops. Otherwise default to Notes.
+  // Only apply when there is no explicit `?tab=` in the URL.
+  useEffect(() => {
+    if (autoTabApplied) return;
+    if (!authReady || !companyReady) return;
+    if (urlTab) return; // respect URL (even if invalid, our parser maps it to notes)
+    if (recentNotesQuery.isLoading || recentNotesQuery.isError) return;
+
+    const notesCount = recentNotesQuery.data?.length ?? 0;
+    setTab(notesCount === 0 ? 'crops' : 'notes');
+    setAutoTabApplied(true);
+  }, [
+    autoTabApplied,
+    authReady,
+    companyReady,
+    urlTab,
+    recentNotesQuery.isLoading,
+    recentNotesQuery.isError,
+    recentNotesQuery.data,
+  ]);
 
   const adminNotesQuery = useQuery({
     queryKey: ['records', 'notebook', 'admin-tab', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
@@ -561,6 +597,7 @@ export default function AdminRecordsPage() {
           onValueChange={(v) => {
             const next = v as typeof tab;
             setTab(next);
+            setAutoTabApplied(true);
             const params = new URLSearchParams(searchParams);
             if (next === 'notes') params.delete('tab');
             else params.set('tab', next);

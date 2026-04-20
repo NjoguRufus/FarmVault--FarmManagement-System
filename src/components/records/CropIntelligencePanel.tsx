@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type {
   CropIntelligenceResponse,
   CropRecordInsightsResponse,
@@ -91,6 +91,8 @@ export function CropIntelligencePanel({
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [chemicalOpen, setChemicalOpen] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
+  const [challengeTypeInputMode, setChallengeTypeInputMode] = useState(false);
+  const [challengeTypeDraft, setChallengeTypeDraft] = useState('');
 
   const [profileForm, setProfileForm] = useState<CropKnowledgeProfileForm>({
     maturityMinDays: profile.maturity_min_days ?? null,
@@ -187,7 +189,12 @@ export function CropIntelligencePanel({
       return;
     }
     try {
-      await addChallenge.mutateAsync(challengeForm);
+      const draft = challengeTypeDraft.trim();
+      const nextType =
+        challengeTypeInputMode && draft
+          ? (draft as CropKnowledgeChallengeForm['challengeType'])
+          : challengeForm.challengeType;
+      await addChallenge.mutateAsync({ ...challengeForm, challengeType: nextType });
       toast.success('Challenge added.');
       setChallengeOpen(false);
       setChallengeForm({
@@ -196,6 +203,8 @@ export function CropIntelligencePanel({
         severity: '',
         notes: '',
       });
+      setChallengeTypeDraft('');
+      setChallengeTypeInputMode(false);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(err);
@@ -203,6 +212,29 @@ export function CropIntelligencePanel({
       toast.error(message);
     }
   };
+
+  const challengeTypeOptions = useMemo(() => {
+    const base: Array<{ value: CropKnowledgeChallengeForm['challengeType']; label: string }> = [
+      { value: 'pest', label: 'Pest' },
+      { value: 'disease', label: 'Disease' },
+      { value: 'seasonal', label: 'Seasonal' },
+      { value: 'climate', label: 'Climate' },
+      { value: 'market', label: 'Market' },
+      { value: 'general', label: 'General' },
+    ];
+    const seen = new Set(base.map((b) => String(b.value)));
+    const dynamic = Array.from(
+      new Set(
+        (challenges ?? [])
+          .map((c) => String((c as { challenge_type?: unknown }).challenge_type ?? '').trim())
+          .filter(Boolean),
+      ),
+    )
+      .filter((t) => !seen.has(t))
+      .sort((a, b) => a.localeCompare(b))
+      .map((t) => ({ value: t as CropKnowledgeChallengeForm['challengeType'], label: t }));
+    return [...dynamic, ...base];
+  }, [challenges]);
 
   const handleSavePractice = async () => {
     if (!practiceForm.title.trim()) {
@@ -679,27 +711,88 @@ export function CropIntelligencePanel({
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Challenge Type</p>
-                <Select
-                  value={challengeForm.challengeType}
-                  onValueChange={(value) =>
-                    setChallengeForm((prev) => ({
-                      ...prev,
-                      challengeType: value as CropKnowledgeChallengeForm['challengeType'],
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pest">Pest</SelectItem>
-                    <SelectItem value="disease">Disease</SelectItem>
-                    <SelectItem value="seasonal">Seasonal</SelectItem>
-                    <SelectItem value="climate">Climate</SelectItem>
-                    <SelectItem value="market">Market</SelectItem>
-                    <SelectItem value="general">General</SelectItem>
-                  </SelectContent>
-                </Select>
+                {challengeTypeInputMode ? (
+                  <div className="space-y-2">
+                    <Input
+                      value={challengeTypeDraft}
+                      onChange={(e) => setChallengeTypeDraft(e.target.value)}
+                      placeholder="Type a category (e.g. Transport)"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const v = challengeTypeDraft.trim();
+                          if (!v) return;
+                          setChallengeForm((prev) => ({
+                            ...prev,
+                            challengeType: v as CropKnowledgeChallengeForm['challengeType'],
+                          }));
+                          setChallengeTypeInputMode(false);
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setChallengeTypeDraft('');
+                          setChallengeTypeInputMode(false);
+                        }
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setChallengeTypeDraft('');
+                          setChallengeTypeInputMode(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          const v = challengeTypeDraft.trim();
+                          if (!v) return;
+                          setChallengeForm((prev) => ({
+                            ...prev,
+                            challengeType: v as CropKnowledgeChallengeForm['challengeType'],
+                          }));
+                          setChallengeTypeInputMode(false);
+                        }}
+                      >
+                        Save category
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Select
+                    value={String(challengeForm.challengeType)}
+                    onValueChange={(value) => {
+                      if (value === '__add_new__') {
+                        setChallengeTypeInputMode(true);
+                        setChallengeTypeDraft('');
+                        return;
+                      }
+                      setChallengeForm((prev) => ({
+                        ...prev,
+                        challengeType: value as CropKnowledgeChallengeForm['challengeType'],
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__add_new__">+ Add New Category…</SelectItem>
+                      {challengeTypeOptions.map((opt) => (
+                        <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Severity</p>

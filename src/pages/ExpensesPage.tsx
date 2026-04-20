@@ -161,7 +161,7 @@ function PickerPaymentDetailContent({
 }
 
 export default function ExpensesPage() {
-  const { activeProject, activeFarmId } = useProject();
+  const { activeProject, activeFarmId, projects } = useProject();
   const { user } = useAuth();
   const { can } = usePermissions();
   const navigate = useNavigate();
@@ -425,6 +425,30 @@ export default function ExpensesPage() {
     latestDate: Date;
     expenses: ExpenseWithSyncState[];
   } | null>(null);
+  const [expenseDetailOpen, setExpenseDetailOpen] = useState(false);
+  const [expenseDetail, setExpenseDetail] = useState<ExpenseWithSyncState | null>(null);
+  const projectNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projects ?? []) {
+      if (!p?.id) continue;
+      const name = String((p as { name?: unknown }).name ?? '').trim();
+      if (name) m.set(String(p.id), name);
+    }
+    if (activeProject?.id && activeProject?.name) {
+      m.set(activeProject.id, activeProject.name);
+    }
+    return m;
+  }, [projects, activeProject?.id, activeProject?.name]);
+
+  const farmNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of farms ?? []) {
+      if (!f?.id) continue;
+      const name = String((f as { name?: unknown }).name ?? '').trim();
+      if (name) m.set(String(f.id), name);
+    }
+    return m;
+  }, [farms]);
   
   // Labor payout drawer state
   const [laborPayoutDrawerCollectionId, setLaborPayoutDrawerCollectionId] = useState<string | null>(null);
@@ -982,15 +1006,15 @@ export default function ExpensesPage() {
       </div>
 
       {/* Expenses Table */}
-      <div className="fv-card flex flex-col">
-        <h3 className="text-lg font-semibold mb-6 shrink-0">Recent Expenses</h3>
+      <div className="space-y-3">
+        <h3 className="text-lg font-semibold shrink-0">Recent Expenses</h3>
 
         {isLoading && (
           <p className="text-sm text-muted-foreground">Loading expenses…</p>
         )}
         
         {/* Desktop Table: scrollable when many rows so card stays same size */}
-        <div className="hidden md:block overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0">
+        <div className="hidden md:block rounded-xl border border-border bg-background overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0">
           <table className="fv-table">
             <thead>
               <tr>
@@ -1081,7 +1105,10 @@ export default function ExpensesPage() {
                     onClick={
                       isPickerPayout && collectionId
                         ? () => setLaborPayoutDrawerCollectionId(collectionId)
-                        : undefined
+                        : () => {
+                            setExpenseDetail(row.expense);
+                            setExpenseDetailOpen(true);
+                          }
                     }
                   >
                     <td>
@@ -1158,8 +1185,8 @@ export default function ExpensesPage() {
                             <DropdownMenuItem
                               className="cursor-pointer"
                               onClick={() => {
-                                const msg = `${expense.description}\nCategory: ${expense.category}\nAmount: ${formatCurrency(expense.amount)}\nDate: ${formatDate(expense.date)}`;
-                                alert(msg);
+                                setExpenseDetail(expense);
+                                setExpenseDetailOpen(true);
                               }}
                             >
                               View details
@@ -1176,7 +1203,7 @@ export default function ExpensesPage() {
         </div>
 
         {/* Mobile Cards: scrollable when 5+ so card stays same size */}
-        <div className="md:hidden overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-1">
+        <div className="md:hidden rounded-xl border border-border bg-background overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-3 py-3">
           {recentTableRows.map((row) => {
             if (row.type === 'harvest_payout') {
               const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
@@ -1185,7 +1212,7 @@ export default function ExpensesPage() {
                   key={row.key}
                   role="button"
                   tabIndex={0}
-                  className="p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
+                  className="mx-3 p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
                   onClick={() => setPayoutDetailCollectionId(row.collectionId)}
                   onKeyDown={(ev) => ev.key === 'Enter' && setPayoutDetailCollectionId(row.collectionId)}
                 >
@@ -1207,7 +1234,7 @@ export default function ExpensesPage() {
                   key={row.key}
                   role="button"
                   tabIndex={0}
-                  className="p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
+                  className="mx-3 p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
                   onClick={() => setPickerPaymentDetailGroup(row)}
                   onKeyDown={(ev) => ev.key === 'Enter' && setPickerPaymentDetailGroup(row)}
                 >
@@ -1236,27 +1263,35 @@ export default function ExpensesPage() {
             return (
               <div
                 key={row.key}
-                role={isPickerPayout && collectionId ? 'button' : undefined}
-                tabIndex={isPickerPayout && collectionId ? 0 : undefined}
+                role="button"
+                tabIndex={0}
                 className={cn(
-                  'p-4 bg-muted/30 rounded-lg',
-                  isPickerPayout && collectionId && 'cursor-pointer hover:bg-muted/50 active:scale-[0.99]',
+                  'mx-3 p-3 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]',
                 )}
                 onClick={
                   isPickerPayout && collectionId
                     ? () => setLaborPayoutDrawerCollectionId(collectionId)
-                    : undefined
+                    : () => {
+                        setExpenseDetail(expense);
+                        setExpenseDetailOpen(true);
+                      }
                 }
                 onKeyDown={
-                  isPickerPayout && collectionId
-                    ? (ev) => ev.key === 'Enter' && setLaborPayoutDrawerCollectionId(collectionId)
-                    : undefined
+                  (ev) => {
+                    if (ev.key !== 'Enter') return;
+                    if (isPickerPayout && collectionId) {
+                      setLaborPayoutDrawerCollectionId(collectionId);
+                    } else {
+                      setExpenseDetail(expense);
+                      setExpenseDetailOpen(true);
+                    }
+                  }
                 }
               >
-                <div className="flex items-start justify-between mb-2 gap-2">
+                <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-foreground">{expense.description}</p>
+                      <p className="font-medium text-foreground truncate">{expense.description}</p>
                       {isTomatoPickerLabour && (
                         <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100 shrink-0">
                           Auto-generated
@@ -1269,12 +1304,12 @@ export default function ExpensesPage() {
                       )}
                     </div>
                     {isTomatoPickerLabour && tomatoLabourNote ? (
-                      <p className="text-xs text-muted-foreground mt-1">{tomatoLabourNote}</p>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{tomatoLabourNote}</p>
                     ) : null}
                     {isPickerPayout && collectionLabel && (
-                      <p className="text-xs text-muted-foreground">Collection: {collectionLabel}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-1">Collection: {collectionLabel}</p>
                     )}
-                    <p className="text-xs text-muted-foreground mt-0.5">{formatDate(expense.date)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(expense.date)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
                     <span className="font-semibold">{formatCurrency(expense.amount)}</span>
@@ -1305,6 +1340,55 @@ export default function ExpensesPage() {
           })}
         </div>
       </div>
+
+      {/* Expense detail (keeps list slim; show full info on click) */}
+      <Dialog open={expenseDetailOpen} onOpenChange={setExpenseDetailOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Expense details</DialogTitle>
+          </DialogHeader>
+          {expenseDetail ? (
+            <div className="space-y-3 text-sm">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Description</div>
+                <div className="font-medium text-foreground">{expenseDetail.description}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Category</div>
+                  <div className="font-medium text-foreground">{expenseDetail.category}</div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Amount</div>
+                  <div className="font-medium text-foreground">{formatCurrency(expenseDetail.amount)}</div>
+                </div>
+              </div>
+              {expenseDetail.farmId ? (
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Farm</div>
+                  <div className="font-medium text-foreground">
+                    {farmNameById.get(String(expenseDetail.farmId)) ?? String(expenseDetail.farmId)}
+                  </div>
+                </div>
+              ) : null}
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Date</div>
+                <div className="font-medium text-foreground">{formatDate(expenseDetail.date)}</div>
+              </div>
+              {expenseDetail.projectId ? (
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Project</div>
+                  <div className="font-medium text-foreground">
+                    {projectNameById.get(String(expenseDetail.projectId)) ?? String(expenseDetail.projectId)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No expense selected.</div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Picker payment detail modal: show batches and pickers (names, numbers, amounts) */}
       <Dialog open={!!pickerPaymentDetailGroup} onOpenChange={(open) => !open && setPickerPaymentDetailGroup(null)}>

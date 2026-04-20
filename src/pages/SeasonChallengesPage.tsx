@@ -131,6 +131,8 @@ export default function SeasonChallengesPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [challengeType, setChallengeType] = useState<ChallengeType>('other');
+  const [challengeTypeInputMode, setChallengeTypeInputMode] = useState(false);
+  const [challengeTypeDraft, setChallengeTypeDraft] = useState('');
   const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [saving, setSaving] = useState(false);
   const [saveAsReusable, setSaveAsReusable] = useState(false);
@@ -139,6 +141,8 @@ export default function SeasonChallengesPage() {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editChallengeType, setEditChallengeType] = useState<ChallengeType>('other');
+  const [editChallengeTypeInputMode, setEditChallengeTypeInputMode] = useState(false);
+  const [editChallengeTypeDraft, setEditChallengeTypeDraft] = useState('');
   const [editSeverity, setEditSeverity] = useState<'low' | 'medium' | 'high'>('medium');
   const [editStatus, setEditStatus] = useState<'identified' | 'mitigating' | 'resolved'>('identified');
   const [editWhatWasDone, setEditWhatWasDone] = useState('');
@@ -169,7 +173,9 @@ export default function SeasonChallengesPage() {
         cropType: activeProject.cropType,
         title,
         description,
-        challengeType,
+        challengeType: (challengeTypeInputMode && challengeTypeDraft.trim())
+          ? (challengeTypeDraft.trim() as ChallengeType)
+          : challengeType,
         severity,
         status: 'identified',
         stageIndex: activeProject.startingStageIndex ?? 0,
@@ -220,6 +226,30 @@ export default function SeasonChallengesPage() {
       setSaving(false);
     }
   };
+
+  const challengeTypeOptions = useMemo(() => {
+    const base: Array<{ value: ChallengeType; label: string }> = [
+      { value: 'weather', label: 'Weather' },
+      { value: 'pests', label: 'Pests' },
+      { value: 'diseases', label: 'Diseases' },
+      { value: 'prices', label: 'Prices' },
+      { value: 'labor', label: 'Labour / People' },
+      { value: 'equipment', label: 'Equipment' },
+      { value: 'other', label: 'Other' },
+    ];
+    const seen = new Set(base.map((b) => String(b.value)));
+    const dynamic = Array.from(
+      new Set(
+        challenges
+          .map((c) => String(c.challengeType ?? '').trim())
+          .filter(Boolean),
+      ),
+    )
+      .filter((t) => !seen.has(t))
+      .sort((a, b) => a.localeCompare(b))
+      .map((t) => ({ value: t as ChallengeType, label: t }));
+    return [...dynamic, ...base];
+  }, [challenges]);
 
   const handleEditChallenge = (challenge: SeasonChallenge) => {
     setEditingChallenge(challenge);
@@ -482,20 +512,81 @@ export default function SeasonChallengesPage() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Challenge Type</label>
-                  <Select value={challengeType} onValueChange={(value) => setChallengeType(value as ChallengeType)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select challenge type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weather">Weather</SelectItem>
-                      <SelectItem value="pests">Pests</SelectItem>
-                      <SelectItem value="diseases">Diseases</SelectItem>
-                      <SelectItem value="prices">Prices</SelectItem>
-                      <SelectItem value="labor">Labour / People</SelectItem>
-                      <SelectItem value="equipment">Equipment</SelectItem>
-                      <SelectItem value="other">Custom (not listed)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {challengeTypeInputMode ? (
+                    <div className="space-y-2">
+                      <input
+                        className="fv-input"
+                        value={challengeTypeDraft}
+                        onChange={(e) => setChallengeTypeDraft(e.target.value)}
+                        placeholder="Type a category (e.g. Transport)"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const v = challengeTypeDraft.trim();
+                            if (v) {
+                              setChallengeType(v as ChallengeType);
+                              setChallengeTypeInputMode(false);
+                            }
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setChallengeTypeDraft('');
+                            setChallengeTypeInputMode(false);
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="fv-btn fv-btn--secondary"
+                          onClick={() => {
+                            setChallengeTypeDraft('');
+                            setChallengeTypeInputMode(false);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="fv-btn fv-btn--primary"
+                          onClick={() => {
+                            const v = challengeTypeDraft.trim();
+                            if (v) {
+                              setChallengeType(v as ChallengeType);
+                              setChallengeTypeInputMode(false);
+                            }
+                          }}
+                        >
+                          Save category
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Select
+                      value={String(challengeType)}
+                      onValueChange={(value) => {
+                        if (value === '__add_new__') {
+                          setChallengeTypeInputMode(true);
+                          setChallengeTypeDraft('');
+                          return;
+                        }
+                        setChallengeType(value as ChallengeType);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select challenge type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__add_new__">+ Add New Category…</SelectItem>
+                        {challengeTypeOptions.map((opt) => (
+                          <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Severity</label>
@@ -774,20 +865,81 @@ export default function SeasonChallengesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Challenge Type</label>
-                  <Select value={editChallengeType} onValueChange={(value) => setEditChallengeType(value as ChallengeType)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select challenge type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weather">Weather</SelectItem>
-                      <SelectItem value="pests">Pests</SelectItem>
-                      <SelectItem value="diseases">Diseases</SelectItem>
-                      <SelectItem value="prices">Prices</SelectItem>
-                      <SelectItem value="labor">Labour / People</SelectItem>
-                      <SelectItem value="equipment">Equipment</SelectItem>
-                      <SelectItem value="other">Custom (not listed)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {editChallengeTypeInputMode ? (
+                    <div className="space-y-2">
+                      <input
+                        className="fv-input"
+                        value={editChallengeTypeDraft}
+                        onChange={(e) => setEditChallengeTypeDraft(e.target.value)}
+                        placeholder="Type a category (e.g. Transport)"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const v = editChallengeTypeDraft.trim();
+                            if (v) {
+                              setEditChallengeType(v as ChallengeType);
+                              setEditChallengeTypeInputMode(false);
+                            }
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditChallengeTypeDraft('');
+                            setEditChallengeTypeInputMode(false);
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="fv-btn fv-btn--secondary"
+                          onClick={() => {
+                            setEditChallengeTypeDraft('');
+                            setEditChallengeTypeInputMode(false);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="fv-btn fv-btn--primary"
+                          onClick={() => {
+                            const v = editChallengeTypeDraft.trim();
+                            if (v) {
+                              setEditChallengeType(v as ChallengeType);
+                              setEditChallengeTypeInputMode(false);
+                            }
+                          }}
+                        >
+                          Save category
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Select
+                      value={String(editChallengeType)}
+                      onValueChange={(value) => {
+                        if (value === '__add_new__') {
+                          setEditChallengeTypeInputMode(true);
+                          setEditChallengeTypeDraft('');
+                          return;
+                        }
+                        setEditChallengeType(value as ChallengeType);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select challenge type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__add_new__">+ Add New Category…</SelectItem>
+                        {challengeTypeOptions.map((opt) => (
+                          <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-foreground">Severity</label>

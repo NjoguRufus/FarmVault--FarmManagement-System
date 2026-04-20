@@ -818,7 +818,16 @@ export interface Delivery {
   createdAt: Date;
 }
 
-export type ChallengeType = 'weather' | 'pests' | 'diseases' | 'prices' | 'labor' | 'equipment' | 'other';
+// Allow custom challenge categories (stored as free text in DB).
+export type ChallengeType =
+  | 'weather'
+  | 'pests'
+  | 'diseases'
+  | 'prices'
+  | 'labor'
+  | 'equipment'
+  | 'other'
+  | (string & {});
 
 export interface SeasonChallenge {
   id: string;
