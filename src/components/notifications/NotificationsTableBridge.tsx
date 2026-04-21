@@ -37,7 +37,7 @@ export function NotificationsTableBridge() {
     let cancelled = false;
 
     const pushRow = (row: NotificationRow) => {
-      const path = row.click_url?.trim().startsWith('/') ? row.click_url!.trim() : '/dashboard';
+      const path = row.click_url?.trim().startsWith('/') ? row.click_url!.trim() : '/home';
       const createdAt = Date.parse(row.created_at);
       addRef.current({
         id: row.id,

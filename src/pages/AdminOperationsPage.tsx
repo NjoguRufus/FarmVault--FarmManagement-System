@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Wrench, Clock, CheckCircle, Edit, Banknote, Users, Package, Activity, Filter } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, Search, Wrench, Clock, CheckCircle, Edit, Banknote, Users, Package, Activity, Filter, ChevronDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -14,7 +16,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
@@ -34,6 +36,16 @@ import { WorkCardDrawer } from '@/components/operations/WorkCardDrawer';
 import { TodayActivityFeed } from '@/components/operations/TodayActivityFeed';
 import { WorkCardGrid } from '@/components/operations/WorkCardGrid';
 import { InventoryUsedToday } from '@/components/operations/InventoryUsedToday';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { DEFAULT_QUICK_FARM_WORK_CHIPS } from '@/lib/workTypeConstants';
+import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
 
 const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon: React.ReactNode }> = {
   planned: { label: 'Planned', color: 'bg-blue-100 text-blue-800', icon: <Clock className="h-4 w-4" /> },
@@ -47,6 +59,7 @@ export default function AdminOperationsPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const companyId = user?.companyId ?? null;
   const canCreateWorkCard = can('operations', 'createWorkCard');
@@ -56,7 +69,11 @@ export default function AdminOperationsPage() {
   const [projectFilter, setProjectFilter] = useState<string>(() => activeProject?.id ?? 'all');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [showPlanWorkModal, setShowPlanWorkModal] = useState(false);
+  const [planWorkPresetCategory, setPlanWorkPresetCategory] = useState<string | null>(null);
   const [showLogWorkModal, setShowLogWorkModal] = useState(false);
+  const [logWorkPresetCategory, setLogWorkPresetCategory] = useState<string | null>(null);
+  const [quickCategoryDraft, setQuickCategoryDraft] = useState('');
+  const { custom: customQuickCategories, add: addQuickCategory } = useFarmWorkCategories(companyId);
   const [selectedWorkCard, setSelectedWorkCard] = useState<WorkCard | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
 
@@ -64,6 +81,20 @@ export default function AdminOperationsPage() {
   useEffect(() => {
     setProjectFilter(activeProject?.id ?? 'all');
   }, [activeProject?.id]);
+
+  // Quick Access: /farm-work?add=1 opens Plan Work (matches New Operation menu).
+  useEffect(() => {
+    if (searchParams.get('add') !== '1') return;
+    setPlanWorkPresetCategory(null);
+    setShowPlanWorkModal(true);
+    setSearchParams(
+      (p) => {
+        p.delete('add');
+        return p;
+      },
+      { replace: true }
+    );
+  }, [searchParams, setSearchParams]);
 
   // Fetch all work cards for company
   const { data: workCards = [], isLoading: cardsLoading, refetch: refetchCards } = useQuery({
@@ -169,16 +200,116 @@ export default function AdminOperationsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Operations Dashboard</h1>
-            <p className="text-muted-foreground">Manage work cards, track activity, and monitor inventory usage</p>
+            <h1 className="text-2xl font-bold text-foreground">Farm Work</h1>
+            <p className="text-muted-foreground max-w-xl">Plan and record work, inputs, and payouts.</p>
           </div>
           {canCreateWorkCard && (
             <div className="flex items-center gap-2">
-              <Button variant="secondary" onClick={() => setShowLogWorkModal(true)} className="gap-2">
-                <Wrench className="h-4 w-4" />
-                Record Work
-              </Button>
-              <Button onClick={() => setShowPlanWorkModal(true)} className="gap-2">
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  if (!open) setQuickCategoryDraft('');
+                }}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" className="gap-2">
+                    <Wrench className="h-4 w-4" />
+                    Record Work
+                    <ChevronDown className="h-4 w-4 opacity-70" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-[min(calc(100vw-1.5rem),22rem)] max-h-[min(70vh,26rem)] overflow-y-auto"
+                >
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground leading-snug">
+                    Quick — choose a category to start recording (fastest)
+                  </DropdownMenuLabel>
+                  <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+                    {DEFAULT_QUICK_FARM_WORK_CHIPS.map(({ label, category }) => (
+                      <DropdownMenuItem
+                        key={category}
+                        onSelect={() => {
+                          setLogWorkPresetCategory(category);
+                          setShowLogWorkModal(true);
+                        }}
+                        className={cn(
+                          'h-8 w-fit min-w-0 shrink-0 cursor-pointer justify-center rounded-full border border-[hsl(var(--fv-success))]/35 px-3 text-[hsl(var(--fv-success))] focus:bg-[hsl(var(--fv-gold-soft))]/45'
+                        )}
+                      >
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                    {customQuickCategories.map((category) => (
+                      <DropdownMenuItem
+                        key={category}
+                        onSelect={() => {
+                          setLogWorkPresetCategory(category);
+                          setShowLogWorkModal(true);
+                        }}
+                        className={cn(
+                          'h-8 w-fit min-w-0 shrink-0 cursor-pointer justify-center rounded-full border border-border px-3 focus:bg-muted/60'
+                        )}
+                      >
+                        {category}
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                  <div className="space-y-1.5 px-2 pb-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Add category</p>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="e.g. Mulching"
+                        value={quickCategoryDraft}
+                        onChange={(e) => setQuickCategoryDraft(e.target.value)}
+                        className="h-9 flex-1"
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          e.preventDefault();
+                          const ok = addQuickCategory(quickCategoryDraft);
+                          if (ok) {
+                            toast.success('Category saved for next time');
+                            setQuickCategoryDraft('');
+                          } else {
+                            toast.error('Already listed or invalid');
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => {
+                          const ok = addQuickCategory(quickCategoryDraft);
+                          if (ok) {
+                            toast.success('Category saved for next time');
+                            setQuickCategoryDraft('');
+                          } else {
+                            toast.error('Already listed or invalid');
+                          }
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setLogWorkPresetCategory(null);
+                      setShowLogWorkModal(true);
+                    }}
+                  >
+                    Full record form…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                onClick={() => {
+                  setPlanWorkPresetCategory(null);
+                  setShowPlanWorkModal(true);
+                }}
+                className="gap-2"
+              >
                 <Plus className="h-4 w-4" />
                 Plan Work
               </Button>
@@ -354,22 +485,32 @@ export default function AdminOperationsPage() {
       {/* Plan Work Modal */}
       <PlanWorkModal
         open={showPlanWorkModal}
-        onOpenChange={setShowPlanWorkModal}
+        onOpenChange={(open) => {
+          setShowPlanWorkModal(open);
+          if (!open) setPlanWorkPresetCategory(null);
+        }}
         initialFarmId={activeProject?.farmId ?? activeFarmId ?? null}
         initialProjectId={activeProject?.id ?? null}
+        initialWorkCategory={planWorkPresetCategory}
         onSuccess={() => {
           setShowPlanWorkModal(false);
+          setPlanWorkPresetCategory(null);
           refetchCards();
         }}
       />
 
       <LogWorkModal
         open={showLogWorkModal}
-        onOpenChange={setShowLogWorkModal}
+        onOpenChange={(open) => {
+          setShowLogWorkModal(open);
+          if (!open) setLogWorkPresetCategory(null);
+        }}
         initialFarmId={activeProject?.farmId ?? activeFarmId ?? null}
         initialProjectId={activeProject?.id ?? null}
+        initialWorkCategory={logWorkPresetCategory}
         onSuccess={() => {
           setShowLogWorkModal(false);
+          setLogWorkPresetCategory(null);
           refetchCards();
         }}
       />

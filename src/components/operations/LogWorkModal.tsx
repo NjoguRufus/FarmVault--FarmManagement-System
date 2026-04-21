@@ -34,6 +34,7 @@ import { createAdminAlert } from '@/services/adminAlertService';
 import { listSuppliers } from '@/services/suppliersService';
 import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import type { InputUsed } from '@/types';
+import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
 
 interface LogWorkModalProps {
   open: boolean;
@@ -41,22 +42,9 @@ interface LogWorkModalProps {
   onSuccess?: () => void;
   initialFarmId?: string | null;
   initialProjectId?: string | null;
+  /** Pre-fill work type when opening from Farm Work quick record. */
+  initialWorkCategory?: string | null;
 }
-
-const WORK_TYPES = [
-  'Spraying',
-  'Fertilizer Application',
-  'Watering',
-  'Weeding',
-  'Tying',
-  'Harvesting',
-  'Planting',
-  'Land Preparation',
-  'Pruning',
-  'Pest Control',
-  'General Maintenance',
-  'Other',
-];
 
 /**
  * Maps work types to allowed inventory category keywords.
@@ -72,6 +60,10 @@ const WORK_TYPE_CATEGORY_FILTER: Record<string, string[] | null> = {
   'Planting': ['seed'],
   'Tying': ['tying', 'rope', 'sack'],
   'Harvesting': ['tying', 'rope', 'sack'],
+  /** Broad bucket: no inventory filter */
+  Quick: null,
+  /** Legacy cards */
+  Other: null,
 };
 
 function resolvePackageLabel(packagingType: string | null | undefined, itemName: string | null | undefined) {
@@ -119,10 +111,12 @@ export function LogWorkModal({
   onSuccess,
   initialFarmId = null,
   initialProjectId = null,
+  initialWorkCategory = null,
 }: LogWorkModalProps) {
   const { user } = useAuth();
   const { projects, activeProject, activeFarmId } = useProject();
   const companyId = user?.companyId ?? null;
+  const { allWorkTypes } = useFarmWorkCategories(companyId);
 
   const [saving, setSaving] = useState(false);
   const [workTypeQuery, setWorkTypeQuery] = useState('');
@@ -169,9 +163,9 @@ export function LogWorkModal({
   );
   const filteredWorkTypes = useMemo(() => {
     const q = workTypeQuery.trim().toLowerCase();
-    if (!q) return WORK_TYPES;
-    return WORK_TYPES.filter((type) => type.toLowerCase().includes(q));
-  }, [workTypeQuery]);
+    if (!q) return allWorkTypes;
+    return allWorkTypes.filter((type) => type.toLowerCase().includes(q));
+  }, [workTypeQuery, allWorkTypes]);
   React.useEffect(() => {
     if (!open) return;
     const preferredFarmId =
@@ -185,14 +179,30 @@ export function LogWorkModal({
       initialProjectId ??
       (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
       '';
-    setFormData((prev) => ({ ...prev, farmId: preferredFarmId, projectId: preferredProjectId ?? '' }));
-    setWorkTypeQuery((prev) => prev || formData.workCategory || '');
+    setFormData((prev) => {
+      const next = { ...prev, farmId: preferredFarmId, projectId: preferredProjectId ?? '' };
+      if (initialWorkCategory) {
+        return {
+          ...next,
+          workTitle: initialWorkCategory,
+          workCategory: initialWorkCategory,
+        };
+      }
+      return {
+        ...next,
+        workTitle: '',
+        workCategory: '',
+      };
+    });
+    setWorkTypeQuery(initialWorkCategory ?? '');
     setWorkTypeMenuOpen(false);
+    setInputs([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     open,
     initialFarmId,
     initialProjectId,
+    initialWorkCategory,
     activeProject?.farmId,
     activeProject?.id,
     activeFarmId,
@@ -214,7 +224,7 @@ export function LogWorkModal({
   // Filter inventory items based on selected work type
   const filteredInventoryItems = useMemo(() => {
     const keywords = WORK_TYPE_CATEGORY_FILTER[formData.workCategory] ?? null;
-    // null means no filter — show all items (General Maintenance, Other, etc.)
+    // null means no filter — show all items (General Maintenance, Quick, custom types, etc.)
     if (!keywords) return inventoryItems;
 
     return inventoryItems.filter((item) => {
@@ -549,7 +559,7 @@ export function LogWorkModal({
                 onChange={(e) => {
                   const value = e.target.value;
                   setWorkTypeQuery(value);
-                  const exact = WORK_TYPES.find((type) => type.toLowerCase() === value.trim().toLowerCase());
+                  const exact = allWorkTypes.find((type) => type.toLowerCase() === value.trim().toLowerCase());
                   setFormData((prev) => ({
                     ...prev,
                     workCategory: exact ?? '',

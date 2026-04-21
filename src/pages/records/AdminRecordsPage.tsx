@@ -31,6 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
+import { FARMER_NOTES_PATH } from '@/lib/routing/farmerAppPaths';
 import SeasonChallengesPage from '@/pages/SeasonChallengesPage';
 
 const BRAND_GREEN = '#16a34a';
@@ -183,7 +184,7 @@ export default function AdminRecordsPage() {
       setAddNoteOpen(false);
       setNewNoteTitle('');
       toast.success('Note created');
-      navigate(`/records/${FARM_NOTEBOOK_GENERAL_SLUG}/${encodeURIComponent(id)}`);
+      navigate(`${FARMER_NOTES_PATH}/${FARM_NOTEBOOK_GENERAL_SLUG}/${encodeURIComponent(id)}`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Could not create note.');
     } finally {
@@ -194,7 +195,7 @@ export default function AdminRecordsPage() {
   const companyReady = isDeveloper ? true : !!(scopeCompanyId && String(scopeCompanyId).trim());
   const needsCompany = !isDeveloper && !companyReady;
 
-  // Quick Access hook: allow /records?add=1 to open the "Add new note" modal.
+  // Quick Access hook: allow /notes?add=1 to open the "Add new note" modal.
   useEffect(() => {
     if (!authReady || !companyReady) return;
     if (searchParams.get('add') !== '1') return;
@@ -659,7 +660,7 @@ export default function AdminRecordsPage() {
               <div className={cn(glassCard(), 'p-7 text-sm text-muted-foreground')}>No crops match your search.</div>
             ) : (
               <div className="space-y-4">
-                <RecordsCropGrid crops={visibleCrops} basePath="/records" className="gap-4 sm:gap-5" />
+                <RecordsCropGrid crops={visibleCrops} basePath={FARMER_NOTES_PATH} className="gap-4 sm:gap-5" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {visibleCrops.slice(0, 6).map((c) => (
                     <div
@@ -711,7 +712,7 @@ export default function AdminRecordsPage() {
                 {recentNotesQuery.data!.map((n) => (
                   <RecordNotebookEntryCard
                     key={n.id}
-                    to={`/records/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                    to={`${FARMER_NOTES_PATH}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
                     title={(n.title ?? '').trim() || 'Untitled'}
                     content={n.content}
                     cropSlug={n.crop_slug}
@@ -770,7 +771,7 @@ export default function AdminRecordsPage() {
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3">
                         <Link
-                          to={`/records/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                          to={`${FARMER_NOTES_PATH}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
                           className="text-base font-semibold text-foreground hover:underline"
                         >
                           {(n.title ?? '').trim() || 'Untitled'}
@@ -870,7 +871,7 @@ export default function AdminRecordsPage() {
             {visibleCrops.map((c) => (
               <Link
                 key={c.crop_id}
-                to={`/records/${encodeURIComponent(c.slug || c.crop_id)}`}
+                to={`${FARMER_NOTES_PATH}/${encodeURIComponent(c.slug || c.crop_id)}`}
                 onClick={() => setFabOpen(false)}
                 className="flex items-center justify-between rounded-xl border border-border/60 px-3 py-2 text-sm hover:border-[color:var(--fv-brand-green)]/40 hover:bg-muted/30"
               >

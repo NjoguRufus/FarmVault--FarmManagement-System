@@ -145,8 +145,8 @@ function resolveAdminAlertPath(alert: AdminAlertRow): string {
   if (d?.startsWith('/')) return d;
   const m = (alert.module ?? '').toLowerCase();
   if (m === 'inventory') return '/inventory';
-  if (m === 'operations' || m.includes('work')) return '/operations';
-  return '/dashboard';
+  if (m === 'operations' || m.includes('work')) return '/farm-work';
+  return '/home';
 }
 
 export function useAdminAlertsRealtime() {

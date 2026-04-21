@@ -74,7 +74,7 @@ export const STAFF_DASHBOARD_PATH = '/staff/staff-dashboard';
 export function resolveStaffShellEntryOrHome(landingPage: string | null | undefined): string {
   const p = (landingPage ?? '').trim();
   if (p === STAFF_DASHBOARD_PATH || p === '/staff' || p.startsWith('/staff/')) return p;
-  if (p === '/dashboard' || p === '/broker' || p === '/developer') return p;
+  if (p === '/home' || p === '/dashboard' || p === '/broker' || p === '/developer') return p;
   if (p.startsWith('/ambassador/')) return p;
   return '/';
 }
@@ -94,7 +94,7 @@ export function getLandingPageFromPermissions(
   },
 ): string {
   if (options?.isDeveloper) return '/developer';
-  if (options?.isCompanyAdmin) return '/dashboard';
+  if (options?.isCompanyAdmin) return '/home';
 
   const companyId = options?.companyId != null ? String(options.companyId).trim() : '';
   if (!companyId) {

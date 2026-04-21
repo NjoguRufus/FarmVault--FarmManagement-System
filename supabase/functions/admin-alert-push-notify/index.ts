@@ -168,7 +168,7 @@ serveFarmVaultEdge("admin-alert-push-notify", async (req: Request, _ctx) => {
   const title = "FarmVault";
   const label = ar.target_label?.trim() || "Inventory";
   const bodyText = `${ar.module}: ${ar.action} — ${label}`;
-  const url = ar.detail_path?.startsWith("/") ? ar.detail_path : "/dashboard";
+  const url = ar.detail_path?.startsWith("/") ? ar.detail_path : "/home";
 
   let delivered = 0;
   for (const uid of filteredRecipients) {

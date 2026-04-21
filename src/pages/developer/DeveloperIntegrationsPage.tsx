@@ -133,7 +133,7 @@ export default function DeveloperIntegrationsPage() {
   const integrations = useMemo(() => buildIntegrations(), [buildIntegrations]);
 
   if (!isDeveloper || user?.role !== 'developer') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/home" replace />;
   }
 
   const onRefreshStatus = async () => {

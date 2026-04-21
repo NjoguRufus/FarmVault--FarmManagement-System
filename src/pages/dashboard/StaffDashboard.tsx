@@ -369,7 +369,7 @@ export function StaffDashboard() {
         {canOperations && (
           <Link to="/staff/operations" className="block" data-tour="staff-card-operations">
             <div className="fv-card p-4 h-full hover:bg-accent/40 transition-colors cursor-pointer">
-              <h2 className="text-lg font-semibold mb-2">Operations</h2>
+              <h2 className="text-lg font-semibold mb-2">Farm Work</h2>
               <p className="text-sm text-muted-foreground">
                 Keep track of work cards and field operations assigned to you or your projects.
               </p>

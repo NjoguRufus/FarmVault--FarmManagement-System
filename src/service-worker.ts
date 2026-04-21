@@ -175,7 +175,7 @@ type PushData = {
 self.addEventListener("push", (event: PushEvent) => {
   const fallback: PushData = {
     body: "You have a new update.",
-    url: "/dashboard",
+    url: "/home",
     type: "system_alert",
   };
 
@@ -206,7 +206,7 @@ self.addEventListener("push", (event: PushEvent) => {
         typeof data.title === "string" && data.title.trim() && data.title.trim() !== FARMVAULT_NOTIFY_TITLE
           ? data.title.trim()
           : displayTitle;
-      const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/dashboard";
+      const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/home";
       const tag = (typeof data.tag === "string" && data.tag.trim()) || FARMVAULT_NOTIFY_TAG;
       const rawNid = typeof data.notification_id === "string" ? data.notification_id.trim() : "";
       const nid = rawNid.length >= 32 && rawNid.includes("-") ? rawNid : "";
@@ -266,7 +266,7 @@ self.addEventListener("push", (event: PushEvent) => {
 async function pickClientForNotificationTarget(targetHref: string): Promise<WindowClient | undefined> {
   const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const origin = self.location.origin;
-  let targetPath = "/dashboard";
+  let targetPath = "/home";
   let targetSearch = "";
   try {
     const t = new URL(targetHref);
@@ -310,7 +310,7 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
     notification_type?: string;
     ts?: number;
   } | undefined;
-  const path = typeof raw?.url === "string" && raw.url.startsWith("/") ? raw.url : "/dashboard";
+  const path = typeof raw?.url === "string" && raw.url.startsWith("/") ? raw.url : "/home";
   const targetUrl = new URL(path, self.location.origin).href;
   const nid = typeof raw?.notification_id === "string" ? raw.notification_id.trim() : "";
   const bellDedupe =

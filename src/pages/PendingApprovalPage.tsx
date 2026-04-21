@@ -118,7 +118,7 @@ export default function PendingApprovalPage() {
       // eslint-disable-next-line no-console
       logger.log('[PendingApproval] Gate status is not pending_approval → dashboard', { gateStatus });
     }
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/home" replace />;
   }
 
   return (

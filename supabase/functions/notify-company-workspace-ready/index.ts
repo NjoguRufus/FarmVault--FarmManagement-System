@@ -5,7 +5,7 @@
 // Auth: Authorization Bearer + Supabase anon + is_developer() RPC (no table reads here).
 //
 // Body JSON (caller resolves recipient — no company table reads here):
-//   { "to": "admin@farm.com", "companyName": "Wamugi Farm", "dashboardUrl": "https://app.../dashboard" }
+//   { "to": "admin@farm.com", "companyName": "Wamugi Farm", "dashboardUrl": "https://app.../home" }
 //
 // Deploy: npx supabase functions deploy notify-company-workspace-ready --no-verify-jwt
 //

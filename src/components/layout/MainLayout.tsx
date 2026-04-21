@@ -45,7 +45,7 @@ export function MainLayout() {
     const allowed = EMERGENCY_ALLOWED_PREFIXES.some(
       (prefix) => path === prefix || path.startsWith(prefix + '/'),
     );
-    return allowed ? null : '/dashboard';
+    return allowed ? null : '/home';
   }, [isEmergencySession, location.pathname]);
 
   const brokerShellBailout = useMemo(() => {

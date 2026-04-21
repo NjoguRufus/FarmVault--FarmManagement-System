@@ -239,7 +239,7 @@ export function OperationsSnapshot({ className }: OperationsSnapshotProps) {
       <div className="relative mt-3 flex justify-end">
         <button
           type="button"
-          onClick={() => navigate('/operations')}
+          onClick={() => navigate('/farm-work')}
           className="text-[11px] sm:text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:underline"
         >
           View all

@@ -79,7 +79,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[Auth] Redirecting employee to /dashboard');
+      logger.log('[Auth] Redirecting employee to app entry / home');
     }
     return children;
   }

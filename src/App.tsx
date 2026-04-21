@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createAppQueryClient } from "@/lib/createAppQueryClient";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
@@ -199,8 +199,26 @@ import { logger } from "@/lib/logger";
 import AppEntryPage from "@/app/app-entry/page";
 import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 import { PlanProvider } from "@/contexts/PlanContext";
+import MoreMenuPage from "@/pages/MoreMenuPage";
+import { FARMER_FARM_WORK_PATH, FARMER_HOME_PATH, FARMER_NOTES_PATH } from "@/lib/routing/farmerAppPaths";
 
 const queryClient = createAppQueryClient();
+
+function LegacyOperationsRedirect() {
+  const loc = useLocation();
+  const path = loc.pathname.replace(/\/+/g, "/") || "/";
+  const suffix = path === "/operations" ? "" : path.slice("/operations".length);
+  const target = `${FARMER_FARM_WORK_PATH}${suffix}`;
+  return <Navigate to={`${target}${loc.search ?? ""}`} replace />;
+}
+
+function LegacyRecordsRedirect() {
+  const loc = useLocation();
+  const path = loc.pathname.replace(/\/+/g, "/") || "/";
+  const suffix = path === "/records" ? "" : path.slice("/records".length);
+  const target = `${FARMER_NOTES_PATH}${suffix}`;
+  return <Navigate to={`${target}${loc.search ?? ""}`} replace />;
+}
 
 /** Preserves ?ref= (and other params) when /signup redirects to /sign-up. */
 function SignupQueryPreservingRedirect() {
@@ -231,7 +249,7 @@ const CompanyDashboardRoute = () => {
   }
 
   if (landing === "/admin") return <Navigate to="/developer" replace />;
-  if (landing === "/dashboard") return <CompanyDashboard />;
+  if (landing === "/dashboard" || landing === FARMER_HOME_PATH) return <CompanyDashboard />;
   if (landing === "/manager" || landing === "/manager/operations") return <Navigate to="/manager" replace />;
   if (landing === "/broker") return <Navigate to="/broker" replace />;
   if (landing === "/driver") return <Navigate to="/driver" replace />;
@@ -364,8 +382,9 @@ const AppRoutesWithLock = () => (
         <Route element={<MainLayout />}>
         <Route path="/app" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
         <Route path="/app/*" element={<RequireNotBroker><CompanyDashboardRoute /></RequireNotBroker>} />
+        <Route path="/dashboard" element={<Navigate to={FARMER_HOME_PATH} replace />} />
         <Route
-          path="/dashboard"
+          path={FARMER_HOME_PATH}
           element={
             <PermissionRoute module="dashboard">
               <RequireNotBroker>
@@ -382,8 +401,12 @@ const AppRoutesWithLock = () => (
         <Route path="/projects/:projectId/planning" element={<PermissionRoute module="planning"><RequireNotBroker><ProjectPlanningPage /></RequireNotBroker></PermissionRoute>} />
         <Route path="/crop-stages" element={<PermissionRoute module="planning"><CropStagesPage /></PermissionRoute>} />
         <Route path="/expenses" element={<PermissionRoute module="expenses"><ExpensesPage /></PermissionRoute>} />
-        <Route path="/operations" element={<PermissionRoute module="operations"><AdminOperationsPage /></PermissionRoute>} />
-        <Route path="/operations/legacy" element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
+        <Route path="/operations/*" element={<LegacyOperationsRedirect />} />
+        <Route
+          path={FARMER_FARM_WORK_PATH}
+          element={<PermissionRoute module="operations"><AdminOperationsPage /></PermissionRoute>}
+        />
+        <Route path={`${FARMER_FARM_WORK_PATH}/legacy`} element={<PermissionRoute module="operations"><OperationsPage /></PermissionRoute>} />
         <Route path="/inventory" element={<PermissionRoute module="inventory"><InventoryPage /></PermissionRoute>} />
         <Route path="/inventory/item/:itemId" element={<PermissionRoute module="inventory"><InventoryItemDetailsPage /></PermissionRoute>} />
         <Route path="/inventory/categories" element={<PermissionRoute module="inventory"><InventoryCategoriesPage /></PermissionRoute>} />
@@ -422,10 +445,21 @@ const AppRoutesWithLock = () => (
         <Route path="/settings" element={<PermissionRoute module="settings"><SettingsPage /></PermissionRoute>} />
         <Route path="/support" element={<SupportPage />} />
         <Route path="/feedback" element={<FeedbackPage />} />
-        <Route path="/records" element={<PermissionRoute module="notes"><AdminRecordsPage /></PermissionRoute>} />
-        <Route path="/records/:cropSlug" element={<PermissionRoute module="notes"><CropDetailsPage /></PermissionRoute>} />
-        <Route path="/records/:cropSlug/new" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
-        <Route path="/records/:cropSlug/:noteId" element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
+        <Route path="/records/*" element={<LegacyRecordsRedirect />} />
+        <Route path={FARMER_NOTES_PATH} element={<PermissionRoute module="notes"><AdminRecordsPage /></PermissionRoute>} />
+        <Route path={`${FARMER_NOTES_PATH}/:cropSlug`} element={<PermissionRoute module="notes"><CropDetailsPage /></PermissionRoute>} />
+        <Route path={`${FARMER_NOTES_PATH}/:cropSlug/new`} element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
+        <Route path={`${FARMER_NOTES_PATH}/:cropSlug/:noteId`} element={<PermissionRoute module="notes"><NotebookPage /></PermissionRoute>} />
+        <Route
+          path="/more"
+          element={
+            <PermissionRoute module="dashboard">
+              <RequireNotBroker>
+                <MoreMenuPage />
+              </RequireNotBroker>
+            </PermissionRoute>
+          }
+        />
         </Route>
       </Route>
 
@@ -600,6 +634,8 @@ const AppRoutesWithLock = () => (
         <Route path="records/:cropSlug/full-knowledge" element={<FullKnowledgePage />} />
         <Route path="records/:cropSlug/new" element={<NotebookPage />} />
         <Route path="records/:cropSlug/:noteId" element={<NotebookPage />} />
+        {/* Some legacy/dev notes may not have crop_slug populated; allow direct record view by id. */}
+        <Route path="records/:recordId" element={<DeveloperRecordViewPage />} />
         <Route path="company-migrations" element={<DeveloperCompanyMigrationsPage />} />
         <Route path="qr" element={<DevQRGeneratorPage />} />
         <Route path="documents" element={<DeveloperDocumentsPage />} />

@@ -22,7 +22,7 @@ import { useCompanyWorkspaceApprovalStatus } from '@/hooks/useCompanyWorkspaceAp
 import { Project } from '@/types';
 
 const NEW_OPERATION_OPTIONS = [
-  { label: 'Log work', path: '/operations', icon: Wrench },
+  { label: 'Log work', path: '/farm-work', icon: Wrench },
   { label: 'Add expense', path: '/expenses', icon: Receipt },
   { label: 'Record harvest', path: '/harvest', icon: TrendingUp },
   { label: 'New project', path: '/projects?new=1', icon: FolderPlus },

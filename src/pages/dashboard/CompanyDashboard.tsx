@@ -100,7 +100,7 @@ function isActivityToday(log: ActivityLogDoc): boolean {
 
 export function CompanyDashboard() {
   useEffect(() => {
-    document.title = "FarmVault Dashboard";
+    document.title = "FarmVault Home";
   }, []);
 
   const queryClient = useQueryClient();
@@ -143,7 +143,7 @@ export function CompanyDashboard() {
     captureEvent(AnalyticsEvents.DASHBOARD_VIEWED, {
       company_id: companyId,
       module_name: 'dashboard',
-      route_path: '/dashboard',
+      route_path: '/home',
     });
   }, [companyId]);
 

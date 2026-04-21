@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import { NotesCard } from "@/components/records/NotesCard";
+import { FARMER_NOTES_PATH } from "@/lib/routing/farmerAppPaths";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./cropDetailsNotes.css";
 
@@ -161,7 +162,7 @@ export default function CropDetailsPage() {
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 navigate(-1);
               } else {
-                navigate(isDeveloperRoute ? "/developer/records" : "/records");
+                navigate(isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH);
               }
             }}
           >
@@ -179,7 +180,7 @@ export default function CropDetailsPage() {
               variant="outline"
               className="rounded-xl"
               onClick={() =>
-                navigate(`${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}/full-knowledge`)
+                navigate(`${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/full-knowledge`)
               }
             >
               Full Knowledge
@@ -189,7 +190,7 @@ export default function CropDetailsPage() {
             className="rounded-xl"
             onClick={() =>
               navigate(
-                `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}/new`,
+                `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/new`,
               )
             }
           >
@@ -224,7 +225,7 @@ export default function CropDetailsPage() {
             className="rounded-xl mt-5"
             onClick={() =>
               navigate(
-                `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}/new`,
+                `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/new`,
               )
             }
           >
@@ -271,7 +272,7 @@ export default function CropDetailsPage() {
                   note={n}
                   onClick={() =>
                     navigate(
-                      `${isDeveloperRoute ? "/developer/records" : "/records"}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(n.id)}`,
+                      `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(n.id)}`,
                     )
                   }
                 />

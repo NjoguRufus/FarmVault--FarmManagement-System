@@ -877,7 +877,7 @@ async function receiptEmailFromPaymentContext(
     mpesaReceipt: tx,
     paymentDate: formatPaymentDate(paidIso),
     viewUrl: `${baseUrl}/billing?receipt=${input.receiptId}`,
-    dashboardUrl: `${baseUrl}/dashboard`,
+    dashboardUrl: `${baseUrl}/home`,
     logoUrl: input.logoUrl,
     newExpiryLabel,
   });
@@ -903,7 +903,7 @@ function receiptEmailFromReceiptRow(
     mpesaReceipt: payRef,
     paymentDate: formatPaymentDate(issued),
     viewUrl: `${baseUrl}/billing?receipt=${receiptId}`,
-    dashboardUrl: `${baseUrl}/dashboard`,
+    dashboardUrl: `${baseUrl}/home`,
     logoUrl,
   });
 }

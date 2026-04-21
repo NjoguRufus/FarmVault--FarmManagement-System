@@ -13,7 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 type DashboardTourStep = Step & {
   id: string;
-  route: "/dashboard";
+  route: "/home";
   placement?: Step["placement"];
 };
 
@@ -32,57 +32,57 @@ const NAVBAR_HEIGHT = 64;
 const baseDashboardSteps: DashboardTourStep[] = [
   {
     id: "dashboard-title",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="dashboard-title"]',
-    content: "This is your FarmVault dashboard. It gives a quick view of farm performance.",
+    content: "This is your FarmVault home — a quick view of how your farm is doing.",
     placement: "bottom",
     disableBeacon: true,
   },
   {
     id: "project-selector",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="dashboard-project-selector"]',
     content: "Use this selector to switch between projects or view all projects together.",
     placement: "bottom",
   },
   {
     id: "crop-stage-progress",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="crop-stage-progress"]',
     content: "Crop Stage Progress shows season progress for the selected project. Use «Updates & Advisory» to see recent activity and smart tips.",
     placement: "bottom",
   },
   {
     id: "new-operations-button",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="new-operation-button"]',
     content: "Quick Access opens shortcuts for recording work, expenses, inventory, and harvest actions.",
     placement: "bottom",
   },
   {
     id: "expenses-summary-card",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="expenses-summary-card"]',
     content: "This card tracks your total expenses so you can control spend across projects.",
     placement: "bottom",
   },
   {
     id: "profit-loss-card",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="profit-loss-card"]',
     content: "Monitor profit and loss here to understand your current financial position.",
     placement: "bottom",
   },
   {
     id: "inventory-overview",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="inventory-overview"]',
     content: "Inventory Overview helps you track available stock and category-level value.",
     placement: "bottom",
   },
   {
     id: "recent-transactions",
-    route: "/dashboard",
+    route: "/home",
     target: '[data-tour="recent-transactions"]',
     content: "Recent Transactions lists your latest sales and expenses for quick auditing.",
     placement: "bottom",
@@ -91,7 +91,7 @@ const baseDashboardSteps: DashboardTourStep[] = [
 
 const mobileBottomNavStep: DashboardTourStep = {
   id: "mobile-bottom-navigation",
-  route: "/dashboard",
+  route: "/home",
   target: '[data-tour="bottom-navigation"]',
   content: "On mobile, use Bottom Navigation for fast movement between key pages.",
   placement: "top",
@@ -99,7 +99,7 @@ const mobileBottomNavStep: DashboardTourStep = {
 
 const desktopTourRestartStep: DashboardTourStep = {
   id: "dashboard-restart-tour",
-  route: "/dashboard",
+  route: "/home",
   target: '[data-tour="dashboard-take-tour"]',
   content: "You can restart this guided tour anytime from this button.",
   placement: "left",
@@ -171,7 +171,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const startTourRaw = useCallback(() => {
-    const firstRoute = steps[0]?.route ?? "/dashboard";
+    const firstRoute = steps[0]?.route ?? "/home";
     setIsRunning(false);
     setActiveSteps([]);
     setStepIndex(0);
@@ -191,7 +191,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!pendingStart) return;
 
-    const firstRoute = steps[0]?.route ?? "/dashboard";
+    const firstRoute = steps[0]?.route ?? "/home";
     if (location.pathname !== firstRoute) return;
 
     let cancelled = false;

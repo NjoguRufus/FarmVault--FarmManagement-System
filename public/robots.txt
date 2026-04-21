@@ -29,6 +29,8 @@ Allow: /agriculture-software-kenya
 # Block authenticated/private areas
 Disallow: /admin
 Disallow: /admin/
+Disallow: /home
+Disallow: /home/
 Disallow: /dashboard
 Disallow: /dashboard/
 Disallow: /developer

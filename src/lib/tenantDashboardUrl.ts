@@ -1,5 +1,6 @@
 /**
- * HTTPS (or local http) URL to the company dashboard for email links and dev tools.
+ * HTTPS (or local http) URL to the company app **home** (`/home`) for email links and dev tools.
+ * Legacy `/dashboard` redirects to `/home` in the SPA; prefer this URL in new links and in Clerk allowed redirects.
  *
  * Resolution order:
  * 1. Current browser origin — same app in dev (localhost) and production (your real domain); no .env swap.
@@ -45,11 +46,11 @@ function envTenantBase(): string | null {
 export function getTenantDashboardUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     const fromPage = originToDashboardBase(window.location.origin);
-    if (fromPage) return `${fromPage}/dashboard`;
+    if (fromPage) return `${fromPage}/home`;
   }
 
   const fromEnv = envTenantBase();
-  if (fromEnv) return `${fromEnv}/dashboard`;
+  if (fromEnv) return `${fromEnv}/home`;
 
-  return 'https://app.farmvault.africa/dashboard';
+  return 'https://app.farmvault.africa/home';
 }

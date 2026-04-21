@@ -2,11 +2,11 @@
  * Routes that use MainLayout (company app shell) — used to scope the post-onboarding modal queue.
  */
 const MAIN_APP_PATH_PREFIXES = [
-  '/dashboard',
+  '/home',
   '/app',
   '/projects',
   '/expenses',
-  '/operations',
+  '/farm-work',
   '/inventory',
   '/harvest',
   '/suppliers',
@@ -17,7 +17,7 @@ const MAIN_APP_PATH_PREFIXES = [
   '/settings',
   '/support',
   '/feedback',
-  '/records',
+  '/notes',
   '/crop-stages',
   '/company',
 ] as const;

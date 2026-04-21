@@ -544,13 +544,13 @@ export default function ProjectDetailsPage() {
             onViewWorkLogs={() => setDetailsDialog('workLogs')}
             onViewInventory={() => setDetailsDialog('inventory')}
             onViewExpenses={() => setDetailsDialog('expenses')}
-            onViewChallenges={() => navigate('/records?tab=challenges')}
+            onViewChallenges={() => navigate('/notes?tab=challenges')}
             workLogsByCategory={workLogsByCategory}
           />
           <ProjectChallengesPanel
             challenges={challenges}
-            onAddChallenge={() => navigate('/records?tab=challenges')}
-            onViewAll={() => navigate('/records?tab=challenges')}
+            onAddChallenge={() => navigate('/notes?tab=challenges')}
+            onViewAll={() => navigate('/notes?tab=challenges')}
             limit={5}
           />
         </div>
@@ -566,7 +566,7 @@ export default function ProjectDetailsPage() {
             onViewWorkLogs={() => setDetailsDialog('workLogs')}
             onViewExpenses={() => setDetailsDialog('expenses')}
             onViewInventory={() => setDetailsDialog('inventory')}
-            onAddChallenge={() => navigate('/records?tab=challenges')}
+            onAddChallenge={() => navigate('/notes?tab=challenges')}
             showPlanSeason={project.status === 'active'}
             showAddChallenge={!isClosed}
           />

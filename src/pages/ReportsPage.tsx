@@ -106,11 +106,11 @@ export default function ReportsPage() {
       route: '/harvest-sales',
     },
     {
-      title: 'Operations Report',
-      description: 'Timeline of all operations performed with status tracking',
+      title: 'Farm Work Report',
+      description: 'Timeline of field work and tasks with status tracking',
       icon: <FileText className="h-6 w-6" />,
       color: 'bg-fv-info/10 text-fv-info',
-      route: '/operations',
+      route: '/farm-work',
     },
   ];
 
