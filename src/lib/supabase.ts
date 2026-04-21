@@ -59,27 +59,9 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 
     const session = w.Clerk?.session;
     if (!session?.getToken) {
-      // If the app tries to talk to Supabase without an active Clerk session,
-      // it's almost always because the user is signed out (or the session expired).
-      // Redirect to sign-in early so we don't keep running requests that will fail RLS.
-      try {
-        const p = window.location?.pathname || '/';
-        const isAuthRoute =
-          p.startsWith('/sign-in') ||
-          p.startsWith('/sign-up') ||
-          p.startsWith('/auth/') ||
-          p.startsWith('/onboarding') ||
-          p.startsWith('/accept-invitation') ||
-          p.startsWith('/dev/bootstrap');
-        const key = 'farmvault:redirected:no-clerk-session:v1';
-        const alreadyRedirected = window.sessionStorage.getItem(key) === '1';
-        if (!isAuthRoute && !alreadyRedirected) {
-          window.sessionStorage.setItem(key, '1');
-          window.location.assign('/sign-in?reason=no-clerk-session');
-        }
-      } catch {
-        // ignore
-      }
+      // Do not hard-redirect here: Clerk + our token bridge can briefly report no session on mobile while
+      // the SPA auth layer still has a valid cached user. Let requests return null / RLS errors instead
+      // of sending users to /sign-in?reason=no-clerk-session incorrectly.
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn('[Supabase] No Clerk session available - user may not be signed in');

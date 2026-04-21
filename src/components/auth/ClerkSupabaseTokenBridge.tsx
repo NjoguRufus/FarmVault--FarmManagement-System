@@ -11,26 +11,46 @@ import { logger } from "@/lib/logger";
  * The `supabase` template ensures `auth.jwt()->>'sub'` is the Clerk user id (default session
  * tokens may not match what RLS and edge functions expect).
  */
-import { useLayoutEffect, useEffect } from 'react';
+import { useLayoutEffect, useEffect, useRef } from 'react';
 import { useAuth, useClerk } from '@clerk/react';
 import { CLERK_JWT_TEMPLATE_SUPABASE, setClerkTokenGetter } from '@/lib/supabase';
+
+/** Match AuthContext transient sign-out grace — avoid dropping the token getter when Clerk flickers (mobile). */
+const CLEAR_GETTER_DEBOUNCE_MS = 4500;
 
 export function ClerkSupabaseTokenBridge() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const clerk = useClerk();
+  const clearGetterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Register token getter before paint so the first Supabase request after auth uses a Clerk token.
   useLayoutEffect(() => {
+    if (clearGetterTimerRef.current) {
+      clearTimeout(clearGetterTimerRef.current);
+      clearGetterTimerRef.current = null;
+    }
+
     if (!isLoaded) {
       return;
     }
 
     if (!isSignedIn) {
       if (import.meta.env.DEV) {
-        logger.log('[ClerkBridge] User not signed in, clearing token getter');
+        logger.log('[ClerkBridge] Signed out (or transient); debouncing token getter clear');
       }
-      setClerkTokenGetter(null);
-      return;
+      clearGetterTimerRef.current = setTimeout(() => {
+        clearGetterTimerRef.current = null;
+        setClerkTokenGetter(null);
+        if (import.meta.env.DEV) {
+          logger.log('[ClerkBridge] Token getter cleared after debounce');
+        }
+      }, CLEAR_GETTER_DEBOUNCE_MS);
+      return () => {
+        if (clearGetterTimerRef.current) {
+          clearTimeout(clearGetterTimerRef.current);
+          clearGetterTimerRef.current = null;
+        }
+      };
     }
 
     setClerkTokenGetter(async () => {
@@ -53,10 +73,20 @@ export function ClerkSupabaseTokenBridge() {
       }
     });
 
+    // Do not clear the getter in cleanup when isSignedIn flips false — that runs before the debounced
+    // signed-out branch and caused immediate Supabase → /sign-in redirects on mobile.
+    return () => {};
+  }, [isLoaded, isSignedIn, getToken]);
+
+  useLayoutEffect(() => {
     return () => {
+      if (clearGetterTimerRef.current) {
+        clearTimeout(clearGetterTimerRef.current);
+        clearGetterTimerRef.current = null;
+      }
       setClerkTokenGetter(null);
     };
-  }, [isLoaded, isSignedIn, getToken]);
+  }, []);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !isLoaded || !clerk) return;
