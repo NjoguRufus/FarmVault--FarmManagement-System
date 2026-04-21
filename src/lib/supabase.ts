@@ -20,6 +20,9 @@ if (!supabaseUrl || !supabaseKey) {
  */
 export const CLERK_JWT_TEMPLATE_SUPABASE = 'supabase' as const;
 
+/** SessionStorage flag: one hard redirect per tab to /sign-in when Supabase runs with no Clerk session (cleared on sign-in). */
+export const NO_CLERK_SESSION_REDIRECT_FLAG_KEY = 'farmvault:redirected:no-clerk-session:v1';
+
 /** Set by ClerkSupabaseTokenBridge so token comes from useAuth().getToken() (reliable in React). */
 let clerkTokenGetter: (() => Promise<string | null>) | null = null;
 
@@ -59,9 +62,31 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 
     const session = w.Clerk?.session;
     if (!session?.getToken) {
-      // Do not hard-redirect here: Clerk + our token bridge can briefly report no session on mobile while
-      // the SPA auth layer still has a valid cached user. Let requests return null / RLS errors instead
-      // of sending users to /sign-in?reason=no-clerk-session incorrectly.
+      // Send signed-out users to sign-in when Clerk has finished loading and there is no session.
+      // Skip while Clerk is still hydrating (`loaded` false) or when a session object exists but the
+      // bridge is not registered yet — avoids false redirects on mobile.
+      try {
+        const clerk = w.Clerk as { loaded?: boolean; session?: unknown; isSignedIn?: boolean } | undefined;
+        const clerkLoaded = clerk?.loaded === true;
+        /** Prefer explicit signed-out; avoids redirect if `session` is briefly null while still signed in. */
+        const clerkSignedOut = clerkLoaded && clerk?.isSignedIn === false;
+        const p = window.location?.pathname || '/';
+        const isAuthRoute =
+          p.startsWith('/sign-in') ||
+          p.startsWith('/sign-up') ||
+          p.startsWith('/auth/') ||
+          p.startsWith('/onboarding') ||
+          p.startsWith('/accept-invitation') ||
+          p.startsWith('/dev/bootstrap') ||
+          p.startsWith('/emergency-access');
+        const alreadyRedirected = window.sessionStorage.getItem(NO_CLERK_SESSION_REDIRECT_FLAG_KEY) === '1';
+        if (clerkSignedOut && !isAuthRoute && !alreadyRedirected) {
+          window.sessionStorage.setItem(NO_CLERK_SESSION_REDIRECT_FLAG_KEY, '1');
+          window.location.assign('/sign-in?reason=no-clerk-session');
+        }
+      } catch {
+        // ignore
+      }
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn('[Supabase] No Clerk session available - user may not be signed in');

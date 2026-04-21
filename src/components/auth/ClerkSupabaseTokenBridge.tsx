@@ -13,7 +13,11 @@ import { logger } from "@/lib/logger";
  */
 import { useLayoutEffect, useEffect, useRef } from 'react';
 import { useAuth, useClerk } from '@clerk/react';
-import { CLERK_JWT_TEMPLATE_SUPABASE, setClerkTokenGetter } from '@/lib/supabase';
+import {
+  CLERK_JWT_TEMPLATE_SUPABASE,
+  NO_CLERK_SESSION_REDIRECT_FLAG_KEY,
+  setClerkTokenGetter,
+} from '@/lib/supabase';
 
 /** Match AuthContext transient sign-out grace — avoid dropping the token getter when Clerk flickers (mobile). */
 const CLEAR_GETTER_DEBOUNCE_MS = 4500;
@@ -51,6 +55,12 @@ export function ClerkSupabaseTokenBridge() {
           clearGetterTimerRef.current = null;
         }
       };
+    }
+
+    try {
+      window.sessionStorage.removeItem(NO_CLERK_SESSION_REDIRECT_FLAG_KEY);
+    } catch {
+      // ignore
     }
 
     setClerkTokenGetter(async () => {
