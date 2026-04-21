@@ -10,8 +10,8 @@ export function farmerInboxNavigatePath(category: string | null | undefined): st
     case 'cropStage':
       return '/crop-stages';
     case 'summary':
-      return '/dashboard';
+      return '/home';
     default:
-      return '/dashboard';
+      return '/home';
   }
 }

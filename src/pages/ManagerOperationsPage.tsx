@@ -2867,13 +2867,17 @@ export default function ManagerOperationsPage() {
               )}
 
               {/* Inputs Used - Show based on work type */}
-              {(logWorkType === 'Spraying' || logWorkType === 'Fertilizer application' || logWorkType === 'Tying of crops' || logWorkType === 'Other') && (
+              {(logWorkType === 'Spraying' ||
+                logWorkType === 'Fertilizer application' ||
+                logWorkType === 'Tying of crops' ||
+                logWorkType === 'Other' ||
+                logWorkType === 'Quick') && (
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">
                     {logWorkType === 'Spraying' && 'Chemicals Used'}
                     {logWorkType === 'Fertilizer application' && 'Fertilizer Used'}
                     {logWorkType === 'Tying of crops' && (logTyingUsedType === 'ropes' ? 'Ropes Used' : 'Sacks Used')}
-                    {logWorkType === 'Other' && 'Inputs Used'}
+                    {(logWorkType === 'Other' || logWorkType === 'Quick') && 'Inputs Used'}
                     {' '}(optional)
                   </label>
                   <div className="space-y-2">

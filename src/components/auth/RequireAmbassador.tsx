@@ -61,7 +61,7 @@ export function RequireAmbassador({ children }: RequireAmbassadorProps) {
 
   if (pt === 'both') {
     if (workspaceMode === 'company') {
-      return <Navigate to="/dashboard" replace />;
+      return <Navigate to="/home" replace />;
     }
     return <>{children}</>;
   }

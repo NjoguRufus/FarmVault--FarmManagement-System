@@ -337,7 +337,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       };
       if (d?.type !== SW_MSG_PUSH_BELL_SYNC || !d.payload) return;
       const p = d.payload;
-      const url = typeof p.url === 'string' && p.url.startsWith('/') ? p.url : '/dashboard';
+      const url = typeof p.url === 'string' && p.url.startsWith('/') ? p.url : '/home';
       let dedupe: string;
       if (typeof p.bellDedupe === 'string' && p.bellDedupe.startsWith('db_notification:')) {
         dedupe = p.bellDedupe.slice(0, 160);

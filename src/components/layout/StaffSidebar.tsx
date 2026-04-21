@@ -44,7 +44,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
     return currentTier === 'pro';
   };
 
-  const items: Array<{ label: string; path: string }> = [{ label: 'Dashboard', path: '/staff/staff-dashboard' }];
+  const items: Array<{ label: string; path: string }> = [{ label: 'Home', path: '/staff/staff-dashboard' }];
 
   const canHarvestCollections = canKey('harvest_collections.view') || can('harvest', 'view');
   const canInventory = effectivePermissionKeys.has('inventory.view') || can('inventory', 'view');
@@ -64,7 +64,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
     items.push({ label: 'Expenses', path: '/staff/expenses' });
   }
   if (canOperations) {
-    items.push({ label: 'Operations', path: '/staff/operations' });
+    items.push({ label: 'Farm Work', path: '/staff/operations' });
   }
 
   const displayName = fullName ?? user?.email ?? 'User';

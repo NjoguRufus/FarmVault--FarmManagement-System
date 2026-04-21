@@ -79,7 +79,10 @@ function DeveloperNoteListRow({
 }) {
   const preview = developerNotePreview(note.content);
   const formattedDate = formatDeveloperNoteListDate(note.updated_at, note.created_at);
-  const to = `/developer/records/${encodeURIComponent(String(note.crop_slug ?? ''))}/${encodeURIComponent(note.id)}`;
+  const cropSlug = String(note.crop_slug ?? '').trim();
+  const to = cropSlug
+    ? `/developer/records/${encodeURIComponent(cropSlug)}/${encodeURIComponent(note.id)}`
+    : `/developer/records/${encodeURIComponent(note.id)}`;
 
   return (
     <Link

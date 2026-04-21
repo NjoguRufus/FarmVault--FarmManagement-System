@@ -40,7 +40,7 @@ export function AmbassadorLayout() {
         return;
       }
       if (pt === "both" && fvUser.companyId && workspaceMode === "company") {
-        navigate("/dashboard", { replace: true });
+        navigate("/home", { replace: true });
         return;
       }
     }

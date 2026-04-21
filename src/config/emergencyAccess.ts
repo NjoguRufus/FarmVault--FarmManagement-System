@@ -71,6 +71,7 @@ export function writeStoredEmergencyServerSession(session: EmergencyServerSessio
 
 /** Operational routes allowed in Emergency Access Mode (no admin/dev). */
 export const EMERGENCY_ALLOWED_PREFIXES = [
+  '/home',
   '/dashboard',
   '/app',
   '/projects',

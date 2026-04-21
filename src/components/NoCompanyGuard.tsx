@@ -51,7 +51,7 @@ export function NoCompanyGuard({
             >
               {busy ? 'Syncing…' : 'Sync workspace'}
             </Button>
-            <Button variant="outline" onClick={() => navigate('/dashboard', { replace: true })}>
+            <Button variant="outline" onClick={() => navigate('/home', { replace: true })}>
               Open dashboard
             </Button>
           </div>

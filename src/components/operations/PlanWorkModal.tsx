@@ -32,6 +32,7 @@ import { listFarmsByCompany } from '@/services/farmsService';
 import type { Employee } from '@/types';
 import { logger } from "@/lib/logger";
 import { isProjectClosed } from '@/lib/projectClosed';
+import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
 
 interface PlanWorkModalProps {
   open: boolean;
@@ -39,22 +40,9 @@ interface PlanWorkModalProps {
   onSuccess?: () => void;
   initialFarmId?: string | null;
   initialProjectId?: string | null;
+  /** When opening from Farm Work quick actions, pre-fill work type (matches base + custom categories). */
+  initialWorkCategory?: string | null;
 }
-
-const WORK_TYPES = [
-  'Spraying',
-  'Fertilizer Application',
-  'Watering',
-  'Weeding',
-  'Tying',
-  'Harvesting',
-  'Planting',
-  'Land Preparation',
-  'Pruning',
-  'Pest Control',
-  'General Maintenance',
-  'Other',
-];
 
 export function PlanWorkModal({
   open,
@@ -62,10 +50,12 @@ export function PlanWorkModal({
   onSuccess,
   initialFarmId = null,
   initialProjectId = null,
+  initialWorkCategory = null,
 }: PlanWorkModalProps) {
   const { user } = useAuth();
   const { projects, activeProject, activeFarmId } = useProject();
   const companyId = user?.companyId ?? null;
+  const { allWorkTypes } = useFarmWorkCategories(companyId);
 
   // Fetch employees from Supabase
   const { data: employees = [] } = useQuery({
@@ -153,9 +143,26 @@ export function PlanWorkModal({
         (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
         (projectsForFarm.some((p) => p.id === prev.projectId) ? prev.projectId : null) ??
         '';
-      return { ...prev, farmId: preferredFarmId, projectId: preferredProjectId };
+      const next = { ...prev, farmId: preferredFarmId, projectId: preferredProjectId };
+      if (initialWorkCategory) {
+        return {
+          ...next,
+          workTitle: initialWorkCategory,
+          workCategory: initialWorkCategory,
+        };
+      }
+      return {
+        ...next,
+        workTitle: '',
+        workCategory: '',
+        plannedDate: new Date(),
+        plannedWorkers: 1,
+        plannedRatePerPerson: 0,
+        allocatedManagerId: '',
+        notes: '',
+      };
     });
-    setWorkTypeQuery((prev) => prev || formData.workCategory || '');
+    setWorkTypeQuery(initialWorkCategory ?? '');
     setWorkTypeMenuOpen(false);
   }, [
     open,
@@ -166,6 +173,7 @@ export function PlanWorkModal({
     selectorFarms,
     initialFarmId,
     initialProjectId,
+    initialWorkCategory,
   ]);
 
   const selectedEmployee = useMemo(() => {
@@ -181,9 +189,9 @@ export function PlanWorkModal({
   );
   const filteredWorkTypes = useMemo(() => {
     const q = workTypeQuery.trim().toLowerCase();
-    if (!q) return WORK_TYPES;
-    return WORK_TYPES.filter((type) => type.toLowerCase().includes(q));
-  }, [workTypeQuery]);
+    if (!q) return allWorkTypes;
+    return allWorkTypes.filter((type) => type.toLowerCase().includes(q));
+  }, [workTypeQuery, allWorkTypes]);
 
   const selectWorkType = (value: string) => {
     setFormData((prev) => ({ ...prev, workCategory: value, workTitle: value }));
@@ -347,7 +355,7 @@ export function PlanWorkModal({
                     onChange={(e) => {
                       const value = e.target.value;
                       setWorkTypeQuery(value);
-                      const exact = WORK_TYPES.find((type) => type.toLowerCase() === value.trim().toLowerCase());
+                      const exact = allWorkTypes.find((type) => type.toLowerCase() === value.trim().toLowerCase());
                       setFormData((prev) => ({
                         ...prev,
                         workCategory: exact ?? '',

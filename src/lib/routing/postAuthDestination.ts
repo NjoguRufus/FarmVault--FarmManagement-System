@@ -2,7 +2,7 @@ import type { Employee, User } from "@/types";
 import { APP_ENTRY_PATH } from "@/lib/routing/appEntryPaths";
 
 function normalizeLandingPath(landing: string): string {
-  const l = (landing || "/dashboard").trim() || "/dashboard";
+  const l = (landing || "/home").trim() || "/home";
   if (l === "/admin") return "/developer";
   return l;
 }

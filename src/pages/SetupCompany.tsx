@@ -252,7 +252,7 @@ export default function SetupCompany() {
   };
 
   const handleGoToDashboard = () => {
-    navigate('/dashboard', { replace: true });
+    navigate('/home', { replace: true });
   };
 
 

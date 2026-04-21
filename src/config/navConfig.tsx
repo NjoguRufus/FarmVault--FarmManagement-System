@@ -1,9 +1,12 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
-  FolderKanban,
-  Layers,
+  Home,
+  Folder,
+  Tractor,
   Receipt,
+  Wallet,
+  NotebookPen,
   Wrench,
   Package,
   TrendingUp,
@@ -26,6 +29,11 @@ import {
   Scale,
   Plug,
 } from 'lucide-react';
+import {
+  FARMER_FARM_WORK_PATH,
+  FARMER_HOME_PATH,
+  FARMER_NOTES_PATH,
+} from '@/lib/routing/farmerAppPaths';
 
 export type NavGroup = 'main' | 'more';
 
@@ -41,19 +49,58 @@ export interface NavItem {
   external?: boolean;
 }
 
+/** Mobile More drawer: section headers + route paths (company shell). */
+export const COMPANY_MOBILE_DRAWER_SECTIONS: { title: string; paths: string[] }[] = [
+  { title: 'FARM', paths: ['/harvest', FARMER_FARM_WORK_PATH, '/inventory'] },
+  { title: 'TEAM & PARTNERS', paths: ['/employees', '/suppliers'] },
+  { title: 'INSIGHTS', paths: [FARMER_NOTES_PATH, '/reports'] },
+  { title: 'FINANCE', paths: ['/expenses', '/billing'] },
+  { title: 'SETTINGS & HELP', paths: ['/settings', '/support', '/feedback'] },
+];
+
+/** Build grouped drawer links; skips paths missing after permission filters. */
+export function buildCompanyMobileDrawerGroups(items: NavItem[]): { title: string; items: NavItem[] }[] {
+  const byPath = new Map<string, NavItem>();
+  items.forEach((item) => {
+    const key = item.path.replace(/\/+/g, '/');
+    byPath.set(key, item);
+  });
+  return COMPANY_MOBILE_DRAWER_SECTIONS.map(({ title, paths }) => ({
+    title,
+    items: paths
+      .map((p) => byPath.get(p.replace(/\/+/g, '/')))
+      .filter((x): x is NavItem => Boolean(x)),
+  })).filter((g) => g.items.length > 0);
+}
+
+/** Primary bottom bar order (company shell): Home → Projects → Farm Work → Expenses → Notes. */
+export const COMPANY_PRIMARY_BOTTOM_PATHS = [
+  FARMER_HOME_PATH,
+  '/projects',
+  FARMER_FARM_WORK_PATH,
+  '/expenses',
+  FARMER_NOTES_PATH,
+] as const;
+
 /** Company nav (company-admin, fallback). Main = bottom bar, More = drawer on mobile. */
 export const companyNavConfig: NavItem[] = [
-  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, group: 'main' },
-  { label: 'My Dashboard', path: '/employee-dashboard', icon: LayoutDashboard, group: 'main', employeeOnly: true },
-  { label: 'Projects', path: '/projects', icon: FolderKanban, group: 'main' },
-  { label: 'Operations', path: '/operations', icon: Wrench, group: 'main' },
-  { label: 'Inventory', path: '/inventory', icon: Package, group: 'main' },
-  { label: 'Expenses', path: '/expenses', icon: Receipt, group: 'more' },
+  { label: 'Home', path: FARMER_HOME_PATH, icon: Home, group: 'main' },
+  {
+    label: 'My Dashboard',
+    path: '/employee-dashboard',
+    icon: LayoutDashboard,
+    group: 'main',
+    employeeOnly: true,
+  },
+  { label: 'Projects', path: '/projects', icon: Folder, group: 'main' },
+  { label: 'Farm Work', path: FARMER_FARM_WORK_PATH, icon: Tractor, group: 'main' },
+  { label: 'Expenses', path: '/expenses', icon: Wallet, group: 'main' },
+  { label: 'Notes', path: FARMER_NOTES_PATH, icon: NotebookPen, group: 'main' },
   { label: 'Harvest', path: '/harvest', icon: TrendingUp, group: 'more' },
+  { label: 'Inventory', path: '/inventory', icon: Package, group: 'more' },
   { label: 'Suppliers', path: '/suppliers', icon: Truck, group: 'more' },
   { label: 'Employees', path: '/employees', icon: Users, group: 'more' },
-  { label: 'Records', path: '/records', icon: FileText, group: 'more' },
-  { label: 'Reports', path: '/reports', icon: FileText, group: 'more' },
+  { label: 'Reports', path: '/reports', icon: BarChart3, group: 'more' },
   { label: 'Billing & Subscription', path: '/billing', icon: CreditCard, group: 'more' },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
   { label: 'Support', path: '/support', icon: HelpCircle, group: 'more' },
@@ -89,24 +136,27 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'more' },
   { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
   { label: 'Integrations', path: '/developer/integrations', icon: Plug, group: 'more' },
-  { label: 'Records', path: '/developer/records', icon: FileText, group: 'more' },
+  { label: 'Notes', path: '/developer/records', icon: NotebookPen, group: 'more' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },
   { label: 'Compliance & Documents', path: '/developer/documents', icon: Scale, group: 'more' },
 ];
 
 /** Manager nav. */
 export const managerNavConfig: NavItem[] = [
-  { label: 'Operations', path: '/manager/operations', icon: Wrench, group: 'main' },
+  { label: 'Farm Work', path: '/manager/operations', icon: Tractor, group: 'main' },
   { label: 'Inventory', path: '/inventory', icon: Package, group: 'main' },
   { label: 'Feedback', path: '/feedback', icon: MessageSquare, group: 'more' },
 ];
 
 const managerExtraNavConfig: NavItem[] = companyNavConfig.filter(
   (item) =>
-    item.path !== '/dashboard' &&
+    item.path !== FARMER_HOME_PATH &&
     item.path !== '/employee-dashboard' &&
-    item.path !== '/operations' &&
+    item.path !== FARMER_FARM_WORK_PATH &&
     item.path !== '/inventory' &&
+    item.path !== '/projects' &&
+    item.path !== '/expenses' &&
+    item.path !== FARMER_NOTES_PATH &&
     item.path !== '/feedback'
 );
 
@@ -121,12 +171,12 @@ function getMergedManagerNav(): NavItem[] {
 
 /** Broker nav — same shell as farm app; detail routes are /broker/harvest/:id. */
 export const brokerNavConfig: NavItem[] = [
-  { label: 'Dashboard', shortLabel: 'Home', path: '/broker', icon: LayoutDashboard, group: 'main' },
+  { label: 'Home', shortLabel: 'Home', path: '/broker', icon: Home, group: 'main' },
   {
     label: 'Market expenses',
     shortLabel: 'Expenses',
     path: '/broker/expenses',
-    icon: Receipt,
+    icon: Wallet,
     group: 'main',
   },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
@@ -142,11 +192,11 @@ export const driverNavConfig: NavItem[] = [
 
 /** Staff/employee nav: all routes live under /staff/* */
 export const staffNavConfig: NavItem[] = [
-  { label: 'Dashboard', path: '/staff/staff-dashboard', icon: LayoutDashboard, group: 'main' },
-  { label: 'Operations', path: '/staff/operations', icon: Wrench, group: 'main' },
+  { label: 'Home', path: '/staff/staff-dashboard', icon: Home, group: 'main' },
+  { label: 'Farm Work', path: '/staff/operations', icon: Tractor, group: 'main' },
   { label: 'Inventory', path: '/staff/inventory', icon: Package, group: 'main' },
   { label: 'Harvest', path: '/staff/harvest', icon: TrendingUp, group: 'more' },
-  { label: 'Expenses', path: '/staff/expenses', icon: Receipt, group: 'more' },
+  { label: 'Expenses', path: '/staff/expenses', icon: Wallet, group: 'more' },
   { label: 'Reports', path: '/staff/reports', icon: FileText, group: 'more' },
   { label: 'Settings', path: '/settings', icon: Settings, group: 'more' },
   { label: 'Support', path: '/staff/support', icon: HelpCircle, group: 'more' },
@@ -180,7 +230,7 @@ export function getNavItemsForSidebar(user: { role?: string; employeeRole?: stri
   )
     return getMergedManagerNav();
 
-  return companyNavConfig.filter((i) => i.path === '/dashboard');
+  return companyNavConfig.filter((i) => i.path === FARMER_HOME_PATH);
 }
 
 /** Returns main items for BottomNav (visible on bar). */

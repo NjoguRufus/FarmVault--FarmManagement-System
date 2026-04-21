@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Package, Receipt, Wrench, Lock } from 'lucide-react';
+import { Home, Scale, Package, Wallet, Tractor, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -51,9 +51,11 @@ export function StaffBottomNav() {
 
   if (!user || isDesktop) return null;
 
-  const items: Array<{ label: string; path: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { label: 'Dashboard', path: '/staff/staff-dashboard', icon: LayoutDashboard },
-  ];
+  const items: Array<{
+    label: string;
+    path: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = [{ label: 'Home', path: '/staff/staff-dashboard', icon: Home }];
 
   const canHarvestCollections = canKey('harvest_collections.view') || can('harvest', 'view');
   const canInventory = effectivePermissionKeys.has('inventory.view') || can('inventory', 'view');
@@ -70,10 +72,10 @@ export function StaffBottomNav() {
     items.push({ label: 'Inventory', path: '/staff/inventory', icon: Package });
   }
   if (canExpenses) {
-    items.push({ label: 'Expenses', path: '/staff/expenses', icon: Receipt });
+    items.push({ label: 'Expenses', path: '/staff/expenses', icon: Wallet });
   }
   if (canOperations) {
-    items.push({ label: 'Operations', path: '/staff/operations', icon: Wrench });
+    items.push({ label: 'Farm Work', path: '/staff/operations', icon: Tractor });
   }
 
   if (items.length === 0) return null;
@@ -146,7 +148,7 @@ export function StaffBottomNav() {
               }
             >
               <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[44px] py-1 px-2">
-                <span className="flex items-center justify-center h-5 w-5 shrink-0">
+                <span className="relative flex items-center justify-center h-5 w-5 shrink-0">
                   <Icon
                     className={cn(
                       'h-5 w-5 shrink-0 transition-colors duration-200 ease-in-out',

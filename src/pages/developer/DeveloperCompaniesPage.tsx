@@ -523,8 +523,8 @@ export default function DeveloperCompaniesPage() {
       const companyName = resolved.companyName;
       const dashboardUrl =
         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-          ? 'https://app.farmvault.africa/dashboard'
-          : `${window.location.origin}/dashboard`;
+          ? 'https://app.farmvault.africa/home'
+          : `${window.location.origin}/home`;
 
       // eslint-disable-next-line no-console
       logger.log('Approval email payload', { to, companyName, dashboardUrl });

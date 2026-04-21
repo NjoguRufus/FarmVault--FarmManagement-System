@@ -302,11 +302,11 @@ export function ManagerDashboard() {
       {/* Quick Actions */}
       <div className="fv-card p-4">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => navigate('/operations')} className="fv-btn fv-btn--primary">
+          <Button onClick={() => navigate('/farm-work')} className="fv-btn fv-btn--primary">
             <Plus className="h-4 w-4" />
             Log Daily Work
           </Button>
-          <Button onClick={() => navigate('/operations')} className="fv-btn fv-btn--secondary">
+          <Button onClick={() => navigate('/farm-work')} className="fv-btn fv-btn--secondary">
             <Wrench className="h-4 w-4" />
             View Today's Work
           </Button>

@@ -62,7 +62,7 @@ export async function sendWebPushToSubscription(
     body: payload.body,
     icon: payload.icon ?? "/icons/farmvault-192.png",
     badge: payload.badge ?? "/icons/badge.png",
-    url: payload.url ?? "/dashboard",
+    url: payload.url ?? "/home",
     tag: payload.tag?.trim() || "farmvault",
     type: payload.type ?? "system_alert",
     notification_id: payload.notification_id,

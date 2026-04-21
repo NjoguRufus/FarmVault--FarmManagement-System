@@ -17,7 +17,7 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
   }
 
   if (isEmergencySession) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/home" replace />;
   }
 
   if (!isAuthenticated) {
@@ -33,7 +33,7 @@ export function RequireDeveloper({ children }: RequireDeveloperProps) {
   if (!isDeveloper) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[Route] Redirecting to /dashboard from RequireDeveloper (not developer)', {
+      logger.log('[Route] Redirecting to /home from RequireDeveloper (not developer)', {
         uid: user?.id,
         companyId: user?.companyId ?? null,
       });

@@ -110,7 +110,7 @@ serveFarmVaultEdge("notification-push-dispatch", async (req: Request, _ctx) => {
   const path = (() => {
     const u = r.click_url?.trim() ?? "";
     if (u.startsWith("/")) return u;
-    return "/dashboard";
+    return "/home";
   })();
 
   const title = r.title?.trim() || "FarmVault";

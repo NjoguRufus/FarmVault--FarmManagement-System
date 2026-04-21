@@ -478,7 +478,7 @@ export async function createWorkCard(input: CreateWorkCardInput): Promise<WorkCa
       kind: 'staff_work_assigned',
       title: 'Work assigned',
       body: `${input.workTitle || 'New field task'} — planned for ${when}.`,
-      path: '/operations',
+      path: '/farm-work',
       toastType: 'info',
       audiences: ['company', 'staff'],
     });
@@ -665,7 +665,7 @@ export async function recordWork(input: RecordWorkInput): Promise<WorkCard> {
       kind: 'activity_operation_logged',
       title: 'Operation logged',
       body: `${label} recorded.`,
-      path: '/operations',
+      path: '/farm-work',
       toastType: 'success',
       audiences: ['company', 'staff'],
     });
@@ -857,7 +857,7 @@ export async function markWorkCardPaid(input: MarkWorkCardPaidInput): Promise<Wo
       kind: 'activity_task_completed',
       title: 'Task completed',
       body: `${label} marked paid (KES ${input.amount.toLocaleString('en-KE')}).`,
-      path: '/operations',
+      path: '/farm-work',
       toastType: 'success',
       audiences: ['company', 'staff'],
     });

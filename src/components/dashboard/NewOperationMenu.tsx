@@ -12,9 +12,9 @@ import {
 /** Each path opens the target page with a query that triggers the add modal directly. */
 const OPTIONS = [
   { label: 'Add expense', path: '/expenses?add=1', icon: Receipt },
-  { label: 'Plan / Record daily work', path: '/operations?add=1', icon: Wrench },
+  { label: 'Plan / Record farm work', path: '/farm-work?add=1', icon: Wrench },
   { label: 'Add inventory item', path: '/inventory?add=1', icon: Package },
-  { label: 'Add a note', path: '/records?add=1', icon: NotebookPen },
+  { label: 'Add a note', path: '/notes?add=1', icon: NotebookPen },
   { label: 'Add project', path: '/projects/new', icon: FolderPlus },
 ] as const;
 

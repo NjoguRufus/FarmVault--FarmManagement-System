@@ -16,8 +16,8 @@ export type AppEntryLocationState = {
 
 function defaultFarmHome(role: CanonicalEmployeeRole | null, landingPage: string): string {
   if (role === "BROKER") return "/broker";
-  const p = (landingPage || "/dashboard").trim();
-  if (!p || p === "/") return "/dashboard";
+  const p = (landingPage || "/home").trim();
+  if (!p || p === "/") return "/home";
   if (p === "/admin") return "/developer";
   return p;
 }
@@ -56,7 +56,7 @@ export default function AppEntryPage() {
     if (!authReady || !user || roleGateLoading || didRun.current) return;
 
     if (isEmergencySession) {
-      const to = (effectiveAccess.landingPage || "/dashboard").trim() || "/dashboard";
+      const to = (effectiveAccess.landingPage || "/home").trim() || "/home";
       const normalized = to === "/admin" ? "/developer" : to;
       didRun.current = true;
       navigate(normalized, { replace: true });

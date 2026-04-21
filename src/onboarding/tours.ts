@@ -27,26 +27,26 @@ export const TOUR_CONFIG: ToursConfig = {
     desktop: [
       {
         id: "admin-project-selector",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="project-selector"]',
         content: "Switch your active project from here. Most pages follow this selection.",
         placement: "bottom",
       },
       {
         id: "admin-dashboard-stats",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="dashboard-stats"]',
         content: "These cards summarize revenue, expenses, profit/loss, and budget position.",
       },
       {
         id: "admin-dashboard-quick-actions",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="new-operation-button"]',
         content: "Use Quick Access to jump into common tasks fast.",
       },
       {
         id: "admin-recent-transactions",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="recent-transactions"]',
         content: "Recent transactions help you monitor the latest farm activity.",
       },
@@ -58,7 +58,7 @@ export const TOUR_CONFIG: ToursConfig = {
       },
       {
         id: "admin-operations-page",
-        route: "/operations",
+        route: "/farm-work",
         target: '[data-tour="operations-plan-work-button"]',
         content: "Plan daily work and assign managers from this action.",
       },
@@ -90,14 +90,14 @@ export const TOUR_CONFIG: ToursConfig = {
     mobile: [
       {
         id: "admin-mobile-dashboard-nav",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="mobile-nav-dashboard"]',
         content: "Use the bottom tabs for fast navigation on mobile.",
         placement: "top",
       },
       {
         id: "admin-mobile-dashboard-cards",
-        route: "/dashboard",
+        route: "/home",
         target: '[data-tour="dashboard-stats"]',
         content: "These key cards show your current business snapshot.",
       },
@@ -110,16 +110,16 @@ export const TOUR_CONFIG: ToursConfig = {
       },
       {
         id: "admin-mobile-operations-nav",
-        route: "/operations",
+        route: "/farm-work",
         target: '[data-tour="mobile-nav-operations"]',
-        content: "Operations is where daily work is planned and tracked.",
+        content: "Farm Work is where daily tasks are planned and tracked.",
         placement: "top",
       },
       {
-        id: "admin-mobile-inventory-nav",
-        route: "/inventory",
-        target: '[data-tour="mobile-nav-inventory"]',
-        content: "Inventory tracks inputs and stock movement.",
+        id: "admin-mobile-notes-nav",
+        route: "/notes",
+        target: '[data-tour="mobile-nav-notes"]',
+        content: "Notes keeps your field observations and jot-downs in one place.",
         placement: "top",
       },
       {

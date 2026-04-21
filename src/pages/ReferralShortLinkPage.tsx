@@ -20,7 +20,7 @@ export default function ReferralShortLinkPage() {
     if (!clerkLoaded) return;
 
     if (hasClerkSession || (authReady && isAuthenticated)) {
-      navigate("/dashboard", { replace: true });
+      navigate("/home", { replace: true });
       return;
     }
 

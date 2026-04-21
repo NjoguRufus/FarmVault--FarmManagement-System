@@ -181,9 +181,9 @@ function smartDailyPushPath(category: string): string {
     case "cropStage":
       return "/crop-stages";
     case "summary":
-      return "/dashboard";
+      return "/home";
     default:
-      return "/dashboard";
+      return "/home";
   }
 }
 
@@ -530,7 +530,7 @@ async function runInactivity(params: {
         type: "insight_inactivity",
         title: "FarmVault",
         body: "It's been a while — open FarmVault when you're ready.",
-        url: "/dashboard",
+        url: "/home",
         tag: inactivityDedupe.slice(0, 64),
       });
     } else {
@@ -967,7 +967,7 @@ serveFarmVaultEdge("engagement-email-cron", async (req: Request, _ctx) => {
     }
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const pushBody = typeof body.body === "string" ? body.body.trim() : "";
-    const pushUrl = typeof body.url === "string" && body.url.startsWith("/") ? body.url : "/dashboard";
+    const pushUrl = typeof body.url === "string" && body.url.startsWith("/") ? body.url : "/home";
     const idsRaw = body.clerk_user_ids;
     if (!title || !pushBody || !Array.isArray(idsRaw) || idsRaw.length === 0) {
       return jsonResponse(

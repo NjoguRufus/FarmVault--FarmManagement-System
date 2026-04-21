@@ -152,10 +152,11 @@ if (shouldRenderApp) {
 
   try {
     if (pk) {
-      // Clerk Dashboard → configure allowed redirect URLs for each deployment origin, e.g.:
-      //   https://app.example.com/auth/callback
-      //   https://app.example.com/auth/continue
-      // Dev: http://localhost:5173/auth/callback (and /auth/continue if used)
+      // Clerk Dashboard → Paths / redirects (per deployment origin):
+      //   Required: https://app.example.com/auth/callback  (afterSignInUrl / afterSignUpUrl below)
+      //   Recommended: https://app.example.com/auth/continue
+      //   Optional bookmarks / allowlists: https://app.example.com/home  (canonical farm shell; /dashboard redirects to /home)
+      // Dev: http://localhost:5173/auth/callback (and /auth/continue, /home if you list explicit paths)
       const afterSignInUrl = getAppEntryUrl("/auth/callback");
       const afterSignUpUrl = getAppEntryUrl("/auth/callback");
       createRoot(root).render(

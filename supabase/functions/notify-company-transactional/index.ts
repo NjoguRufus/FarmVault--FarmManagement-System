@@ -415,7 +415,7 @@ serveFarmVaultEdge("notify-company-transactional", async (req: Request, _ctx) =>
       receipt,
       billingCycle: String(payRow.billing_cycle ?? "monthly"),
       billingUrl: `${appUrl}/billing`,
-      dashboardUrl: `${appUrl}/dashboard`,
+      dashboardUrl: `${appUrl}/home`,
     });
 
     console.log("Sending email to:", to);

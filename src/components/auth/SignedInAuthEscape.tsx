@@ -85,7 +85,7 @@ export function SignedInAuthEscape() {
 
     if (isEmergencySession) {
       didRun.current = true;
-      const to = (effectiveAccess.landingPage || "/dashboard").trim() || "/dashboard";
+      const to = (effectiveAccess.landingPage || "/home").trim() || "/home";
       const normalized = to === "/admin" ? "/developer" : to;
       if (location.pathname !== normalized) {
         navigate(normalized, { replace: true });

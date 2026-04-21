@@ -82,7 +82,7 @@ function InstallFarmVaultInner({ className, compact }: InstallFarmVaultProps) {
   };
 
   const handleOpenApp = () => {
-    navigate("/dashboard");
+    navigate("/home");
   };
 
   const handleInstallClick = async () => {

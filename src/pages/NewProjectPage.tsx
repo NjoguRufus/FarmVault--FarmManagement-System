@@ -14,7 +14,7 @@ export default function NewProjectPage() {
           <NewProjectForm
             initialFarmId={activeFarmId}
             onCancel={() => navigate('/projects')}
-            onSuccess={() => navigate('/dashboard', { replace: true })}
+            onSuccess={() => navigate('/home', { replace: true })}
           />
         </div>
       </div>

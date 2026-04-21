@@ -16,6 +16,7 @@ import { features, type SubscriptionTier } from '@/config/subscriptionFeatureMat
 import { logger } from "@/lib/logger";
 import { brokerMayAccessNavPath } from '@/lib/brokerNav';
 import { isNavItemActive } from '@/lib/navActive';
+import { FARMER_FARM_WORK_PATH, FARMER_HOME_PATH, FARMER_NOTES_PATH } from '@/lib/routing/farmerAppPaths';
 
 interface AppSidebarProps {
   collapsed: boolean;
@@ -25,8 +26,10 @@ interface AppSidebarProps {
 function getSidebarTourId(path: string): string | undefined {
   const normalized = path.replace(/\/+/g, '/');
   const map: Record<string, string> = {
+    [FARMER_HOME_PATH]: 'nav-dashboard',
     '/dashboard': 'nav-dashboard',
     '/projects': 'nav-projects',
+    [FARMER_FARM_WORK_PATH]: 'nav-operations',
     '/operations': 'nav-operations',
     '/manager/operations': 'nav-operations',
     '/inventory': 'nav-inventory',
@@ -68,10 +71,10 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   ] as const;
   const companySectionOrder = [
     'Farm Overview',
-    'Farm Operations',
+    'Farm',
     'Team & Partners',
-    'Insights & Records',
-    'Finance & Subscription',
+    'Insights',
+    'Finance',
     'Settings & Help',
   ] as const;
 
@@ -108,28 +111,31 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
 
   const getCompanySection = (path: string) => {
     switch (path) {
+      case FARMER_HOME_PATH:
       case '/dashboard':
-        return 'Farm Overview';
       case '/projects':
+        return 'Farm Overview';
+      case '/harvest':
+      case FARMER_FARM_WORK_PATH:
       case '/operations':
       case '/inventory':
-      case '/harvest':
-        return 'Farm Operations';
+        return 'Farm';
       case '/employees':
       case '/suppliers':
         return 'Team & Partners';
+      case FARMER_NOTES_PATH:
       case '/records':
       case '/reports':
-        return 'Insights & Records';
+        return 'Insights';
       case '/expenses':
       case '/billing':
-        return 'Finance & Subscription';
+        return 'Finance';
       case '/settings':
       case '/support':
       case '/feedback':
         return 'Settings & Help';
       default:
-        return 'Farm Operations';
+        return 'Farm';
     }
   };
 

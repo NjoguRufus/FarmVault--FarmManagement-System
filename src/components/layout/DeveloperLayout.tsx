@@ -21,11 +21,11 @@ export function DeveloperLayout() {
 
   // Hard guard: if a non-developer somehow reaches this shell, bounce them back to their landing page.
   // Use `isDeveloper` (RPC + allowlist) — not only `user.role`, which can be a tenant role during hydration
-  // or for linked developer accounts — so approving a company never kicks the operator to /dashboard → onboarding.
+  // or for linked developer accounts — so approving a company never kicks the operator to /home → onboarding.
   const redirectTarget = useMemo(() => {
     if (!user) return '/sign-in';
     if (isDeveloper || user.role === 'developer') return null;
-    return '/dashboard';
+    return '/home';
   }, [user, isDeveloper]);
 
   useEffect(() => {

@@ -435,7 +435,7 @@ export function BillingModal({
       kind: 'premium_subscription',
       title: 'Subscription active',
       body: 'Your FarmVault plan is now active.',
-      path: '/dashboard',
+      path: '/home',
       toastType: 'success',
       audiences: ['company'],
     });

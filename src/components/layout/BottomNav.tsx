@@ -5,36 +5,65 @@ import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { getMainNavItems, getMoreNavItems, type NavItem as BottomNavItem } from '@/config/navConfig';
+import {
+  buildCompanyMobileDrawerGroups,
+  COMPANY_PRIMARY_BOTTOM_PATHS,
+  getMainNavItems,
+  getNavItemsForSidebar,
+  getMoreNavItems,
+  type NavItem as BottomNavItem,
+} from '@/config/navConfig';
 import { MobileMoreDrawer } from './MobileMoreDrawer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getModuleForPath } from '@/lib/permissions';
-import { logger } from "@/lib/logger";
+import { logger } from '@/lib/logger';
 import { brokerMayAccessNavPath } from '@/lib/brokerNav';
 import { isNavItemActive } from '@/lib/navActive';
+import { FARMER_FARM_WORK_PATH, FARMER_HOME_PATH, FARMER_NOTES_PATH } from '@/lib/routing/farmerAppPaths';
 
 type DrawerGroup = { title: string; items: BottomNavItem[] };
 
 const ACTIVE_TAB_SCALE = 1.04;
 const NAV_ITEM_TRANSITION = {
-  duration: 0.2,
+  duration: 0.22,
   ease: 'easeInOut' as const,
 };
-const ACTIVE_TAB_SHADOW = '0 8px 18px -12px rgba(27, 67, 50, 0.45), 0 3px 8px -6px rgba(27, 67, 50, 0.35)';
+
+/** Warm forest green (hue ~145); mint tints — not blue/cool sage. */
+const TAB_TEXT_ACTIVE_CLASS = 'text-[#356b4e] dark:text-[#b5dcc4]';
+const TAB_TEXT_INACTIVE_CLASS = 'text-[#6e9178] dark:text-[#8aad92]';
+const TAB_RING_ACTIVE = 'ring-[#356b4e]/24 dark:ring-[#6ecf9a]/35';
+
 const MAX_BOTTOM_TABS_NARROW = 5;
-const MAX_BOTTOM_TABS_WIDE = 7; // e.g. tablets around 770px wide
+const MAX_BOTTOM_TABS_WIDE = 7;
+
+const navFilter = (
+  item: BottomNavItem,
+  effectiveIsBroker: boolean,
+  can: (m: string, a: string) => boolean
+) => {
+  if (effectiveIsBroker && brokerMayAccessNavPath(item.path)) return true;
+  const module = getModuleForPath(item.path);
+  if (!module) return true;
+  return can(module, 'view');
+};
 
 function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undefined {
   if (type === 'more') return 'mobile-nav-more';
 
   const normalized = path.replace(/\/+/g, '/');
   const map: Record<string, string> = {
+    [FARMER_HOME_PATH]: 'mobile-nav-dashboard',
     '/dashboard': 'mobile-nav-dashboard',
     '/projects': 'mobile-nav-projects',
+    [FARMER_FARM_WORK_PATH]: 'mobile-nav-operations',
     '/operations': 'mobile-nav-operations',
     '/manager/operations': 'mobile-nav-operations',
     '/inventory': 'mobile-nav-inventory',
     '/harvest': 'mobile-nav-harvest',
+    [FARMER_NOTES_PATH]: 'mobile-nav-notes',
+    '/records': 'mobile-nav-notes',
+    '/expenses': 'mobile-nav-expenses',
     '/broker': 'mobile-nav-broker-dashboard',
     '/broker/harvest-sales': 'mobile-nav-broker-harvest',
     '/broker/expenses': 'mobile-nav-broker-expenses',
@@ -42,22 +71,43 @@ function getBottomNavTourId(path: string, type: 'link' | 'more'): string | undef
   return map[normalized];
 }
 
+function isRouteUnderPrimary(pathname: string, primaryPath: string): boolean {
+  const p = pathname.replace(/\/+/g, '/');
+  const base = primaryPath.replace(/\/+/g, '/');
+  return p === base || (base !== '/' && p.startsWith(`${base}/`));
+}
+
 export function BottomNav() {
   const { user, effectiveAccess } = useAuth();
   const { can } = usePermissions();
   const location = useLocation();
-  const mainItems = getMainNavItems(user).filter((item) => {
-    if (effectiveAccess.isBroker && brokerMayAccessNavPath(item.path)) return true;
-    const module = getModuleForPath(item.path);
-    if (!module) return true;
-    return can(module, 'view');
-  });
-  const moreItems = getMoreNavItems(user).filter((item) => {
-    if (effectiveAccess.isBroker && brokerMayAccessNavPath(item.path)) return true;
-    const module = getModuleForPath(item.path);
-    if (!module) return true;
-    return can(module, 'view');
-  });
+
+  const isCompanyAdminShell =
+    user?.role === 'company-admin' || (user as { role?: string } | null)?.role === 'company_admin';
+  const isDeveloperShell = user?.role === 'developer';
+
+  const allNavItems = useMemo(() => {
+    return getNavItemsForSidebar(user).filter((item) =>
+      navFilter(item, effectiveAccess.isBroker, can as (m: string, a: string) => boolean)
+    );
+  }, [user, effectiveAccess.isBroker, can]);
+
+  const mainItems = useMemo(
+    () => allNavItems.filter((i) => i.group === 'main'),
+    [allNavItems]
+  );
+  const moreItems = useMemo(
+    () => allNavItems.filter((i) => i.group === 'more'),
+    [allNavItems]
+  );
+
+  const mainItemsLegacy = getMainNavItems(user).filter((item) =>
+    navFilter(item, effectiveAccess.isBroker, can as (m: string, a: string) => boolean)
+  );
+  const moreItemsLegacy = getMoreNavItems(user).filter((item) =>
+    navFilter(item, effectiveAccess.isBroker, can as (m: string, a: string) => boolean)
+  );
+
   const [moreOpen, setMoreOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isWide, setIsWide] = useState(false);
@@ -67,7 +117,6 @@ export function BottomNav() {
     setMounted(true);
   }, []);
 
-  // Treat mobile screens wider than ~380px (up to below lg) as "wide mobile" for nav layout.
   useEffect(() => {
     const update = () => {
       if (typeof window === 'undefined') return;
@@ -85,76 +134,66 @@ export function BottomNav() {
   }, []);
 
   const visibleMainItems = useMemo(() => {
+    if (!user) return [];
+    if (isCompanyAdminShell && !isDeveloperShell) {
+      const byPath = new Map(mainItems.map((i) => [i.path.replace(/\/+/g, '/'), i]));
+      return COMPANY_PRIMARY_BOTTOM_PATHS.map((p) => byPath.get(p)).filter(Boolean) as BottomNavItem[];
+    }
+
     const maxTabs = isWide ? MAX_BOTTOM_TABS_WIDE : MAX_BOTTOM_TABS_NARROW;
-    const slotForMore = moreItems.length > 0 || mainItems.length > MAX_BOTTOM_TABS_NARROW ? 1 : 0;
+    const slotForMore = moreItemsLegacy.length > 0 || mainItemsLegacy.length > MAX_BOTTOM_TABS_NARROW ? 1 : 0;
     const maxDirectTabs = Math.max(1, maxTabs - slotForMore);
 
-    // Base source of items
-    const allMain = [...mainItems];
+    const allMain = [...mainItemsLegacy];
 
-    // On wide-but-not-lg screens, we want a specific priority:
-    // 1) Dashboard first, 2) all other main items, 3) Harvest last (just before More).
     if (isWide) {
-      const dashboard = allMain.find((i) => i.path === '/dashboard');
-      const harvestFromMain = allMain.find((i) => i.path === '/harvest');
-      const harvestFromMore = moreItems.find((i) => i.path === '/harvest');
-      const harvest = harvestFromMain ?? harvestFromMore;
-
-      const rest = allMain.filter(
-        (i) => i.path !== '/dashboard' && i.path !== '/harvest'
-      );
-
+      const home = allMain.find((i) => i.path === FARMER_HOME_PATH);
+      const rest = allMain.filter((i) => i.path !== FARMER_HOME_PATH);
       const ordered: BottomNavItem[] = [];
-      if (dashboard) ordered.push(dashboard);
+      if (home) ordered.push(home);
       ordered.push(...rest);
-      if (harvest) ordered.push(harvest);
-
       return ordered.slice(0, maxDirectTabs);
     }
 
-    // Narrow screens: just take main items in their original order.
     return allMain.slice(0, maxDirectTabs);
-  }, [mainItems, moreItems, isWide]);
+  }, [
+    user,
+    isCompanyAdminShell,
+    isDeveloperShell,
+    mainItems,
+    mainItemsLegacy,
+    moreItemsLegacy,
+    isWide,
+  ]);
 
   const drawerItems = useMemo(() => {
-    const overflowMainItems = mainItems.slice(visibleMainItems.length);
+    const overflowMainItems = mainItemsLegacy.slice(visibleMainItems.length);
     const deduped = new Map<string, BottomNavItem>();
-    [...moreItems, ...overflowMainItems].forEach((item) => {
+    [...moreItemsLegacy, ...overflowMainItems].forEach((item) => {
       deduped.set(item.path, item);
     });
     return Array.from(deduped.values());
-  }, [mainItems, moreItems, visibleMainItems.length]);
+  }, [mainItemsLegacy, moreItemsLegacy, visibleMainItems.length]);
 
   const drawerGroups = useMemo<DrawerGroup[]>(() => {
     if (!user) return [{ title: 'More', items: drawerItems }];
 
-    const isDeveloper = user.role === 'developer';
-    const isCompanyAdmin = user.role === 'company-admin' || user.role === 'company_admin';
-
-    if (!isDeveloper && !isCompanyAdmin) {
-      return [{ title: 'More', items: drawerItems }];
+    if (isCompanyAdminShell && !isDeveloperShell) {
+      return buildCompanyMobileDrawerGroups(allNavItems);
     }
 
-    const developerOrder = [
-      'Platform Overview',
-      'Workspace Management',
-      'Finance & Billing',
-      'Operations & Monitoring',
-      'Communication',
-      'Security, Compliance & Data',
-    ] as const;
-    const companyOrder = [
-      'Farm Overview',
-      'Farm Operations',
-      'Team & Partners',
-      'Insights & Records',
-      'Finance & Subscription',
-      'Settings & Help',
-    ] as const;
+    if (isDeveloperShell) {
+      const developerOrder = [
+        'Platform Overview',
+        'Workspace Management',
+        'Finance & Billing',
+        'Operations & Monitoring',
+        'Communication',
+        'Security, Compliance & Data',
+      ] as const;
 
-    const sectionForPath = (path: string) => {
-      const normalized = path.replace(/\/+/g, '/');
-      if (isDeveloper) {
+      const sectionForPath = (path: string) => {
+        const normalized = path.replace(/\/+/g, '/');
         switch (normalized) {
           case '/developer':
             return 'Platform Overview';
@@ -183,47 +222,41 @@ export function BottomNav() {
           default:
             return 'Workspace Management';
         }
-      }
+      };
 
-      switch (normalized) {
-        case '/dashboard':
-          return 'Farm Overview';
-        case '/projects':
-        case '/operations':
-        case '/inventory':
-        case '/harvest':
-          return 'Farm Operations';
-        case '/employees':
-        case '/suppliers':
-          return 'Team & Partners';
-        case '/records':
-        case '/reports':
-          return 'Insights & Records';
-        case '/expenses':
-        case '/billing':
-          return 'Finance & Subscription';
-        case '/settings':
-        case '/support':
-        case '/feedback':
-          return 'Settings & Help';
-        default:
-          return 'Farm Operations';
-      }
-    };
+      const order = developerOrder;
+      const buckets = new Map<string, BottomNavItem[]>();
+      order.forEach((title) => buckets.set(title, []));
+      drawerItems.forEach((item) => {
+        const section = sectionForPath(item.path);
+        const bucket = buckets.get(section);
+        if (bucket) bucket.push(item);
+      });
 
-    const order = isDeveloper ? developerOrder : companyOrder;
-    const buckets = new Map<string, BottomNavItem[]>();
-    order.forEach((title) => buckets.set(title, []));
-    drawerItems.forEach((item) => {
-      const section = sectionForPath(item.path);
-      const bucket = buckets.get(section);
-      if (bucket) bucket.push(item);
-    });
+      return order
+        .map((title) => ({ title, items: buckets.get(title) ?? [] }))
+        .filter((group) => group.items.length > 0);
+    }
 
-    return order
-      .map((title) => ({ title, items: buckets.get(title) ?? [] }))
-      .filter((group) => group.items.length > 0);
-  }, [drawerItems, user]);
+    return [{ title: 'More', items: drawerItems }];
+  }, [drawerItems, user, isDeveloperShell, isCompanyAdminShell, allNavItems]);
+
+  const drawerItemsForSheet = useMemo(() => {
+    if (isCompanyAdminShell && !isDeveloperShell) {
+      const seen = new Set<string>();
+      const out: BottomNavItem[] = [];
+      drawerGroups.forEach((g) => {
+        g.items.forEach((item) => {
+          const k = item.path;
+          if (seen.has(k)) return;
+          seen.add(k);
+          out.push(item);
+        });
+      });
+      return out;
+    }
+    return drawerItems;
+  }, [drawerGroups, drawerItems, isCompanyAdminShell, isDeveloperShell]);
 
   const tabs = useMemo(() => {
     const list = visibleMainItems.map((item) => ({
@@ -232,7 +265,8 @@ export function BottomNav() {
       type: 'link' as const,
       tourId: getBottomNavTourId(item.path, 'link'),
     }));
-    if (drawerItems.length > 0) {
+    const showMore = isCompanyAdminShell && !isDeveloperShell ? drawerGroups.length > 0 : drawerItems.length > 0;
+    if (showMore) {
       list.push({
         label: 'More',
         path: '',
@@ -243,19 +277,31 @@ export function BottomNav() {
       });
     }
     return list;
-  }, [visibleMainItems, drawerItems.length]);
+  }, [visibleMainItems, drawerItems.length, drawerGroups.length, isCompanyAdminShell, isDeveloperShell]);
 
   const handleMoreTap = () => {
-    if (drawerItems.length > 0) setMoreOpen(true);
+    const open = isCompanyAdminShell && !isDeveloperShell ? drawerGroups.length > 0 : drawerItems.length > 0;
+    if (open) setMoreOpen(true);
   };
 
   const isMoreActive = useMemo(() => {
+    const path = location.pathname.replace(/\/+/g, '/');
+    if (isCompanyAdminShell && !isDeveloperShell) {
+      if (path === '/more' || path.startsWith('/more/')) return true;
+      const isPrimary = COMPANY_PRIMARY_BOTTOM_PATHS.some((base) => isRouteUnderPrimary(path, base));
+      if (isPrimary) return false;
+      return buildCompanyMobileDrawerGroups(allNavItems).some((group) =>
+        group.items.some((m) => {
+          const mp = m.path.replace(/\/+/g, '/');
+          return path === mp || (mp !== '/' && path.startsWith(`${mp}/`));
+        })
+      );
+    }
     return drawerItems.some((m) => {
       const mp = m.path.replace(/\/+/g, '/');
-      const path = location.pathname.replace(/\/+/g, '/');
-      return path === mp || (mp !== '/' && path.startsWith(mp + '/'));
+      return path === mp || (mp !== '/' && path.startsWith(`${mp}/`));
     });
-  }, [drawerItems, location.pathname]);
+  }, [drawerItems, location.pathname, isCompanyAdminShell, isDeveloperShell, allNavItems]);
 
   if (!user || isDesktop) {
     return null;
@@ -263,12 +309,8 @@ export function BottomNav() {
 
   const navNode = (
     <div
-      className="fixed inset-x-0 bottom-3.5 z-[60] lg:hidden flex justify-center pointer-events-none"
+      className="fixed inset-x-0 z-[60] lg:hidden flex justify-center pointer-events-none bottom-0 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 pt-2"
       style={{
-        position: 'fixed',
-        left: 0,
-        right: 0,
-        bottom: '14px',
         transform: 'translateZ(0)',
         WebkitTransform: 'translateZ(0)',
         backfaceVisibility: 'hidden',
@@ -277,13 +319,16 @@ export function BottomNav() {
     >
       <nav
         data-tour="bottom-navigation"
-        className="pointer-events-auto w-[92%] max-w-[480px] rounded-2xl min-h-[56px] flex items-center justify-around px-1 py-1.5 gap-1 relative overflow-hidden bg-fv-cream dark:bg-card border border-primary/10 dark:border-emerald-200/10 border-t-primary/20 dark:border-t-emerald-200/15 shadow-[0_10px_24px_-16px_rgba(27,67,50,0.38),0_4px_10px_-6px_rgba(27,67,50,0.2)] dark:shadow-[0_12px_26px_-16px_rgba(0,0,0,0.65),0_4px_10px_-6px_rgba(0,0,0,0.5)]"
+        className={cn(
+          'pointer-events-auto w-full max-w-[480px] rounded-2xl min-h-[58px] flex items-stretch justify-between gap-0 px-1 py-1.5 relative overflow-hidden',
+          /* 1px vertical rules between tabs (not cell outlines) */
+          'divide-x divide-solid divide-[#356b4e]/32 dark:divide-[#6ecf9a]/42',
+          'bg-[#f2f8f4] dark:bg-[hsl(145_22%_13%)]/95',
+          'border border-[#356b4e]/22 dark:border-[#6ecf9a]/28 shadow-[0_12px_32px_-18px_rgba(0,0,0,0.1),0_6px_20px_-12px_rgba(53,107,78,0.16)]',
+          'backdrop-blur-md supports-[backdrop-filter]:bg-[#f2f8f4]/92 dark:supports-[backdrop-filter]:bg-[hsl(145_22%_13%)]/92',
+        )}
         aria-label="Bottom navigation"
       >
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-primary/15 to-transparent dark:from-emerald-900/30"
-        />
         {tabs.map((item) => {
           if (item.type === 'more') {
             return (
@@ -316,7 +361,13 @@ export function BottomNav() {
   return (
     <>
       {mounted ? createPortal(navNode, document.body) : null}
-      <MobileMoreDrawer open={moreOpen} onOpenChange={setMoreOpen} items={drawerItems} groups={drawerGroups} />
+      <MobileMoreDrawer
+        open={moreOpen}
+        onOpenChange={setMoreOpen}
+        items={drawerItemsForSheet}
+        groups={drawerGroups}
+        variant={isCompanyAdminShell && !isDeveloperShell ? 'left' : 'bottom'}
+      />
     </>
   );
 }
@@ -331,13 +382,19 @@ function NavItem({
 }: {
   item: { label: string; icon: React.ComponentType<{ className?: string }>; tourId?: string };
   active?: boolean;
-  /** When set (e.g. broker tab URLs), overrides React Router NavLink `isActive`. */
   activeOverride?: boolean;
   to?: string;
   asButton?: boolean;
   onPress?: () => void;
 }) {
   const Icon = item.icon;
+  /** Mint-green tint (hue ~145); outline matches TAB_GREEN */
+  const activePill = cn(
+    'bg-gradient-to-b from-[#d9eee0] via-[#e8f4ec] to-[#f2f8f4] dark:from-[hsl(145_32%_17%)] dark:via-[hsl(145_28%_15%)] dark:to-[hsl(145_24%_13%)]',
+    'ring-1',
+    TAB_RING_ACTIVE,
+    'shadow-[inset_0_0_0_1px_rgba(53,107,78,0.12),inset_0_1px_0_rgba(255,255,255,0.9),0_2px_10px_-4px_rgba(53,107,78,0.14)]'
+  );
 
   if (asButton && onPress) {
     return (
@@ -346,38 +403,29 @@ function NavItem({
         onClick={onPress}
         data-tour={item.tourId}
         className={cn(
-          'relative z-10 flex flex-1 min-w-0 min-h-[44px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
-          activeProp && 'bg-green-100/85 dark:bg-emerald-900/45'
+          'relative z-10 flex flex-1 min-w-0 min-h-[48px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[#356b4e]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f2f8f4] dark:focus-visible:ring-offset-transparent',
+          activeProp && activePill
         )}
         aria-label={item.label}
+        aria-current={activeProp ? 'page' : undefined}
         initial={false}
-        animate={
-          activeProp
-            ? {
-                scale: ACTIVE_TAB_SCALE,
-                boxShadow: ACTIVE_TAB_SHADOW,
-              }
-            : {
-                scale: 1,
-                boxShadow: 'none',
-              }
-        }
+        animate={activeProp ? { scale: ACTIVE_TAB_SCALE } : { scale: 1 }}
         transition={NAV_ITEM_TRANSITION}
-        whileTap={{ scale: 0.985 }}
+        whileTap={{ scale: 0.96 }}
       >
-        <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[44px] py-1 px-2">
+          <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[48px] py-1 px-1.5">
           <span className="flex items-center justify-center h-5 w-5 shrink-0">
             <Icon
               className={cn(
-                'h-5 w-5 shrink-0 transition-colors duration-200 ease-in-out',
-                activeProp ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
+                'h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-200 ease-out',
+                activeProp ? TAB_TEXT_ACTIVE_CLASS : TAB_TEXT_INACTIVE_CLASS
               )}
             />
           </span>
           <span
             className={cn(
-              'text-[10px] font-medium truncate max-w-[72px] text-center transition-colors duration-200 ease-in-out',
-              activeProp ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
+              'text-[10px] font-semibold tracking-tight truncate max-w-[4.75rem] text-center transition-colors duration-200 ease-out',
+              activeProp ? TAB_TEXT_ACTIVE_CLASS : TAB_TEXT_INACTIVE_CLASS
             )}
           >
             {item.label}
@@ -393,58 +441,51 @@ function NavItem({
   const normalizedPath = pathOnly.replace(/\/+/g, '/') || '/';
   const endMatch =
     !to.includes('?') &&
-    (normalizedPath === '/' || normalizedPath === '/developer' || normalizedPath === '/broker');
+    (normalizedPath === '/' ||
+      normalizedPath === FARMER_HOME_PATH ||
+      normalizedPath === '/developer' ||
+      normalizedPath === '/broker');
 
   return (
     <NavLink
       to={to}
       end={endMatch}
       data-tour={item.tourId}
-      className="relative z-10 flex flex-1 min-w-0 min-h-[44px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+      className="relative z-10 flex flex-1 min-w-0 min-h-[48px] rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[#356b4e]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f2f8f4] dark:focus-visible:ring-offset-transparent"
       aria-label={item.label}
     >
       {({ isActive }) => {
         const tabActive = activeOverride ?? isActive;
         return (
-        <motion.span
-          className={cn(
-            'flex flex-1 min-w-0 w-full h-full rounded-xl',
-            tabActive && 'bg-green-100/85 dark:bg-emerald-900/45'
-          )}
-          initial={false}
-          animate={
-            tabActive
-              ? {
-                  scale: ACTIVE_TAB_SCALE,
-                  boxShadow: ACTIVE_TAB_SHADOW,
-                }
-              : {
-                  scale: 1,
-                  boxShadow: 'none',
-                }
-          }
-          transition={NAV_ITEM_TRANSITION}
-          whileTap={{ scale: 0.985 }}
-        >
-          <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[44px] py-1 px-2">
-            <span className="flex items-center justify-center h-5 w-5 shrink-0">
-            <Icon
-              className={cn(
-                'h-5 w-5 shrink-0 transition-colors duration-200 ease-in-out',
-                tabActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
-              )}
-            />
+          <motion.span
+            className={cn(
+              'flex flex-1 min-w-0 w-full h-full rounded-xl',
+              tabActive && activePill
+            )}
+            initial={false}
+            animate={tabActive ? { scale: ACTIVE_TAB_SCALE } : { scale: 1 }}
+            transition={NAV_ITEM_TRANSITION}
+            whileTap={{ scale: 0.96 }}
+          >
+            <span className="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 min-h-[48px] py-1 px-1.5">
+              <span className="flex items-center justify-center h-5 w-5 shrink-0">
+                <Icon
+                  className={cn(
+                    'h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-200 ease-out',
+                    tabActive ? TAB_TEXT_ACTIVE_CLASS : TAB_TEXT_INACTIVE_CLASS
+                  )}
+                />
+              </span>
+              <span
+                className={cn(
+                  'text-[10px] font-semibold tracking-tight truncate max-w-[4.75rem] text-center transition-colors duration-200 ease-out',
+                  tabActive ? TAB_TEXT_ACTIVE_CLASS : TAB_TEXT_INACTIVE_CLASS
+                )}
+              >
+                {item.label}
+              </span>
             </span>
-            <span
-              className={cn(
-                'text-[10px] font-medium truncate max-w-[72px] text-center transition-colors duration-200 ease-in-out',
-                tabActive ? 'text-primary dark:text-emerald-100' : 'text-primary/60 dark:text-emerald-100/60'
-              )}
-            >
-              {item.label}
-            </span>
-          </span>
-        </motion.span>
+          </motion.span>
         );
       }}
     </NavLink>

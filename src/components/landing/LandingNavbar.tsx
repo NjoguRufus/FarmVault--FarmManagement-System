@@ -20,7 +20,7 @@ export function LandingNavbar() {
   const { isAuthenticated, authReady } = useAuth();
 
   const showOpenDashboard = isPublicProductionHost() && authReady && isAuthenticated;
-  const dashboardHref = buildUrl(getAppBaseUrl(), "/dashboard");
+  const dashboardHref = buildUrl(getAppBaseUrl(), "/home");
   const loginHref = getAppAuthUrl("sign-in");
   const signUpHref = getAppAuthUrl("sign-up");
 

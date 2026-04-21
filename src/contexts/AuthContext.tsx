@@ -1471,7 +1471,7 @@ export function AuthProvider({
         if (import.meta.env.DEV) {
           if (employeeFromRpc && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
-            logger.log('[Auth] Redirecting employee to /dashboard (invite matched via RPC)');
+            logger.log('[Auth] Redirecting employee to /home (invite matched via RPC)');
           } else if (employee && !isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
             logger.log('[Auth] Employee session path', {
@@ -1481,7 +1481,7 @@ export function AuthProvider({
             });
           } else if (isContextCompanyAdmin) {
             // eslint-disable-next-line no-console
-            logger.log('[Auth] Company admin session path → /dashboard', {
+            logger.log('[Auth] Company admin session path → /home', {
               uid: userId,
               companyId: mappedWithCompany.companyId,
               role: mappedWithCompany.role,
