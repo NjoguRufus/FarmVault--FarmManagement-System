@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { rateLimitAsync } from '@/lib/rateLimitAsync';
 
 export type CompanySubscriptionGateStatus =
   | 'pending_approval'
@@ -35,14 +36,22 @@ export interface CompanySubscriptionGateState {
   active_until?: string | null;
 }
 
-export async function getSubscriptionGateState(): Promise<CompanySubscriptionGateState | null> {
+const getSubscriptionGateStateImpl = async (): Promise<CompanySubscriptionGateState | null> => {
   const { data, error } = await supabase.rpc('get_subscription_gate_state');
   if (error) {
     throw new Error(error.message ?? 'Failed to load subscription gate state');
   }
   const row = Array.isArray(data) ? data[0] : data;
   return (row as CompanySubscriptionGateState | null) ?? null;
-}
+};
+
+/**
+ * Hard throttle to avoid rate-limit storms (rerenders, reconnects, tab focus).
+ * React Query caching should already prevent most duplicates; this is a safety net.
+ */
+export const getSubscriptionGateState = rateLimitAsync(getSubscriptionGateStateImpl, {
+  minIntervalMs: 30_000,
+});
 
 /** Member-visible STK rows — aligns tenant UI with developer when gate RPC lags behind mpesa_payments. */
 export function mpesaRowIndicatesConfirmedPayment(row: {
@@ -65,17 +74,24 @@ export function mpesaRowIndicatesFailedPayment(row: {
   return u === 'FAILED' || u === 'FAILURE';
 }
 
-export async function hasConfirmedMpesaStkForCompany(companyId: string): Promise<boolean> {
+const hasConfirmedMpesaStkForCompanyImpl = async (companyId: string): Promise<boolean> => {
   const cid = companyId.trim();
   if (!cid) return false;
   const { data, error } = await supabase
     .from('mpesa_payments')
-    .select('id,result_code,status')
+    .select('id,result_code,status,created_at')
     .eq('company_id', cid)
-    .limit(80);
+    .order('created_at', { ascending: false })
+    // Only need a small recent window to detect "any confirmed" without scanning lots of rows.
+    .limit(20);
   if (error || !data?.length) return false;
   return data.some((r) => mpesaRowIndicatesConfirmedPayment(r as { result_code?: number | null; status?: string | null }));
-}
+};
+
+/** Hard throttle — payment status does not need rapid polling. */
+export const hasConfirmedMpesaStkForCompany = rateLimitAsync(hasConfirmedMpesaStkForCompanyImpl, {
+  minIntervalMs: 60_000,
+});
 
 export type DeveloperSubscriptionAction =
   | 'approve'
