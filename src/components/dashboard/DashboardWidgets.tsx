@@ -16,6 +16,7 @@ import {
 } from 'recharts';
 import { BarChart3, PieChart as PieChartIcon, TrendingUp, LayoutList } from 'lucide-react';
 import { InventoryItem } from '@/types';
+import { formatKes } from '@/components/reports/analyticsFormat';
 
 const STAGE_COLORS = [
   'hsl(150 35% 25%)',
@@ -101,7 +102,7 @@ export function RecentTransactions({ transactions: propTransactions = [] }: Rece
     () => [...transactions].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 10),
     [transactions],
   );
-  const formatCurrency = (amount: number) => `KES ${(amount / 1000).toFixed(0)}k`;
+  const formatTxAmount = (amount: number) => formatKes(Math.abs(Number(amount) || 0));
   const formatDate = (d: Date) => d.toLocaleDateString('en-KE', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
@@ -126,7 +127,7 @@ export function RecentTransactions({ transactions: propTransactions = [] }: Rece
                   )}
                 </div>
                 <span className={`text-sm font-semibold ${tx.type === 'sale' ? 'text-green-600 dark:text-green-400' : 'text-foreground'}`}>
-                  {tx.type === 'sale' ? '+' : '-'}{formatCurrency(tx.amount)}
+                  {tx.type === 'sale' ? '+' : '-'}{formatTxAmount(tx.amount)}
                 </span>
               </div>
             ))

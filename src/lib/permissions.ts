@@ -598,6 +598,8 @@ const PATH_TO_MODULE: Array<{ prefix: string; module: PermissionModule }> = [
   { prefix: '/projects/', module: 'projects' },
   { prefix: '/projects', module: 'projects' },
   { prefix: '/suppliers', module: 'projects' },
+  { prefix: '/staff/notes/', module: 'notes' },
+  { prefix: '/staff/notes', module: 'notes' },
   { prefix: '/notes/', module: 'notes' },
   { prefix: '/notes', module: 'notes' },
   { prefix: '/records/', module: 'notes' },

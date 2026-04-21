@@ -9,13 +9,6 @@ import { CropStageProgressCard } from '@/components/dashboard';
 import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
 import type { CropStage } from '@/types';
 import type { EnvironmentType } from '@/types';
-import {
-  Select as UiSelect,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
 import { toDate } from '@/lib/dateUtils';
 import { getLegacyStartingStageIndex, getStageLabelForKey } from '@/lib/stageDetection';
 import { detectStageForCrop } from '@/knowledge/stageDetection';
@@ -24,7 +17,6 @@ import { useCropCatalog } from '@/hooks/useCropCatalog';
 import { subscribeActivity, type ActivityLogDoc } from '@/services/activityLogService';
 import { buildSmartAdvisoryCardSummary } from '@/utils/advisoryEngine';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
-import { isProjectClosed } from '@/lib/projectClosed';
 import { computedTimelineStagesForProject } from '@/lib/farmProgressFromProject';
 import { logger } from "@/lib/logger";
 
@@ -33,22 +25,12 @@ export function StaffDashboard() {
   const { permissions, can } = usePermissions();
   const { effectivePermissionKeys, projectAccessIds, hasProjectAccess } = useEmployeeAccess();
   const { fullName, roleLabel } = useStaff();
-  const { projects, activeProject, setActiveProject } = useProject();
+  const { activeProject } = useProject();
   const { crops: cropCatalog } = useCropCatalog(user?.companyId);
 
   const companyId = user?.companyId ?? null;
 
   const { data: allStages = [] } = useCompanyProjectStages(companyId);
-
-  const companyProjects = useMemo(() => {
-    const byCompany = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
-    return byCompany.filter((p) => hasProjectAccess(p.id));
-  }, [projects, companyId, hasProjectAccess]);
-
-  const staffSelectableProjects = useMemo(
-    () => companyProjects.filter((p) => !isProjectClosed(p)),
-    [companyProjects],
-  );
 
   const activeProjectStages = useMemo(() => {
     if (!activeProject || !companyId) return [];
@@ -287,31 +269,6 @@ export function StaffDashboard() {
         <p className="text-sm text-muted-foreground mt-1">
           {displayRole} · Staff workspace
         </p>
-      </div>
-
-      {/* Mobile project selector inside dashboard */}
-      <div className="md:hidden max-w-xs">
-        <p className="text-xs text-muted-foreground mb-1.5">Project</p>
-        <UiSelect
-          value={activeProject?.id ?? undefined}
-          onValueChange={(projectId) => {
-            const next = staffSelectableProjects.find((p) => p.id === projectId) ?? null;
-            if (next) {
-              setActiveProject(next);
-            }
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select project" />
-          </SelectTrigger>
-          <SelectContent>
-            {staffSelectableProjects.map((project) => (
-              <SelectItem key={project.id} value={project.id}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </UiSelect>
       </div>
 
       {/* Crop stage progress: when staff have planning/projects/dashboard access, show same view as admin (including knowledge-based progress when no stages set). */}

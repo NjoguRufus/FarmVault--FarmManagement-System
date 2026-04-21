@@ -6,6 +6,7 @@ import { StaffProvider } from '@/contexts/StaffContext';
 import { StaffSidebar } from './StaffSidebar';
 import { StaffNavbar } from './StaffNavbar';
 import { StaffBottomNav } from './StaffBottomNav';
+import { FloatingActionButton } from './FloatingActionButton';
 import { cn } from '@/lib/utils';
 import { StaffTourProvider } from '@/tour/StaffTourProvider';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
@@ -88,6 +89,7 @@ export function StaffLayout() {
             </div>
           </main>
           <StaffBottomNav />
+          <FloatingActionButton />
         </div>
       </StaffTourProvider>
     </StaffProvider>

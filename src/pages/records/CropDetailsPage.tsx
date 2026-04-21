@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import { NotesCard } from "@/components/records/NotesCard";
-import { FARMER_NOTES_PATH } from "@/lib/routing/farmerAppPaths";
+import { resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./cropDetailsNotes.css";
 
@@ -48,6 +48,7 @@ export default function CropDetailsPage() {
   const { user } = useAuth();
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
+  const notesBase = resolveNotesBasePath(location.pathname);
 
   const [rows, setRows] = useState<FarmNotebookEntryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,7 +163,7 @@ export default function CropDetailsPage() {
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 navigate(-1);
               } else {
-                navigate(isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH);
+                navigate(notesBase);
               }
             }}
           >
@@ -180,7 +181,7 @@ export default function CropDetailsPage() {
               variant="outline"
               className="rounded-xl"
               onClick={() =>
-                navigate(`${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/full-knowledge`)
+                navigate(`${notesBase}/${encodeURIComponent(cropSlug)}/full-knowledge`)
               }
             >
               Full Knowledge
@@ -189,9 +190,7 @@ export default function CropDetailsPage() {
           <Button
             className="rounded-xl"
             onClick={() =>
-              navigate(
-                `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/new`,
-              )
+              navigate(`${notesBase}/${encodeURIComponent(cropSlug)}/new`)
             }
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -224,9 +223,7 @@ export default function CropDetailsPage() {
           <Button
             className="rounded-xl mt-5"
             onClick={() =>
-              navigate(
-                `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/new`,
-              )
+              navigate(`${notesBase}/${encodeURIComponent(cropSlug)}/new`)
             }
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -271,9 +268,7 @@ export default function CropDetailsPage() {
                 <NotesCard
                   note={n}
                   onClick={() =>
-                    navigate(
-                      `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(n.id)}`,
-                    )
+                    navigate(`${notesBase}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(n.id)}`)
                   }
                 />
                 {isDeveloperRoute ? (

@@ -40,7 +40,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     amount: 0,
-    method: 'cash' as 'cash' | 'mpesa' | 'bank' | 'other',
+    method: 'mpesa' as 'cash' | 'mpesa' | 'bank' | 'other',
     notes: '',
   });
 
@@ -49,7 +49,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
     if (workCard && open) {
       setFormData({
         amount: workCard.actualTotal ?? workCard.plannedTotal ?? 0,
-        method: 'cash',
+        method: 'mpesa',
         notes: '',
       });
     }
@@ -129,7 +129,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px]">
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-[520px] sm:w-full">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Banknote className="h-5 w-5" />
@@ -149,46 +149,51 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
             )}
           </div>
 
-          {/* Amount */}
-          <div className="space-y-2">
-            <Label htmlFor="amount">Amount Paid (KSh) *</Label>
-            <Input
-              id="amount"
-              type="number"
-              min={0}
-              value={formData.amount}
-              onChange={(e) => setFormData(prev => ({ 
-                ...prev, 
-                amount: parseFloat(e.target.value) || 0 
-              }))}
-            />
-            {workCard.actualTotal && workCard.actualTotal !== formData.amount && (
-              <p className="text-xs text-muted-foreground">
-                Calculated total: KSh {workCard.actualTotal.toLocaleString()}
-              </p>
-            )}
-          </div>
-
-          {/* Payment Method */}
-          <div className="space-y-2">
-            <Label htmlFor="method">Payment Method</Label>
-            <Select
-              value={formData.method}
-              onValueChange={(v) => setFormData(prev => ({ 
-                ...prev, 
-                method: v as 'cash' | 'mpesa' | 'bank' | 'other' 
-              }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="mpesa">M-Pesa</SelectItem>
-                <SelectItem value="bank">Bank Transfer</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Amount + payment method — same row on all breakpoints */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 items-start">
+            <div className="min-w-0 space-y-1.5 sm:space-y-2">
+              <Label htmlFor="amount" className="text-xs leading-tight sm:text-sm">
+                Amount Paid (KSh) *
+              </Label>
+              <Input
+                id="amount"
+                type="number"
+                min={0}
+                className="min-w-0"
+                value={formData.amount}
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  amount: parseFloat(e.target.value) || 0,
+                }))}
+              />
+              {workCard.actualTotal && workCard.actualTotal !== formData.amount && (
+                <p className="text-xs text-muted-foreground">
+                  Calculated total: KSh {workCard.actualTotal.toLocaleString()}
+                </p>
+              )}
+            </div>
+            <div className="min-w-0 space-y-1.5 sm:space-y-2">
+              <Label htmlFor="method" className="text-xs leading-tight sm:text-sm">
+                Payment Method
+              </Label>
+              <Select
+                value={formData.method}
+                onValueChange={(v) => setFormData(prev => ({
+                  ...prev,
+                  method: v as 'cash' | 'mpesa' | 'bank' | 'other',
+                }))}
+              >
+                <SelectTrigger id="method" className="min-w-0 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="mpesa">M-Pesa</SelectItem>
+                  <SelectItem value="bank">Bank Transfer</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Notes */}
@@ -204,14 +209,14 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
           </div>
 
           {/* Summary */}
-          <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
-            <div className="flex items-center justify-between">
-              <span className="text-purple-700">Amount to Pay</span>
-              <span className="text-2xl font-bold text-purple-900">
+          <div className="rounded-lg border border-primary/25 bg-primary/10 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-medium text-primary">Amount to Pay</span>
+              <span className="text-2xl font-bold tabular-nums text-foreground">
                 KSh {formData.amount.toLocaleString()}
               </span>
             </div>
-            <p className="text-xs text-purple-600 mt-2">
+            <p className="mt-2 text-xs text-primary/80">
               This will create a labor expense entry
             </p>
           </div>

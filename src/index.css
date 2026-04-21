@@ -257,6 +257,38 @@
     @apply bg-muted/20;
   }
 
+  /* Recent Expenses table: vertical separators between columns (same gradient bars as BottomNav) */
+  .fv-expenses-table-with-seps th:not(:first-child),
+  .fv-expenses-table-with-seps td:not(:first-child) {
+    @apply relative;
+  }
+  .fv-expenses-table-with-seps th:not(:first-child)::before,
+  .fv-expenses-table-with-seps td:not(:first-child)::before {
+    content: '';
+    @apply pointer-events-none absolute left-0 top-[12%] bottom-[12%] w-px rounded-full;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(53, 107, 78, 0.27) 18%,
+      rgba(53, 107, 78, 0.37) 50%,
+      rgba(53, 107, 78, 0.27) 82%,
+      transparent 100%
+    );
+    box-shadow: 0 0 6px rgba(53, 107, 78, 0.08);
+  }
+  .dark .fv-expenses-table-with-seps th:not(:first-child)::before,
+  .dark .fv-expenses-table-with-seps td:not(:first-child)::before {
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(110, 207, 154, 0.31) 18%,
+      rgba(110, 207, 154, 0.43) 50%,
+      rgba(110, 207, 154, 0.31) 82%,
+      transparent 100%
+    );
+    box-shadow: 0 0 6px rgba(110, 207, 154, 0.09);
+  }
+
   /* Status Badges */
   .fv-badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;

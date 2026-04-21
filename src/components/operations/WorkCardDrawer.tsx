@@ -10,8 +10,6 @@ import {
   Package,
   FileText,
   History,
-  MoreVertical,
-  X,
 } from 'lucide-react';
 import {
   Sheet,
@@ -23,16 +21,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { WorkCard, WorkCardStatus } from '@/services/operationsWorkCardService';
@@ -56,7 +46,6 @@ const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon
 };
 
 export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdated }: WorkCardDrawerProps) {
-  const { user } = useAuth();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
   
@@ -69,7 +58,9 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
   const isEdited = workCard.status === 'edited' || (workCard.editHistory && workCard.editHistory.length > 0);
   const canRecordWork = workCard.status === 'planned';
   const canEditWork = workCard.status === 'logged' || workCard.status === 'edited';
-  const canMarkPaid = (workCard.status === 'logged' || workCard.status === 'edited') && !workCard.payment.isPaid;
+  const canMarkPaid =
+    (workCard.status === 'logged' || workCard.status === 'edited') && !workCard.payment.isPaid;
+  const showMarkPaid = canMarkPaid && can('operations', 'markPaid');
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'Not set';
@@ -126,33 +117,28 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {canRecordWork && (
-                <Button onClick={() => setShowRecordWorkModal(true)} className="flex-1">
+                <Button onClick={() => setShowRecordWorkModal(true)} className="min-w-0 flex-1 sm:flex-1">
                   <CheckCircle className="h-4 w-4 mr-2" />
                   Record Work
                 </Button>
               )}
               {canEditWork && (
-                <Button variant="outline" onClick={() => setShowRecordWorkModal(true)} className="flex-1">
+                <Button variant="outline" onClick={() => setShowRecordWorkModal(true)} className="min-w-0 flex-1 sm:flex-1">
                   <Edit className="h-4 w-4 mr-2" />
                   Edit Work
                 </Button>
               )}
-              {canMarkPaid && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setShowMarkPaidModal(true)}>
-                      <Banknote className="h-4 w-4 mr-2" />
-                      Mark as Paid
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              {showMarkPaid && (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowMarkPaidModal(true)}
+                  className="min-w-0 flex-1 basis-full sm:basis-auto sm:flex-initial"
+                >
+                  <Banknote className="h-4 w-4 mr-2" />
+                  Mark as paid
+                </Button>
               )}
             </div>
           </SheetHeader>

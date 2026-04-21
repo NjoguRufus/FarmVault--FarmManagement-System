@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './AppSidebar';
 import { BottomNav } from './BottomNav';
+import { FloatingActionButton } from './FloatingActionButton';
 import { TopNavbar } from './TopNavbar';
 import { PaymentReminderBanner } from './PaymentReminderBanner';
 import { PostOnboardingProjectWelcomeBanner } from './PostOnboardingProjectWelcomeBanner';
@@ -206,6 +207,7 @@ export function MainLayout() {
       </main>
 
       <BottomNav />
+      <FloatingActionButton />
       {!subscriptionLoading && trialExpiredNeedsPlan && isCompanyAdmin && <PostTrialPlanModal open />}
     </div>
   );

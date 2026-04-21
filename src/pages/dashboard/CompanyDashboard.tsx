@@ -28,15 +28,7 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCollection } from '@/hooks/useCollection';
 import { Expense, Harvest, Project, Sale } from '@/types';
-import type { CropType, EnvironmentType } from '@/types';
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
-import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
+import type { EnvironmentType } from '@/types';
 import { toDate } from '@/lib/dateUtils';
 import { getSortTime, safeToDate } from '@/lib/safeTime';
 import {
@@ -83,7 +75,6 @@ import {
   projectFarmLifecycle,
 } from '@/lib/farmProgressFromProject';
 import { useCompanyProjectStages } from '@/hooks/useCompanyProjectStages';
-import { isProjectClosed } from '@/lib/projectClosed';
 import { FeatureGate } from '@/components/subscription';
 import { logger } from "@/lib/logger";
 import { hasTomatoHarvestModule } from '@/lib/cropModules';
@@ -106,7 +97,6 @@ export function CompanyDashboard() {
   const queryClient = useQueryClient();
   const {
     activeProject,
-    setActiveProject,
     projects: supabaseProjects,
     isLoadingProjects,
     projectsFetchError,
@@ -324,11 +314,6 @@ export function CompanyDashboard() {
       return scoped.filter((p) => hasProjectAccess(p.id));
     },
     [mergedProjects, companyId, hasProjectAccess]
-  );
-
-  const dashboardSelectableProjects = useMemo(
-    () => companyProjects.filter((p) => !isProjectClosed(p)),
-    [companyProjects],
   );
 
   const farmProgressRowsForAllProjects = useMemo(() => {
@@ -941,7 +926,7 @@ export function CompanyDashboard() {
         type: 'sale',
         date: d ?? new Date(0),
         label: s.buyerName || 'Sale',
-        amount: s.totalAmount,
+        amount: Number(s.totalAmount) || 0,
         status: s.status,
       });
     });
@@ -952,7 +937,7 @@ export function CompanyDashboard() {
         type: 'expense',
         date: d ?? new Date(0),
         label: e.description || e.category || 'Expense',
-        amount: e.amount,
+        amount: Number(e.amount) || 0,
       });
     });
     return items.sort((a, b) => getSortTime(b.date) - getSortTime(a.date)).slice(0, 15);
@@ -994,18 +979,6 @@ export function CompanyDashboard() {
   }, [filteredExpenses, filteredSales]);
 
   const firstName = user?.name?.trim().split(/\s+/)[0] || null;
-
-  const handleProjectChange = useCallback(
-    (value: string) => {
-      if (value === 'all') {
-        setActiveProject(null);
-      } else {
-        const proj = dashboardSelectableProjects.find((p) => p.id === value);
-        if (proj) setActiveProject(proj);
-      }
-    },
-    [dashboardSelectableProjects, setActiveProject]
-  );
 
   const advisorySummary = useMemo(() => {
     const hasActivityToday = mergedActivityLogs.some(isActivityToday);
@@ -1130,13 +1103,6 @@ export function CompanyDashboard() {
     );
   }
 
-  const projectSelectorValue = activeProject ? activeProject.id : 'all';
-
-  const getCropIcon = (cropType?: CropType | null) => {
-    if (!cropType) return cropTypeKeyEmoji(null);
-    return cropTypeKeyEmoji(String(cropType));
-  };
-
   const showCropStageCard = canSee('dashboard', 'cards.cropStage');
   const showRevenueCard = canSee('dashboard', 'cards.revenue');
   const showExpensesCard = canSee('dashboard', 'cards.expenses');
@@ -1212,30 +1178,12 @@ export function CompanyDashboard() {
         </Alert>
       )}
 
-      {/* Unified header: Greeting + Project selector + Quick Access (desktop & mobile) */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-center">
-        <DashboardGreeting firstName={firstName} />
-        <div className="flex w-full items-center justify-between gap-2 sm:gap-3 md:ml-auto md:w-auto md:flex-nowrap md:justify-end">
-          <Select value={projectSelectorValue} onValueChange={handleProjectChange}>
-            <SelectTrigger
-              data-tour="dashboard-project-selector"
-              className="h-9 w-[112px] shrink-0 sm:w-[150px] lg:w-[180px] rounded-md border border-border/50 bg-card/80 text-sm"
-            >
-              <SelectValue placeholder="Project" />
-            </SelectTrigger>
-            <SelectContent className="rounded-md">
-              <SelectItem value="all">All Projects</SelectItem>
-              {dashboardSelectableProjects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  <span className="flex items-center gap-2">
-                    <span className="text-base" aria-hidden>{getCropIcon(p.cropType)}</span>
-                    {p.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <NewOperationMenu variant={isMobile ? 'mobile' : 'default'} />
+      {/* Greeting + action strip: Tour (leading) and Quick Access (trailing) — full-width justify-between so they don’t sit as one block */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 shrink">
+          <DashboardGreeting firstName={firstName} />
+        </div>
+        <div className="flex w-full min-w-0 flex-1 flex-row flex-nowrap items-center justify-between gap-3 sm:max-w-none sm:pl-4 md:pl-6">
           <Button
             type="button"
             size="sm"
@@ -1247,6 +1195,9 @@ export function CompanyDashboard() {
             <HelpCircle className="h-4 w-4 lg:mr-1.5" />
             <span className="hidden lg:inline">Take a Tour</span>
           </Button>
+          <div className="shrink-0">
+            <NewOperationMenu variant={isMobile ? 'mobile' : 'default'} />
+          </div>
         </div>
       </div>
 

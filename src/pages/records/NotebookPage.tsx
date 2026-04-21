@@ -24,7 +24,7 @@ import type { NoteAttachmentLayout } from "@/components/records/DraggableAttachm
 import { DraggableAttachment } from "@/components/records/DraggableAttachment";
 import { StructuredNotePreview } from "@/components/records/StructuredNotePreview";
 import { SmartRichNotesEditor } from "@/components/records/SmartRichNotesEditor";
-import { FARMER_NOTES_PATH } from "@/lib/routing/farmerAppPaths";
+import { resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
 import { parseNotebookContentToBlocks } from "@/lib/notebook/parseNotebookContentToBlocks";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./notebookPage.css";
@@ -67,6 +67,7 @@ export default function NotebookPage() {
   const { user } = useAuth();
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
+  const notesBase = resolveNotesBasePath(location.pathname);
 
   const [noteId, setNoteId] = useState<string | null>(noteIdParam && noteIdParam !== "new" ? noteIdParam : null);
   const [loading, setLoading] = useState<boolean>(() => !!noteIdParam && noteIdParam !== "new");
@@ -442,10 +443,9 @@ export default function NotebookPage() {
 
           setNoteId(createdId);
           // Replace URL so refresh lands on the existing note.
-          navigate(
-            `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(createdId)}`,
-            { replace: true },
-          );
+          navigate(`${notesBase}/${encodeURIComponent(cropSlug)}/${encodeURIComponent(createdId)}`, {
+            replace: true,
+          });
         } else {
           const { error } = await db
             .public()
@@ -551,9 +551,7 @@ export default function NotebookPage() {
       toast.success("Note deleted");
       setShowDeleteConfirm(false);
       navigate(
-        isGeneralFarmNotebook
-          ? `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}`
-          : `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}`,
+        isGeneralFarmNotebook ? notesBase : `${notesBase}/${encodeURIComponent(cropSlug)}`,
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to delete note.";
@@ -595,9 +593,7 @@ export default function NotebookPage() {
               return;
             }
             navigate(
-              isGeneralFarmNotebook
-                ? `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}`
-                : `${isDeveloperRoute ? "/developer/records" : FARMER_NOTES_PATH}/${encodeURIComponent(cropSlug)}`,
+              isGeneralFarmNotebook ? notesBase : `${notesBase}/${encodeURIComponent(cropSlug)}`,
             );
           }}
         >

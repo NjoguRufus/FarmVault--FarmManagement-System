@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Clock, CheckCircle, Edit, Banknote, Calendar, Package, History, Plus, ClipboardList } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -21,6 +22,7 @@ import {
 import { WorkCardDrawer } from '@/components/operations/WorkCardDrawer';
 import { RecordWorkModal } from '@/components/operations/RecordWorkModal';
 import { LogWorkModal } from '@/components/operations/LogWorkModal';
+import { MarkPaidModal } from '@/components/operations/MarkPaidModal';
 
 const STATUS_CONFIG: Record<WorkCardStatus, { label: string; color: string; icon: React.ReactNode }> = {
   planned: { label: 'Planned', color: 'bg-blue-100 text-blue-800', icon: <Clock className="h-4 w-4" /> },
@@ -35,19 +37,24 @@ export default function StaffOperationsPage() {
   const { employee } = useCurrentEmployee();
   const { can } = usePermissions();
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const companyId = user?.companyId ?? null;
   const employeeId = employee?.id ?? null;
   const canRecordWork = can('operations', 'recordDailyWork');
+  const canMarkPaid = can('operations', 'markPaid');
 
   const [selectedWorkCard, setSelectedWorkCard] = useState<WorkCard | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [showRecordModal, setShowRecordModal] = useState(false);
   const [showLogWorkModal, setShowLogWorkModal] = useState(false);
+  const [markPaidWorkCard, setMarkPaidWorkCard] = useState<WorkCard | null>(null);
   const [activeTab, setActiveTab] = useState('assigned');
+  /** After /staff/operations?add=1: open Record work on first planned card when possible, else Log work. */
+  const [pendingQuickAddIntent, setPendingQuickAddIntent] = useState(false);
 
   // Fetch work cards assigned to this employee
-  const { data: assignedCards = [], refetch: refetchAssigned } = useQuery({
+  const { data: assignedCards = [], isLoading: assignedLoading, refetch: refetchAssigned } = useQuery({
     queryKey: ['assigned-work-cards', companyId, employeeId],
     queryFn: () => getWorkCardsForWorker({
       companyId: companyId!,
@@ -75,6 +82,36 @@ export default function StaffOperationsPage() {
   const pendingCards = useMemo(() => {
     return assignedCards.filter(card => card.status === 'planned');
   }, [assignedCards]);
+
+  // Quick add: /staff/operations?add=1 → RecordWorkModal when there is planned assigned work, else LogWorkModal.
+  useEffect(() => {
+    if (searchParams.get('add') !== '1') return;
+    setSearchParams(
+      (p) => {
+        p.delete('add');
+        return p;
+      },
+      { replace: true },
+    );
+    if (!canRecordWork) return;
+    setPendingQuickAddIntent(true);
+  }, [searchParams, setSearchParams, canRecordWork]);
+
+  useEffect(() => {
+    if (!pendingQuickAddIntent) return;
+    if (assignedLoading) return;
+    if (!canRecordWork) {
+      setPendingQuickAddIntent(false);
+      return;
+    }
+    if (pendingCards.length > 0) {
+      setSelectedWorkCard(pendingCards[0]);
+      setShowRecordModal(true);
+    } else {
+      setShowLogWorkModal(true);
+    }
+    setPendingQuickAddIntent(false);
+  }, [pendingQuickAddIntent, assignedLoading, pendingCards, canRecordWork]);
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'No date';
@@ -109,6 +146,10 @@ export default function StaffOperationsPage() {
     const config = STATUS_CONFIG[card.status];
     const isEdited = card.status === 'edited' || (card.editHistory && card.editHistory.length > 0);
     const hasInputs = card.inputsUsed && card.inputsUsed.length > 0;
+    const showMarkPaidOnCard =
+      canMarkPaid &&
+      (card.status === 'logged' || card.status === 'edited') &&
+      !card.payment.isPaid;
 
     return (
       <Card
@@ -178,6 +219,20 @@ export default function StaffOperationsPage() {
               </Button>
             )}
 
+            {showMarkPaidOnCard && (
+              <Button
+                variant="secondary"
+                className="w-full mt-2"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMarkPaidWorkCard(card);
+                }}
+              >
+                <Banknote className="h-4 w-4 mr-2" />
+                Mark as paid
+              </Button>
+            )}
+
             {/* Work Done Summary */}
             {card.status !== 'planned' && card.workDone && (
               <p className="text-sm text-muted-foreground line-clamp-2 pt-2 border-t">
@@ -202,9 +257,20 @@ export default function StaffOperationsPage() {
             </p>
           </div>
           {canRecordWork && (
-            <Button onClick={() => setShowLogWorkModal(true)} className="gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                if (pendingCards.length > 0) {
+                  setSelectedWorkCard(pendingCards[0]);
+                  setShowRecordModal(true);
+                } else {
+                  setShowLogWorkModal(true);
+                }
+              }}
+              className="gap-2"
+            >
               <Plus className="h-4 w-4" />
-              Log Work
+              {pendingCards.length > 0 ? 'Record work' : 'Log work'}
             </Button>
           )}
         </div>
@@ -305,6 +371,18 @@ export default function StaffOperationsPage() {
         initialProjectId={activeProject?.id ?? null}
         onSuccess={() => {
           setShowLogWorkModal(false);
+          handleWorkUpdated();
+        }}
+      />
+
+      <MarkPaidModal
+        open={markPaidWorkCard !== null}
+        onOpenChange={(open) => {
+          if (!open) setMarkPaidWorkCard(null);
+        }}
+        workCard={markPaidWorkCard}
+        onSuccess={() => {
+          setMarkPaidWorkCard(null);
           handleWorkUpdated();
         }}
       />
