@@ -411,6 +411,7 @@ export default function AdminOperationsPage() {
               isLoading={cardsLoading}
               onCardClick={handleCardClick}
               statusConfig={STATUS_CONFIG}
+              onMarkPaidSuccess={handleWorkCardUpdated}
             />
 
             {/* 2) Inventory + Today's activity together */}
@@ -473,6 +474,7 @@ export default function AdminOperationsPage() {
                 isLoading={cardsLoading}
                 onCardClick={handleCardClick}
                 statusConfig={STATUS_CONFIG}
+                onMarkPaidSuccess={handleWorkCardUpdated}
               />
 
               {/* Inventory Used Today */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, FileText, Loader2, Plus, RefreshCw, Search, Sprout } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,17 +31,16 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
-import { FARMER_NOTES_PATH } from '@/lib/routing/farmerAppPaths';
+import { resolveNotesBasePath } from '@/lib/routing/farmerAppPaths';
 import SeasonChallengesPage from '@/pages/SeasonChallengesPage';
 
-const BRAND_GREEN = '#16a34a';
 const BRAND_GOLD = '#D8B980';
 
 function glassCard(className?: string) {
   return cn(
     'rounded-2xl border border-white/10 bg-background/55 shadow-[0_12px_40px_rgba(17,24,39,0.08)] backdrop-blur-md transition-all duration-300',
     'dark:border-white/5 dark:bg-background/40 dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]',
-    'hover:shadow-[0_16px_48px_rgba(22,163,74,0.12)]',
+    'hover:shadow-[0_16px_48px_hsl(var(--primary)_/_0.12)]',
     className,
   );
 }
@@ -86,6 +85,8 @@ function formatRelativeTime(iso: string | null): string {
 export default function AdminRecordsPage() {
   const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const notesBasePath = resolveNotesBasePath(location.pathname);
   const urlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
   const initialTab =
     urlTab === 'challenges'
@@ -184,7 +185,7 @@ export default function AdminRecordsPage() {
       setAddNoteOpen(false);
       setNewNoteTitle('');
       toast.success('Note created');
-      navigate(`${FARMER_NOTES_PATH}/${FARM_NOTEBOOK_GENERAL_SLUG}/${encodeURIComponent(id)}`);
+      navigate(`${notesBasePath}/${FARM_NOTEBOOK_GENERAL_SLUG}/${encodeURIComponent(id)}`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Could not create note.');
     } finally {
@@ -518,23 +519,18 @@ export default function AdminRecordsPage() {
   return (
     <div
       className="space-y-8 animate-fade-in pb-24"
-      style={
-        {
-          '--fv-brand-green': BRAND_GREEN,
-          '--fv-brand-gold': BRAND_GOLD,
-        } as React.CSSProperties
-      }
+      style={{ '--fv-brand-gold': BRAND_GOLD } as React.CSSProperties}
     >
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-3">
             <span
               className={cn(
-                'inline-flex h-12 w-12 items-center justify-center rounded-2xl border shadow-md',
-                'border-[color:var(--fv-brand-green)]/25 bg-gradient-to-br from-[#16a34a]/12 to-transparent',
+                'inline-flex h-12 w-12 items-center justify-center rounded-md border shadow-md',
+                'border-primary/25 bg-gradient-to-br from-primary/12 to-transparent',
               )}
             >
-              <Sprout className="h-6 w-6" style={{ color: BRAND_GREEN }} />
+              <Sprout className="h-6 w-6 text-primary" />
             </span>
             <div>
               <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[34px]">
@@ -550,7 +546,7 @@ export default function AdminRecordsPage() {
           <Button
             size="sm"
             variant="outline"
-            className="rounded-xl"
+            className="rounded-md border-primary/35 text-primary hover:bg-primary/10 hover:text-primary"
             disabled={!companyReady}
             onClick={() => setAddCropOpen(true)}
           >
@@ -559,8 +555,8 @@ export default function AdminRecordsPage() {
           </Button>
           <Button
             size="sm"
-            className="rounded-xl shadow-md hover:opacity-95"
-            style={{ backgroundColor: BRAND_GREEN }}
+            variant="default"
+            className="rounded-md shadow-sm"
             disabled={!companyReady}
             onClick={openAddNoteModal}
           >
@@ -651,7 +647,7 @@ export default function AdminRecordsPage() {
                 <p className="text-sm text-muted-foreground max-w-md mx-auto mb-5">
                   Start logging notes in a crop notebook and your activity will appear here.
                 </p>
-                <Button onClick={() => setFabOpen(true)} size="sm" style={{ backgroundColor: BRAND_GREEN }}>
+                <Button onClick={() => setFabOpen(true)} size="sm" variant="default" className="rounded-md">
                   <Plus className="h-4 w-4 mr-1" />
                   Add note
                 </Button>
@@ -660,7 +656,7 @@ export default function AdminRecordsPage() {
               <div className={cn(glassCard(), 'p-7 text-sm text-muted-foreground')}>No crops match your search.</div>
             ) : (
               <div className="space-y-4">
-                <RecordsCropGrid crops={visibleCrops} basePath={FARMER_NOTES_PATH} className="gap-4 sm:gap-5" />
+                <RecordsCropGrid crops={visibleCrops} basePath={notesBasePath} className="gap-4 sm:gap-5" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {visibleCrops.slice(0, 6).map((c) => (
                     <div
@@ -702,7 +698,7 @@ export default function AdminRecordsPage() {
                   Add a farm notebook note or open a crop notebook. New notes use the same cards as your crop
                   shortcuts.
                 </p>
-                <Button onClick={openAddNoteModal} size="sm" style={{ backgroundColor: BRAND_GREEN }}>
+                <Button onClick={openAddNoteModal} size="sm" variant="default" className="rounded-md">
                   <Plus className="h-4 w-4 mr-1" />
                   Add new note
                 </Button>
@@ -712,7 +708,7 @@ export default function AdminRecordsPage() {
                 {recentNotesQuery.data!.map((n) => (
                   <RecordNotebookEntryCard
                     key={n.id}
-                    to={`${FARMER_NOTES_PATH}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                    to={`${notesBasePath}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
                     title={(n.title ?? '').trim() || 'Untitled'}
                     content={n.content}
                     cropSlug={n.crop_slug}
@@ -771,7 +767,7 @@ export default function AdminRecordsPage() {
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3">
                         <Link
-                          to={`${FARMER_NOTES_PATH}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                          to={`${notesBasePath}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
                           className="text-base font-semibold text-foreground hover:underline"
                         >
                           {(n.title ?? '').trim() || 'Untitled'}
@@ -788,19 +784,6 @@ export default function AdminRecordsPage() {
           </TabsContent>
         </Tabs>
       )}
-
-      {companyReady ? (
-        <Button
-          type="button"
-          size="lg"
-          className="fixed bottom-6 right-6 z-40 h-14 rounded-full px-6 shadow-xl transition-transform hover:scale-[1.03]"
-          style={{ backgroundColor: BRAND_GREEN }}
-          onClick={openAddNoteModal}
-        >
-          <Plus className="h-5 w-5 mr-2" />
-          Add new note
-        </Button>
-      ) : null}
 
       <Dialog
         open={addNoteOpen}
@@ -844,7 +827,7 @@ export default function AdminRecordsPage() {
             </Button>
             <Button
               type="button"
-              style={{ backgroundColor: BRAND_GREEN }}
+              variant="default"
               disabled={addNoteSaving || !newNoteTitle.trim()}
               onClick={() => void createFarmNoteAndOpenEditor()}
             >
@@ -871,9 +854,9 @@ export default function AdminRecordsPage() {
             {visibleCrops.map((c) => (
               <Link
                 key={c.crop_id}
-                to={`${FARMER_NOTES_PATH}/${encodeURIComponent(c.slug || c.crop_id)}`}
+                to={`${notesBasePath}/${encodeURIComponent(c.slug || c.crop_id)}`}
                 onClick={() => setFabOpen(false)}
-                className="flex items-center justify-between rounded-xl border border-border/60 px-3 py-2 text-sm hover:border-[color:var(--fv-brand-green)]/40 hover:bg-muted/30"
+                className="flex items-center justify-between rounded-xl border border-border/60 px-3 py-2 text-sm hover:border-primary/40 hover:bg-muted/30"
               >
                 <span className="font-medium">{c.crop_name}</span>
                 <span className="text-xs text-muted-foreground">{c.records_count} notes</span>
@@ -923,11 +906,7 @@ export default function AdminRecordsPage() {
             <Button variant="outline" disabled={cropCatalogSaving} onClick={() => setAddCropOpen(false)}>
               Cancel
             </Button>
-            <Button
-              style={{ backgroundColor: BRAND_GREEN }}
-              disabled={cropCatalogSaving}
-              onClick={() => void saveCustomCrop()}
-            >
+            <Button variant="default" disabled={cropCatalogSaving} onClick={() => void saveCustomCrop()}>
               {cropCatalogSaving ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>

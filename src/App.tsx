@@ -543,6 +543,38 @@ const AppRoutesWithLock = () => (
           }
         />
         <Route
+          path="notes/:cropSlug/new"
+          element={
+            <PermissionRoute module="notes">
+              <NotebookPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="notes/:cropSlug/:noteId"
+          element={
+            <PermissionRoute module="notes">
+              <NotebookPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="notes/:cropSlug"
+          element={
+            <PermissionRoute module="notes">
+              <CropDetailsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path="notes"
+          element={
+            <PermissionRoute module="notes">
+              <AdminRecordsPage />
+            </PermissionRoute>
+          }
+        />
+        <Route
           path="operations"
           element={
             <PermissionRoute module="operations">

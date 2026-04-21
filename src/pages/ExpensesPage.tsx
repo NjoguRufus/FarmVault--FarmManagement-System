@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Download, MoreHorizontal, Calendar as CalendarIcon, Receipt, Loader2 } from 'lucide-react';
-import { AuditLogsButton } from '@/components/audit/AuditLogsButton';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExpensesPieChart } from '@/components/dashboard/ExpensesPieChart';
@@ -614,7 +613,12 @@ export default function ExpensesPage() {
       toast.error('Permission denied', { description: 'You cannot export reports.' });
       return;
     }
-    const rows = filteredExpenses.map((expense) => ({
+    const sorted = [...filteredExpenses].sort((a, b) => {
+      const tb = toDate(b.date)?.getTime() ?? 0;
+      const ta = toDate(a.date)?.getTime() ?? 0;
+      return tb - ta;
+    });
+    const rows = sorted.map((expense) => ({
       Date: formatDate(expense.date),
       Category: expense.category,
       Amount: expense.amount,
@@ -645,6 +649,12 @@ export default function ExpensesPage() {
       toast.error('No expenses to export.');
       return;
     }
+
+    const sortedForPdf = [...filteredExpenses].sort((a, b) => {
+      const tb = toDate(b.date)?.getTime() ?? 0;
+      const ta = toDate(a.date)?.getTime() ?? 0;
+      return tb - ta;
+    });
 
     const dateRangeLabel = dateRange?.from || dateRange?.to
       ? `${dateRange?.from ? formatDate(dateRange.from) : '—'} → ${dateRange?.to ? formatDate(dateRange.to) : '—'}`
@@ -693,7 +703,7 @@ export default function ExpensesPage() {
         top_category: String(top[0]),
         top_category_amount: formatKes(Number(top[1] ?? 0)),
       },
-      rows: filteredExpenses.map((e) => ({
+      rows: sortedForPdf.map((e) => ({
         date: formatDate(e.date),
         category: `<span class="badge ${badgeForExpenseCategory(String(e.category ?? ''))}">${String(e.category ?? '')}</span>`,
         item: String(e.description ?? ''),
@@ -743,8 +753,7 @@ export default function ExpensesPage() {
             )}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <AuditLogsButton companyId={companyId} tableName="expenses" />
+        <div className="flex flex-wrap items-center gap-2">
           {showBrokerExpensesButton && (
             <button
               type="button"
@@ -832,46 +841,43 @@ export default function ExpensesPage() {
           </>
           )}
           {canExportExpenseReport && (
-            <>
+            <div className="flex flex-row flex-nowrap gap-2 shrink-0">
               <button
-                className="fv-btn fv-btn--secondary"
+                type="button"
+                className="fv-btn fv-btn--secondary whitespace-nowrap shrink-0"
                 onClick={() => void handleExportExpensesPdf()}
                 data-tour="staff-expenses-export"
               >
-                <Download className="h-4 w-4" />
+                <Download className="h-4 w-4 shrink-0" />
                 Export PDF
               </button>
               <button
-                className="fv-btn fv-btn--secondary"
+                type="button"
+                className="fv-btn fv-btn--secondary whitespace-nowrap shrink-0"
                 onClick={handleExportExpensesCsv}
               >
-                <Download className="h-4 w-4" />
+                <Download className="h-4 w-4 shrink-0" />
                 Export CSV
               </button>
-            </>
-          )}
-          {canCreateExpense && (
-            <>
-              <button className="fv-btn fv-btn--primary" data-tour="staff-expenses-add" onClick={() => setAddOpen(true)}>
-                <Plus className="h-4 w-4" />
-                Add Expense
-              </button>
-              <AddExpenseModal
-                open={addOpen}
-                onOpenChange={setAddOpen}
-                companyId={companyId}
-                farmId={activeProject?.farmId ?? selectedFarmId ?? null}
-                projectId={activeProject?.id ?? null}
-                createdBy={user?.id ?? null}
-                onSaved={async () => {
-                  await queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
-                  await queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
-                }}
-              />
-            </>
+            </div>
           )}
         </div>
       </div>
+
+      {canCreateExpense && (
+        <AddExpenseModal
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          companyId={companyId}
+          farmId={activeProject?.farmId ?? selectedFarmId ?? null}
+          projectId={activeProject?.id ?? null}
+          createdBy={user?.id ?? null}
+          onSaved={async () => {
+            await queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
+            await queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+          }}
+        />
+      )}
 
       <Dialog open={!!payoutDetailCollectionId} onOpenChange={(open) => !open && setPayoutDetailCollectionId(null)}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-hidden flex flex-col">
@@ -923,91 +929,84 @@ export default function ExpensesPage() {
 
       {/* Summary Cards + Filters */}
       <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-2 sm:gap-3">
-          <SimpleStatCard
-            title="Total Expenses"
-            value={formatCurrency(totalExpenses)}
-            subtitle={`From ${expenses.length} transactions`}
-            layout="vertical"
-          />
-          <SimpleStatCard
-            title="Filtered Total"
-            value={formatCurrency(totalExpenses)}
-            subtitle="Based on applied filters"
-            layout="vertical"
-          />
-        </div>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search expenses..."
-              className="fv-input pl-10"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            <SimpleStatCard
+              title="Total Expenses"
+              value={formatCurrency(totalExpenses)}
+              subtitle={`From ${expenses.length} transactions`}
+              layout="vertical"
+            />
+            <SimpleStatCard
+              title="Filtered Total"
+              value={formatCurrency(totalExpenses)}
+              subtitle="Based on applied filters"
+              layout="vertical"
             />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="Seeds">Seeds</SelectItem>
-              <SelectItem value="Fertilizers">Fertilizers</SelectItem>
-              <SelectItem value="Labor">Labor</SelectItem>
-              <SelectItem value="labour">Labour (picker)</SelectItem>
-              <SelectItem value="Pesticides">Pesticides</SelectItem>
-              <SelectItem value="Irrigation">Irrigation</SelectItem>
-              <SelectItem value="Equipment">Equipment</SelectItem>
-            </SelectContent>
-          </Select>
-          <Popover>
-            <PopoverTrigger asChild>
-              <button className="fv-btn fv-btn--secondary flex items-center gap-2">
-                <CalendarIcon className="h-4 w-4" />
-                Date range
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="p-0" align="end">
-              <Calendar
-                mode="range"
-                selected={dateRange}
-                onSelect={setDateRange}
+          <div className="flex flex-row gap-2 items-stretch min-w-0">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search expenses..."
+                className="fv-input pl-10 w-full min-w-0"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
               />
-            </PopoverContent>
-          </Popover>
+            </div>
+            {canCreateExpense && (
+              <button
+                type="button"
+                className="fv-btn fv-btn--primary shrink-0 whitespace-nowrap px-3 sm:px-4"
+                data-tour="staff-expenses-add"
+                onClick={() => setAddOpen(true)}
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                Add Expense
+              </button>
+            )}
+          </div>
+          <div className="flex flex-row flex-nowrap gap-2 items-stretch min-w-0">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="min-w-0 flex-1 sm:w-44 sm:flex-none sm:shrink-0">
+                <SelectValue placeholder="All Categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="Seeds">Seeds</SelectItem>
+                <SelectItem value="Fertilizers">Fertilizers</SelectItem>
+                <SelectItem value="Labor">Labor</SelectItem>
+                <SelectItem value="labour">Labour (picker)</SelectItem>
+                <SelectItem value="Pesticides">Pesticides</SelectItem>
+                <SelectItem value="Irrigation">Irrigation</SelectItem>
+                <SelectItem value="Equipment">Equipment</SelectItem>
+              </SelectContent>
+            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="fv-btn fv-btn--secondary flex items-center justify-center gap-2 shrink-0 whitespace-nowrap px-3"
+                >
+                  <CalendarIcon className="h-4 w-4 shrink-0" />
+                  Date range
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="p-0 w-auto max-w-[calc(100vw-2rem)]" align="end">
+                <Calendar
+                  mode="range"
+                  selected={dateRange}
+                  onSelect={setDateRange}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
-        {/* Pie + Bar charts — Basic: titles visible, data blurred + Pro overlay */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
-            <ExpensesPieChart
-              data={Object.entries(
-                filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-                  acc[e.category] = (acc[e.category] || 0) + e.amount;
-                  return acc;
-                }, {}),
-              ).map(([category, amount]) => ({ category, amount }))}
-            />
-          </FeatureGate>
-          <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
-            <ExpensesBarChart
-              data={Object.entries(
-                filteredExpenses.reduce<Record<string, number>>((acc, e) => {
-                  acc[e.category] = (acc[e.category] || 0) + e.amount;
-                  return acc;
-                }, {}),
-              ).map(([category, amount]) => ({ category, amount }))}
-            />
-          </FeatureGate>
-        </div>
-      </div>
-
-      {/* Expenses Table */}
-      <div className="space-y-3">
-        <h3 className="text-lg font-semibold shrink-0">Recent Expenses</h3>
+        {/* Recent Expenses — first main section */}
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold shrink-0">Recent Expenses</h3>
 
         {isLoading && (
           <p className="text-sm text-muted-foreground">Loading expenses…</p>
@@ -1015,7 +1014,7 @@ export default function ExpensesPage() {
         
         {/* Desktop Table: scrollable when many rows so card stays same size */}
         <div className="hidden md:block rounded-xl border border-border bg-background overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0">
-          <table className="fv-table">
+          <table className="fv-table fv-expenses-table-with-seps">
             <thead>
               <tr>
                 <th>Description</th>
@@ -1202,142 +1201,224 @@ export default function ExpensesPage() {
           </table>
         </div>
 
-        {/* Mobile Cards: scrollable when 5+ so card stays same size */}
-        <div className="md:hidden rounded-xl border border-border bg-background overflow-y-auto scrollbar-thin max-h-[320px] space-y-3 pr-3 py-3">
-          {recentTableRows.map((row) => {
-            if (row.type === 'harvest_payout') {
-              const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
-              return (
-                <div
-                  key={row.key}
-                  role="button"
-                  tabIndex={0}
-                  className="mx-3 p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
-                  onClick={() => setPayoutDetailCollectionId(row.collectionId)}
-                  onKeyDown={(ev) => ev.key === 'Enter' && setPayoutDetailCollectionId(row.collectionId)}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-medium text-foreground">Picker Payout</p>
-                      <p className="text-xs text-muted-foreground">{row.collectionName}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{payoutDate ? formatDate(payoutDate) : '—'}</p>
-                    </div>
-                    <span className="font-semibold">{formatCurrency(row.totalPaid)}</span>
-                  </div>
-                  <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
-                </div>
-              );
-            }
-            if (row.type === 'picker_group') {
-              return (
-                <div
-                  key={row.key}
-                  role="button"
-                  tabIndex={0}
-                  className="mx-3 p-4 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]"
-                  onClick={() => setPickerPaymentDetailGroup(row)}
-                  onKeyDown={(ev) => ev.key === 'Enter' && setPickerPaymentDetailGroup(row)}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-medium text-foreground">{row.displayName}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(row.latestDate)}</p>
-                    </div>
-                    <span className="font-semibold">{formatCurrency(row.totalAmount)}</span>
-                  </div>
-                  <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
-                </div>
-              );
-            }
-            const expense = row.expense;
-            const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
-            const collectionId = expense.meta?.harvestCollectionId;
-            const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
-            const isTomatoPickerLabour =
-              expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
-              Boolean(expense.meta?.tomatoHarvestSessionId);
-            const tomatoSessionId = expense.meta?.tomatoHarvestSessionId;
-            const tomatoProjectId = expense.projectId;
-            const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
+        {/* Mobile: same list/table as desktop; columns Description → Amount → Category → Date (swapped vs desktop) */}
+        <div className="md:hidden rounded-xl border border-border bg-background overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0 [&_th]:py-2 [&_th]:px-2 [&_th]:text-[10px] [&_td]:py-2.5 [&_td]:px-2 [&_td]:text-xs">
+          <table className="fv-table fv-expenses-table-with-seps min-w-[360px] w-full">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Category</th>
+                <th>Date</th>
+                <th className="w-10" aria-hidden />
+              </tr>
+            </thead>
+            <tbody>
+              {recentTableRows.map((row) => {
+                if (row.type === 'harvest_payout') {
+                  const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
+                  return (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setPayoutDetailCollectionId(row.collectionId)}
+                    >
+                      <td>
+                        <div>
+                          <span className="font-medium text-foreground">Picker Payout</span>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{row.collectionName}</p>
+                        </div>
+                      </td>
+                      <td className="font-medium whitespace-nowrap">{formatCurrency(row.totalPaid)}</td>
+                      <td>
+                        <span className={cn('fv-badge text-[10px]', getCategoryColor('labour'))}>labour</span>
+                      </td>
+                      <td className="text-muted-foreground whitespace-nowrap text-[11px]">
+                        {payoutDate ? formatDate(payoutDate) : '—'}
+                      </td>
+                      <td onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="p-1.5 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setPayoutDetailCollectionId(row.collectionId)}
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+                if (row.type === 'picker_group') {
+                  return (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setPickerPaymentDetailGroup(row)}
+                    >
+                      <td>
+                        <span className="font-medium text-foreground">{row.displayName}</span>
+                      </td>
+                      <td className="font-medium whitespace-nowrap">{formatCurrency(row.totalAmount)}</td>
+                      <td>
+                        <span className={cn('fv-badge text-[10px]', getCategoryColor('labour'))}>labour</span>
+                      </td>
+                      <td className="text-muted-foreground whitespace-nowrap text-[11px]">
+                        {formatDate(row.latestDate)}
+                      </td>
+                      <td onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="p-1.5 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setPickerPaymentDetailGroup(row)}
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+                const expense = row.expense;
+                const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
+                const collectionId = expense.meta?.harvestCollectionId;
+                const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
+                const isTomatoPickerLabour =
+                  expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
+                  Boolean(expense.meta?.tomatoHarvestSessionId);
+                const tomatoSessionId = expense.meta?.tomatoHarvestSessionId;
+                const tomatoProjectId = expense.projectId;
+                const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
 
-            return (
-              <div
-                key={row.key}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  'mx-3 p-3 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50 active:scale-[0.99]',
-                )}
-                onClick={
-                  isPickerPayout && collectionId
-                    ? () => setLaborPayoutDrawerCollectionId(collectionId)
-                    : () => {
-                        setExpenseDetail(expense);
-                        setExpenseDetailOpen(true);
-                      }
-                }
-                onKeyDown={
-                  (ev) => {
-                    if (ev.key !== 'Enter') return;
-                    if (isPickerPayout && collectionId) {
-                      setLaborPayoutDrawerCollectionId(collectionId);
-                    } else {
-                      setExpenseDetail(expense);
-                      setExpenseDetailOpen(true);
+                return (
+                  <tr
+                    key={row.key}
+                    className={
+                      isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''
                     }
-                  }
-                }
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-foreground truncate">{expense.description}</p>
-                      {isTomatoPickerLabour && (
-                        <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100 shrink-0">
-                          Auto-generated
-                        </span>
-                      )}
-                      {expense.pending && (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
-                          Syncing...
-                        </span>
-                      )}
-                    </div>
-                    {isTomatoPickerLabour && tomatoLabourNote ? (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{tomatoLabourNote}</p>
-                    ) : null}
-                    {isPickerPayout && collectionLabel && (
-                      <p className="text-xs text-muted-foreground line-clamp-1">Collection: {collectionLabel}</p>
-                    )}
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{formatDate(expense.date)}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span className="font-semibold">{formatCurrency(expense.amount)}</span>
-                    {isTomatoPickerLabour && tomatoSessionId && tomatoProjectId ? (
-                      <button
-                        type="button"
-                        className="fv-btn fv-btn--secondary text-xs py-1 px-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/tomato-harvest/${tomatoProjectId}/session/${tomatoSessionId}`);
-                        }}
+                    onClick={
+                      isPickerPayout && collectionId
+                        ? () => setLaborPayoutDrawerCollectionId(collectionId)
+                        : () => {
+                            setExpenseDetail(row.expense);
+                            setExpenseDetailOpen(true);
+                          }
+                    }
+                  >
+                    <td>
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="font-medium text-foreground leading-tight">{expense.description}</span>
+                          {isTomatoPickerLabour && (
+                            <span className="rounded-full border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[9px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100">
+                              Auto-generated
+                            </span>
+                          )}
+                          {expense.pending && (
+                            <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+                              Syncing...
+                            </span>
+                          )}
+                        </div>
+                        {isTomatoPickerLabour && tomatoLabourNote ? (
+                          <span className="text-[10px] text-muted-foreground line-clamp-2">{tomatoLabourNote}</span>
+                        ) : null}
+                        {isPickerPayout && collectionLabel && (
+                          <span className="text-[10px] text-muted-foreground line-clamp-1">Coll: {collectionLabel}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="font-medium whitespace-nowrap">{formatCurrency(expense.amount)}</td>
+                    <td>
+                      <span
+                        className={cn(
+                          'fv-badge text-[10px]',
+                          getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category),
+                        )}
                       >
-                        View harvest
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    'fv-badge',
-                    getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category),
-                  )}
-                >
-                  {expense.category === 'picker_payout' ? 'labour' : expense.category}
-                </span>
-              </div>
-            );
-          })}
+                        {expense.category === 'picker_payout' ? 'labour' : expense.category}
+                      </span>
+                    </td>
+                    <td className="text-muted-foreground whitespace-nowrap text-[11px]">{formatDate(expense.date)}</td>
+                    <td onClick={(ev) => ev.stopPropagation()}>
+                      {isPickerPayout && collectionId ? (
+                        <button
+                          type="button"
+                          className="p-1.5 hover:bg-muted rounded-lg transition-colors"
+                          onClick={() => setLaborPayoutDrawerCollectionId(collectionId)}
+                        >
+                          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ) : isTomatoPickerLabour && tomatoSessionId && tomatoProjectId ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button type="button" className="p-1.5 hover:bg-muted rounded-lg transition-colors">
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() =>
+                                navigate(`/tomato-harvest/${tomatoProjectId}/session/${tomatoSessionId}`)
+                              }
+                            >
+                              View harvest
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button type="button" className="p-1.5 hover:bg-muted rounded-lg transition-colors">
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() => {
+                                setExpenseDetail(expense);
+                                setExpenseDetailOpen(true);
+                              }}
+                            >
+                              View details
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        </div>
+
+        {/* Expense by category — pie + bar charts */}
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold shrink-0">Expense by category</h3>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
+              <ExpensesPieChart
+                data={Object.entries(
+                  filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                    acc[e.category] = (acc[e.category] || 0) + e.amount;
+                    return acc;
+                  }, {}),
+                ).map(([category, amount]) => ({ category, amount }))}
+              />
+            </FeatureGate>
+            <FeatureGate feature="advancedAnalytics" upgradePresentation="blur-data" className="min-w-0">
+              <ExpensesBarChart
+                data={Object.entries(
+                  filteredExpenses.reduce<Record<string, number>>((acc, e) => {
+                    acc[e.category] = (acc[e.category] || 0) + e.amount;
+                    return acc;
+                  }, {}),
+                ).map(([category, amount]) => ({ category, amount }))}
+              />
+            </FeatureGate>
+          </div>
         </div>
       </div>
 

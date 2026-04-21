@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Clock, CheckCircle, Edit, Banknote, Calendar, User, Package, Cloud, Droplets, Bug, Tractor, Leaf, Wrench } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { usePermissions } from '@/hooks/usePermissions';
 import type { WorkCard, WorkCardStatus } from '@/services/operationsWorkCardService';
+import { MarkPaidModal } from './MarkPaidModal';
 
 interface StatusConfig {
   label: string;
@@ -18,9 +21,13 @@ interface WorkCardGridProps {
   isLoading?: boolean;
   onCardClick?: (card: WorkCard) => void;
   statusConfig: Record<WorkCardStatus, StatusConfig>;
+  onMarkPaidSuccess?: () => void;
 }
 
-export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: WorkCardGridProps) {
+export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig, onMarkPaidSuccess }: WorkCardGridProps) {
+  const { can } = usePermissions();
+  const canMarkPaid = can('operations', 'markPaid');
+  const [markPaidCard, setMarkPaidCard] = useState<WorkCard | null>(null);
   const getWorkCategoryIcon = (category: string) => {
     const normalized = (category || '').toLowerCase();
     if (normalized.includes('spray')) return Cloud;
@@ -77,12 +84,17 @@ export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: Wo
   };
 
   return (
+    <>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {cards.map((card) => {
         const config = statusConfig[card.status];
         const hasInputs = card.inputsUsed && card.inputsUsed.length > 0;
         const isEdited = card.status === 'edited' || (card.editHistory && card.editHistory.length > 0);
         const CategoryIcon = getWorkCategoryIcon(card.workCategory);
+        const showMarkPaidOnCard =
+          canMarkPaid &&
+          (card.status === 'logged' || card.status === 'edited') &&
+          !card.payment.isPaid;
 
         return (
           <Card
@@ -156,11 +168,38 @@ export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig }: Wo
                     {card.workDone}
                   </p>
                 )}
+
+                {showMarkPaidOnCard && (
+                  <Button
+                    variant="secondary"
+                    className="w-full mt-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMarkPaidCard(card);
+                    }}
+                  >
+                    <Banknote className="h-4 w-4 mr-2" />
+                    Mark as paid
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
         );
       })}
     </div>
+
+    <MarkPaidModal
+      open={markPaidCard !== null}
+      onOpenChange={(open) => {
+        if (!open) setMarkPaidCard(null);
+      }}
+      workCard={markPaidCard}
+      onSuccess={() => {
+        setMarkPaidCard(null);
+        onMarkPaidSuccess?.();
+      }}
+    />
+    </>
   );
 }
