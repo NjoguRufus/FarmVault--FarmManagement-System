@@ -33,6 +33,10 @@ import { toast } from 'sonner';
 import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
 import { resolveNotesBasePath } from '@/lib/routing/farmerAppPaths';
 import SeasonChallengesPage from '@/pages/SeasonChallengesPage';
+import {
+  listFarmNotebookAdminNotes,
+  type FarmNotebookAdminNoteRow,
+} from '@/services/notebookAdminNotesService';
 
 const BRAND_GOLD = '#D8B980';
 
@@ -88,13 +92,22 @@ export default function AdminRecordsPage() {
   const location = useLocation();
   const notesBasePath = resolveNotesBasePath(location.pathname);
   const urlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
+
+  const { authReady, user } = useAuth();
+  const navigate = useNavigate();
+  const { isDeveloper, companyId: scopeCompanyId } = useCompanyScope();
+  const { activeProject, activeFarmId } = useProject();
+  const queryClient = useQueryClient();
+
   const initialTab =
     urlTab === 'challenges'
       ? 'challenges'
       : urlTab === 'crops'
         ? 'crops'
         : urlTab === 'admin'
-          ? 'admin'
+          ? isDeveloper
+            ? 'admin'
+            : 'notes'
           : 'notes';
   const [tab, setTab] = useState<'crops' | 'notes' | 'admin' | 'challenges'>(initialTab);
   const [autoTabApplied, setAutoTabApplied] = useState(false);
@@ -106,28 +119,6 @@ export default function AdminRecordsPage() {
   const [addNoteOpen, setAddNoteOpen] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [addNoteSaving, setAddNoteSaving] = useState(false);
-
-  const { authReady, user } = useAuth();
-  const navigate = useNavigate();
-  const { isDeveloper, companyId: scopeCompanyId } = useCompanyScope();
-  const { activeProject, activeFarmId } = useProject();
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    const nextUrlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
-    const next =
-      nextUrlTab === 'challenges'
-        ? 'challenges'
-        : nextUrlTab === 'crops'
-          ? 'crops'
-          : nextUrlTab === 'admin'
-            ? 'admin'
-            : 'notes';
-    setTab(next);
-    // When the user explicitly sets tab via URL, stop auto-defaulting.
-    if (nextUrlTab) setAutoTabApplied(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
 
   const openAddNoteModal = () => {
     setNewNoteTitle('');
@@ -347,9 +338,10 @@ export default function AdminRecordsPage() {
     recentNotesQuery.data,
   ]);
 
-  const adminNotesQuery = useQuery({
-    queryKey: ['records', 'notebook', 'admin-tab', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
-    enabled: authReady && companyReady,
+  /** Developer: all admin-flagged notebook entries (debug / cross-company tooling). */
+  const developerAdminNotesQuery = useQuery({
+    queryKey: ['records', 'notebook', 'admin-tab', 'developer', String(scopeCompanyId ?? '')],
+    enabled: authReady && companyReady && isDeveloper,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotebookEntryRow[]> => {
@@ -359,11 +351,46 @@ export default function AdminRecordsPage() {
         .select('id, crop_slug, title, content, company_id, created_at, updated_at, source, is_admin_note')
         .eq('is_admin_note', true)
         .order('updated_at', { ascending: false })
-        .limit(isDeveloper ? 120 : 60);
+        .limit(120);
       if (error) throw error;
       return (data as NotebookEntryRow[]) ?? [];
     },
   });
+
+  /** Farm staff: only admin notes targeted to them (ALL / COMPANY / CROP / USER) via RPC. */
+  const sharedAdminNotesQuery = useQuery({
+    queryKey: ['records', 'notebook', 'admin-shared', String(scopeCompanyId ?? '')],
+    enabled: authReady && companyReady && !isDeveloper && !!String(scopeCompanyId ?? '').trim(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    queryFn: async (): Promise<FarmNotebookAdminNoteRow[]> => {
+      const cid = String(scopeCompanyId ?? '').trim();
+      return listFarmNotebookAdminNotes(cid);
+    },
+  });
+
+  const showAdminNotesTab =
+    isDeveloper ||
+    (sharedAdminNotesQuery.isSuccess && (sharedAdminNotesQuery.data?.length ?? 0) > 0);
+
+  useEffect(() => {
+    const nextUrlTab = (searchParams.get('tab') ?? '').trim().toLowerCase();
+    let next: typeof tab;
+    if (nextUrlTab === 'challenges') next = 'challenges';
+    else if (nextUrlTab === 'crops') next = 'crops';
+    else if (nextUrlTab === 'admin') {
+      if (isDeveloper) next = 'admin';
+      else if (sharedAdminNotesQuery.isLoading) next = 'notes';
+      else if (
+        sharedAdminNotesQuery.isSuccess &&
+        (sharedAdminNotesQuery.data?.length ?? 0) > 0
+      ) {
+        next = 'admin';
+      } else next = 'notes';
+    } else next = 'notes';
+    setTab(next);
+    if (nextUrlTab) setAutoTabApplied(true);
+  }, [searchParams, isDeveloper, sharedAdminNotesQuery.isLoading, sharedAdminNotesQuery.isSuccess, sharedAdminNotesQuery.data]);
 
   useEffect(() => {
     if (!authReady || !companyReady) return;
@@ -373,6 +400,9 @@ export default function AdminRecordsPage() {
     const channel = supabase
       .channel('fv-notebook-records')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_notebook_entries' }, () => {
+        flush();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'farm_notebook_admin_notes' }, () => {
         flush();
       })
       .subscribe();
@@ -537,7 +567,7 @@ export default function AdminRecordsPage() {
                 Farm notebook
               </h1>
               <p className="text-sm leading-relaxed text-muted-foreground sm:text-[15px]">
-                Crops, your notes, and FarmVault admin updates — organized in one place.
+                Crops, your notes, and season challenges — organized in one place.
               </p>
             </div>
           </div>
@@ -627,15 +657,17 @@ export default function AdminRecordsPage() {
               >
                 Season challenges
               </TabsTrigger>
-              <TabsTrigger
-                value="admin"
-                className="relative shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Bell className="h-3.5 w-3.5 shrink-0" />
-                  Admin notes
-                </span>
-              </TabsTrigger>
+              {showAdminNotesTab ? (
+                <TabsTrigger
+                  value="admin"
+                  className="relative shrink-0 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Bell className="h-3.5 w-3.5 shrink-0" />
+                    Admin notes
+                  </span>
+                </TabsTrigger>
+              ) : null}
             </TabsList>
           </div>
 
@@ -725,63 +757,118 @@ export default function AdminRecordsPage() {
             <SeasonChallengesPage />
           </TabsContent>
 
+          {showAdminNotesTab ? (
           <TabsContent value="admin" className="mt-0">
             <div className={cn(glassCard(), 'p-6 space-y-4')}>
-              {adminNotesQuery.isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-24 w-full rounded-xl" />
-                  <Skeleton className="h-24 w-full rounded-xl" />
-                </div>
-              ) : adminNotesQuery.isError ? (
-                <p className="text-sm text-red-600">Could not load notes.</p>
-              ) : (adminNotesQuery.data?.length ?? 0) === 0 ? (
-                <p className="text-sm text-muted-foreground">No notes yet.</p>
-              ) : (
-                <ul className="space-y-4">
-                  {adminNotesQuery.data!.map((n) => (
-                    <li
-                      key={n.id}
-                      className="rounded-xl border border-[color:var(--fv-brand-gold)]/35 bg-gradient-to-br from-[#D8B980]/8 to-transparent p-4 shadow-sm"
-                    >
-                      {String(n.source ?? '').toLowerCase() === 'developer' ? (
-                        <div className="mb-1 w-fit rounded-md bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-semibold text-[#1f6f43]">
-                          From Developer
-                        </div>
-                      ) : null}
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        <span style={{ color: BRAND_GOLD }}>From notebook</span>
-                        <span>·</span>
-                        <span>{String(n.crop_slug ?? '').trim() || 'Farm notebook'}</span>
-                        {isDeveloper ? (
-                          <>
+              {isDeveloper ? (
+                <>
+                  {developerAdminNotesQuery.isLoading ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-24 w-full rounded-xl" />
+                      <Skeleton className="h-24 w-full rounded-xl" />
+                    </div>
+                  ) : developerAdminNotesQuery.isError ? (
+                    <p className="text-sm text-red-600">Could not load notes.</p>
+                  ) : (developerAdminNotesQuery.data?.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">No notes yet.</p>
+                  ) : (
+                    <ul className="space-y-4">
+                      {developerAdminNotesQuery.data!.map((n) => (
+                        <li
+                          key={n.id}
+                          className="rounded-xl border border-[color:var(--fv-brand-gold)]/35 bg-gradient-to-br from-[#D8B980]/8 to-transparent p-4 shadow-sm"
+                        >
+                          {String(n.source ?? '').toLowerCase() === 'developer' ? (
+                            <div className="mb-1 w-fit rounded-md bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-semibold text-[#1f6f43]">
+                              From Developer
+                            </div>
+                          ) : null}
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            <span style={{ color: BRAND_GOLD }}>From notebook</span>
+                            <span>·</span>
+                            <span>{String(n.crop_slug ?? '').trim() || 'Farm notebook'}</span>
                             <span>·</span>
                             <span>{String(n.company_id ?? '').slice(0, 8) || 'company'}</span>
-                          </>
-                        ) : null}
-                        {(n.updated_at || n.created_at) ? (
-                          <>
-                            <span>·</span>
-                            <span>{new Date((n.updated_at ?? n.created_at) as string).toLocaleString()}</span>
-                          </>
-                        ) : null}
-                      </div>
-                      <div className="mt-2 flex items-center justify-between gap-3">
-                        <Link
-                          to={`${notesBasePath}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
-                          className="text-base font-semibold text-foreground hover:underline"
+                            {n.updated_at || n.created_at ? (
+                              <>
+                                <span>·</span>
+                                <span>{new Date((n.updated_at ?? n.created_at) as string).toLocaleString()}</span>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-3">
+                            <Link
+                              to={`${notesBasePath}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                              className="text-base font-semibold text-foreground hover:underline"
+                            >
+                              {(n.title ?? '').trim() || 'Untitled'}
+                            </Link>
+                          </div>
+                          <p className="mt-2 text-sm text-muted-foreground line-clamp-4">
+                            {(n.content ?? '').trim() || 'No content yet…'}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <>
+                  {sharedAdminNotesQuery.isLoading ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-24 w-full rounded-xl" />
+                      <Skeleton className="h-24 w-full rounded-xl" />
+                    </div>
+                  ) : sharedAdminNotesQuery.isError ? (
+                    <p className="text-sm text-red-600">Could not load admin notes.</p>
+                  ) : (sharedAdminNotesQuery.data?.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">No admin notes shared to you yet.</p>
+                  ) : (
+                    <ul className="space-y-4">
+                      {sharedAdminNotesQuery.data!.map((n) => (
+                        <li
+                          key={n.id}
+                          className="rounded-xl border border-[color:var(--fv-brand-gold)]/35 bg-gradient-to-br from-[#D8B980]/8 to-transparent p-4 shadow-sm"
                         >
-                          {(n.title ?? '').trim() || 'Untitled'}
-                        </Link>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground line-clamp-4">
-                        {(n.content ?? '').trim() || 'No content yet…'}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            <span style={{ color: BRAND_GOLD }}>Admin note</span>
+                            <span>·</span>
+                            <span>
+                              {(() => {
+                                const t = String(n.target_type ?? '').toUpperCase();
+                                if (t === 'USER') return 'Shared with you';
+                                if (t === 'COMPANY') return 'Company';
+                                if (t === 'CROP') return 'Crop';
+                                if (t === 'ALL') return 'Everyone';
+                                return t || '—';
+                              })()}
+                            </span>
+                            <span>·</span>
+                            <span>{String(n.crop_id ?? '').trim() || 'Farm notebook'}</span>
+                            {n.created_at ? (
+                              <>
+                                <span>·</span>
+                                <span>{new Date(n.created_at).toLocaleString()}</span>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="mt-2">
+                            <p className="text-base font-semibold text-foreground">
+                              {(n.title ?? '').trim() || 'Untitled'}
+                            </p>
+                          </div>
+                          <p className="mt-2 text-sm text-muted-foreground line-clamp-6 whitespace-pre-wrap">
+                            {(n.content ?? '').trim() || 'No content yet…'}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
             </div>
           </TabsContent>
+          ) : null}
         </Tabs>
       )}
 
