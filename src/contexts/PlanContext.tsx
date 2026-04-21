@@ -57,9 +57,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     queryKey: ['subscription-gate', companyId],
     enabled: !!companyId && !isDeveloper,
     queryFn: () => getSubscriptionGateState(),
-    staleTime: 45_000,
+    // Subscription state changes infrequently; keep this cache warm to reduce RPC calls.
+    staleTime: 5 * 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    // Don't retry in a tight loop; failing here previously caused "stuck loading" UX.
+    retry: false,
   });
 
   const {
@@ -71,9 +75,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     queryKey: ['company-mpesa-stk-confirmed', companyId],
     enabled: !!companyId && !isDeveloper,
     queryFn: () => hasConfirmedMpesaStkForCompany(companyId!),
-    staleTime: 60_000,
+    // Payment confirmation does not need second-by-second accuracy; reduce reads.
+    staleTime: 5 * 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
   });
 
   const loadError = useMemo(() => {

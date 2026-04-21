@@ -22,8 +22,12 @@ export function createAppQueryClient() {
         staleTime: 60_000,
         gcTime: 30 * 60_000,
         refetchOnWindowFocus: false,
-        refetchOnReconnect: true,
+        // Reconnect storms (wifi toggles, mobile hotspots) can cause a burst of duplicate Supabase reads.
+        // Keep this off and let explicit user actions / page reload drive refetch when needed.
+        refetchOnReconnect: false,
         retry: queryShouldRetry,
+        // Backoff to avoid hitting Supabase limits during outages.
+        retryDelay: (attempt) => Math.min(30_000, 1000 * 2 ** attempt),
       },
       mutations: {
         retry: false,
