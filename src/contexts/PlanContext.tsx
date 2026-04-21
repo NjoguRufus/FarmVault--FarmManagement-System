@@ -14,6 +14,8 @@ import {
 export interface PlanContextValue {
   companyId: string | null;
   isDeveloper: boolean;
+  /** Non-null when subscription-gate queries failed to load. */
+  error: string | null;
   /**
    * Null until confirmed from Supabase.
    * Under no circumstances should UI assume a plan before confirmation.
@@ -50,6 +52,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     data: subscriptionState,
     isLoading: gateLoading,
     isFetching: gateFetching,
+    error: gateError,
   } = useQuery({
     queryKey: ['subscription-gate', companyId],
     enabled: !!companyId && !isDeveloper,
@@ -63,6 +66,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     data: stkConfirmed,
     isLoading: stkLoading,
     isFetching: stkFetching,
+    error: stkError,
   } = useQuery({
     queryKey: ['company-mpesa-stk-confirmed', companyId],
     enabled: !!companyId && !isDeveloper,
@@ -71,6 +75,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
+
+  const loadError = useMemo(() => {
+    const e = gateError ?? stkError;
+    if (!e) return null;
+    return e instanceof Error ? e.message : String(e);
+  }, [gateError, stkError]);
 
   const resolved = useMemo(() => {
     return resolveWorkspaceSubscriptionState(
@@ -86,6 +96,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     Boolean(companyId) &&
     !isDeveloper &&
     // If we have not received a gate row yet, plan is not confirmed.
+    !loadError &&
     (gateLoading || gateFetching || stkLoading || stkFetching || !subscriptionState || resolved.plan == null);
 
   const value = useMemo<PlanContextValue>(() => {
@@ -101,6 +112,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     return {
       companyId,
       isDeveloper,
+      error: loadError,
       plan: resolved.plan,
       status: resolved.status,
       canWrite: resolved.canWrite,
@@ -117,7 +129,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       billingReferenceFromGate: (subscriptionState as any)?.billing_reference ?? null,
       loadingPlan,
     };
-  }, [companyId, isDeveloper, resolved, subscriptionState, stkConfirmed, loadingPlan]);
+  }, [companyId, isDeveloper, loadError, resolved, subscriptionState, stkConfirmed, loadingPlan]);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

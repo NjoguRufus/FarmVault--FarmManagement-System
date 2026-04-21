@@ -18,12 +18,14 @@ import { useFarmerInboxBellSync } from '@/hooks/useFarmerInboxBellSync';
 import { logger } from "@/lib/logger";
 import { useAmbassadorAccess } from '@/contexts/AmbassadorAccessContext';
 import { brokerMayAccessNavPath } from '@/lib/brokerNav';
+import { usePlan } from '@/contexts/PlanContext';
 
 export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user, isEmergencySession, effectiveAccess } = useAuth();
   const { workspaceMode } = useAmbassadorAccess();
   const { trialExpiredNeedsPlan, isLoading: subscriptionLoading } = useSubscriptionStatus();
+  const plan = usePlan();
   const isDeveloper = user?.role === 'developer';
   useCompanySubscriptionRealtime(user?.companyId, Boolean(user?.companyId && !isDeveloper));
   useFarmerInboxBellSync(user ?? null, user?.companyId ?? null, user?.id ?? null);
@@ -152,6 +154,13 @@ export function MainLayout() {
 
   // Hard gate: never render plan-dependent UI until the plan is confirmed from Supabase.
   // This prevents BASIC/PRO flicker on refresh for paying customers.
+  if (!isEmergencySession && plan.error) {
+    return (
+      <AuthLoadingScreen
+        message={`Unable to load your subscription status. Please check your internet connection and refresh. (${plan.error})`}
+      />
+    );
+  }
   if (!isEmergencySession && subscriptionLoading) {
     return <AuthLoadingScreen />;
   }
