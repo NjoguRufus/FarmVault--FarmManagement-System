@@ -561,6 +561,8 @@ export function AuthProvider({
    * Only clear cache when transitioning from confirmed-signed-in to signed-out.
    */
   const confirmedSignedInRef = useRef<boolean>(false);
+  /** Clerk userId we last finished bootstrapping for; avoids re-clearing auth gates on effect re-runs (same session). */
+  const lastBootstrapUserIdRef = useRef<string | null>(null);
 
   // When emergency session is created from the Emergency Access page, pick it up so RequireAuth sees the user.
   useEffect(() => {
@@ -716,6 +718,7 @@ export function AuthProvider({
       setIsEmergencySession(false);
       setActivationResolved(true);
       confirmedSignedInRef.current = false;
+      lastBootstrapUserIdRef.current = null;
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('fv:isDeveloper', '0');
       }
@@ -727,18 +730,30 @@ export function AuthProvider({
     // resetting the gate, authReady may stay true from the signed-out branch while user stays null —
     // PostAuth then redirects to /sign-in even after a successful password sign-in.
     if (!userId) {
+      lastBootstrapUserIdRef.current = null;
       setActivationResolved(false);
       setAuthReady(false);
       return;
     }
 
     let cancelled = false;
-    setAuthReady(false);
-    setSetupIncomplete(false);
-    setResetRequired(false);
-    setActivationResolved(false);
+    const sameSession =
+      lastBootstrapUserIdRef.current !== null && lastBootstrapUserIdRef.current === userId;
+    if (!sameSession) {
+      setAuthReady(false);
+      setSetupIncomplete(false);
+      setResetRequired(false);
+      setActivationResolved(false);
+    }
 
     (async () => {
+      const markBootstrapped = () => {
+        lastBootstrapUserIdRef.current = userId;
+      };
+      const clearBootstrapped = () => {
+        lastBootstrapUserIdRef.current = null;
+      };
+
       try {
         setTenantSessionTrust('verified');
         const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
@@ -853,6 +868,7 @@ export function AuthProvider({
             });
           }
 
+          markBootstrapped();
           setActivationResolved(true);
           setAuthReady(true);
           return;
@@ -896,6 +912,7 @@ export function AuthProvider({
             setSetupIncomplete(false);
             setResetRequired(true);
             setActivationResolved(true);
+            clearBootstrapped();
             setAuthReady(true);
             try {
               await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
@@ -1024,6 +1041,7 @@ export function AuthProvider({
             setSetupIncomplete(false);
             setResetRequired(true);
             setActivationResolved(true);
+            clearBootstrapped();
             setAuthReady(true);
             try {
               await (clerkSignOut ? Promise.resolve(clerkSignOut()) : Promise.resolve());
@@ -1159,6 +1177,7 @@ export function AuthProvider({
                   setSetupIncomplete(false);
                   setResetRequired(true);
                   setActivationResolved(true);
+                  clearBootstrapped();
                   setAuthReady(true);
 
                   try {
@@ -1416,6 +1435,7 @@ export function AuthProvider({
           writeCachedUser({ ...mapped, companyId: null });
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
+          markBootstrapped();
           setAuthReady(true);
           return;
         }
@@ -1439,6 +1459,7 @@ export function AuthProvider({
           writeCachedUser(null);
           setActivationResolved(true);
           confirmedSignedInRef.current = true;
+          markBootstrapped();
           setAuthReady(true);
           return;
         }
@@ -1568,6 +1589,7 @@ export function AuthProvider({
         setResetRequired(false);
         setActivationResolved(true);
         confirmedSignedInRef.current = true;
+        markBootstrapped();
         setAuthReady(true);
 
         if (hasEffectiveCompany && isContextCompanyAdmin) {
@@ -1608,6 +1630,7 @@ export function AuthProvider({
           if (typeof window !== 'undefined') {
             window.location.assign('/sign-in?reason=session-reconcile');
           }
+          clearBootstrapped();
           setAuthReady(true);
           return;
         }
@@ -1625,6 +1648,7 @@ export function AuthProvider({
         });
         // Allow UI to proceed; otherwise RequireAuth can spin forever (authReady is ANDed with activationResolved).
         setActivationResolved(true);
+        markBootstrapped();
         setAuthReady(true);
       }
     })();
