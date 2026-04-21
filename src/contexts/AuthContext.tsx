@@ -111,6 +111,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_USER_CACHE_KEY = 'farmvault:auth:user:v1';
 const CLERK_LOAD_TIMEOUT_MS = 4000;
+/** Hold local session while Clerk briefly reports signed-out (common on mobile Safari / background). */
+const TRANSIENT_CLERK_SIGN_OUT_GRACE_MS = 4000;
 const ACCESS_REVOKED_REDIRECT_KEY = 'farmvault:access-revoked:v1';
 
 function isExplicitOnboardingRoute(): boolean {
@@ -563,6 +565,13 @@ export function AuthProvider({
   const confirmedSignedInRef = useRef<boolean>(false);
   /** Clerk userId we last finished bootstrapping for; avoids re-clearing auth gates on effect re-runs (same session). */
   const lastBootstrapUserIdRef = useRef<string | null>(null);
+  /**
+   * Mobile Safari / backgrounding can briefly flip Clerk to isSignedIn=false while the session recovers.
+   * First timestamp we observed that state for the current episode (reset when Clerk is signed-in again).
+   */
+  const transientClerkSignedOutSinceRef = useRef<number | null>(null);
+  /** True while logout() is driving Clerk sign-out so we skip the transient grace window. */
+  const explicitLogoutRequestedRef = useRef(false);
 
   // When emergency session is created from the Emergency Access page, pick it up so RequireAuth sees the user.
   useEffect(() => {
@@ -672,6 +681,7 @@ export function AuthProvider({
     if (!isSignedIn) {
       const emergencyUser = readEmergencySession();
       if (emergencyUser) {
+        transientClerkSignedOutSinceRef.current = null;
         setUser(emergencyUser);
         setEmployeeProfile(null);
         setPermissions(buildEffectivePermissions(emergencyUser, null));
@@ -688,6 +698,7 @@ export function AuthProvider({
       // Only clear the cache if we previously confirmed the user was signed in (explicit logout).
       const cachedUser = readCachedUser();
       if (cachedUser && !confirmedSignedInRef.current) {
+        transientClerkSignedOutSinceRef.current = null;
         // Clerk loaded but says not signed in, and we haven't confirmed sign-in yet.
         // This could be Clerk hydrating - keep the cached user briefly.
         // Set authReady so the app can render, but don't clear the cache yet.
@@ -701,6 +712,28 @@ export function AuthProvider({
         setAuthReady(true);
         setActivationResolved(true);
         return;
+      }
+
+      // Signed-in before, Clerk now says not — often a transient gap on mobile; hold session briefly unless user logged out explicitly.
+      if (
+        !explicitLogoutRequestedRef.current &&
+        cachedUser &&
+        confirmedSignedInRef.current
+      ) {
+        const now = Date.now();
+        if (transientClerkSignedOutSinceRef.current === null) {
+          transientClerkSignedOutSinceRef.current = now;
+        }
+        if (now - transientClerkSignedOutSinceRef.current < TRANSIENT_CLERK_SIGN_OUT_GRACE_MS) {
+          setUser((prev) => prev ?? cachedUser);
+          setPermissions(buildEffectivePermissions(cachedUser, null));
+          setAuthReady(true);
+          setActivationResolved(true);
+          return;
+        }
+        transientClerkSignedOutSinceRef.current = null;
+      } else {
+        transientClerkSignedOutSinceRef.current = null;
       }
       
       // Confirmed logout: either we never had a cached user, or we previously confirmed sign-in
@@ -725,6 +758,8 @@ export function AuthProvider({
       setAuthReady(true);
       return;
     }
+
+    transientClerkSignedOutSinceRef.current = null;
 
     // Clerk can report isSignedIn before userId (sub) is available. If we return here without
     // resetting the gate, authReady may stay true from the signed-out branch while user stays null —
@@ -1703,6 +1738,7 @@ export function AuthProvider({
     if (isEmergencySession) {
       writeEmergencySession(null);
       clearPendingApprovalSession();
+      transientClerkSignedOutSinceRef.current = null;
       setUser(null);
       setEmployeeProfile(null);
       setPermissions(getDefaultPermissions());
@@ -1712,12 +1748,15 @@ export function AuthProvider({
       setIsEmergencySession(false);
       return;
     }
+    explicitLogoutRequestedRef.current = true;
+    transientClerkSignedOutSinceRef.current = null;
     if (clerkSignOut) {
       Promise.resolve(clerkSignOut())
         .catch(() => {
           // Ignore sign-out errors; proceed with local cleanup
         })
         .finally(() => {
+          explicitLogoutRequestedRef.current = false;
           clearPendingApprovalSession();
           setUser(null);
           setEmployeeProfile(null);
@@ -1729,6 +1768,7 @@ export function AuthProvider({
           writeCachedUser(null);
         });
     } else {
+      explicitLogoutRequestedRef.current = false;
       clearPendingApprovalSession();
       setUser(null);
       setEmployeeProfile(null);
