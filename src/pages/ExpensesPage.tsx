@@ -66,6 +66,8 @@ import { AddExpenseModal } from '@/components/expenses/AddExpenseModal';
 type ExpenseWithSyncState = Expense & {
   pending?: boolean;
   fromCache?: boolean;
+  /** From finance.expenses.created_at — used with date for newest-first ordering. */
+  createdAt?: string;
 };
 
 type PickerPaymentGroup = {
@@ -75,6 +77,16 @@ type PickerPaymentGroup = {
   latestDate: Date;
   expenses: ExpenseWithSyncState[];
 };
+
+function msOrZero(d: unknown): number {
+  const t = toDate(d)?.getTime();
+  return t != null && Number.isFinite(t) ? t : 0;
+}
+
+/** Newest activity first: max(expense date, created_at). */
+function expenseRowSortMs(e: ExpenseWithSyncState): number {
+  return Math.max(msOrZero(e.date), msOrZero(e.createdAt));
+}
 
 function PickerPaymentDetailContent({
   group,
@@ -364,13 +376,15 @@ export default function ExpensesPage() {
     combined.sort((a, b) => {
       let tA = 0;
       let tB = 0;
-      if (a.type === 'harvest_payout') tA = a.harvestDate ? new Date(a.harvestDate).getTime() : 0;
-      else if (a.type === 'picker_group') tA = a.latestDate ? a.latestDate.getTime() : 0;
-      else tA = toDate(a.expense.date)?.getTime() ?? 0;
-      if (b.type === 'harvest_payout') tB = b.harvestDate ? new Date(b.harvestDate).getTime() : 0;
-      else if (b.type === 'picker_group') tB = b.latestDate ? b.latestDate.getTime() : 0;
-      else tB = toDate(b.expense.date)?.getTime() ?? 0;
-      return tB - tA;
+      if (a.type === 'harvest_payout') tA = msOrZero(a.harvestDate);
+      else if (a.type === 'picker_group') tA = msOrZero(a.latestDate);
+      else tA = expenseRowSortMs(a.expense as ExpenseWithSyncState);
+      if (b.type === 'harvest_payout') tB = msOrZero(b.harvestDate);
+      else if (b.type === 'picker_group') tB = msOrZero(b.latestDate);
+      else tB = expenseRowSortMs(b.expense as ExpenseWithSyncState);
+      const diff = tB - tA;
+      if (diff !== 0) return diff;
+      return String(b.key).localeCompare(String(a.key));
     });
     return combined;
   }, [filteredExpenses, pickerPaymentGroups, recentPayouts, collectionNameMap]);
@@ -1013,7 +1027,7 @@ export default function ExpensesPage() {
         )}
         
         {/* Desktop Table: scrollable when many rows so card stays same size */}
-        <div className="hidden md:block rounded-xl border border-border bg-background overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0">
+        <div className="hidden md:block rounded-xl border border-border bg-white dark:bg-card overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0 [&_thead_th]:bg-primary/12 [&_thead_th]:text-foreground dark:[&_thead_th]:bg-primary/18 dark:[&_thead_th]:text-foreground [&_tbody_tr]:bg-white dark:[&_tbody_tr]:bg-card [&_tbody_tr:hover]:bg-muted/30 dark:[&_tbody_tr:hover]:bg-muted/20">
           <table className="fv-table fv-expenses-table-with-seps">
             <thead>
               <tr>
@@ -1202,7 +1216,7 @@ export default function ExpensesPage() {
         </div>
 
         {/* Mobile: same list/table as desktop; columns Description → Amount → Category → Date (swapped vs desktop) */}
-        <div className="md:hidden rounded-xl border border-border bg-background overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0 [&_th]:py-2 [&_th]:px-2 [&_th]:text-[10px] [&_td]:py-2.5 [&_td]:px-2 [&_td]:text-xs">
+        <div className="md:hidden rounded-xl border border-border bg-white dark:bg-card overflow-x-auto overflow-y-auto scrollbar-thin max-h-[320px] min-h-0 [&_thead_th]:bg-primary/12 [&_thead_th]:text-foreground dark:[&_thead_th]:bg-primary/18 [&_tbody_tr]:bg-white dark:[&_tbody_tr]:bg-card [&_tbody_tr:hover]:bg-muted/30 dark:[&_tbody_tr:hover]:bg-muted/20 [&_th]:py-2 [&_th]:px-2 [&_th]:text-[10px] [&_td]:py-2.5 [&_td]:px-2 [&_td]:text-xs">
           <table className="fv-table fv-expenses-table-with-seps min-w-[360px] w-full">
             <thead>
               <tr>
