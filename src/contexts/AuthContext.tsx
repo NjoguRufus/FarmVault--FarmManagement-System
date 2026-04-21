@@ -765,6 +765,22 @@ export function AuthProvider({
     // resetting the gate, authReady may stay true from the signed-out branch while user stays null —
     // PostAuth then redirects to /sign-in even after a successful password sign-in.
     if (!userId) {
+      const cachedForUserIdGap = readCachedUser();
+      const refId = lastBootstrapUserIdRef.current;
+      const cacheMatchesSession =
+        !!cachedForUserIdGap && (!refId || cachedForUserIdGap.id === refId);
+      if (
+        !explicitLogoutRequestedRef.current &&
+        cachedForUserIdGap &&
+        confirmedSignedInRef.current &&
+        cacheMatchesSession
+      ) {
+        setUser((prev) => prev ?? cachedForUserIdGap);
+        setPermissions(buildEffectivePermissions(cachedForUserIdGap, null));
+        setAuthReady(true);
+        setActivationResolved(true);
+        return;
+      }
       lastBootstrapUserIdRef.current = null;
       setActivationResolved(false);
       setAuthReady(false);
