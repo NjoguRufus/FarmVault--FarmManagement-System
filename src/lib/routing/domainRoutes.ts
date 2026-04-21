@@ -50,6 +50,8 @@ export function isPublicRoutePath(pathname: string): boolean {
   const p = pathname || '/';
   // Referral short links: /r/CODE (must not use prefix "/r" — would match /register, etc.)
   if (p === '/r' || p.startsWith('/r/')) return true;
+  // In-app Farm Work (shares /farm-* with marketing SEO URLs like /farm-management-…).
+  if (p === '/farm-work' || p.startsWith('/farm-work/')) return false;
   const prefixes = [
     '/',
     '/features',
