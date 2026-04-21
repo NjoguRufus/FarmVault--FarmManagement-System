@@ -51,6 +51,8 @@ const getSubscriptionGateStateImpl = async (): Promise<CompanySubscriptionGateSt
  */
 export const getSubscriptionGateState = rateLimitAsync(getSubscriptionGateStateImpl, {
   minIntervalMs: 30_000,
+  // Never cache "no row" — it can be transient during auth hydration / policy propagation.
+  shouldCacheResult: (res) => res != null,
 });
 
 /** Member-visible STK rows — aligns tenant UI with developer when gate RPC lags behind mpesa_payments. */

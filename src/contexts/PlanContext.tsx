@@ -52,6 +52,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     data: subscriptionState,
     isLoading: gateLoading,
     isFetching: gateFetching,
+    isFetched: gateFetchedOnce,
     error: gateError,
   } = useQuery({
     queryKey: ['subscription-gate', companyId],
@@ -70,6 +71,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     data: stkConfirmed,
     isLoading: stkLoading,
     isFetching: stkFetching,
+    isFetched: stkFetchedOnce,
     error: stkError,
   } = useQuery({
     queryKey: ['company-mpesa-stk-confirmed', companyId],
@@ -85,9 +87,37 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const loadError = useMemo(() => {
     const e = gateError ?? stkError;
-    if (!e) return null;
-    return e instanceof Error ? e.message : String(e);
-  }, [gateError, stkError]);
+    if (e) return e instanceof Error ? e.message : String(e);
+
+    // If gate query finished but returned no row, we must not "load forever".
+    // This usually indicates the subscription gate RPC isn't available or the company isn't initialized.
+    if (
+      Boolean(companyId) &&
+      !isDeveloper &&
+      gateFetchedOnce &&
+      !gateLoading &&
+      !gateFetching &&
+      subscriptionState == null
+    ) {
+      return 'Subscription status is not initialized for this company (no gate row returned).';
+    }
+
+    // If STK query finished but produced no boolean, treat as non-fatal (it can be empty); no error.
+    // We still rely primarily on the subscription gate for plan/status.
+    void stkFetchedOnce;
+
+    return null;
+  }, [
+    gateError,
+    stkError,
+    companyId,
+    isDeveloper,
+    gateFetchedOnce,
+    gateLoading,
+    gateFetching,
+    subscriptionState,
+    stkFetchedOnce,
+  ]);
 
   const resolved = useMemo(() => {
     return resolveWorkspaceSubscriptionState(
@@ -104,7 +134,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     !isDeveloper &&
     // If we have not received a gate row yet, plan is not confirmed.
     !loadError &&
-    (gateLoading || gateFetching || stkLoading || stkFetching || !subscriptionState || resolved.plan == null);
+    (gateLoading || gateFetching || stkLoading || stkFetching || resolved.plan == null);
 
   const value = useMemo<PlanContextValue>(() => {
     const stk = stkConfirmed === true && !isDeveloper;

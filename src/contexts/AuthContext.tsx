@@ -553,6 +553,7 @@ export function AuthProvider({
     ],
   );
   const clerkLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clerkUserIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Track whether we've ever confirmed the user was signed in during this session.
    * This prevents clearing the cached user during Clerk's initial hydration phase,
@@ -603,6 +604,42 @@ export function AuthProvider({
       }
     };
   }, [clerkState === null, clerkLoaded]);
+
+  // Clerk can briefly report `isSignedIn=true` while `userId` is still null during hydration.
+  // If that state persists, the app can get stuck behind authReady/activationResolved gates.
+  // After a short grace period, allow UI to proceed using the cached user (if any) rather than spinning forever.
+  useEffect(() => {
+    if (clerkState === null) return;
+    if (!clerkLoaded) return;
+
+    const needsUserId = isSignedIn && !userId;
+    if (!needsUserId) {
+      if (clerkUserIdTimeoutRef.current) {
+        clearTimeout(clerkUserIdTimeoutRef.current);
+        clerkUserIdTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (clerkUserIdTimeoutRef.current) return;
+
+    clerkUserIdTimeoutRef.current = setTimeout(() => {
+      clerkUserIdTimeoutRef.current = null;
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[AuthContext] Clerk signed-in but userId still null after timeout; unblocking auth gates using cached user.');
+      }
+      setActivationResolved(true);
+      setAuthReady(true);
+    }, 3000);
+
+    return () => {
+      if (clerkUserIdTimeoutRef.current) {
+        clearTimeout(clerkUserIdTimeoutRef.current);
+        clerkUserIdTimeoutRef.current = null;
+      }
+    };
+  }, [clerkState === null, clerkLoaded, isSignedIn, userId]);
 
   useEffect(() => {
     if (clerkState === null) {
@@ -1586,6 +1623,8 @@ export function AuthProvider({
             'We could not fully load your FarmVault account. You can continue, but some data may be missing.',
           variant: 'destructive',
         });
+        // Allow UI to proceed; otherwise RequireAuth can spin forever (authReady is ANDed with activationResolved).
+        setActivationResolved(true);
         setAuthReady(true);
       }
     })();

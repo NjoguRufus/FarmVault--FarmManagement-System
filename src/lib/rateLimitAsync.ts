@@ -7,6 +7,13 @@ export type RateLimitAsyncOptions = {
    * otherwise they dedupe to the in-flight request.
    */
   minIntervalMs: number;
+  /**
+   * Decide whether a resolved value should be cached for the throttle window.
+   * Default: cache everything (including falsy values).
+   *
+   * Useful when `null` means "not ready yet" and should not be reused.
+   */
+  shouldCacheResult?: (result: unknown) => boolean;
 };
 
 /**
@@ -23,12 +30,13 @@ export type RateLimitAsyncOptions = {
  */
 export function rateLimitAsync<TArgs extends unknown[], TResult>(
   fn: AsyncFn<TArgs, TResult>,
-  { minIntervalMs }: RateLimitAsyncOptions,
+  { minIntervalMs, shouldCacheResult }: RateLimitAsyncOptions,
 ): AsyncFn<TArgs, TResult> {
   let inFlight: Promise<TResult> | null = null;
   let lastSuccessAt = 0;
   let lastSuccessValue: TResult | undefined;
   let hasSuccessValue = false;
+  const shouldCache = shouldCacheResult ?? (() => true);
 
   return async (...args: TArgs) => {
     const now = Date.now();
@@ -43,9 +51,11 @@ export function rateLimitAsync<TArgs extends unknown[], TResult>(
 
     inFlight = fn(...args)
       .then((res) => {
-        lastSuccessAt = Date.now();
-        lastSuccessValue = res;
-        hasSuccessValue = true;
+        if (shouldCache(res)) {
+          lastSuccessAt = Date.now();
+          lastSuccessValue = res;
+          hasSuccessValue = true;
+        }
         return res;
       })
       .finally(() => {
