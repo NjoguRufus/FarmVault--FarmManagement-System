@@ -154,15 +154,17 @@ export function MainLayout() {
 
   // Hard gate: never render plan-dependent UI until the plan is confirmed from Supabase.
   // This prevents BASIC/PRO flicker on refresh for paying customers.
-  if (!isEmergencySession && plan.error) {
+  // If resolver fails AND we have no cached subscription to safely display, show a deterministic error.
+  if (!isEmergencySession && plan.error && !plan.subscription) {
     return (
       <AuthLoadingScreen
         message={`Unable to load your subscription status. Please check your internet connection and refresh. (${plan.error})`}
       />
     );
   }
-  if (!isEmergencySession && subscriptionLoading) {
-    return <AuthLoadingScreen />;
+  // If we have no resolved subscription yet, show a neutral verification loader (never "Basic" UI).
+  if (!isEmergencySession && subscriptionLoading && !plan.subscription) {
+    return <AuthLoadingScreen message="Verifying your subscription…" />;
   }
 
   return (

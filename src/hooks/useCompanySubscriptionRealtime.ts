@@ -10,6 +10,7 @@ const BILLING_REFETCH_DEBOUNCE_MS = 500;
 /** Force in-flight network refetch so plan/status update on screen immediately (not next stale window). */
 function refetchWorkspaceBillingQueries(queryClient: QueryClient, companyId: string) {
   void Promise.all([
+    queryClient.refetchQueries({ queryKey: ['company-subscription', companyId], type: 'active' }),
     queryClient.refetchQueries({ queryKey: ['subscription-gate', companyId], type: 'active' }),
     queryClient.refetchQueries({ queryKey: ['company-mpesa-stk-confirmed', companyId], type: 'active' }),
     queryClient.refetchQueries({ queryKey: ['company-subscription-row', companyId], type: 'active' }),

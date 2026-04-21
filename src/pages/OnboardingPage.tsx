@@ -23,6 +23,7 @@ import {
   readOnboardingSessionProgress,
   saveOnboardingSessionProgress,
 } from '@/lib/onboardingSessionProgress';
+import { useQueryClient } from '@tanstack/react-query';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { NewProjectForm } from '@/components/projects/NewProjectForm';
 import { createFarm } from '@/services/farmsService';
@@ -71,6 +72,7 @@ export default function OnboardingPage() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user: clerkUser } = useUser();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [companyName, setCompanyName] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
@@ -467,6 +469,18 @@ export default function OnboardingPage() {
         leaseDuration: ownershipType === 'leased' ? Number(leaseDuration) : null,
         leaseDurationType: ownershipType === 'leased' ? leaseDurationType : null,
       });
+
+      // Avoid the "farm dropdown delay" in the next step by seeding the farms cache immediately.
+      // NewProjectForm reads farms from React Query: ['farms', companyId].
+      queryClient.setQueryData(['farms', companyId], (prev: unknown) => {
+        const arr = Array.isArray(prev) ? (prev as any[]) : [];
+        // Deduplicate by id.
+        const without = arr.filter((x) => (x as any)?.id !== farm.id);
+        return [farm, ...without];
+      });
+      // Background refetch to ensure server is source of truth.
+      void queryClient.invalidateQueries({ queryKey: ['farms', companyId] });
+
       setFirstFarmId(farm.id);
       setStep(4);
     } catch (e) {

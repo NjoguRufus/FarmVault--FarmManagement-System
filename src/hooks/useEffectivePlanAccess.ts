@@ -98,13 +98,13 @@ export function useEffectivePlanAccess(): UseEffectivePlanAccessResult {
       plan: sub.plan as any,
       status: sub.status as any,
       trialStartAt: undefined,
-      trialEndsAt: sub.isActivePaid ? undefined : sub.trialEndsAt ?? undefined,
+      trialEndsAt: sub.isTrial ? sub.displayAccessEndIso ?? undefined : undefined,
       paidUntil: sub.isActivePaid ? sub.displayAccessEndIso ?? null : null,
       override: undefined,
     };
 
     return getEffectivePlanAccessFromSubscription(subscription);
-  }, [isDeveloper, sub.plan, sub.status, sub.isOverrideActive, sub.trialEndsAt, sub.isActivePaid, sub.displayAccessEndIso]);
+  }, [isDeveloper, sub.plan, sub.status, sub.isOverrideActive, sub.isTrial, sub.isActivePaid, sub.displayAccessEndIso]);
 
   const planLabel = useMemo(() => getEffectivePlanLabel(access), [access]);
 

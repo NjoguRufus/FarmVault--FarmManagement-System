@@ -1,27 +1,25 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  getSubscriptionGateState,
-  hasConfirmedMpesaStkForCompany,
-} from '@/services/subscriptionService';
-import {
-  resolveWorkspaceSubscriptionState,
-  type WorkspaceSubscriptionPlan,
-  type WorkspaceSubscriptionStatus,
-} from '@/lib/resolveWorkspaceSubscriptionState';
+import { getCompanySubscription, type ResolvedCompanySubscription, type ResolvedCompanyPlan, type ResolvedCompanySubscriptionStatus } from '@/services/subscriptionService';
 
 export interface PlanContextValue {
   companyId: string | null;
   isDeveloper: boolean;
-  /** Non-null when subscription-gate queries failed to load. */
+  /** Raw resolved subscription object when available. */
+  subscription: ResolvedCompanySubscription | null;
+  /** True once subscription has been resolved from backend or we are showing cached (offline) data. */
+  isResolved: boolean;
+  /** True when data is confirmed from backend for this session. */
+  isVerified: boolean;
+  /** Non-null when resolver failed and no cache could be used. */
   error: string | null;
   /**
    * Null until confirmed from Supabase.
    * Under no circumstances should UI assume a plan before confirmation.
    */
-  plan: WorkspaceSubscriptionPlan | null;
-  status: WorkspaceSubscriptionStatus | null;
+  plan: ResolvedCompanyPlan | null;
+  status: ResolvedCompanySubscriptionStatus | null;
   canWrite: boolean;
   isTrial: boolean;
   isExpired: boolean;
@@ -44,129 +42,126 @@ export interface PlanContextValue {
 const PlanContext = createContext<PlanContextValue | undefined>(undefined);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const isDeveloper = user?.role === 'developer';
   const companyId = user?.companyId ?? null;
+  const cacheKey = useMemo(
+    () => (companyId ? `farmvault:subscription:v2:${companyId}` : null),
+    [companyId],
+  );
 
-  const {
-    data: subscriptionState,
-    isLoading: gateLoading,
-    isFetching: gateFetching,
-    isFetched: gateFetchedOnce,
-    error: gateError,
-  } = useQuery({
-    queryKey: ['subscription-gate', companyId],
-    enabled: !!companyId && !isDeveloper,
-    queryFn: () => getSubscriptionGateState(),
-    // Subscription state changes infrequently; keep this cache warm to reduce RPC calls.
-    staleTime: 5 * 60_000,
-    gcTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    // Don't retry in a tight loop; failing here previously caused "stuck loading" UX.
-    retry: false,
-  });
-
-  const {
-    data: stkConfirmed,
-    isLoading: stkLoading,
-    isFetching: stkFetching,
-    isFetched: stkFetchedOnce,
-    error: stkError,
-  } = useQuery({
-    queryKey: ['company-mpesa-stk-confirmed', companyId],
-    enabled: !!companyId && !isDeveloper,
-    queryFn: () => hasConfirmedMpesaStkForCompany(companyId!),
-    // Payment confirmation does not need second-by-second accuracy; reduce reads.
-    staleTime: 5 * 60_000,
-    gcTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  });
-
-  const loadError = useMemo(() => {
-    const e = gateError ?? stkError;
-    if (e) return e instanceof Error ? e.message : String(e);
-
-    // If gate query finished but returned no row, we must not "load forever".
-    // This usually indicates the subscription gate RPC isn't available or the company isn't initialized.
-    if (
-      Boolean(companyId) &&
-      !isDeveloper &&
-      gateFetchedOnce &&
-      !gateLoading &&
-      !gateFetching &&
-      subscriptionState == null
-    ) {
-      return 'Subscription status is not initialized for this company (no gate row returned).';
+  const [cached, setCached] = useState<ResolvedCompanySubscription | null>(() => {
+    if (!cacheKey || typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(cacheKey);
+      if (!raw) return null;
+      return JSON.parse(raw) as ResolvedCompanySubscription;
+    } catch {
+      return null;
     }
+  });
 
-    // If STK query finished but produced no boolean, treat as non-fatal (it can be empty); no error.
-    // We still rely primarily on the subscription gate for plan/status.
-    void stkFetchedOnce;
+  const {
+    data: resolved,
+    isPending,
+    isFetching,
+    isSuccess,
+    error: resolveError,
+  } = useQuery({
+    queryKey: ['company-subscription', companyId],
+    enabled: authReady && !!companyId && !isDeveloper,
+    queryFn: () => getCompanySubscription(companyId!),
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
+  });
 
+  useEffect(() => {
+    if (!cacheKey || typeof window === 'undefined') return;
+    if (isSuccess && resolved) {
+      try {
+        window.localStorage.setItem(cacheKey, JSON.stringify(resolved));
+        setCached(resolved);
+      } catch {
+        // ignore
+      }
+    }
+  }, [cacheKey, isSuccess, resolved]);
+
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+
+  const effectiveSub: ResolvedCompanySubscription | null = resolved ?? cached ?? null;
+  const isVerified = Boolean(resolved && isSuccess);
+  const canUseCache = !isOnline && !resolved && cached != null;
+  const isResolved = isVerified || canUseCache;
+  const error = useMemo(() => {
+    if (isResolved) return null;
+    if (!companyId || isDeveloper) return null;
+    if (resolveError) return resolveError instanceof Error ? resolveError.message : String(resolveError);
+    // Still pending and no cache available: no error, just unresolved.
     return null;
-  }, [
-    gateError,
-    stkError,
-    companyId,
-    isDeveloper,
-    gateFetchedOnce,
-    gateLoading,
-    gateFetching,
-    subscriptionState,
-    stkFetchedOnce,
-  ]);
+  }, [isResolved, companyId, isDeveloper, resolveError]);
 
-  const resolved = useMemo(() => {
-    return resolveWorkspaceSubscriptionState(
-      subscriptionState ?? null,
-      companyId,
-      Boolean(isDeveloper),
-      new Date(),
-      { hasConfirmedStkPayment: stkConfirmed === true },
-    );
-  }, [subscriptionState, companyId, isDeveloper, stkConfirmed]);
+  const validUntil = effectiveSub?.valid_until ?? null;
+  const validUntilDate = useMemo(() => {
+    if (!validUntil) return null;
+    const d = new Date(validUntil);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }, [validUntil]);
 
-  const loadingPlan =
-    Boolean(companyId) &&
-    !isDeveloper &&
-    // If we have not received a gate row yet, plan is not confirmed.
-    !loadError &&
-    (gateLoading || gateFetching || stkLoading || stkFetching || resolved.plan == null);
+  const daysRemaining = useMemo(() => {
+    if (!validUntilDate) return null;
+    // Infinity shows as Invalid Date; in that case validUntilDate would be null.
+    const diff = validUntilDate.getTime() - Date.now();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }, [validUntilDate]);
+
+  const isExpired = effectiveSub?.status === 'expired';
+  const canWrite = effectiveSub ? effectiveSub.status !== 'expired' : true;
+  const isTrial = effectiveSub?.is_trial === true;
+  const isActivePaid = effectiveSub?.plan === 'pro' && (effectiveSub.status === 'active' || effectiveSub.status === 'grace');
 
   const value = useMemo<PlanContextValue>(() => {
-    const stk = stkConfirmed === true && !isDeveloper;
-    const rawMode = (subscriptionState as any)?.billing_mode ?? null;
-    const rawCycle = (subscriptionState as any)?.billing_cycle ?? null;
-    const cycleFromStk = !stk
-      ? rawCycle
-      : rawCycle && String(rawCycle).toLowerCase() !== 'trial'
-        ? rawCycle
-        : 'monthly';
-
     return {
       companyId,
       isDeveloper,
-      error: loadError,
-      plan: resolved.plan,
-      status: resolved.status,
-      canWrite: resolved.canWrite,
-      isTrial: resolved.isTrial,
-      isExpired: resolved.isExpired,
-      daysRemaining: resolved.daysRemaining,
-      isOverrideActive: resolved.isOverrideActive,
-      trialExpiredNeedsPlan: resolved.trialExpiredNeedsPlan,
-      trialEndsAt: resolved.trialEndsAt,
-      displayAccessEndIso: resolved.displayAccessEndIso,
-      isActivePaid: resolved.isActivePaid,
-      billingModeFromGate: stk ? 'mpesa_stk' : rawMode,
-      billingCycleFromGate: cycleFromStk,
-      billingReferenceFromGate: (subscriptionState as any)?.billing_reference ?? null,
-      loadingPlan,
+      subscription: effectiveSub,
+      isResolved,
+      isVerified,
+      error,
+      plan: effectiveSub?.plan ?? null,
+      status: effectiveSub?.status ?? null,
+      canWrite,
+      isTrial,
+      isExpired,
+      daysRemaining,
+      isOverrideActive: false,
+      trialExpiredNeedsPlan: false,
+      trialEndsAt: null,
+      displayAccessEndIso: effectiveSub?.valid_until ?? null,
+      isActivePaid,
+      billingModeFromGate: null,
+      billingCycleFromGate: null,
+      billingReferenceFromGate: null,
+      loadingPlan: !isResolved && (isPending || isFetching),
     };
-  }, [companyId, isDeveloper, loadError, resolved, subscriptionState, stkConfirmed, loadingPlan]);
+  }, [
+    companyId,
+    isDeveloper,
+    effectiveSub,
+    isResolved,
+    isVerified,
+    error,
+    canWrite,
+    isTrial,
+    isExpired,
+    daysRemaining,
+    isActivePaid,
+    isPending,
+    isFetching,
+  ]);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

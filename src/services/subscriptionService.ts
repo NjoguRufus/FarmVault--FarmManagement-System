@@ -1,6 +1,18 @@
 import { supabase } from '@/lib/supabase';
 import { rateLimitAsync } from '@/lib/rateLimitAsync';
 
+export type ResolvedCompanyPlan = 'basic' | 'pro';
+export type ResolvedCompanySubscriptionStatus = 'active' | 'grace' | 'expired';
+
+export interface ResolvedCompanySubscription {
+  plan: ResolvedCompanyPlan;
+  status: ResolvedCompanySubscriptionStatus;
+  valid_until: string;
+  resolved_at: string;
+  /** UX hint only; plan/status remain authoritative. */
+  is_trial?: boolean;
+}
+
 export type CompanySubscriptionGateStatus =
   | 'pending_approval'
   | 'pending_payment'
@@ -51,8 +63,6 @@ const getSubscriptionGateStateImpl = async (): Promise<CompanySubscriptionGateSt
  */
 export const getSubscriptionGateState = rateLimitAsync(getSubscriptionGateStateImpl, {
   minIntervalMs: 30_000,
-  // Never cache "no row" — it can be transient during auth hydration / policy propagation.
-  shouldCacheResult: (res) => res != null,
 });
 
 /** Member-visible STK rows — aligns tenant UI with developer when gate RPC lags behind mpesa_payments. */
@@ -93,6 +103,26 @@ const hasConfirmedMpesaStkForCompanyImpl = async (companyId: string): Promise<bo
 /** Hard throttle — payment status does not need rapid polling. */
 export const hasConfirmedMpesaStkForCompany = rateLimitAsync(hasConfirmedMpesaStkForCompanyImpl, {
   minIntervalMs: 60_000,
+});
+
+const getCompanySubscriptionImpl = async (companyId: string): Promise<ResolvedCompanySubscription> => {
+  const cid = companyId.trim();
+  if (!cid) throw new Error('companyId is required');
+  const { data, error } = await supabase.rpc('get_company_subscription', { p_company_id: cid });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to resolve subscription');
+  }
+  // PostgREST may return a record or array depending on function shape.
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error('Subscription resolver returned no data');
+  }
+  return row as ResolvedCompanySubscription;
+};
+
+/** Hard throttle + dedupe. This RPC is authoritative, so keep it fast and bounded. */
+export const getCompanySubscription = rateLimitAsync(getCompanySubscriptionImpl, {
+  minIntervalMs: 10_000,
 });
 
 export type DeveloperSubscriptionAction =

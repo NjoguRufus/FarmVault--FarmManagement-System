@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { usePlan } from '@/contexts/PlanContext';
-import type { WorkspaceSubscriptionPlan, WorkspaceSubscriptionStatus } from '@/lib/resolveWorkspaceSubscriptionState';
+import type { ResolvedCompanyPlan, ResolvedCompanySubscriptionStatus } from '@/services/subscriptionService';
 
-export type SubscriptionPlan = WorkspaceSubscriptionPlan;
-export type SubscriptionStatus = WorkspaceSubscriptionStatus;
+export type SubscriptionPlan = ResolvedCompanyPlan;
+export type SubscriptionStatus = ResolvedCompanySubscriptionStatus;
 
 export interface CompanySubscriptionOverride {
   enabled: boolean;
@@ -34,15 +34,11 @@ export interface SubscriptionStatusResult {
   plan: SubscriptionPlan | null;
   status: SubscriptionStatus | null;
   isLoading: boolean;
-  /** Trial ended, is_trial still true in DB — company admin must call choose_post_trial_plan. */
-  trialExpiredNeedsPlan: boolean;
-  /** Raw trial end from gate RPC (for effective plan / feature access). */
-  trialEndsAt: string | null;
-  /** From gate: trial end or paid period end — use for billing renewal line. */
+  /** From resolver: access end (trial end or paid period end), if applicable. */
   displayAccessEndIso: string | null;
   /** Active paid (or equivalent); trial countdown hidden. */
   isActivePaid: boolean;
-  /** From get_subscription_gate_state (same source as plan/status). */
+  /** Present for legacy callers; may be null under deterministic resolver. */
   billingModeFromGate: string | null;
   billingCycleFromGate: string | null;
   /** From get_subscription_gate_state — fallback when company doc has no billing_reference yet. */
@@ -62,8 +58,6 @@ export function useSubscriptionStatus(): SubscriptionStatusResult {
       plan: plan.plan,
       status: plan.status,
       isLoading: plan.loadingPlan,
-      trialExpiredNeedsPlan: plan.trialExpiredNeedsPlan,
-      trialEndsAt: plan.trialEndsAt,
       displayAccessEndIso: plan.displayAccessEndIso,
       isActivePaid: plan.isActivePaid,
       billingModeFromGate: plan.billingModeFromGate,
