@@ -32,7 +32,6 @@ const NAV_ITEM_TRANSITION = {
 /** Warm forest green (hue ~145); mint tints — not blue/cool sage. */
 const TAB_TEXT_ACTIVE_CLASS = 'text-[#356b4e] dark:text-[#b5dcc4]';
 const TAB_TEXT_INACTIVE_CLASS = 'text-[#6e9178] dark:text-[#8aad92]';
-const TAB_RING_ACTIVE = 'ring-[#356b4e]/24 dark:ring-[#6ecf9a]/35';
 
 const MAX_BOTTOM_TABS_NARROW = 5;
 const MAX_BOTTOM_TABS_WIDE = 7;
@@ -321,39 +320,45 @@ export function BottomNav() {
         data-tour="bottom-navigation"
         className={cn(
           'pointer-events-auto w-full max-w-[480px] rounded-2xl min-h-[58px] flex items-stretch justify-between gap-0 px-1 py-1.5 relative overflow-hidden',
-          /* 1px vertical rules between tabs (not cell outlines) */
-          'divide-x divide-solid divide-[#356b4e]/32 dark:divide-[#6ecf9a]/42',
           'bg-[#f2f8f4] dark:bg-[hsl(145_22%_13%)]/95',
           'border border-[#356b4e]/22 dark:border-[#6ecf9a]/28 shadow-[0_12px_32px_-18px_rgba(0,0,0,0.1),0_6px_20px_-12px_rgba(53,107,78,0.16)]',
           'backdrop-blur-md supports-[backdrop-filter]:bg-[#f2f8f4]/92 dark:supports-[backdrop-filter]:bg-[hsl(145_22%_13%)]/92',
         )}
         aria-label="Bottom navigation"
       >
-        {tabs.map((item) => {
-          if (item.type === 'more') {
-            return (
+        {tabs.map((item, index) => (
+          <React.Fragment key={item.type === 'more' ? 'more' : item.path}>
+            {index > 0 ? (
+              <span
+                aria-hidden
+                className={cn(
+                  'pointer-events-none shrink-0 self-center h-9 w-px rounded-full',
+                  'bg-[linear-gradient(180deg,transparent_0%,rgba(53,107,78,0.27)_18%,rgba(53,107,78,0.37)_50%,rgba(53,107,78,0.27)_82%,transparent_100%)]',
+                  'dark:bg-[linear-gradient(180deg,transparent_0%,rgba(110,207,154,0.31)_18%,rgba(110,207,154,0.43)_50%,rgba(110,207,154,0.31)_82%,transparent_100%)]',
+                  'shadow-[0_0_6px_rgba(53,107,78,0.08)] dark:shadow-[0_0_6px_rgba(110,207,154,0.09)]'
+                )}
+              />
+            ) : null}
+            {item.type === 'more' ? (
               <NavItem
-                key="more"
                 item={item}
                 active={isMoreActive}
                 asButton
                 onPress={handleMoreTap}
               />
-            );
-          }
-          return (
-            <NavItem
-              key={item.path}
-              item={item}
-              activeOverride={
-                effectiveAccess.isBroker
-                  ? isNavItemActive(location.pathname, location.search, item.path)
-                  : undefined
-              }
-              to={item.path}
-            />
-          );
-        })}
+            ) : (
+              <NavItem
+                item={item}
+                activeOverride={
+                  effectiveAccess.isBroker
+                    ? isNavItemActive(location.pathname, location.search, item.path)
+                    : undefined
+                }
+                to={item.path}
+              />
+            )}
+          </React.Fragment>
+        ))}
       </nav>
     </div>
   );
@@ -388,12 +393,10 @@ function NavItem({
   onPress?: () => void;
 }) {
   const Icon = item.icon;
-  /** Mint-green tint (hue ~145); outline matches TAB_GREEN */
+  /** Selected: mint fill only — no ring / box outline (separators are | bars between tabs). */
   const activePill = cn(
     'bg-gradient-to-b from-[#d9eee0] via-[#e8f4ec] to-[#f2f8f4] dark:from-[hsl(145_32%_17%)] dark:via-[hsl(145_28%_15%)] dark:to-[hsl(145_24%_13%)]',
-    'ring-1',
-    TAB_RING_ACTIVE,
-    'shadow-[inset_0_0_0_1px_rgba(53,107,78,0.12),inset_0_1px_0_rgba(255,255,255,0.9),0_2px_10px_-4px_rgba(53,107,78,0.14)]'
+    'shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_2px_8px_-2px_rgba(53,107,78,0.12)]'
   );
 
   if (asButton && onPress) {
