@@ -14,6 +14,12 @@ import { listFarmsByCompany } from '@/services/farmsService';
 import { Expense, ExpenseCategory, CropStage, WorkLog } from '@/types';
 import { BROKER_EXPENSE_CATEGORIES } from '@/types';
 import { getExpenseCategoryLabel } from '@/lib/utils';
+import {
+  COMPANY_EXPENSE_CATEGORY_CORE_ORDER,
+  CUSTOM_EXPENSE_CATEGORIES_CHANGED,
+  isBrokerExpenseCategorySlug,
+  loadCustomExpenseCategories,
+} from '@/lib/customExpenseCategoriesStorage';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { useQueryClient } from '@tanstack/react-query';
 import { Wrench, CheckCircle, Clock } from 'lucide-react';
@@ -248,6 +254,13 @@ export default function ExpensesPage() {
     });
   }, [companyId, activeProject?.id]);
 
+  const [customExpenseCategoriesEpoch, setCustomExpenseCategoriesEpoch] = useState(0);
+  useEffect(() => {
+    const fn = () => setCustomExpenseCategoriesEpoch((e) => e + 1);
+    window.addEventListener(CUSTOM_EXPENSE_CATEGORIES_CHANGED, fn);
+    return () => window.removeEventListener(CUSTOM_EXPENSE_CATEGORIES_CHANGED, fn);
+  }, []);
+
   // Stages and work logs still used for stage detection in expense form
   const allStages: CropStage[] = [];
   const allWorkLogs: WorkLog[] = [];
@@ -422,6 +435,32 @@ export default function ExpensesPage() {
     [expenses, brokerCategoryValues],
   );
   const brokerExpensesTotal = brokerExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+  /** Filter dropdown: core order first, then other categories A→Z (broker market slugs excluded). */
+  const expenseCategoryFilterOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of expenses) {
+      const c = String(e.category ?? '').trim();
+      if (c && !isBrokerExpenseCategorySlug(c)) set.add(c);
+    }
+    for (const v of COMPANY_EXPENSE_CATEGORY_CORE_ORDER) {
+      set.add(v);
+    }
+    for (const c of loadCustomExpenseCategories(companyId ?? null)) {
+      const t = c.trim();
+      if (t && !isBrokerExpenseCategorySlug(t)) set.add(t);
+    }
+    const pinned = COMPANY_EXPENSE_CATEGORY_CORE_ORDER.filter((v) => set.has(v));
+    const pinnedSet = new Set(pinned);
+    const rest = Array.from(set)
+      .filter((v) => !pinnedSet.has(v))
+      .sort((a, b) =>
+        getExpenseCategoryLabel(a).localeCompare(getExpenseCategoryLabel(b), undefined, {
+          sensitivity: 'base',
+        }),
+      );
+    return [...pinned, ...rest];
+  }, [expenses, companyId, customExpenseCategoriesEpoch]);
 
   const formatCurrency = (amount: number) => `KES ${amount.toLocaleString()}`;
 
@@ -1023,13 +1062,11 @@ export default function ExpensesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="Seeds">Seeds</SelectItem>
-                <SelectItem value="Fertilizers">Fertilizers</SelectItem>
-                <SelectItem value="Labor">Labor</SelectItem>
-                <SelectItem value="labour">Labour (picker)</SelectItem>
-                <SelectItem value="Pesticides">Pesticides</SelectItem>
-                <SelectItem value="Irrigation">Irrigation</SelectItem>
-                <SelectItem value="Equipment">Equipment</SelectItem>
+                {expenseCategoryFilterOptions.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {getExpenseCategoryLabel(value)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Popover>
@@ -1062,7 +1099,6 @@ export default function ExpensesPage() {
             rows={recentTableRows}
             isLoading={isLoading}
             collectionNameMap={collectionNameMap}
-            formatCurrency={formatCurrency}
             getCategoryColor={getCategoryColor}
             onHarvestPayoutClick={(id) => setPayoutDetailCollectionId(id)}
             onPickerGroupClick={(g) =>
