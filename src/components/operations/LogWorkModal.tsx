@@ -38,6 +38,7 @@ import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import { AddInventoryItemModal } from '@/components/inventory/AddInventoryItemModal';
 import type { InputUsed } from '@/types';
 import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
+import { workersCountFromInput } from '@/lib/workersInput';
 
 interface LogWorkModalProps {
   open: boolean;
@@ -208,7 +209,7 @@ export function LogWorkModal({
     workCategory: '',
     workDate: new Date(),
     workDone: '',
-    actualWorkers: 1,
+    actualWorkersStr: '0',
     actualRatePerPerson: 0,
     notes: '',
   });
@@ -268,7 +269,12 @@ export function LogWorkModal({
       (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
       '';
     setFormData((prev) => {
-      const next = { ...prev, farmId: preferredFarmId, projectId: preferredProjectId ?? '' };
+      const next = {
+        ...prev,
+        farmId: preferredFarmId,
+        projectId: preferredProjectId ?? '',
+        actualWorkersStr: '0',
+      };
       if (initialWorkCategory) {
         return {
           ...next,
@@ -334,7 +340,8 @@ export function LogWorkModal({
     });
   }, [inventoryItems, formData.workCategory]);
 
-  const actualTotal = formData.actualWorkers * formData.actualRatePerPerson;
+  const parsedWorkers = workersCountFromInput(formData.actualWorkersStr);
+  const actualTotal = parsedWorkers * formData.actualRatePerPerson;
 
   // When work type changes, clear any previously selected inputs
   // since they may no longer match the new category filter
@@ -477,6 +484,11 @@ export function LogWorkModal({
       toast.error('Please select a work type');
       return;
     }
+    const workers = workersCountFromInput(formData.actualWorkersStr);
+    if (workers <= 0 || formData.actualRatePerPerson <= 0) {
+      toast.error('Workers and rate must be greater than zero');
+      return;
+    }
     setSaving(true);
     try {
       const drumsParts = inputs
@@ -493,7 +505,7 @@ export function LogWorkModal({
         workTitle: effectiveWorkTitle,
         workCategory: formData.workCategory,
         plannedDate: format(formData.workDate, 'yyyy-MM-dd'),
-        plannedWorkers: formData.actualWorkers,
+        plannedWorkers: workers,
         plannedRatePerPerson: formData.actualRatePerPerson,
         notes: notesCombined || null,
         allocatedManagerId: user?.id ?? null,
@@ -520,7 +532,7 @@ export function LogWorkModal({
         actorUserId: user?.id ?? '',
         actorUserName: user?.name ?? null,
         actualDate: format(formData.workDate, 'yyyy-MM-dd'),
-        actualWorkers: formData.actualWorkers,
+        actualWorkers: workers,
         actualRatePerPerson: formData.actualRatePerPerson,
         workDone: formData.workDone.trim(),
         executionNotes: notesCombined || null,
@@ -586,7 +598,7 @@ export function LogWorkModal({
         workCategory: '',
         workDate: new Date(),
         workDone: '',
-        actualWorkers: 1,
+        actualWorkersStr: '0',
         actualRatePerPerson: 0,
         notes: '',
       });
@@ -749,12 +761,22 @@ export function LogWorkModal({
               <Input
                 id="actualWorkers"
                 type="number"
-                min={1}
-                value={formData.actualWorkers}
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  actualWorkers: parseInt(e.target.value) || 1
-                }))}
+                min={0}
+                inputMode="numeric"
+                value={formData.actualWorkersStr}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    actualWorkersStr: e.target.value,
+                  }))
+                }
+                onBlur={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    actualWorkersStr:
+                      prev.actualWorkersStr.trim() === '' ? '0' : String(workersCountFromInput(prev.actualWorkersStr)),
+                  }))
+                }
               />
             </div>
             <div className="space-y-2">
@@ -1085,6 +1107,8 @@ export function LogWorkModal({
           categories={inventoryCategories}
           suppliers={suppliers}
           createdBy={user?.id}
+          farmId={initialFarmId ?? null}
+          projectId={initialProjectId ?? null}
           externalPrefill={addInventoryPrefill}
           externalPrefillNonce={addInventoryPrefillNonce}
           onCreated={(meta) => void handleInventoryItemCreated(meta)}

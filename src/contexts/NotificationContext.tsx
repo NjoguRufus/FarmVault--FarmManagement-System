@@ -46,6 +46,11 @@ interface AddNotificationOptions {
   skipSound?: boolean; // Skip sound playback (used when sound is handled elsewhere, e.g., real-time alerts)
   navigatePath?: string;
   dedupeKey?: string;
+  /**
+   * Sonner toast id: same id updates one toast instead of stacking (independent of `dedupeKey`,
+   * which also suppresses duplicate bell rows).
+   */
+  toastMergeId?: string;
   /** When true, only append to the bell list (no toast, no sound). */
   silent?: boolean;
   /** When set, mirrors `public.notifications.id` (UUID) for read sync + dedupe with Web Push. */
@@ -68,6 +73,47 @@ interface NotificationContextValue {
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 const MAX_NOTIFICATIONS = 100;
 const STORAGE_KEY_PREFIX = 'farmvault:notifications:v1:';
+
+function notificationToastSonnerId(n: {
+  toastMergeId?: string;
+  dedupeKey?: string;
+  title: string;
+  message?: string;
+}): string {
+  if (n.toastMergeId) return `fv-t:${n.toastMergeId}`;
+  if (n.dedupeKey) return `fv-t:${n.dedupeKey}`;
+  let h = 2166136261;
+  const s = `${n.title}\u0000${n.message ?? ''}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `fv-t:m${(h >>> 0).toString(36)}`;
+}
+
+function emitBellToast(
+  title: string,
+  message: string | undefined,
+  toastType: ToastNotificationType,
+  id: string,
+) {
+  const opts = { description: message, id };
+  switch (toastType) {
+    case 'success':
+      toast.success(title, opts);
+      break;
+    case 'warning':
+      toast.warning(title, opts);
+      break;
+    case 'error':
+      toast.error(title, opts);
+      break;
+    case 'info':
+    default:
+      toast.info(title, opts);
+      break;
+  }
+}
 
 function normalizeStoredNotification(value: unknown): AppNotification | null {
   if (!value || typeof value !== 'object') return null;
@@ -247,7 +293,17 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       if (n.silent) return;
 
-      toast(n.title, { description: n.message, duration: 4000 });
+      emitBellToast(
+        n.title,
+        n.message,
+        n.toastType ?? 'info',
+        notificationToastSonnerId({
+          toastMergeId: n.toastMergeId,
+          dedupeKey: n.dedupeKey,
+          title: n.title,
+          message: n.message,
+        }),
+      );
 
       // Play notification sound if enabled (unless skipSound is true)
       if (n.skipSound) {
@@ -303,6 +359,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         skipSound: payload.skipSound,
         navigatePath: payload.path,
         type: notificationPortalForUnifiedKind(payload.kind, payload.audiences),
+        toastMergeId: `unified:${payload.kind}`,
       });
       if (
         payload.showSystemNotification !== false &&

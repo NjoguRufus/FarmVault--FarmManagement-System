@@ -178,10 +178,12 @@ export default function StaffOperationsPage() {
               </Badge>
             </div>
 
-            {/* Date */}
+            {/* Date: actual when logged, else planned */}
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Calendar className="h-4 w-4" />
-              {formatDate(card.plannedDate)}
+              {formatDate(
+                card.status === 'planned' ? card.plannedDate : card.actualDate ?? card.plannedDate,
+              )}
             </div>
 
             {/* Badges */}
@@ -221,7 +223,6 @@ export default function StaffOperationsPage() {
 
             {showMarkPaidOnCard && (
               <Button
-                variant="secondary"
                 className="w-full mt-2"
                 onClick={(e) => {
                   e.stopPropagation();

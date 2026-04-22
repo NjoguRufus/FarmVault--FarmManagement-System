@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,11 +6,16 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 import type { Supplier } from '@/types';
 import { recordInventoryStockIn, logInventoryAuditEvent } from '@/services/inventoryReadModelService';
-import { createFinanceExpense } from '@/services/financeExpenseService';
+import { INVENTORY_STOCK_IN_EXPENSE_SOURCE } from '@/services/financeExpenseService';
+import { ExpenseService } from '@/services/localData/ExpenseService';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useProject } from '@/contexts/ProjectContext';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useQueryClient } from '@tanstack/react-query';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 
 interface RecordStockInModalProps {
   open: boolean;
@@ -35,6 +40,9 @@ export function RecordStockInModal({
 }: RecordStockInModalProps) {
   const { user } = useAuth();
   const { activeProject, activeFarmId } = useProject();
+  const { can } = usePermissions();
+  const canCreateExpense = can('expenses', 'create');
+  const queryClient = useQueryClient();
   const { addNotification } = useNotifications();
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
@@ -42,12 +50,28 @@ export function RecordStockInModal({
   const [supplierId, setSupplierId] = useState<'none' | string>('none');
   const [date, setDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [countAsExpensePurchase, setCountAsExpensePurchase] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const resolvedFarmId = farmId ?? activeProject?.farmId ?? activeFarmId ?? null;
+  const resolvedProjectId = projectId ?? activeProject?.id ?? null;
+
+  const purchaseLineTotal = useMemo(() => {
+    const q = Number(quantity);
+    const c = Number(unitCost);
+    if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(c) || c <= 0) return null;
+    return q * c;
+  }, [quantity, unitCost]);
+
+  const isPurchase = transactionType.toLowerCase() === 'purchase';
+  const expenseToggleEnabled =
+    isPurchase && canCreateExpense && Boolean(resolvedFarmId) && purchaseLineTotal != null && purchaseLineTotal > 0;
 
   useEffect(() => {
     if (open) {
       const today = new Date().toISOString().slice(0, 10);
       setDate(today);
+      setCountAsExpensePurchase(true);
       if (item?.supplier_id) {
         setSupplierId(item.supplier_id as string);
       }
@@ -57,6 +81,7 @@ export function RecordStockInModal({
       setTransactionType('Purchase');
       setSupplierId('none');
       setNotes('');
+      setCountAsExpensePurchase(true);
     }
   }, [open, item?.supplier_id]);
 
@@ -72,8 +97,6 @@ export function RecordStockInModal({
     setSaving(true);
     try {
       const totalCost = qty * cost;
-      const resolvedFarmId = farmId ?? activeProject?.farmId ?? activeFarmId ?? null;
-      const resolvedProjectId = projectId ?? activeProject?.id ?? null;
 
       await recordInventoryStockIn({
         companyId,
@@ -103,9 +126,15 @@ export function RecordStockInModal({
         },
       });
 
-      if (transactionType.toLowerCase() === 'purchase' && totalCost > 0) {
-        if (resolvedFarmId) {
-          await createFinanceExpense({
+      if (
+        transactionType.toLowerCase() === 'purchase' &&
+        totalCost > 0 &&
+        countAsExpensePurchase &&
+        canCreateExpense &&
+        resolvedFarmId
+      ) {
+        try {
+          await ExpenseService.create({
             companyId,
             farmId: resolvedFarmId,
             projectId: resolvedProjectId,
@@ -114,10 +143,29 @@ export function RecordStockInModal({
             note: `Inventory stock-in: ${item.name} (${qty} ${item.unit || 'units'} @ KES ${cost.toLocaleString()})`,
             expenseDate: date || new Date().toISOString().slice(0, 10),
             createdBy: user?.id ?? null,
+            source: INVENTORY_STOCK_IN_EXPENSE_SOURCE,
+            referenceId: crypto.randomUUID(),
           });
-        } else {
-          toast.warning('Stock recorded, but no active farm selected so expense was not auto-created.');
+          void queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
+          void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+        } catch (expErr: unknown) {
+          const msg = expErr instanceof Error ? expErr.message : String(expErr);
+          toast.warning('Stock recorded, but expense was not saved.', { description: msg });
         }
+      } else if (
+        transactionType.toLowerCase() === 'purchase' &&
+        totalCost > 0 &&
+        countAsExpensePurchase &&
+        !resolvedFarmId
+      ) {
+        toast.message('No farm in context — expense not recorded. Add on Expenses if needed.');
+      } else if (
+        transactionType.toLowerCase() === 'purchase' &&
+        totalCost > 0 &&
+        countAsExpensePurchase &&
+        !canCreateExpense
+      ) {
+        toast.message('No permission to create expenses — log this purchase on Expenses if needed.');
       }
 
       addNotification({
@@ -223,6 +271,35 @@ export function RecordStockInModal({
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
+
+            {isPurchase ? (
+              <div
+                className={cn(
+                  'flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5',
+                  !expenseToggleEnabled && 'opacity-80',
+                )}
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">Count as expense</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {!resolvedFarmId
+                      ? 'Pick a farm/project so this posts to finance.'
+                      : !canCreateExpense
+                        ? 'No expense permission — log manually if needed.'
+                        : purchaseLineTotal == null
+                          ? 'Enter quantity and unit cost.'
+                          : 'Turn off if you already recorded this purchase on Expenses.'}
+                  </p>
+                </div>
+                <Switch
+                  checked={countAsExpensePurchase && expenseToggleEnabled}
+                  onCheckedChange={(v) => setCountAsExpensePurchase(v)}
+                  disabled={!expenseToggleEnabled}
+                  className="shrink-0 mt-0.5"
+                  aria-label="Count stock purchase as expense"
+                />
+              </div>
+            ) : null}
 
             <div className="space-y-1">
               <label className="text-sm font-medium text-foreground">Notes</label>

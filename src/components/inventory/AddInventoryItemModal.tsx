@@ -1,21 +1,26 @@
+/**
+ * Add inventory item — unit-driven flow (no packaging type).
+ *
+ * Example payload shape before API mapping:
+ * - Continuous: { item_name, unit: "litres", amount_per_item, quantity (items), total_quantity, price_per_item?, total_cost? }
+ * - Count: { item_name, unit: "pieces", quantity, total_quantity }
+ *
+ * @example
+ * ```tsx
+ * <AddInventoryItemModal
+ *   open={open}
+ *   onOpenChange={setOpen}
+ *   companyId={companyId}
+ *   categories={categories}
+ *   suppliers={suppliers}
+ *   onCreated={({ itemId, name }) => selectItem(itemId)}
+ * />
+ * ```
+ */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  ChevronDown,
-  ChevronUp,
-  Package,
-  Wheat,
-  Boxes,
-  Wine,
-  PackageOpen,
-  Box,
-} from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -35,12 +40,24 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { cn } from '@/lib/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { INVENTORY_CATEGORIES_QUERY_KEY, INVENTORY_STOCK_QUERY_KEY } from '@/hooks/useInventoryReadModels';
+import { useProject } from '@/contexts/ProjectContext';
+import { usePermissions } from '@/hooks/usePermissions';
+import { ExpenseService } from '@/services/localData/ExpenseService';
+import {
+  financeExpenseExistsByReference,
+  INVENTORY_OPENING_EXPENSE_SOURCE,
+} from '@/services/financeExpenseService';
+import { Switch } from '@/components/ui/switch';
+import { CostSection } from '@/components/inventory/add-item/CostSection';
+import { DynamicQuantityFields } from '@/components/inventory/add-item/DynamicQuantityFields';
+import { UnitSelector } from '@/components/inventory/add-item/UnitSelector';
+import { isContinuousUnit, type StockUnit } from '@/components/inventory/add-item/inventoryAddItemUnits';
+import { parseNonNegativeNumber, parsePositiveNumber } from '@/components/inventory/add-item/validation';
+import { parseQuantityForSubmit, validateQuantityStep } from '@/components/inventory/add-item/validationHandler';
 
-type PackagingType = 'single' | 'sack' | 'box' | 'bottle' | 'pack' | 'other';
-type UnitType = 'kg' | 'g' | 'litres' | 'ml' | 'pieces' | 'metres';
 type WizardStep = 1 | 2 | 3;
 
-const DRAFT_STORAGE_PREFIX = 'fv-add-inv-draft:v1:';
+const DRAFT_STORAGE_PREFIX = 'fv-add-inv-draft:v2:';
 
 type AddInventoryDraft = {
   step: WizardStep;
@@ -48,13 +65,12 @@ type AddInventoryDraft = {
   name: string;
   categoryId: string;
   newCategoryName: string;
-  packagingType: PackagingType;
-  unit: UnitType;
-  amount: string;
-  numberOfPacks: string;
-  unitsPerPack: string;
-  pricePerPack: string;
-  totalPrice: string;
+  stockUnit: StockUnit;
+  amountPerItem: string;
+  numberOfItems: string;
+  pricePerItem: string;
+  totalCost: string;
+  totalCostManual?: boolean;
   supplierId: 'none' | 'add_new' | string;
   newSupplierName: string;
   showAdvanced: boolean;
@@ -63,105 +79,67 @@ type AddInventoryDraft = {
   minStockLevel: string;
   reorderQuantity: string;
   notes: string;
+  countAsExpense?: boolean;
 };
 
-const packagingConfig: Record<
-  PackagingType,
-  {
-    icon: React.ElementType;
-    label: string;
-    singularLabel: string;
-    pluralLabel: string;
-    color: string;
-    bgColor: string;
-    stockLabel: string;
-    unitsPerLabel: string;
-    priceLabel: string;
-    showUnitsPerField: boolean;
-    exampleCalc: string;
+function normalizeLegacyStockUnit(raw: unknown): StockUnit | null {
+  if (typeof raw !== 'string') return null;
+  const u = raw.trim();
+  const legacy: Record<string, StockUnit> = {
+    g: 'grams',
+    grams: 'grams',
+    kg: 'kg',
+    ml: 'ml',
+    litres: 'litres',
+    liter: 'litres',
+    pieces: 'pieces',
+    metres: 'meters',
+    meters: 'meters',
+  };
+  return legacy[u] ?? (['ml', 'litres', 'kg', 'grams', 'pieces', 'meters'].includes(u) ? (u as StockUnit) : null);
+}
+
+function parseStoredDraft(raw: string): Partial<AddInventoryDraft> | null {
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (!o || typeof o !== 'object') return null;
+
+    const stockUnit =
+      normalizeLegacyStockUnit(o.stockUnit) ?? normalizeLegacyStockUnit(o.unit) ?? 'kg';
+
+    const amountPerItem =
+      (typeof o.amountPerItem === 'string' ? o.amountPerItem : undefined) ??
+      (typeof o.amount === 'string' ? o.amount : undefined) ??
+      (typeof o.unitsPerPack === 'string' ? o.unitsPerPack : '') ??
+      '';
+
+    const numberOfItems =
+      (typeof o.numberOfItems === 'string' ? o.numberOfItems : undefined) ??
+      (typeof o.numberOfPacks === 'string' ? o.numberOfPacks : '') ??
+      '';
+
+    const pricePerItem =
+      (typeof o.pricePerItem === 'string' ? o.pricePerItem : undefined) ??
+      (typeof o.pricePerPack === 'string' ? o.pricePerPack : '') ??
+      '';
+
+    const totalCost =
+      (typeof o.totalCost === 'string' ? o.totalCost : undefined) ??
+      (typeof o.totalPrice === 'string' ? o.totalPrice : '') ??
+      '';
+
+    return {
+      ...(o as Partial<AddInventoryDraft>),
+      stockUnit,
+      amountPerItem,
+      numberOfItems,
+      pricePerItem,
+      totalCost,
+    };
+  } catch {
+    return null;
   }
-> = {
-  single: {
-    icon: Box,
-    label: 'Single Item',
-    singularLabel: 'item',
-    pluralLabel: 'items',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
-    stockLabel: 'Number of items',
-    unitsPerLabel: 'Amount per item',
-    priceLabel: 'Price per item',
-    showUnitsPerField: false,
-    exampleCalc: '10 items = 10 pieces',
-  },
-  sack: {
-    icon: Wheat,
-    label: 'Sack / Bag',
-    singularLabel: 'sack',
-    pluralLabel: 'sacks',
-    color: 'text-fv-gold',
-    bgColor: 'bg-fv-gold-soft/50',
-    stockLabel: 'Number of sacks',
-    unitsPerLabel: 'Content per sack',
-    priceLabel: 'Price per sack',
-    showUnitsPerField: false,
-    exampleCalc: '5 sacks × 50kg = 250kg',
-  },
-  box: {
-    icon: Boxes,
-    label: 'Box / Carton',
-    singularLabel: 'box',
-    pluralLabel: 'boxes',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
-    stockLabel: 'Number of boxes',
-    unitsPerLabel: 'Units per box',
-    priceLabel: 'Price per box',
-    showUnitsPerField: true,
-    exampleCalc: '5 boxes × 24 pieces = 120 pieces',
-  },
-  bottle: {
-    icon: Wine,
-    label: 'Bottle / Container',
-    singularLabel: 'bottle',
-    pluralLabel: 'bottles',
-    color: 'text-fv-success',
-    bgColor: 'bg-fv-success/10',
-    stockLabel: 'Number of bottles',
-    unitsPerLabel: 'Content per bottle',
-    priceLabel: 'Price per bottle',
-    showUnitsPerField: false,
-    exampleCalc: '6 bottles × 2L = 12L',
-  },
-  pack: {
-    icon: PackageOpen,
-    label: 'Pack / Bundle',
-    singularLabel: 'pack',
-    pluralLabel: 'packs',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
-    stockLabel: 'Number of packs',
-    unitsPerLabel: 'Units per pack',
-    priceLabel: 'Price per pack',
-    showUnitsPerField: true,
-    exampleCalc: '4 packs × 10 pieces = 40 pieces',
-  },
-  other: {
-    icon: Package,
-    label: 'Other',
-    singularLabel: 'unit',
-    pluralLabel: 'units',
-    color: 'text-muted-foreground',
-    bgColor: 'bg-muted/40',
-    stockLabel: 'Number of units',
-    unitsPerLabel: 'Amount per unit',
-    priceLabel: 'Price per unit',
-    showUnitsPerField: true,
-    exampleCalc: '3 units × 1 = 3 total',
-  },
-};
-
-const packagingOptions: PackagingType[] = ['single', 'sack', 'box', 'bottle', 'other'];
+}
 
 interface AddInventoryItemModalProps {
   open: boolean;
@@ -173,9 +151,19 @@ interface AddInventoryItemModalProps {
   onCreated?: (meta?: { itemId: string; name: string }) => void;
   createdBy?: string;
   /** Pre-fill when opened from another surface (e.g. Log Work typeahead). */
-  externalPrefill?: { name: string; categoryTemplate?: string } | null;
+  externalPrefill?: {
+    name: string;
+    categoryTemplate?: string;
+    /** Prefill step 3 total (KES), e.g. from a recorded expense. */
+    totalCostKes?: number;
+    /** Set false when purchase was already booked as an expense (default true / unchanged). */
+    countAsExpense?: boolean;
+  } | null;
   /** Increment when `externalPrefill` should re-apply (same name, new open). */
   externalPrefillNonce?: number;
+  /** Farm for booking an expense (falls back to active project). */
+  farmId?: string | null;
+  projectId?: string | null;
 }
 
 export function AddInventoryItemModal({
@@ -188,13 +176,21 @@ export function AddInventoryItemModal({
   createdBy,
   externalPrefill = null,
   externalPrefillNonce = 0,
+  farmId: farmIdProp = null,
+  projectId: projectIdProp = null,
 }: AddInventoryItemModalProps) {
   const { sessionClaims } = useAuth();
   const sessionCompanyId = (sessionClaims?.company_id as string | undefined)?.trim();
   const { user } = useAppAuth();
+  const { activeProject, activeFarmId } = useProject();
+  const { can } = usePermissions();
+  const canCreateExpense = can('expenses', 'create');
   const { addNotification } = useNotifications();
   const queryClient = useQueryClient();
   const reducedMotion = useReducedMotion();
+
+  const resolvedFarmId = farmIdProp ?? activeProject?.farmId ?? activeFarmId ?? null;
+  const resolvedProjectId = projectIdProp ?? activeProject?.id ?? null;
 
   const [step, setStep] = useState<WizardStep>(1);
   const [slideDir, setSlideDir] = useState<1 | -1>(1);
@@ -207,13 +203,13 @@ export function AddInventoryItemModal({
   const [categoryId, setCategoryId] = useState<string>('');
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  const [packagingType, setPackagingType] = useState<PackagingType>('single');
-  const [unit, setUnit] = useState<UnitType>('kg');
-  const [amount, setAmount] = useState('');
-  const [numberOfPacks, setNumberOfPacks] = useState('');
-  const [unitsPerPack, setUnitsPerPack] = useState('');
-  const [pricePerPack, setPricePerPack] = useState('');
-  const [totalPrice, setTotalPrice] = useState('');
+  const [stockUnit, setStockUnit] = useState<StockUnit>('kg');
+  const [amountPerItem, setAmountPerItem] = useState('');
+  const [numberOfItems, setNumberOfItems] = useState('');
+
+  const [pricePerItem, setPricePerItem] = useState('');
+  const [totalCost, setTotalCost] = useState('');
+  const [totalCostManual, setTotalCostManual] = useState(false);
 
   const [supplierId, setSupplierId] = useState<'none' | 'add_new' | string>('none');
   const [newSupplierName, setNewSupplierName] = useState('');
@@ -224,6 +220,8 @@ export function AddInventoryItemModal({
   const [minStockLevel, setMinStockLevel] = useState('');
   const [reorderQuantity, setReorderQuantity] = useState('');
   const [notes, setNotes] = useState('');
+
+  const [countAsExpense, setCountAsExpense] = useState(true);
 
   const [saving, setSaving] = useState(false);
 
@@ -239,28 +237,16 @@ export function AddInventoryItemModal({
 
   const predefinedCategories = useMemo(
     () => [
-      { value: 'template:fertilizer', label: 'Fertilizer', defaultUnit: 'kg' as UnitType },
-      { value: 'template:chemical', label: 'Chemical / Pesticide', defaultUnit: 'ml' as UnitType },
-      { value: 'template:fuel', label: 'Fuel', defaultUnit: 'litres' as UnitType },
-      { value: 'template:tying-ropes-sacks', label: 'Tying Ropes / Sacks', defaultUnit: 'pieces' as UnitType },
+      { value: 'template:fertilizer', label: 'Fertilizer', defaultUnit: 'kg' as StockUnit },
+      { value: 'template:chemical', label: 'Chemical / Pesticide', defaultUnit: 'ml' as StockUnit },
+      { value: 'template:fuel', label: 'Fuel', defaultUnit: 'litres' as StockUnit },
+      { value: 'template:tying-ropes-sacks', label: 'Tying Ropes / Sacks', defaultUnit: 'pieces' as StockUnit },
       { value: 'add_new', label: '+ Add new category…', defaultUnit: null },
     ],
     [],
   );
 
-  const predefinedUnits = useMemo(
-    () => [
-      { value: 'kg', label: 'kg' },
-      { value: 'g', label: 'g' },
-      { value: 'litres', label: 'litre' },
-      { value: 'ml', label: 'ml' },
-      { value: 'pieces', label: 'pieces' },
-      { value: 'metres', label: 'meters' },
-    ],
-    [],
-  );
-
-  const getCategoryDefaultUnit = (catId: string, catName?: string): UnitType | null => {
+  const getCategoryDefaultUnit = (catId: string, catName?: string): StockUnit | null => {
     const predefined = predefinedCategories.find((c) => c.value === catId);
     if (predefined?.defaultUnit) return predefined.defaultUnit;
 
@@ -269,7 +255,7 @@ export function AddInventoryItemModal({
     if (n.includes('chemical') || n.includes('pesticide') || n.includes('herbicide') || n.includes('fungicide')) return 'ml';
     if (n.includes('fuel') || n.includes('diesel') || n.includes('petrol')) return 'litres';
     if (n.includes('rope') || n.includes('sack') || n.includes('tying')) return 'pieces';
-    if (n.includes('seed')) return 'g';
+    if (n.includes('seed')) return 'grams';
 
     return null;
   };
@@ -281,158 +267,78 @@ export function AddInventoryItemModal({
     const defaultUnit = getCategoryDefaultUnit(newCategoryId, matchedCategory?.name ?? undefined);
 
     if (defaultUnit) {
-      setUnit(defaultUnit);
+      setStockUnit(defaultUnit);
     }
   };
 
-  const currentPackaging = packagingConfig[packagingType];
-
-  const getUnitDisplayName = (u: UnitType): string => {
-    switch (u) {
-      case 'kg':
-        return 'kgs';
-      case 'g':
-        return 'grams';
-      case 'litres':
-        return 'litres';
-      case 'ml':
-        return 'ml';
-      case 'pieces':
-        return 'pieces';
-      case 'metres':
-        return 'meters';
-      default:
-        return u;
+  const liveTotalQuantity = useMemo(() => {
+    const items = parsePositiveNumber(numberOfItems);
+    if (!Number.isFinite(items) || items <= 0) return NaN;
+    if (isContinuousUnit(stockUnit)) {
+      const per = parsePositiveNumber(amountPerItem);
+      if (!Number.isFinite(per) || per <= 0) return NaN;
+      return per * items;
     }
+    return items;
+  }, [stockUnit, amountPerItem, numberOfItems]);
+
+  const itemsNumForCost = parsePositiveNumber(numberOfItems);
+  const priceNumForAuto = parseNonNegativeNumber(pricePerItem);
+  const autoTotalCost = useMemo(() => {
+    if (!Number.isFinite(itemsNumForCost) || itemsNumForCost <= 0) return NaN;
+    if (!Number.isFinite(priceNumForAuto)) return NaN;
+    return Math.round(itemsNumForCost * priceNumForAuto * 100) / 100;
+  }, [itemsNumForCost, priceNumForAuto]);
+
+  /** Positive KES total for opening purchase (matches submit logic). */
+  const openingExpenseAmount = useMemo(() => {
+    const itemsCount = parsePositiveNumber(numberOfItems);
+    const priceNum = pricePerItem.trim() ? parseNonNegativeNumber(pricePerItem) : NaN;
+    const totalNum = totalCost.trim() ? parseNonNegativeNumber(totalCost) : NaN;
+    let effectiveTotal: number | undefined;
+    if (totalCostManual && Number.isFinite(totalNum)) effectiveTotal = totalNum;
+    else if (Number.isFinite(priceNum) && Number.isFinite(itemsCount) && itemsCount > 0) {
+      effectiveTotal = itemsCount * priceNum;
+    } else if (Number.isFinite(totalNum)) effectiveTotal = totalNum;
+    if (effectiveTotal != null && Number.isFinite(effectiveTotal) && effectiveTotal > 0) return effectiveTotal;
+    return null;
+  }, [numberOfItems, pricePerItem, totalCost, totalCostManual]);
+
+  const expenseToggleEnabled =
+    canCreateExpense && Boolean(resolvedFarmId) && openingExpenseAmount != null;
+
+  useEffect(() => {
+    if (totalCostManual) return;
+    if (Number.isFinite(autoTotalCost)) setTotalCost(String(autoTotalCost));
+    else if (!pricePerItem.trim() && !numberOfItems.trim()) setTotalCost('');
+  }, [autoTotalCost, totalCostManual, pricePerItem, numberOfItems]);
+
+  const handlePricePerItemChange = (v: string) => {
+    setTotalCostManual(false);
+    setPricePerItem(v);
   };
 
-  const getAmountPlaceholder = (): string => {
-    const unitName = getUnitDisplayName(unit);
-    const packagingName = currentPackaging.singularLabel;
-
-    return `How many ${unitName} per ${packagingName}`;
+  const handleNumberOfItemsChange = (v: string) => {
+    setTotalCostManual(false);
+    setNumberOfItems(v);
   };
 
-  const getAmountExample = (): string => {
-    switch (packagingType) {
-      case 'sack':
-        return unit === 'kg' ? '50' : '25';
-      case 'bottle':
-        return unit === 'litres' ? '2' : unit === 'ml' ? '500' : '1';
-      case 'box':
-        return '24';
-      case 'pack':
-        return '10';
-      case 'single':
-        return '1';
-      default:
-        return '1';
-    }
+  const handleTotalCostChange = (v: string) => {
+    setTotalCostManual(true);
+    setTotalCost(v);
   };
 
-  const getUnitLabel = (u: UnitType, value: number): string => {
-    if (u === 'litres') return value === 1 ? 'litre' : 'litres';
-    if (u === 'pieces') return value === 1 ? 'piece' : 'pieces';
-    if (u === 'metres') return value === 1 ? 'meter' : 'meters';
-    return u;
+  const handleStockUnitChange = (u: StockUnit) => {
+    setStockUnit(u);
+    if (!isContinuousUnit(u)) setAmountPerItem('');
   };
-
-  const getPackLabel = (count: number): string => {
-    return count === 1 ? currentPackaging.singularLabel : currentPackaging.pluralLabel;
-  };
-
-  const needsUnitsPerField = currentPackaging.showUnitsPerField;
-
-  const calculatedTotal = useMemo(() => {
-    const packs = Number(numberOfPacks);
-    if (!Number.isFinite(packs) || packs <= 0) return null;
-
-    if (needsUnitsPerField) {
-      const upp = Number(unitsPerPack);
-      if (!Number.isFinite(upp) || upp <= 0) return { value: packs, unit: 'pieces' as const, isPackCount: true };
-      return { value: packs * upp, unit: 'pieces' as const, isPackCount: false };
-    } else {
-      const amt = Number(amount);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        if (packagingType === 'single') {
-          return { value: packs, unit: 'pieces' as const, isPackCount: true };
-        }
-        return { value: packs, unit, isPackCount: true };
-      }
-      return { value: packs * amt, unit, isPackCount: false };
-    }
-  }, [numberOfPacks, amount, unit, unitsPerPack, needsUnitsPerField, packagingType]);
-
-  const handlePricePerPackChange = (value: string) => {
-    setPricePerPack(value);
-    const packs = Number(numberOfPacks);
-    const ppk = Number(value);
-    if (Number.isFinite(ppk) && ppk > 0 && Number.isFinite(packs) && packs > 0) {
-      setTotalPrice(String(packs * ppk));
-    } else if (!value) {
-      setTotalPrice('');
-    }
-  };
-
-  const handleTotalPriceChange = (value: string) => {
-    setTotalPrice(value);
-    const packs = Number(numberOfPacks);
-    const tp = Number(value);
-    if (Number.isFinite(tp) && tp > 0 && Number.isFinite(packs) && packs > 0) {
-      setPricePerPack(String(Math.round((tp / packs) * 100) / 100));
-    } else if (!value) {
-      setPricePerPack('');
-    }
-  };
-
-  const handleNumberOfPacksChange = (value: string) => {
-    setNumberOfPacks(value);
-    const packs = Number(value);
-    const ppk = Number(pricePerPack);
-    if (Number.isFinite(ppk) && ppk > 0 && Number.isFinite(packs) && packs > 0) {
-      setTotalPrice(String(packs * ppk));
-    }
-  };
-
-  /** Centered live line for Step 2 */
-  const liveQuantityLine = (() => {
-    const packs = Number(numberOfPacks);
-    if (!Number.isFinite(packs) || packs <= 0) return null;
-    if (!calculatedTotal) return null;
-
-    const packLabel = getPackLabel(packs);
-
-    if (calculatedTotal.isPackCount) {
-      if (needsUnitsPerField) {
-        return `${packs} ${packLabel} — enter ${currentPackaging.unitsPerLabel.toLowerCase()}`;
-      }
-      if (packagingType === 'single') {
-        return `${packs} ${packLabel} = ${packs} pieces`;
-      }
-      return `${packs} ${packLabel} — set amount per ${currentPackaging.singularLabel}`;
-    }
-
-    const total = calculatedTotal.value;
-    const unitStr =
-      calculatedTotal.unit === 'pieces'
-        ? total === 1
-          ? 'piece'
-          : 'pieces'
-        : getUnitLabel(calculatedTotal.unit as UnitType, total);
-
-    return `${packs} ${packLabel} = ${total.toLocaleString()} ${unitStr}`;
-  })();
 
   const canGoToStep2 = Boolean(
     name.trim() && categoryId && (categoryId !== 'add_new' || newCategoryName.trim()),
   );
 
-  const packsNumForGate = Number(numberOfPacks);
-  const canGoToStep3 = Boolean(
-    Number.isFinite(packsNumForGate) &&
-      packsNumForGate > 0 &&
-      (!needsUnitsPerField || (Number(unitsPerPack) > 0 && Number.isFinite(Number(unitsPerPack)))),
-  );
+  const step2Error = validateQuantityStep(stockUnit, amountPerItem, numberOfItems);
+  const canGoToStep3 = step2Error == null;
 
   const goNext = () => {
     if (step === 1 && canGoToStep2) {
@@ -454,20 +360,19 @@ export function AddInventoryItemModal({
     }
   };
 
-  const applyDraft = useCallback((d: AddInventoryDraft) => {
-    setStep(d.step ?? 1);
+  const applyDraft = useCallback((d: Partial<AddInventoryDraft>) => {
+    setStep((d.step as WizardStep) ?? 1);
     setSlideDir(d.slideDir === -1 ? -1 : 1);
     setName(d.name ?? '');
     setCategoryId(d.categoryId ?? '');
     setNewCategoryName(d.newCategoryName ?? '');
-    const draftPackaging = (d.packagingType as PackagingType) ?? 'single';
-    setPackagingType(draftPackaging === 'pack' ? 'bottle' : draftPackaging);
-    setUnit((d.unit as UnitType) ?? 'kg');
-    setAmount(d.amount ?? '');
-    setNumberOfPacks(d.numberOfPacks ?? '');
-    setUnitsPerPack(d.unitsPerPack ?? '');
-    setPricePerPack(d.pricePerPack ?? '');
-    setTotalPrice(d.totalPrice ?? '');
+    const u = normalizeLegacyStockUnit(d.stockUnit) ?? 'kg';
+    setStockUnit(u);
+    setAmountPerItem(d.amountPerItem ?? '');
+    setNumberOfItems(d.numberOfItems ?? '');
+    setPricePerItem(d.pricePerItem ?? '');
+    setTotalCost(d.totalCost ?? '');
+    setTotalCostManual(Boolean(d.totalCostManual));
     setSupplierId((d.supplierId as 'none' | 'add_new' | string) ?? 'none');
     setNewSupplierName(d.newSupplierName ?? '');
     setShowAdvanced(Boolean(d.showAdvanced));
@@ -476,6 +381,7 @@ export function AddInventoryItemModal({
     setMinStockLevel(d.minStockLevel ?? '');
     setReorderQuantity(d.reorderQuantity ?? '');
     setNotes(d.notes ?? '');
+    setCountAsExpense(d.countAsExpense !== false);
   }, []);
 
   const resetForm = () => {
@@ -484,13 +390,12 @@ export function AddInventoryItemModal({
     setName('');
     setCategoryId('');
     setNewCategoryName('');
-    setPackagingType('single');
-    setUnit('kg');
-    setAmount('');
-    setNumberOfPacks('');
-    setUnitsPerPack('');
-    setPricePerPack('');
-    setTotalPrice('');
+    setStockUnit('kg');
+    setAmountPerItem('');
+    setNumberOfItems('');
+    setPricePerItem('');
+    setTotalCost('');
+    setTotalCostManual(false);
     setSupplierId('none');
     setNewSupplierName('');
     setShowAdvanced(false);
@@ -499,24 +404,23 @@ export function AddInventoryItemModal({
     setMinStockLevel('');
     setReorderQuantity('');
     setNotes('');
+    setCountAsExpense(true);
   };
 
-  /** Restore wizard draft before paint so the debounced save effect does not overwrite with empty state. */
   useLayoutEffect(() => {
     if (!open || !companyId) return;
     try {
       const raw = sessionStorage.getItem(draftKey);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<AddInventoryDraft>;
+      const parsed = parseStoredDraft(raw);
       if (parsed && typeof parsed === 'object') {
-        applyDraft(parsed as AddInventoryDraft);
+        applyDraft(parsed);
       }
     } catch {
       /* ignore */
     }
   }, [open, companyId, draftKey, applyDraft]);
 
-  /** Debounced draft save while the modal is open. */
   useEffect(() => {
     if (!open || !companyId) return;
     const id = window.setTimeout(() => {
@@ -526,13 +430,12 @@ export function AddInventoryItemModal({
         name,
         categoryId,
         newCategoryName,
-        packagingType,
-        unit,
-        amount,
-        numberOfPacks,
-        unitsPerPack,
-        pricePerPack,
-        totalPrice,
+        stockUnit,
+        amountPerItem,
+        numberOfItems,
+        pricePerItem,
+        totalCost,
+        totalCostManual,
         supplierId,
         newSupplierName,
         showAdvanced,
@@ -541,6 +444,7 @@ export function AddInventoryItemModal({
         minStockLevel,
         reorderQuantity,
         notes,
+        countAsExpense,
       };
       try {
         sessionStorage.setItem(draftKey, JSON.stringify(draft));
@@ -558,13 +462,12 @@ export function AddInventoryItemModal({
     name,
     categoryId,
     newCategoryName,
-    packagingType,
-    unit,
-    amount,
-    numberOfPacks,
-    unitsPerPack,
-    pricePerPack,
-    totalPrice,
+    stockUnit,
+    amountPerItem,
+    numberOfItems,
+    pricePerItem,
+    totalCost,
+    totalCostManual,
     supplierId,
     newSupplierName,
     showAdvanced,
@@ -573,6 +476,7 @@ export function AddInventoryItemModal({
     minStockLevel,
     reorderQuantity,
     notes,
+    countAsExpense,
   ]);
 
   const handleDialogOpenChange = (val: boolean) => {
@@ -604,14 +508,30 @@ export function AddInventoryItemModal({
     if (tpl) {
       handleCategoryChange(tpl);
     }
+    const kes = externalPrefill?.totalCostKes;
+    if (kes != null && Number.isFinite(kes) && kes > 0) {
+      setTotalCost(String(kes));
+      setTotalCostManual(true);
+      setPricePerItem('');
+    }
+    if (externalPrefill?.countAsExpense === false) {
+      setCountAsExpense(false);
+    }
     setStep(1);
     setSlideDir(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- apply when dialog opens / nonce bumps
-  }, [open, externalPrefillNonce, externalPrefill?.name, externalPrefill?.categoryTemplate]);
+  }, [
+    open,
+    externalPrefillNonce,
+    externalPrefill?.name,
+    externalPrefill?.categoryTemplate,
+    externalPrefill?.totalCostKes,
+    externalPrefill?.countAsExpense,
+  ]);
 
   const handleSubmit = async () => {
     if (step !== 3) return;
-    if (!name.trim() || !categoryId || !unit) return;
+    if (!name.trim() || !categoryId) return;
 
     const activeCompanyId = sessionCompanyId || String(companyId ?? '').trim();
     if (!activeCompanyId) {
@@ -619,34 +539,32 @@ export function AddInventoryItemModal({
       return;
     }
 
-    const normalizedUnit = unit.trim();
-    if (!normalizedUnit) {
-      toast.error('Please select a unit for this item.');
+    const qtyErr = validateQuantityStep(stockUnit, amountPerItem, numberOfItems);
+    if (qtyErr) {
+      toast.error(qtyErr);
       return;
     }
 
-    const packsNum = Number(numberOfPacks);
-    if (!Number.isFinite(packsNum) || packsNum <= 0) {
-      toast.error(`Please enter how many ${currentPackaging.pluralLabel} you have.`);
-      return;
-    }
-
-    let qty: number;
-    let effectiveUnitsPerPack: number;
-
-    if (needsUnitsPerField) {
-      const upp = Number(unitsPerPack);
-      effectiveUnitsPerPack = Number.isFinite(upp) && upp > 0 ? upp : 1;
-      qty = packsNum * effectiveUnitsPerPack;
-    } else {
-      const amt = Number(amount);
-      effectiveUnitsPerPack = Number.isFinite(amt) && amt > 0 ? amt : 1;
-      qty = packsNum * effectiveUnitsPerPack;
-    }
-
-    if (!Number.isFinite(qty) || qty <= 0) {
+    const { unitSize, stockQuantity } = parseQuantityForSubmit(stockUnit, amountPerItem, numberOfItems);
+    if (!Number.isFinite(stockQuantity) || stockQuantity <= 0) {
       toast.error('Quantity must be greater than zero.');
       return;
+    }
+
+    const normalizedUnit = stockUnit.trim();
+    if (pricePerItem.trim()) {
+      const p = parseNonNegativeNumber(pricePerItem);
+      if (!Number.isFinite(p)) {
+        toast.error('Enter a valid price per item.');
+        return;
+      }
+    }
+    if (totalCost.trim()) {
+      const t = parseNonNegativeNumber(totalCost);
+      if (!Number.isFinite(t)) {
+        toast.error('Enter a valid total cost.');
+        return;
+      }
     }
 
     setSaving(true);
@@ -730,20 +648,22 @@ export function AddInventoryItemModal({
         resolvedSupplierId = supplierId;
       }
 
-      let avgCost: number | undefined = undefined;
-      const pricePerPackNum = pricePerPack ? Number(pricePerPack) : NaN;
-      const totalPriceNum = totalPrice ? Number(totalPrice) : NaN;
+      const itemsCount = parsePositiveNumber(numberOfItems);
+      const priceNum = pricePerItem.trim() ? parseNonNegativeNumber(pricePerItem) : NaN;
+      const totalNum = totalCost.trim() ? parseNonNegativeNumber(totalCost) : NaN;
 
       let effectiveTotal: number | undefined;
-
-      if (Number.isFinite(pricePerPackNum)) {
-        effectiveTotal = packsNum * pricePerPackNum;
-      } else if (Number.isFinite(totalPriceNum)) {
-        effectiveTotal = totalPriceNum;
+      if (totalCostManual && Number.isFinite(totalNum)) {
+        effectiveTotal = totalNum;
+      } else if (Number.isFinite(priceNum)) {
+        effectiveTotal = itemsCount * priceNum;
+      } else if (Number.isFinite(totalNum)) {
+        effectiveTotal = totalNum;
       }
 
-      if (effectiveTotal != null && Number.isFinite(effectiveTotal) && qty > 0) {
-        avgCost = effectiveTotal / qty;
+      let avgCost: number | undefined = undefined;
+      if (effectiveTotal != null && Number.isFinite(effectiveTotal) && stockQuantity > 0) {
+        avgCost = effectiveTotal / stockQuantity;
       }
 
       const finalInsertPayload = {
@@ -754,14 +674,11 @@ export function AddInventoryItemModal({
         unit: normalizedUnit,
         minStockLevel: showAdvanced && minStockLevel ? Number(minStockLevel) : undefined,
         reorderQuantity: showAdvanced && reorderQuantity ? Number(reorderQuantity) : undefined,
-        // DB constraint: inventory_item_master.average_cost is NOT NULL.
-        // Step 3 is optional, so default to 0 when the user doesn't provide cost.
         averageCost: avgCost ?? 0,
         itemCode: (showAdvanced ? itemCode || sku || undefined : undefined) ?? undefined,
         description: showAdvanced ? notes || undefined : undefined,
-        unitSize: effectiveUnitsPerPack,
+        unitSize,
         unitSizeLabel: normalizedUnit,
-        packagingType,
         defaultProjectId: undefined,
         defaultCropStageId: undefined,
       } as const;
@@ -771,7 +688,7 @@ export function AddInventoryItemModal({
       const rpcPayload = {
         companyId: activeCompanyId,
         itemId: created.id,
-        quantity: qty,
+        quantity: stockQuantity,
         unitCost: avgCost ?? 0,
         transactionType: 'opening_balance',
         supplierId: resolvedSupplierId,
@@ -785,17 +702,54 @@ export function AddInventoryItemModal({
         action: 'ITEM_CREATED',
         inventoryItemId: created.id,
         itemName: name,
-        quantity: qty,
+        quantity: stockQuantity,
         unit: normalizedUnit,
         actorUserId: user?.id ?? createdBy,
         actorName: user?.name ?? user?.email,
         notes: showAdvanced ? notes || undefined : undefined,
         metadata: {
           category: resolvedCategoryUuid,
-          packagingType,
           unit: normalizedUnit,
+          unitSize,
         },
       });
+
+      const expenseKes =
+        effectiveTotal != null && Number.isFinite(effectiveTotal) && effectiveTotal > 0 ? effectiveTotal : null;
+      if (countAsExpense && expenseKes != null && resolvedFarmId && canCreateExpense) {
+        try {
+          const dup = await financeExpenseExistsByReference(
+            activeCompanyId,
+            INVENTORY_OPENING_EXPENSE_SOURCE,
+            created.id,
+          );
+          if (dup) {
+            toast.message('Expense link already exists for this item.');
+          } else {
+            await ExpenseService.create({
+              companyId: activeCompanyId,
+              farmId: resolvedFarmId,
+              projectId: resolvedProjectId,
+              category: 'inventory_purchase',
+              amount: expenseKes,
+              note: `Inventory — new item: ${name.trim()} (opening stock, KES ${expenseKes.toLocaleString()})`,
+              expenseDate: new Date().toISOString().slice(0, 10),
+              createdBy: user?.id ?? createdBy ?? null,
+              source: INVENTORY_OPENING_EXPENSE_SOURCE,
+              referenceId: created.id,
+            });
+            void queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+          }
+        } catch (expErr: unknown) {
+          const msg = expErr instanceof Error ? expErr.message : String(expErr);
+          toast.warning('Item created, but expense was not saved.', { description: msg });
+        }
+      } else if (countAsExpense && expenseKes != null && !resolvedFarmId) {
+        toast.message('No farm in context — expense not recorded. Add it on Expenses if needed.');
+      } else if (countAsExpense && expenseKes != null && !canCreateExpense) {
+        toast.message('No permission to create expenses — log this purchase on the Expenses page if needed.');
+      }
 
       addNotification({
         title: 'Item Created',
@@ -840,13 +794,21 @@ export function AddInventoryItemModal({
       return;
     }
     if (step === 3) {
-      // Prevent accidental save when pressing Enter inside price/supplier fields.
-      // Save should happen only through the explicit "Save item" button.
       e.preventDefault();
     }
   };
 
-  const stepTitle = step === 1 ? 'What are you adding?' : step === 2 ? 'How much do you have?' : 'Optional cost info';
+  const stepTitle = step === 1 ? 'What are you adding?' : step === 2 ? 'How much do you have?' : 'Cost (optional)';
+
+  const stepsMeta = useMemo(
+    () =>
+      [
+        { n: 1 as const, label: 'Item' },
+        { n: 2 as const, label: 'Quantity' },
+        { n: 3 as const, label: 'Cost' },
+      ] as const,
+    [],
+  );
 
   const motionVariants = {
     enter: (dir: number) =>
@@ -860,6 +822,13 @@ export function AddInventoryItemModal({
         : { opacity: 0, x: -dir * 10 },
   };
 
+  const saveDisabled =
+    saving ||
+    !name.trim() ||
+    !categoryId ||
+    !numberOfItems.trim() ||
+    Boolean(validateQuantityStep(stockUnit, amountPerItem, numberOfItems));
+
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
@@ -872,39 +841,44 @@ export function AddInventoryItemModal({
         }}
         className={cn(
           'max-w-[430px] w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto gap-0',
-          'bg-card border border-border/60 shadow-lg',
-          'rounded-xl p-5 sm:p-6',
+          'bg-fv-cream dark:bg-card border border-border/50 shadow-lg',
+          'rounded-md p-4 sm:p-5',
         )}
       >
-        <DialogHeader className="space-y-3 pb-4 text-left">
+        <DialogHeader className="space-y-2.5 pb-3 text-left">
           <DialogTitle className="sr-only">Add Inventory Item</DialogTitle>
 
-          <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 text-[11px] font-semibold tracking-wide text-muted-foreground sm:text-xs">
-            {([1, 2, 3] as const).map((n, i) => (
-              <React.Fragment key={n}>
-                {i > 0 && <span className="text-border">—</span>}
-                <span
+          <div className="space-y-2">
+            <div className="flex gap-1.5">
+              {stepsMeta.map((s) => (
+                <div
+                  key={s.n}
                   className={cn(
-                    'rounded-md px-2 py-0.5 transition-colors',
-                    step === n
-                      ? 'bg-fv-gold-soft/60 text-fv-olive'
-                      : step > n
-                        ? 'text-foreground/80'
-                        : 'text-muted-foreground',
+                    'h-1.5 flex-1 rounded-full transition-colors duration-200',
+                    step >= s.n ? 'bg-fv-olive/80 dark:bg-primary' : 'bg-muted dark:bg-muted',
+                  )}
+                />
+              ))}
+            </div>
+            <div className="flex justify-between gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-[11px]">
+              {stepsMeta.map((s) => (
+                <span
+                  key={s.n}
+                  className={cn(
+                    'min-w-0 truncate',
+                    step === s.n && 'text-fv-olive dark:text-foreground',
+                    step > s.n && 'text-foreground/75',
                   )}
                 >
-                  [{n} {n === 1 ? 'Item' : n === 2 ? 'Quantity' : 'Cost'}]
+                  {s.n} {s.label}
                 </span>
-              </React.Fragment>
-            ))}
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-1">
-            <h2 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">{stepTitle}</h2>
-            <p className="text-xs text-muted-foreground">
-              Your progress is saved automatically. Complete all steps and tap Save item — you won’t create the item until
-              then.
-            </p>
+          <div className="space-y-0.5">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">{stepTitle}</h2>
+            <p className="text-[11px] text-muted-foreground sm:text-xs">Draft auto-saves. Create the item on Save.</p>
           </div>
         </DialogHeader>
 
@@ -919,10 +893,10 @@ export function AddInventoryItemModal({
                 animate="center"
                 exit="exit"
                 transition={{ duration: reducedMotion ? 0.12 : 0.28, ease: 'easeOut' }}
-                className="space-y-4"
+                className="space-y-3"
               >
                 {step === 1 && (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-foreground" htmlFor="inv-item-name">
                         Item name
@@ -971,159 +945,73 @@ export function AddInventoryItemModal({
                         />
                       </div>
                     )}
-
-                    <div className="h-px w-full bg-border/50" />
-
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-foreground">Packaging type</label>
-                      <Select
-                        value={packagingType}
-                        onValueChange={(v) => {
-                          setPackagingType(v as PackagingType);
-                          setUnitsPerPack('');
-                        }}
-                      >
-                        <SelectTrigger className="fv-input h-11">
-                          <SelectValue placeholder="How is it packaged?" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {packagingOptions.map((key) => {
-                            const config = packagingConfig[key];
-                            return (
-                            <SelectItem key={key} value={key}>
-                              <span className="flex items-center gap-2">
-                                <config.icon className={`h-4 w-4 ${config.color}`} />
-                                {config.label}
-                              </span>
-                            </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
                 )}
 
                 {step === 2 && (
                   <div className="space-y-4 text-center">
                     <div className="space-y-1.5 text-left">
-                      <label className="text-sm font-medium text-foreground">Unit</label>
-                      <Select value={unit} onValueChange={(v) => setUnit(v as UnitType)}>
-                        <SelectTrigger ref={unitSelectTriggerRef} className="fv-input h-11">
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {predefinedUnits.map((u) => (
-                            <SelectItem key={u.value} value={u.value}>
-                              {u.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-sm font-medium text-foreground">
-                        {needsUnitsPerField ? currentPackaging.unitsPerLabel : 'Amount per item'}
-                      </label>
-                      {needsUnitsPerField ? (
-                        <div className="relative">
-                          <Input
-                            type="number"
-                            className="fv-input pr-16"
-                            value={unitsPerPack}
-                            onChange={(e) => setUnitsPerPack(e.target.value)}
-                            placeholder={packagingType === 'box' ? '24' : '10'}
-                            min={0}
-                            step="any"
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                            pieces
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <Input
-                            type="number"
-                            className="fv-input pr-14"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            placeholder={getAmountExample()}
-                            min={0}
-                            step="any"
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                            {unit}
-                          </span>
-                        </div>
-                      )}
-                      {!needsUnitsPerField && (
-                        <p className="text-xs text-muted-foreground">{getAmountPlaceholder()}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-sm font-medium text-foreground">{currentPackaging.stockLabel}</label>
-                      <Input
-                        type="number"
-                        className="fv-input"
-                        value={numberOfPacks}
-                        onChange={(e) => handleNumberOfPacksChange(e.target.value)}
-                        placeholder={`How many ${currentPackaging.pluralLabel}?`}
-                        min={0}
-                        required
+                      <UnitSelector
+                        ref={unitSelectTriggerRef}
+                        value={stockUnit}
+                        onChange={handleStockUnitChange}
+                        triggerClassName="fv-input h-11 w-full"
                       />
                     </div>
 
-                    <div className="mx-auto max-w-xs pt-1">
-                      <p className="text-sm font-medium text-primary">
-                        {liveQuantityLine ?? <span className="font-normal text-muted-foreground">Enter numbers to see total</span>}
-                      </p>
+                    <div className="text-left">
+                      <DynamicQuantityFields
+                        unit={stockUnit}
+                        amountPerItem={amountPerItem}
+                        numberOfItems={numberOfItems}
+                        onAmountPerItemChange={setAmountPerItem}
+                        onNumberOfItemsChange={handleNumberOfItemsChange}
+                        totalQuantity={liveTotalQuantity}
+                        reducedMotion={reducedMotion}
+                      />
                     </div>
                   </div>
                 )}
 
                 {step === 3 && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-1.5 sm:col-span-1">
-                        <label className="text-sm font-medium text-foreground">{currentPackaging.priceLabel}</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                            KSh
-                          </span>
-                          <Input
-                            ref={priceInputRef}
-                            type="number"
-                            step="0.01"
-                            className="fv-input pl-12"
-                            value={pricePerPack}
-                            onChange={(e) => handlePricePerPackChange(e.target.value)}
-                            placeholder="e.g. 2500"
-                            min={0}
-                          />
-                        </div>
-                      </div>
+                    <CostSection
+                      ref={priceInputRef}
+                      pricePerItem={pricePerItem}
+                      onPricePerItemChange={handlePricePerItemChange}
+                      totalCost={totalCost}
+                      onTotalCostChange={handleTotalCostChange}
+                      autoTotalHint={
+                        Number.isFinite(autoTotalCost) ? String(autoTotalCost) : Number.isFinite(itemsNumForCost) ? '0' : undefined
+                      }
+                      currencyPrefix="KSh"
+                    />
 
-                      <div className="space-y-1.5 sm:col-span-1">
-                        <label className="text-sm font-medium text-foreground">
-                          Auto total <span className="font-normal text-muted-foreground">(editable)</span>
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                            KSh
-                          </span>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            className="fv-input pl-12"
-                            value={totalPrice}
-                            onChange={(e) => handleTotalPriceChange(e.target.value)}
-                            placeholder="Total"
-                            min={0}
-                          />
-                        </div>
+                    <div
+                      className={cn(
+                        'flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-background/60 px-3 py-2.5',
+                        !expenseToggleEnabled && 'opacity-80',
+                      )}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <p className="text-sm font-medium text-foreground">Count as expense</p>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          {openingExpenseAmount == null
+                            ? 'Enter a total cost above to record an expense.'
+                            : !resolvedFarmId
+                              ? 'Pick a farm/project (header) so this posts to finance.'
+                              : !canCreateExpense
+                                ? 'You can’t create expenses — turn this off if you already logged it manually.'
+                                : 'Turn off if you already added this purchase on the Expenses page.'}
+                        </p>
                       </div>
+                      <Switch
+                        checked={countAsExpense && expenseToggleEnabled}
+                        onCheckedChange={(v) => setCountAsExpense(v)}
+                        disabled={!expenseToggleEnabled}
+                        className="shrink-0 mt-0.5"
+                        aria-label="Count inventory purchase as expense"
+                      />
                     </div>
 
                     <div className="space-y-1.5">
@@ -1260,7 +1148,7 @@ export function AddInventoryItemModal({
                 <button
                   type="button"
                   onClick={() => void handleSubmit()}
-                  disabled={saving || !name.trim() || !categoryId || !unit.trim() || !numberOfPacks}
+                  disabled={saveDisabled}
                   className={cn(
                     'inline-flex w-full items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition-all',
                     'gradient-primary text-primary-foreground btn-luxury',
@@ -1277,3 +1165,6 @@ export function AddInventoryItemModal({
     </Dialog>
   );
 }
+
+/** Alias matching product naming in specs. */
+export { AddInventoryItemModal as AddItemModal };

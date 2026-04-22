@@ -15,6 +15,12 @@ const LARGE_EXPENSE_KES = 50_000;
 /** Auto-synced tomato harvest picker labour (DB trigger upserts; never create manually). */
 export const TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE = 'HARVEST_PICKERS' as const;
 
+/** Opening purchase when creating a new inventory item (reference_id = inventory item id). */
+export const INVENTORY_OPENING_EXPENSE_SOURCE = 'inventory_opening' as const;
+
+/** Purchase recorded from Record Stock In (reference_id = unique per transaction). */
+export const INVENTORY_STOCK_IN_EXPENSE_SOURCE = 'inventory_stock_in' as const;
+
 const harvest = () => supabase.schema('harvest');
 
 /** Strip machine suffix so toasts and lists never show raw UUID anchors. */
@@ -312,6 +318,29 @@ export interface CreateExpenseInput {
   source?: string | null;
   /** Optional linkage UUID (e.g. picker payment entry id). */
   referenceId?: string | null;
+}
+
+/** Returns true if a non-deleted expense already exists for this source + reference (idempotency). */
+export async function financeExpenseExistsByReference(
+  companyId: string,
+  source: string,
+  referenceId: string,
+): Promise<boolean> {
+  const tenant = requireCompanyId(companyId);
+  const src = String(source).trim();
+  const ref = String(referenceId).trim();
+  if (!src || !ref) return false;
+  const { data, error } = await db
+    .finance()
+    .from('expenses')
+    .select('id')
+    .eq('company_id', tenant)
+    .eq('source', src)
+    .eq('reference_id', ref)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, User, Package, Plus, X, AlertTriangle } from 'lucide-react';
 import {
   Dialog,
@@ -36,16 +36,89 @@ import {
   type WorkCard,
   type InputUsed,
 } from '@/services/operationsWorkCardService';
-import { recordInventoryUsage, listInventoryStock, type InventoryStockRow } from '@/services/inventoryReadModelService';
+import {
+  recordInventoryUsage,
+  recordInventoryStockIn,
+  listInventoryStock,
+  type InventoryStockRow,
+} from '@/services/inventoryReadModelService';
 import { createAdminAlert } from '@/services/adminAlertService';
 import type { Employee } from '@/types';
+import { workersCountFromInput } from '@/lib/workersInput';
 
 interface RecordWorkModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workCard: WorkCard | null;
   isEdit?: boolean;
+  /** Focused flow: only adjust inventory lines (audit + stock deltas). */
+  variant?: 'full' | 'inputsOnly';
   onSuccess?: () => void;
+}
+
+function aggregateInputsByItem(lines: InputUsed[]): Map<string, { quantity: number; unit: string; itemName: string }> {
+  const m = new Map<string, { quantity: number; unit: string; itemName: string }>();
+  for (const line of lines) {
+    const cur = m.get(line.itemId) ?? { quantity: 0, unit: line.unit, itemName: line.itemName };
+    cur.quantity += Number(line.quantity) || 0;
+    cur.unit = line.unit;
+    cur.itemName = line.itemName;
+    m.set(line.itemId, cur);
+  }
+  return m;
+}
+
+function inputsQuantityFingerprint(lines: InputUsed[]): string {
+  const agg = aggregateInputsByItem(lines);
+  return [...agg.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, v]) => `${id}:${v.quantity}`)
+    .join('|');
+}
+
+async function applyInventoryDeltasForWorkCardEdit(params: {
+  companyId: string;
+  projectId: string | null | undefined;
+  workCardTitle: string;
+  workDone: string;
+  usedOn: string;
+  before: InputUsed[];
+  after: InputUsed[];
+}): Promise<void> {
+  const beforeAgg = aggregateInputsByItem(params.before);
+  const afterAgg = aggregateInputsByItem(params.after);
+  const ids = new Set([...beforeAgg.keys(), ...afterAgg.keys()]);
+
+  for (const itemId of ids) {
+    const o = beforeAgg.get(itemId)?.quantity ?? 0;
+    const n = afterAgg.get(itemId)?.quantity ?? 0;
+    const delta = n - o;
+    if (Math.abs(delta) < 1e-9) continue;
+    const meta = afterAgg.get(itemId) ?? beforeAgg.get(itemId)!;
+
+    if (delta > 0) {
+      await recordInventoryUsage({
+        companyId: params.companyId,
+        itemId,
+        quantity: delta,
+        projectId: params.projectId ?? undefined,
+        usedOn: params.usedOn,
+        purpose: `Work card: ${params.workCardTitle}`,
+        notes: `${params.workDone} (usage adjustment +${delta} ${meta.unit})`,
+      });
+    } else {
+      const returned = -delta;
+      await recordInventoryStockIn({
+        companyId: params.companyId,
+        itemId,
+        quantity: returned,
+        unitCost: 0,
+        transactionType: 'usage_correction',
+        date: params.usedOn,
+        notes: `Stock return — work card input correction: ${params.workCardTitle} (${returned} ${meta.unit})`,
+      });
+    }
+  }
 }
 
 interface InputEntry {
@@ -56,7 +129,14 @@ interface InputEntry {
   currentStock?: number;
 }
 
-export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, onSuccess }: RecordWorkModalProps) {
+export function RecordWorkModal({
+  open,
+  onOpenChange,
+  workCard,
+  isEdit = false,
+  variant = 'full',
+  onSuccess,
+}: RecordWorkModalProps) {
   const { user } = useAuth();
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
@@ -82,7 +162,8 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     actualDate: new Date(),
-    actualWorkers: 1,
+    /** String so the field can be cleared while typing; default and empty blur → "0". */
+    actualWorkersStr: '0',
     actualRatePerPerson: 0,
     workDone: '',
     executionNotes: '',
@@ -93,33 +174,47 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
   const [selectedInputId, setSelectedInputId] = useState('');
   const [inputQuantity, setInputQuantity] = useState('');
 
+  const inputsOnly = variant === 'inputsOnly';
+  const effectiveEdit = isEdit || inputsOnly;
+
+  const inventoryBaselineRef = useRef<InputUsed[]>([]);
+
   // Initialize form when the modal opens or the target card changes.
   // Do not depend on `inventoryItems` here — React Query often returns a new array reference each render,
   // which would retrigger this effect and cause "Maximum update depth exceeded".
   const workCardId = workCard?.id;
   useEffect(() => {
     if (!open || !workCard) return;
-    if (isEdit) {
+    const baseline: InputUsed[] =
+      workCard.inputsUsed?.map((i) => ({
+        itemId: i.itemId,
+        itemName: i.itemName,
+        quantity: i.quantity,
+        unit: i.unit,
+      })) ?? [];
+    inventoryBaselineRef.current = baseline;
+
+    if (effectiveEdit) {
       setFormData({
         actualDate: workCard.actualDate ? new Date(workCard.actualDate) : new Date(),
-        actualWorkers: workCard.actualWorkers ?? 1,
+        actualWorkersStr: String(workCard.actualWorkers ?? 0),
         actualRatePerPerson: workCard.actualRatePerPerson ?? 0,
         workDone: workCard.workDone ?? '',
         executionNotes: workCard.executionNotes ?? '',
         workerIds: workCard.workerIds ?? [],
       });
       setInputs(
-        workCard.inputsUsed?.map((i) => ({
+        baseline.map((i) => ({
           itemId: i.itemId,
           itemName: i.itemName,
           quantity: i.quantity,
           unit: i.unit,
-        })) ?? [],
+        })),
       );
     } else {
       setFormData({
         actualDate: new Date(),
-        actualWorkers: workCard.plannedWorkers,
+        actualWorkersStr: '0',
         actualRatePerPerson: workCard.plannedRatePerPerson,
         workDone: '',
         executionNotes: '',
@@ -128,7 +223,7 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       setInputs([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync when dialog/card identity changes only; full workCard read intentionally
-  }, [open, workCardId, isEdit]);
+  }, [open, workCardId, effectiveEdit]);
 
   // Merge live stock levels from inventory without resetting the whole form.
   useEffect(() => {
@@ -147,7 +242,8 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
     });
   }, [open, workCardId, inventoryItems]);
 
-  const actualTotal = formData.actualWorkers * formData.actualRatePerPerson;
+  const parsedWorkers = workersCountFromInput(formData.actualWorkersStr);
+  const actualTotal = parsedWorkers * formData.actualRatePerPerson;
 
   const handleAddInput = () => {
     if (!selectedInputId || !inputQuantity) return;
@@ -203,18 +299,22 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
   const handleSubmit = async () => {
     if (!workCard) return;
 
-    if (!formData.workDone.trim()) {
-      toast.error('Please describe the work done');
-      return;
-    }
+    if (!inputsOnly) {
+      if (!formData.workDone.trim()) {
+        toast.error('Please describe the work done');
+        return;
+      }
 
-    if (formData.actualWorkers <= 0 || formData.actualRatePerPerson <= 0) {
-      toast.error('Workers and rate must be greater than zero');
-      return;
+      const workers = workersCountFromInput(formData.actualWorkersStr);
+      if (workers <= 0 || formData.actualRatePerPerson <= 0) {
+        toast.error('Workers and rate must be greater than zero');
+        return;
+      }
     }
 
     setSaving(true);
     try {
+      const workersForSave = workersCountFromInput(formData.actualWorkersStr);
       const inputsUsed: InputUsed[] = inputs.map(i => ({
         itemId: i.itemId,
         itemName: i.itemName,
@@ -223,13 +323,59 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       }));
 
       const workerNames = getWorkerNames();
+      const usedOn = format(formData.actualDate, 'yyyy-MM-dd');
+
+      if (inputsOnly) {
+        if (inputsQuantityFingerprint(inputsUsed) === inputsQuantityFingerprint(inventoryBaselineRef.current)) {
+          toast.message('No changes to inputs.');
+          setSaving(false);
+          return;
+        }
+
+        await editWork({
+          id: workCard.id,
+          expectedRowVersion: workCard.rowVersion ?? null,
+          inputsUsed,
+          actorUserId: user?.id ?? '',
+          actorUserName: user?.name ?? null,
+        });
+
+        await applyInventoryDeltasForWorkCardEdit({
+          companyId: companyId!,
+          projectId: workCard.projectId,
+          workCardTitle: workCard.workTitle,
+          workDone: formData.workDone.trim(),
+          usedOn,
+          before: inventoryBaselineRef.current,
+          after: inputsUsed,
+        });
+
+        await createAdminAlert({
+          companyId: companyId!,
+          severity: 'normal',
+          module: 'operations',
+          action: 'WORK_EDITED',
+          actorUserId: user?.id ?? undefined,
+          actorName: user?.name ?? undefined,
+          targetId: workCard.id,
+          targetLabel: workCard.workTitle,
+          metadata: {
+            inputsOnlyCorrection: true,
+            inputsCount: inputsUsed.length,
+          },
+        });
+
+        toast.success('Inputs updated. Audit recorded.');
+        onSuccess?.();
+        return;
+      }
 
       if (isEdit) {
         await editWork({
           id: workCard.id,
           expectedRowVersion: workCard.rowVersion ?? null,
           actualDate: format(formData.actualDate, 'yyyy-MM-dd'),
-          actualWorkers: formData.actualWorkers,
+          actualWorkers: workersForSave,
           actualRatePerPerson: formData.actualRatePerPerson,
           workDone: formData.workDone.trim(),
           executionNotes: formData.executionNotes.trim() || null,
@@ -239,12 +385,24 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
           actorUserId: user?.id ?? '',
           actorUserName: user?.name ?? null,
         });
+
+        if (inputsQuantityFingerprint(inputsUsed) !== inputsQuantityFingerprint(inventoryBaselineRef.current)) {
+          await applyInventoryDeltasForWorkCardEdit({
+            companyId: companyId!,
+            projectId: workCard.projectId,
+            workCardTitle: workCard.workTitle,
+            workDone: formData.workDone.trim(),
+            usedOn: format(formData.actualDate, 'yyyy-MM-dd'),
+            before: inventoryBaselineRef.current,
+            after: inputsUsed,
+          });
+        }
       } else {
         await recordWork({
           id: workCard.id,
           expectedRowVersion: workCard.rowVersion ?? null,
           actualDate: format(formData.actualDate, 'yyyy-MM-dd'),
-          actualWorkers: formData.actualWorkers,
+          actualWorkers: workersForSave,
           actualRatePerPerson: formData.actualRatePerPerson,
           workDone: formData.workDone.trim(),
           executionNotes: formData.executionNotes.trim() || null,
@@ -254,34 +412,32 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
           actorUserId: user?.id ?? '',
           actorUserName: user?.name ?? null,
         });
-      }
 
-      // Record inventory usage for each input
-      for (const input of inputsUsed) {
-        try {
-          await recordInventoryUsage({
-            companyId: companyId!,
-            itemId: input.itemId,
-            quantity: input.quantity,
-            projectId: workCard.projectId ?? undefined,
-            usedOn: format(formData.actualDate, 'yyyy-MM-dd'),
-            purpose: `Work card: ${workCard.workTitle}`,
-            notes: `Used for: ${formData.workDone}`,
-          });
-        } catch (err) {
-          console.error('Failed to record inventory usage for', input.itemName, err);
+        for (const input of inputsUsed) {
+          try {
+            await recordInventoryUsage({
+              companyId: companyId!,
+              itemId: input.itemId,
+              quantity: input.quantity,
+              projectId: workCard.projectId ?? undefined,
+              usedOn: format(formData.actualDate, 'yyyy-MM-dd'),
+              purpose: `Work card: ${workCard.workTitle}`,
+              notes: `Used for: ${formData.workDone}`,
+            });
+          } catch (err) {
+            console.error('Failed to record inventory usage for', input.itemName, err);
+          }
         }
-      }
 
-      // Record in work card inventory usage table
-      if (inputsUsed.length > 0) {
-        await recordInventoryUsageForWorkCard({
-          workCardId: workCard.id,
-          companyId: companyId!,
-          inputsUsed,
-          actorUserId: user?.id ?? '',
-          actorUserName: user?.name ?? null,
-        });
+        if (inputsUsed.length > 0) {
+          await recordInventoryUsageForWorkCard({
+            workCardId: workCard.id,
+            companyId: companyId!,
+            inputsUsed,
+            actorUserId: user?.id ?? '',
+            actorUserName: user?.name ?? null,
+          });
+        }
       }
 
       // Create admin alert
@@ -296,7 +452,7 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
         targetLabel: workCard.workTitle,
         metadata: {
           workDone: formData.workDone,
-          actualWorkers: formData.actualWorkers,
+          actualWorkers: workersForSave,
           inputsCount: inputsUsed.length,
         },
       });
@@ -318,12 +474,23 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
       <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? 'Edit Work' : 'Record Work'}
+            {inputsOnly ? 'Adjust inputs used' : isEdit ? 'Edit Work' : 'Record Work'}
           </DialogTitle>
           <p className="text-sm text-muted-foreground">{workCard.workTitle}</p>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {inputsOnly && (
+            <Alert className="border-amber-200 bg-amber-50/90">
+              <AlertTriangle className="h-4 w-4 text-amber-700" />
+              <AlertDescription className="text-amber-900 text-sm">
+                Saving updates the work card and is recorded in the audit trail. Inventory stock is adjusted to match.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!inputsOnly && (
+            <>
           {/* Work Done */}
           <div className="space-y-2">
             <Label htmlFor="workDone">Work Done Today *</Label>
@@ -370,12 +537,22 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
               <Input
                 id="actualWorkers"
                 type="number"
-                min={1}
-                value={formData.actualWorkers}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  actualWorkers: parseInt(e.target.value) || 1 
-                }))}
+                min={0}
+                inputMode="numeric"
+                value={formData.actualWorkersStr}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    actualWorkersStr: e.target.value,
+                  }))
+                }
+                onBlur={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    actualWorkersStr:
+                      prev.actualWorkersStr.trim() === '' ? '0' : String(workersCountFromInput(prev.actualWorkersStr)),
+                  }))
+                }
               />
             </div>
             <div className="space-y-2">
@@ -399,6 +576,8 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
               <p className="text-sm text-muted-foreground">Total</p>
               <p className="text-xl font-semibold">KSh {actualTotal.toLocaleString()}</p>
             </div>
+          )}
+            </>
           )}
 
           {/* Inputs Used */}
@@ -506,6 +685,8 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
             )}
           </div>
 
+          {!inputsOnly && (
+            <>
           {/* Workers Involved */}
           <div className="space-y-2">
             <Label>Workers Involved</Label>
@@ -541,6 +722,8 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
               rows={2}
             />
           </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>
@@ -548,7 +731,13 @@ export function RecordWorkModal({ open, onOpenChange, workCard, isEdit = false, 
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? 'Saving...' : isEdit ? 'Update Work' : 'Record Work'}
+            {saving
+              ? 'Saving...'
+              : inputsOnly
+                ? 'Save inputs'
+                : isEdit
+                  ? 'Update Work'
+                  : 'Record Work'}
           </Button>
         </DialogFooter>
       </DialogContent>

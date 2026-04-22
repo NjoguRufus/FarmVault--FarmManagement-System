@@ -171,7 +171,6 @@ export function WorkCardGrid({ cards, isLoading, onCardClick, statusConfig, onMa
 
                 {showMarkPaidOnCard && (
                   <Button
-                    variant="secondary"
                     className="w-full mt-2"
                     onClick={(e) => {
                       e.stopPropagation();

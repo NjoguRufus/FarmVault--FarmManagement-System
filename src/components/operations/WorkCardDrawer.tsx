@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Clock,
   CheckCircle,
@@ -8,8 +8,9 @@ import {
   User,
   Users,
   Package,
-  FileText,
   History,
+  MoreVertical,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Sheet,
@@ -18,6 +19,22 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -50,9 +67,18 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
   const isMobile = useIsMobile();
   
   const [showRecordWorkModal, setShowRecordWorkModal] = useState(false);
+  const [recordWorkModalVariant, setRecordWorkModalVariant] = useState<'full' | 'inputsOnly'>('full');
+  const [confirmEditWorkOpen, setConfirmEditWorkOpen] = useState(false);
+  const pendingRecordVariantRef = useRef<'full' | 'inputsOnly'>('full');
   const [showMarkPaidModal, setShowMarkPaidModal] = useState(false);
 
   if (!workCard) return null;
+
+  const isLoggedWork = workCard.status !== 'planned';
+  /** Clear staff bottom nav (z-[60], ~56px + bottom-3.5) when sheet scrolls on mobile */
+  const sheetBodyBottomPad = isMobile
+    ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]'
+    : '';
 
   const config = STATUS_CONFIG[workCard.status];
   const isEdited = workCard.status === 'edited' || (workCard.editHistory && workCard.editHistory.length > 0);
@@ -82,7 +108,13 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
 
   const handleRecordWorkSuccess = () => {
     setShowRecordWorkModal(false);
+    setRecordWorkModalVariant('full');
     onUpdated?.();
+  };
+
+  const handleRecordModalOpenChange = (open: boolean) => {
+    setShowRecordWorkModal(open);
+    if (!open) setRecordWorkModalVariant('full');
   };
 
   const handleMarkPaidSuccess = () => {
@@ -93,9 +125,11 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side={isMobile ? 'bottom' : 'right'} className={cn(
-          isMobile ? 'h-[90vh]' : 'w-[500px] sm:w-[600px]'
-        )}>
+        <SheetContent
+          side={isMobile ? 'bottom' : 'right'}
+          className={cn(isMobile ? 'h-[90vh]' : 'w-[500px] sm:w-[600px]')}
+        >
+          <div className={cn('flex flex-col min-h-0', sheetBodyBottomPad)}>
           <SheetHeader className="space-y-4">
             <div className="flex items-start justify-between">
               <div className="space-y-1 flex-1 pr-4">
@@ -113,31 +147,69 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
                     Edited
                   </Badge>
                 )}
+                {canEditWork && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        aria-label="More actions"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          pendingRecordVariantRef.current = 'inputsOnly';
+                          setConfirmEditWorkOpen(true);
+                        }}
+                      >
+                        <Package className="h-4 w-4 mr-2" />
+                        Edit inputs used
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
+            {/* Action Buttons — one row on mobile (no wrap / no full-width second row) */}
+            <div className="flex flex-nowrap items-stretch gap-2">
               {canRecordWork && (
-                <Button onClick={() => setShowRecordWorkModal(true)} className="min-w-0 flex-1 sm:flex-1">
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Record Work
+                <Button
+                  onClick={() => {
+                    setRecordWorkModalVariant('full');
+                    setShowRecordWorkModal(true);
+                  }}
+                  className="min-w-0 flex-1 shrink"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2 shrink-0" />
+                  <span className="truncate">Record Work</span>
                 </Button>
               )}
               {canEditWork && (
-                <Button variant="outline" onClick={() => setShowRecordWorkModal(true)} className="min-w-0 flex-1 sm:flex-1">
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit Work
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    pendingRecordVariantRef.current = 'full';
+                    setConfirmEditWorkOpen(true);
+                  }}
+                  className="min-w-0 flex-1 shrink"
+                >
+                  <Edit className="h-4 w-4 mr-2 shrink-0" />
+                  <span className="truncate">Edit Work</span>
                 </Button>
               )}
               {showMarkPaid && (
                 <Button
-                  variant="outline"
                   onClick={() => setShowMarkPaidModal(true)}
-                  className="min-w-0 flex-1 basis-full sm:basis-auto sm:flex-initial"
+                  className="min-w-0 flex-1 shrink"
                 >
-                  <Banknote className="h-4 w-4 mr-2" />
-                  Mark as paid
+                  <Banknote className="h-4 w-4 mr-2 shrink-0" />
+                  <span className="truncate">Mark as paid</span>
                 </Button>
               )}
             </div>
@@ -153,10 +225,99 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
             </TabsList>
 
             <TabsContent value="details" className="space-y-6 mt-4">
-              {/* Section A - Planned */}
+              {isLoggedWork && (
+                <>
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
+                      Actual work
+                    </h3>
+
+                    {workCard.workDone && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Work Done</p>
+                        <p className="text-sm">{workCard.workDone}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Date</p>
+                        <p className="font-medium">{formatDate(workCard.actualDate)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Workers</p>
+                        <p className="font-medium">{workCard.actualWorkers ?? '-'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Rate per Person</p>
+                        <p className="font-medium">
+                          {workCard.actualRatePerPerson ? `KSh ${workCard.actualRatePerPerson.toLocaleString()}` : '-'}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Total</p>
+                        <p className="font-medium">
+                          {workCard.actualTotal ? `KSh ${workCard.actualTotal.toLocaleString()}` : '-'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {workCard.inputsUsed && workCard.inputsUsed.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">Inputs Used</p>
+                        <div className="space-y-2">
+                          {workCard.inputsUsed.map((input, idx) => (
+                            <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                              <Package className="h-4 w-4 text-teal-600" />
+                              <span className="font-medium">{input.quantity} {input.unit}</span>
+                              <span className="text-muted-foreground">{input.itemName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {workCard.workerNames && workCard.workerNames.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">Workers Involved</p>
+                        <div className="flex flex-wrap gap-2">
+                          {workCard.workerNames.map((name, idx) => (
+                            <Badge key={idx} variant="secondary">
+                              <User className="h-3 w-3 mr-1" />
+                              {name}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {workCard.executionNotes && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Notes</p>
+                        <p className="text-sm">{workCard.executionNotes}</p>
+                      </div>
+                    )}
+
+                    {workCard.loggedByName && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Logged By</p>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <p className="font-medium">{workCard.loggedByName}</p>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDateTime(workCard.loggedAt)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <Separator />
+                </>
+              )}
+
               <div className="space-y-3">
                 <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-                  Planned
+                  {isLoggedWork ? 'Original plan' : 'Planned'}
                 </h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -198,99 +359,6 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
                   </div>
                 )}
               </div>
-
-              {/* Section B - Actual Work (if logged) */}
-              {workCard.status !== 'planned' && (
-                <>
-                  <Separator />
-                  <div className="space-y-3">
-                    <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-                      Actual Work
-                    </h3>
-                    
-                    {workCard.workDone && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Work Done</p>
-                        <p className="text-sm">{workCard.workDone}</p>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Date</p>
-                        <p className="font-medium">{formatDate(workCard.actualDate)}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Workers</p>
-                        <p className="font-medium">{workCard.actualWorkers ?? '-'}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Rate per Person</p>
-                        <p className="font-medium">
-                          {workCard.actualRatePerPerson ? `KSh ${workCard.actualRatePerPerson.toLocaleString()}` : '-'}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Actual Total</p>
-                        <p className="font-medium">
-                          {workCard.actualTotal ? `KSh ${workCard.actualTotal.toLocaleString()}` : '-'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Inputs Used */}
-                    {workCard.inputsUsed && workCard.inputsUsed.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">Inputs Used</p>
-                        <div className="space-y-2">
-                          {workCard.inputsUsed.map((input, idx) => (
-                            <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
-                              <Package className="h-4 w-4 text-teal-600" />
-                              <span className="font-medium">{input.quantity} {input.unit}</span>
-                              <span className="text-muted-foreground">{input.itemName}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Workers Involved */}
-                    {workCard.workerNames && workCard.workerNames.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">Workers Involved</p>
-                        <div className="flex flex-wrap gap-2">
-                          {workCard.workerNames.map((name, idx) => (
-                            <Badge key={idx} variant="secondary">
-                              <User className="h-3 w-3 mr-1" />
-                              {name}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {workCard.executionNotes && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Notes</p>
-                        <p className="text-sm">{workCard.executionNotes}</p>
-                      </div>
-                    )}
-
-                    {workCard.loggedByName && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Logged By</p>
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <p className="font-medium">{workCard.loggedByName}</p>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDateTime(workCard.loggedAt)}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
 
               {/* Payment Info */}
               {workCard.payment.isPaid && (
@@ -370,15 +438,50 @@ export function WorkCardDrawer({ open, onOpenChange, workCard, onClose, onUpdate
               </TabsContent>
             )}
           </Tabs>
+          </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={confirmEditWorkOpen} onOpenChange={setConfirmEditWorkOpen}>
+        <AlertDialogContent className="rounded-sm [&>div.absolute]:rounded-sm">
+          <AlertDialogHeader className="text-left sm:text-left space-y-0">
+            <div className="flex gap-3">
+              <div
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                aria-hidden
+              >
+                <AlertTriangle className="h-5 w-5" strokeWidth={2} />
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <AlertDialogTitle className="text-base">Edit work card?</AlertDialogTitle>
+                <AlertDialogDescription className="text-sm leading-snug">
+                  Input changes update inventory. Saves are logged to audit history.
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex !flex-row flex-nowrap items-center justify-end gap-2 space-x-0 sm:space-x-0">
+            <AlertDialogCancel className="mt-0 sm:mt-0">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmEditWorkOpen(false);
+                setRecordWorkModalVariant(pendingRecordVariantRef.current);
+                setShowRecordWorkModal(true);
+              }}
+            >
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Record Work Modal */}
       <RecordWorkModal
         open={showRecordWorkModal}
-        onOpenChange={setShowRecordWorkModal}
+        onOpenChange={handleRecordModalOpenChange}
         workCard={workCard}
         isEdit={canEditWork}
+        variant={recordWorkModalVariant}
         onSuccess={handleRecordWorkSuccess}
       />
 
