@@ -130,6 +130,8 @@ import { HarvestCollectionsTour } from '@/components/tours/HarvestCollectionsTou
 import { RenameHarvestCollectionModal } from '@/components/modals/RenameHarvestCollectionModal';
 import { HarvestCollectionTransferModal } from '@/components/modals/HarvestCollectionTransferModal';
 import { isProjectClosed } from '@/lib/projectClosed';
+import { hasHarvestCollectionsModule } from '@/lib/cropModules';
+import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
 import { FeatureGate } from '@/components/subscription';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 
@@ -146,7 +148,7 @@ export default function HarvestCollectionsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { can: canKey, projectAccessIds } = useEmployeeAccess();
+  const { can: canKey, projectAccessIds, hasProjectAccess, isLoading: employeeAccessLoading } = useEmployeeAccess();
   const { activeProject, activeFarmId, projects, setActiveProject } = useProject();
   const { hasPendingWrites, isSyncing, isOnline, triggerSync } = useConnectivityStatus();
   const queryClient = useQueryClient();
@@ -177,22 +179,25 @@ export default function HarvestCollectionsPage() {
 
   const harvestProjectSelectOptions = useMemo(() => {
     const open = companyProjects.filter((p) => !isProjectClosed(p));
+    let list: Project[];
     if (
       effectiveProject &&
       isProjectClosed(effectiveProject) &&
       !open.some((p) => p.id === effectiveProject.id)
     ) {
-      return [effectiveProject, ...open];
+      list = [effectiveProject, ...open];
+    } else {
+      list = open;
     }
-    return open;
-  }, [companyProjects, effectiveProject]);
+    return list.filter((p) => hasProjectAccess(p.id));
+  }, [companyProjects, effectiveProject, hasProjectAccess]);
 
   const switchHarvestProject = useCallback(
     (projectId: string) => {
       const next = harvestProjectSelectOptions.find((p) => p.id === projectId) ?? null;
       if (!next || isProjectClosed(next)) return;
       setActiveProject(next as Project);
-      navigate(`${harvestNavPrefix}/harvest-collections/${next.id}`, { replace: true });
+      navigate(resolveHarvestEntryPath(next, harvestNavPrefix), { replace: true });
     },
     [harvestProjectSelectOptions, setActiveProject, navigate, harvestNavPrefix],
   );
@@ -203,6 +208,30 @@ export default function HarvestCollectionsPage() {
     if (isProjectClosed(effectiveProject)) return;
     setActiveProject(effectiveProject);
   }, [routeProjectId, effectiveProject, activeProject?.id, setActiveProject]);
+
+  useEffect(() => {
+    if (employeeAccessLoading || !userCompanyId) return;
+    if (!effectiveProject) return;
+    if (!hasProjectAccess(effectiveProject.id)) {
+      const fallback = companyProjects.find((p) => !isProjectClosed(p) && hasProjectAccess(p.id));
+      if (fallback) {
+        navigate(resolveHarvestEntryPath(fallback, harvestNavPrefix), { replace: true });
+      }
+      return;
+    }
+    const cropKey = String(effectiveProject.cropTypeKey ?? effectiveProject.cropType ?? '');
+    if (!hasHarvestCollectionsModule(cropKey)) {
+      navigate(resolveHarvestEntryPath(effectiveProject, harvestNavPrefix), { replace: true });
+    }
+  }, [
+    employeeAccessLoading,
+    userCompanyId,
+    effectiveProject,
+    companyProjects,
+    hasProjectAccess,
+    navigate,
+    harvestNavPrefix,
+  ]);
 
   useEffect(() => {
     if (!userCompanyId) return;

@@ -56,7 +56,9 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
+import { isProjectClosed } from '@/lib/projectClosed';
 import { formatDate } from '@/lib/dateUtils';
 import { toast } from 'sonner';
 import { PermissionEditor } from '@/components/permissions/PermissionEditor';
@@ -66,7 +68,14 @@ import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { UpgradeModal } from '@/components/subscription/UpgradeModal';
 import { EMPLOYEE_ROLES, PERMISSION_KEYS, type EmployeeRoleKey, type PermissionKey } from '@/config/accessControl';
 import { ROLE_PRESET_LABELS, ROLE_PRESET_KEYS, roleToPreset, presetToLegacyRole } from '@/lib/access';
-import { listCompanyRoleTemplates, saveCompanyRoleTemplate, getRoleTemplatePermissionKeys, logActivity } from '@/services/employeeAccessService';
+import {
+  listCompanyRoleTemplates,
+  saveCompanyRoleTemplate,
+  getRoleTemplatePermissionKeys,
+  getEmployeeProjectAccess,
+  setEmployeeProjectAccess,
+  logActivity,
+} from '@/services/employeeAccessService';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 import { BASIC_LIMITS } from '@/config/basicLimits';
@@ -205,6 +214,7 @@ function getDepartmentFromRole(role: ManagedEmployeeRole | null): string {
 
 export default function EmployeesPage() {
   const { user, employeeProfile, refreshAuthState } = useAuth();
+  const { projects } = useProject();
   const navigate = useNavigate();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
@@ -240,6 +250,14 @@ export default function EmployeesPage() {
   const companyId = user?.companyId ?? null;
   const isDeveloper = user?.role === 'developer';
   const scope = { companyScoped: true, companyId, isDeveloper };
+
+  const editAssignableProjects = useMemo(() => {
+    if (!companyId) return [];
+    return projects
+      .filter((p) => p.companyId === companyId && !isProjectClosed(p))
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [companyId, projects]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -362,6 +380,7 @@ export default function EmployeesPage() {
   // Supabase employees.permissions uses flat permission keys (module.action) from config/accessControl.
   const [editPermissionPreset, setEditPermissionPreset] = useState<EmployeeRoleKey>('custom');
   const [editPermissionsFlat, setEditPermissionsFlat] = useState<Record<string, boolean>>({});
+  const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
   const { canWrite, isTrial, isExpired, daysRemaining } = useSubscriptionStatus();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const planAccess = useEffectivePlanAccess();
@@ -415,6 +434,7 @@ export default function EmployeesPage() {
   }
 
   const openEdit = (employee: Employee) => {
+  setEditProjectIds([]);
   const rawRole = employee.employeeRole ?? employee.role ?? null;
   const preset = roleToPreset(rawRole);
   const displayRole = presetToLegacyRole(preset);
@@ -443,6 +463,16 @@ export default function EmployeesPage() {
     const flat = normalizeFlatPermissions(employee.permissions);
     setEditPermissionsFlat(Object.keys(flat).length > 0 ? flat : getEmployeePresetPermissions(presetKey));
     setEditOpen(true);
+    if (companyId) {
+      void (async () => {
+        try {
+          const ids = await getEmployeeProjectAccess(companyId, employee.id);
+          setEditProjectIds(ids);
+        } catch {
+          setEditProjectIds([]);
+        }
+      })();
+    }
     return;
   }
 
@@ -627,6 +657,7 @@ export default function EmployeesPage() {
           permissions: editPermissionsFlat as any,
           permission_preset: editPermissionPreset,
         });
+        await setEmployeeProjectAccess(companyId!, editingEmployee.id, editProjectIds);
         if (companyId) {
           await logActivity({
             companyId,
@@ -1589,7 +1620,16 @@ export default function EmployeesPage() {
         </Dialog>
 
         {/* Edit employee modal */}
-        <Dialog open={editOpen} onOpenChange={(open) => { setEditOpen(open); if (!open) setEditingEmployee(null); }}>
+        <Dialog
+          open={editOpen}
+          onOpenChange={(open) => {
+            setEditOpen(open);
+            if (!open) {
+              setEditingEmployee(null);
+              setEditProjectIds([]);
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit employee</DialogTitle>
@@ -1752,6 +1792,41 @@ export default function EmployeesPage() {
                   />
                 )}
               </div>
+              {isEmployeesSupabase && (
+                <div className="space-y-2 rounded-lg border border-border/50 bg-muted/10 p-3">
+                  <label className="text-sm font-medium text-foreground">Projects they can access</label>
+                  <p className="text-xs text-muted-foreground">
+                    Leave none selected for <strong>all</strong> projects. Otherwise limit which projects this person can open in Harvest and elsewhere.
+                  </p>
+                  {editAssignableProjects.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No open projects.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                      {editAssignableProjects.map((p) => {
+                        const checked = editProjectIds.includes(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className="flex items-center gap-2 rounded-md border border-border/50 bg-background/70 px-2.5 py-2 text-xs sm:text-sm"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(next) => {
+                                const on = next === true;
+                                setEditProjectIds((prev) => {
+                                  if (on) return prev.includes(p.id) ? prev : [...prev, p.id];
+                                  return prev.filter((id) => id !== p.id);
+                                });
+                              }}
+                            />
+                            <span className="truncate">{p.name || p.id}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Status</label>
                 <Select value={editStatus} onValueChange={(v) => setEditStatus(v as typeof editStatus)}>
@@ -1771,7 +1846,11 @@ export default function EmployeesPage() {
                 <button
                   type="button"
                   className="fv-btn fv-btn--secondary"
-                  onClick={() => { setEditOpen(false); setEditingEmployee(null); }}
+                  onClick={() => {
+                    setEditOpen(false);
+                    setEditingEmployee(null);
+                    setEditProjectIds([]);
+                  }}
                 >
                   Cancel
                 </button>

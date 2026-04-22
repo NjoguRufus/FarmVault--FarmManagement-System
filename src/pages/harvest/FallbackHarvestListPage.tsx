@@ -1,14 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, TrendingUp, Wallet, Package, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
+import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { Button } from '@/components/ui/button';
 import { SimpleStatCard } from '@/components/dashboard/SimpleStatCard';
 import { formatDate } from '@/lib/dateUtils';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { isProjectClosed } from '@/lib/projectClosed';
+import { hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
+import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
 import {
   createFallbackSession,
   listFallbackSessionsForProject,
@@ -38,16 +42,60 @@ function destinationLabel(dest: string): string {
 }
 
 export default function FallbackHarvestListPage() {
-  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
+  const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const navigate = useNavigate();
   const harvestNavPrefix = useHarvestNavPrefix();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
-  const { activeProject } = useProject();
+  const { activeProject, projects, setActiveProject } = useProject();
+  const { hasProjectAccess, isLoading: employeeAccessLoading } = useEmployeeAccess();
 
   const companyId = user?.companyId ?? null;
-  const projectId = routeProjectId ?? activeProject?.id ?? null;
+
+  const companyProjects = useMemo(
+    () => (companyId ? projects.filter((p) => p.companyId === companyId) : projects),
+    [projects, companyId],
+  );
+
+  const effectiveProject = useMemo(() => {
+    if (routeProjectId) {
+      return projects.find((p) => p.id === routeProjectId) ?? null;
+    }
+    return activeProject;
+  }, [routeProjectId, projects, activeProject]);
+
+  useEffect(() => {
+    if (!routeProjectId || !effectiveProject || effectiveProject.id !== routeProjectId) return;
+    if (activeProject?.id === routeProjectId) return;
+    if (isProjectClosed(effectiveProject)) return;
+    setActiveProject(effectiveProject);
+  }, [routeProjectId, effectiveProject, activeProject?.id, setActiveProject]);
+
+  const projectId = effectiveProject?.id ?? null;
+
+  useEffect(() => {
+    if (employeeAccessLoading || !companyId || !effectiveProject) return;
+    if (!hasProjectAccess(effectiveProject.id)) {
+      const fallback = companyProjects.find((p) => !isProjectClosed(p) && hasProjectAccess(p.id));
+      if (fallback) {
+        navigate(resolveHarvestEntryPath(fallback, harvestNavPrefix), { replace: true });
+      }
+      return;
+    }
+    const crop = String(effectiveProject.cropTypeKey ?? effectiveProject.cropType ?? '');
+    if (hasTomatoHarvestModule(crop) || hasHarvestCollectionsModule(crop)) {
+      navigate(resolveHarvestEntryPath(effectiveProject, harvestNavPrefix), { replace: true });
+    }
+  }, [
+    employeeAccessLoading,
+    companyId,
+    effectiveProject,
+    companyProjects,
+    hasProjectAccess,
+    navigate,
+    harvestNavPrefix,
+  ]);
 
   useFallbackHarvestRealtime({ companyId, projectId });
 
