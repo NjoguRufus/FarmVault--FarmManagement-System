@@ -1,12 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  getInventoryItems,
   getInventoryItemById,
   getInventoryMovementsForItem,
   getInventoryAuditLogs,
   type InventoryMovement,
   type InventoryAuditLog,
 } from '@/services/inventoryService';
+import { InventoryService } from '@/services/localData/InventoryService';
 import type { InventoryItem } from '@/types';
 
 export const INVENTORY_ITEMS_QUERY_KEY = 'inventoryItems:v2';
@@ -20,7 +20,17 @@ export function useInventoryItems(companyId: string | null) {
 
   const { data, isLoading, error } = useQuery({
     queryKey: key,
-    queryFn: () => getInventoryItems(companyId!),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await InventoryService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return InventoryService.getInventoryItems(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 30_000,
   });

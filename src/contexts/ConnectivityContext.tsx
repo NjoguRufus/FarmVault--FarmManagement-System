@@ -16,6 +16,9 @@ import {
   resetOfflineRetrySchedule,
   OFFLINE_QUEUE_CHANGE_EVENT,
 } from '@/lib/offlineQueue';
+import { getLocalSyncQueuePendingCount } from '@/lib/localData/localSyncQueue';
+import { LOCAL_SYNC_STATE_EVENT } from '@/lib/localData/types';
+import { runLocalDataSyncEngine, getIsLocalDataSyncRunning } from '@/lib/localData/syncEngine';
 
 type ConnectivityStatus = 'online' | 'offline' | 'syncing' | 'sync_failed';
 
@@ -24,7 +27,7 @@ interface ConnectivityContextValue {
   isOnline: boolean;
   isSyncing: boolean;
   hasPendingWrites: boolean;
-  /** Number of unsynced items in the offline queue. */
+  /** Unsynced items: legacy harvest queue + local-first sync queue. */
   pendingCount: number;
   /** True after a sync run that had one or more failures (retry available). */
   lastSyncFailed: boolean;
@@ -40,11 +43,12 @@ function refreshPendingAndSyncing(
   setPendingCount: (n: number) => void,
   setIsSyncing: (v: boolean) => void
 ) {
-  getPendingCount().then((count) => {
-    setHasPendingWrites(count > 0);
-    setPendingCount(count);
+  void Promise.all([getPendingCount(), getLocalSyncQueuePendingCount()]).then(([harvest, local]) => {
+    const n = harvest + local;
+    setHasPendingWrites(n > 0);
+    setPendingCount(n);
   });
-  setIsSyncing(getIsSyncing());
+  setIsSyncing(getIsSyncing() || getIsLocalDataSyncRunning());
 }
 
 export function ConnectivityProvider({ children }: { children: ReactNode }) {
@@ -63,10 +67,10 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const triggerSync = useCallback(async () => {
-    const result = await syncQueue();
-    setLastSyncFailed(result.failed > 0);
+    const [harvest, local] = await Promise.all([syncQueue(), runLocalDataSyncEngine(null)]);
+    setLastSyncFailed(harvest.failed > 0 || local.failed > 0);
     refresh();
-    return result;
+    return { synced: harvest.synced + local.processed, failed: harvest.failed + local.failed };
   }, [refresh]);
 
   useEffect(() => {
@@ -75,7 +79,8 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
       void (async () => {
         await resetOfflineRetrySchedule();
         const r = await syncQueue();
-        setLastSyncFailed(r.failed > 0);
+        const l = await runLocalDataSyncEngine(null);
+        setLastSyncFailed(r.failed > 0 || l.failed > 0);
         refresh();
       })();
     };
@@ -84,8 +89,8 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     const onVisible = () => {
       if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        void syncQueue().then((r) => {
-          setLastSyncFailed(r.failed > 0);
+        void Promise.all([syncQueue(), runLocalDataSyncEngine(null)]).then(([r, l]) => {
+          setLastSyncFailed(r.failed > 0 || l.failed > 0);
           refresh();
         });
       }
@@ -106,13 +111,17 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     refresh();
     const onQueueChange = () => refresh();
     window.addEventListener(OFFLINE_QUEUE_CHANGE_EVENT, onQueueChange);
-    return () => window.removeEventListener(OFFLINE_QUEUE_CHANGE_EVENT, onQueueChange);
+    window.addEventListener(LOCAL_SYNC_STATE_EVENT, onQueueChange);
+    return () => {
+      window.removeEventListener(OFFLINE_QUEUE_CHANGE_EVENT, onQueueChange);
+      window.removeEventListener(LOCAL_SYNC_STATE_EVENT, onQueueChange);
+    };
   }, [refresh]);
 
   useEffect(() => {
     if (typeof navigator !== 'undefined' && navigator.onLine) {
-      void syncQueue().then((r) => {
-        setLastSyncFailed(r.failed > 0);
+      void Promise.all([syncQueue(), runLocalDataSyncEngine(null)]).then(([r, l]) => {
+        setLastSyncFailed(r.failed > 0 || l.failed > 0);
         refresh();
       });
     }
@@ -123,7 +132,7 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
       if (!hasShownOfflineToastRef.current) {
         toast({
           title: "You're offline",
-          description: 'Harvest entries will sync when back online.',
+          description: 'Offline mode — your data will sync automatically when you reconnect.',
         });
         hasShownOfflineToastRef.current = true;
       }

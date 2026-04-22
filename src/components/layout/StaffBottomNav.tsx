@@ -41,7 +41,7 @@ export function StaffBottomNav() {
       setIsDesktop(width >= 1024);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        logger.log('[StaffBottomNav] viewport', { width, isDesktop: width >= 1024 });
+        logger.debug('[StaffBottomNav] viewport', { width, isDesktop: width >= 1024 });
       }
     };
     update();
@@ -82,7 +82,7 @@ export function StaffBottomNav() {
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    logger.log('[StaffBottomNav] visible nav items', {
+    logger.debug('[StaffBottomNav] visible nav items', {
       uid: user.id,
       items: items.map((i) => i.path),
     });

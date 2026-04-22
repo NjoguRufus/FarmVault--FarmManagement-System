@@ -7,7 +7,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useInventoryStock, useInventoryCategories } from '@/hooks/useInventoryReadModels';
 import { useInventoryItems } from '@/hooks/useInventory';
 import { useInventoryAuditLogs, useInventoryActions, useInventoryNotifications } from '@/hooks/useInventoryAudit';
-import { listSuppliers } from '@/services/suppliersService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import { updateInventoryItem } from '@/services/inventoryService';
 import type { Supplier } from '@/types';
 import { InventoryStatsCards } from '@/components/inventory/InventoryStatsCards';
@@ -23,7 +23,11 @@ import { InventoryItemDrawer } from '@/components/inventory/InventoryItemDrawer'
 import { useQuery } from '@tanstack/react-query';
 import type { InventoryStockRow } from '@/services/inventoryReadModelService';
 import { listInventoryTransactions, listInventoryUsage } from '@/services/inventoryReadModelService';
-import { INVENTORY_TRANSACTIONS_QUERY_KEY, INVENTORY_USAGE_QUERY_KEY } from '@/hooks/useInventoryReadModels';
+import {
+  INVENTORY_STOCK_QUERY_KEY,
+  INVENTORY_TRANSACTIONS_QUERY_KEY,
+  INVENTORY_USAGE_QUERY_KEY,
+} from '@/hooks/useInventoryReadModels';
 import { useQueryClient } from '@tanstack/react-query';
 import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_MESSAGE } from '@/lib/concurrentUpdate';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
@@ -83,7 +87,17 @@ export default function InventoryPage() {
     isLoading: suppliersLoading,
   } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId ?? 'none'],
-    queryFn: () => listSuppliers(companyId ?? ''),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });
@@ -121,12 +135,6 @@ export default function InventoryPage() {
     const supplierIds = new Set(allStockItems.map(item => item.supplier_id).filter(Boolean));
     return allSuppliers.filter(s => supplierIds.has(s.id));
   }, [allStockItems, allSuppliers]);
-
-  const handleInventoryChange = () => {
-    refetchStock();
-    invalidateStockQueries();
-    refetchAudit();
-  };
 
   const handleDeductStock = async (params: {
     companyId: string;
@@ -236,6 +244,14 @@ export default function InventoryPage() {
   const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false);
 
   const { auditLogs, isLoading: auditLoading, refetch: refetchAudit } = useInventoryAuditLogs(companyId, null, 100);
+  const handleInventoryChange = useCallback(() => {
+    const cid = companyId ?? '';
+    void queryClient.invalidateQueries({ queryKey: [INVENTORY_STOCK_QUERY_KEY] });
+    void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa', cid] });
+    void refetchStock();
+    invalidateStockQueries();
+    void refetchAudit();
+  }, [companyId, queryClient, refetchStock, invalidateStockQueries, refetchAudit]);
   const { deductStock, archiveItem, restoreItem } = useInventoryActions({
     companyId,
     onSuccess: handleInventoryChange,

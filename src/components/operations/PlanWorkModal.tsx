@@ -26,9 +26,9 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
-import { listEmployees } from '@/services/employeesSupabaseService';
 import { createWorkCard } from '@/services/operationsWorkCardService';
-import { listFarmsByCompany } from '@/services/farmsService';
+import { EmployeeService } from '@/services/localData/EmployeeService';
+import { FarmService } from '@/services/localData/FarmService';
 import type { Employee } from '@/types';
 import { logger } from "@/lib/logger";
 import { isProjectClosed } from '@/lib/projectClosed';
@@ -60,12 +60,32 @@ export function PlanWorkModal({
   // Fetch employees from Supabase
   const { data: employees = [] } = useQuery({
     queryKey: ['employees', companyId],
-    queryFn: () => listEmployees(companyId!),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await EmployeeService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return EmployeeService.listEmployees(companyId);
+    },
     enabled: !!companyId,
   });
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', companyId ?? ''],
-    queryFn: () => listFarmsByCompany(companyId),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(companyId);
+    },
     enabled: Boolean(companyId),
   });
   const selectorFarms = useMemo(

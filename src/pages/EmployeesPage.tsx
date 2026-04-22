@@ -15,7 +15,6 @@ import { useCollection } from '@/hooks/useCollection';
 import { Employee, PermissionMap, PermissionPresetKey, User } from '@/types';
 import { employeesProvider } from '@/lib/provider';
 import {
-  listEmployees,
   inviteEmployee,
   updateEmployee as updateEmployeeSupabase,
   saveEmployeeDraft,
@@ -75,6 +74,7 @@ import { useEffectivePlanAccess } from '@/hooks/useEffectivePlanAccess';
 import { openUpgradeModal } from '@/lib/upgradeModalEvents';
 import { logger } from "@/lib/logger";
 import { debounce } from '@/lib/debounce';
+import { EmployeeService } from '@/services/localData/EmployeeService';
 
 type ManagedEmployeeRole = 'operations-manager' | 'sales-broker' | EmployeeRoleKey;
 type EmployeeRoleSelection = ManagedEmployeeRole | 'none' | string;
@@ -306,7 +306,14 @@ export default function EmployeesPage() {
     if (!companyId || !isEmployeesSupabase) return;
     setLoadingSupabase(true);
     try {
-      const list = await listEmployees(companyId);
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await EmployeeService.pullRemote(companyId);
+        } catch {
+          // ignore; still show local
+        }
+      }
+      const list = await EmployeeService.listEmployees(companyId);
       setEmployeesSupabase(list);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console

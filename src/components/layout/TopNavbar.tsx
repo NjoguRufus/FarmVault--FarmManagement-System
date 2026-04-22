@@ -10,7 +10,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
-import { listFarmsByCompany } from '@/services/farmsService';
+import { FarmService } from '@/services/localData/FarmService';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -85,7 +85,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   useEffect(() => {
     if (!import.meta.env.DEV || !user?.companyId) return;
     // eslint-disable-next-line no-console
-    logger.log('[TopNavbar] subscription badge state', {
+    logger.debug('[TopNavbar] subscription badge state', {
       companyId: user.companyId,
       isActivePaid,
       isTrial,
@@ -115,7 +115,18 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', user?.companyId ?? ''],
-    queryFn: () => listFarmsByCompany(user?.companyId ?? null),
+    queryFn: async () => {
+      const cid = user?.companyId;
+      if (!cid) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(cid);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(cid);
+    },
     enabled: Boolean(user?.companyId),
   });
   const selectorFarms = farms.filter(
@@ -129,7 +140,7 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
   useEffect(() => {
     if (import.meta.env.DEV && user) {
       // eslint-disable-next-line no-console
-      logger.log('[Navbar Avatar]', {
+      logger.debug('[Navbar Avatar]', {
         name: user?.name,
         email: user?.email,
         imageUrl: user?.avatar ?? null,

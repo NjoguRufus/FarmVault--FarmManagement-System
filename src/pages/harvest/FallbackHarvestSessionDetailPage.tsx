@@ -29,7 +29,7 @@ import { EditMarketSalesBuyerDialog } from '@/components/harvest/EditMarketSales
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { listEmployees } from '@/services/employeesSupabaseService';
+import { EmployeeService } from '@/services/localData/EmployeeService';
 import type { Employee } from '@/types';
 import { createFinanceExpense } from '@/services/financeExpenseService';
 import {
@@ -119,7 +119,17 @@ export default function FallbackHarvestSessionDetailPage() {
   const { data: employees = [] } = useQuery({
     queryKey: ['employees', companyId],
     enabled: Boolean(companyId),
-    queryFn: () => listEmployees(companyId ?? ''),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await EmployeeService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return EmployeeService.listEmployees(companyId);
+    },
     staleTime: 60_000,
   });
 

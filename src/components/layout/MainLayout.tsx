@@ -90,7 +90,7 @@ export function MainLayout() {
         staffTarget.startsWith('/staff/');
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        logger.log('[Shell] staff user → /staff redirect', {
+        logger.debug('[Shell] staff user → /staff redirect', {
           uid: user.id,
           role: user.role,
           employeeRole: (user as any).employeeRole,
@@ -106,7 +106,7 @@ export function MainLayout() {
 
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[Shell] using admin shell', {
+      logger.debug('[Shell] using admin shell', {
         uid: user.id,
         role: user.role,
         employeeRole: (user as any).employeeRole,
@@ -146,7 +146,7 @@ export function MainLayout() {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    logger.log('[Responsive] main layout breakpoint', {
+    logger.debug('[Responsive] main layout breakpoint', {
       width,
       isDesktop,
       path: location.pathname,

@@ -168,7 +168,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    logger.log('[Nav] visible nav items', {
+    logger.debug('[Nav] visible nav items', {
       uid: user.id,
       items: navItems.map((i) => i.path),
     });

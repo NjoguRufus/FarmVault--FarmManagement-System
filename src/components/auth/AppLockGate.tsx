@@ -36,10 +36,8 @@ import {
   type AppPinChangeEventDetail,
 } from '@/services/appLockService';
 
-// Debug logging - always enabled for now to help diagnose issues
 function debugLog(...args: unknown[]): void {
-  // eslint-disable-next-line no-console
-  logger.log('[AppLockGate]', ...args);
+  logger.debug('[AppLockGate]', ...args);
 }
 
 type BootState = 'booting' | 'locked' | 'unlocked';

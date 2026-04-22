@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { developerGetProjectById, getProject } from '@/services/projectsService';
-import { getFinanceExpenses } from '@/services/financeExpenseService';
+import { ExpenseService } from '@/services/localData/ExpenseService';
 import { getBudgetPool } from '@/services/budgetPoolService';
 import { useCollection } from '@/hooks/useCollection';
 import { useProjectStages } from '@/hooks/useProjectStages';
@@ -85,7 +85,16 @@ export function DeveloperProjectDetailsSheet({ open, onOpenChange, companyId, pr
 
   const { data: financeExpensesRaw = [] } = useQuery({
     queryKey: ['developer-project-finance-expenses', companyId, projectId],
-    queryFn: () => getFinanceExpenses(companyId, { projectId }),
+    queryFn: async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await ExpenseService.pullRemote(companyId, { projectId });
+        } catch {
+          // ignore; still use local
+        }
+      }
+      return ExpenseService.list(companyId, { projectId });
+    },
     enabled: open && Boolean(companyId && projectId),
     staleTime: 30_000,
     refetchOnWindowFocus: false,

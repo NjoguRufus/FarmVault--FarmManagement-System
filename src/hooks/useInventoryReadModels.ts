@@ -51,7 +51,7 @@ export function useInventoryStock(params: {
       // DEBUG: Log raw stock data from view
       if (import.meta.env.DEV && result.length > 0) {
         // eslint-disable-next-line no-console
-        logger.log('[useInventoryStock] Raw data from inventory_stock_view:', {
+        logger.log('[useInventoryStock] Raw data (local inventory + filters):', {
           itemCount: result.length,
           firstItem: result[0],
           stockFields: result.slice(0, 3).map(item => ({

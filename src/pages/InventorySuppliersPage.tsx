@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { listSuppliers } from '@/services/suppliersService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import type { Supplier } from '@/types';
 import { AlertTriangle } from 'lucide-react';
 
@@ -15,7 +15,17 @@ export default function InventorySuppliersPage() {
     error,
   } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId ?? 'none'],
-    queryFn: () => listSuppliers(companyId ?? ''),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });

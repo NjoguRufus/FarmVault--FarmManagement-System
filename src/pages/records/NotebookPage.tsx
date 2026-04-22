@@ -22,7 +22,6 @@ import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import type { NoteAttachmentLayout } from "@/components/records/DraggableAttachment";
 import { DraggableAttachment } from "@/components/records/DraggableAttachment";
-import { StructuredNotePreview } from "@/components/records/StructuredNotePreview";
 import { SmartRichNotesEditor } from "@/components/records/SmartRichNotesEditor";
 import { resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
 import { parseNotebookContentToBlocks } from "@/lib/notebook/parseNotebookContentToBlocks";
@@ -30,6 +29,12 @@ import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./notebookPage.css";
 import { useProject } from "@/contexts/ProjectContext";
 import { FARM_NOTEBOOK_GENERAL_SLUG } from "@/constants/farmNotebook";
+import {
+  prepareImageForStorageUpload,
+  withNotebookUploadSlot,
+} from "@/lib/notebook/notebookAttachmentUpload";
+
+const MAX_NOTEBOOK_ATTACHMENTS = 10;
 
 type FarmNotebookEntryRow = {
   id: string;
@@ -78,7 +83,8 @@ export default function NotebookPage() {
   const [title, setTitle] = useState<string>("");
   const [content, setContent] = useState<string>("");
   const [attachments, setAttachments] = useState<NoteAttachmentLayout[]>([]);
-  const [uploading, setUploading] = useState(false);
+  /** Non-image file uploads (PDFs, etc.) still go through a blocking request before appearing. */
+  const [otherFilesUploading, setOtherFilesUploading] = useState(false);
   const [developerCompanyId, setDeveloperCompanyId] = useState<string>("");
   const [currentNoteCompanyId, setCurrentNoteCompanyId] = useState<string | null>(null);
   const [noteSource, setNoteSource] = useState<string | null>(null);
@@ -93,6 +99,10 @@ export default function NotebookPage() {
   const inflightRef = useRef<Promise<void> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const pendingFileByIdRef = useRef(new Map<string, { file: File; objectUrl: string }>());
+  const runRemoteUploadRef = useRef<(id: string, file: File) => void>(() => undefined);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
 
   function newAttachmentId() {
     // crypto.randomUUID is widely supported in modern browsers; fallback for older environments
@@ -122,9 +132,11 @@ export default function NotebookPage() {
       const anyItem = item as any;
       const url = String(anyItem.url ?? anyItem.publicUrl ?? anyItem.path ?? "");
       if (!url) continue;
+      const mt = anyItem.mimeType != null ? String(anyItem.mimeType) : undefined;
       out.push({
         id: String(anyItem.id ?? newAttachmentId()),
         url,
+        ...(mt ? { mimeType: mt } : {}),
         x: Number.isFinite(anyItem.x) ? Number(anyItem.x) : 40,
         y: Number.isFinite(anyItem.y) ? Number(anyItem.y) : 40,
         width: Number.isFinite(anyItem.width) ? Number(anyItem.width) : 180,
@@ -134,6 +146,17 @@ export default function NotebookPage() {
       });
     }
     return out;
+  }
+
+  function attachmentForPersistence(a: NoteAttachmentLayout): NoteAttachmentLayout | null {
+    if (a.url.startsWith("blob:")) return null;
+    const { localUploadState, ...row } = a;
+    void localUploadState;
+    return row;
+  }
+
+  function attachmentsToPersist(list: NoteAttachmentLayout[]) {
+    return list.map(attachmentForPersistence).filter((x): x is NoteAttachmentLayout => x != null);
   }
 
   useEffect(() => {
@@ -327,51 +350,193 @@ export default function NotebookPage() {
     return data.publicUrl;
   }
 
-  async function handleAttachments(files: File[]) {
-    const uploads: NoteAttachmentLayout[] = [];
+  useEffect(() => {
+    return () => {
+      for (const a of attachmentsRef.current) {
+        if (a.url.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(a.url);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+  }, []);
 
-    for (const file of files) {
-      const url = await uploadNoteAttachment(file);
-      uploads.push({
-        id: newAttachmentId(),
-        url,
-        x: 40,
-        y: 40,
-        width: 180,
-        height: 140,
-        rotation: 0,
-        zIndex: 1,
+  function runRemoteUpload(attachmentId: string, file: File) {
+    setAttachments((prev) =>
+      prev.map((x) =>
+        x.id === attachmentId && x.url.startsWith("blob:") ? { ...x, localUploadState: "uploading" } : x,
+      ),
+    );
+    (async () => {
+      try {
+        const publicUrl = await withNotebookUploadSlot(async () => {
+          const toSend = await prepareImageForStorageUpload(file);
+          return uploadNoteAttachment(toSend);
+        });
+        pendingFileByIdRef.current.delete(attachmentId);
+        setAttachments((prev) => {
+          const cur = prev.find((x) => x.id === attachmentId);
+          if (!cur) {
+            const orphan = pendingFileByIdRef.current.get(attachmentId);
+            if (orphan?.objectUrl.startsWith("blob:")) {
+              try {
+                URL.revokeObjectURL(orphan.objectUrl);
+              } catch {
+                // ignore
+              }
+            }
+            return prev;
+          }
+          if (cur.url.startsWith("blob:")) {
+            try {
+              URL.revokeObjectURL(cur.url);
+            } catch {
+              // ignore
+            }
+          }
+          return prev.map((x) =>
+            x.id === attachmentId ? { ...x, url: publicUrl, localUploadState: undefined } : x,
+          );
+        });
+      } catch (err) {
+        setAttachments((prev) => {
+          if (!prev.some((x) => x.id === attachmentId)) {
+            pendingFileByIdRef.current.delete(attachmentId);
+            return prev;
+          }
+          return prev.map((x) =>
+            x.id === attachmentId ? { ...x, localUploadState: "error" } : x,
+          );
+        });
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          toast.message("Offline", {
+            description: "Attachment will upload when you are back online.",
+          });
+        } else {
+          const msg = err instanceof Error ? err.message : "Attachment upload failed";
+          toast.error(msg);
+        }
+      }
+    })();
+  }
+
+  runRemoteUploadRef.current = runRemoteUpload;
+
+  useEffect(() => {
+    const onOnline = () => {
+      const pending = attachmentsRef.current.filter(
+        (a) => a.url.startsWith("blob:") && a.localUploadState === "error",
+      );
+      for (const a of pending) {
+        const entry = pendingFileByIdRef.current.get(a.id);
+        if (!entry) continue;
+        void runRemoteUploadRef.current(a.id, entry.file);
+      }
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, []);
+
+  const onAttachmentsSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const currentCount = attachmentsRef.current.length;
+    const room = MAX_NOTEBOOK_ATTACHMENTS - currentCount;
+    if (room <= 0) {
+      toast.error("Attachment limit", {
+        description: `Each note can have at most ${MAX_NOTEBOOK_ATTACHMENTS} attachments. Remove one to add more.`,
+      });
+      e.target.value = "";
+      return;
+    }
+
+    const raw = Array.from(e.target.files ?? []);
+    if (raw.length === 0) return;
+    if (raw.length > room) {
+      toast.message("Attachment limit", {
+        description: `Only ${room} more attachment${room === 1 ? "" : "s"} allowed (max ${MAX_NOTEBOOK_ATTACHMENTS} per note). ${raw.length - room} file(s) were skipped.`,
+      });
+    }
+    const files = raw.slice(0, room);
+
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+
+    if (images.length) {
+      const base = attachmentsRef.current;
+      const maxZ = base.reduce((m, a) => Math.max(m, a.zIndex || 1), 1);
+      let z = maxZ;
+      const added: NoteAttachmentLayout[] = [];
+      for (const file of images) {
+        z += 1;
+        const id = newAttachmentId();
+        const objectUrl = URL.createObjectURL(file);
+        pendingFileByIdRef.current.set(id, { file, objectUrl });
+        added.push({
+          id,
+          url: objectUrl,
+          mimeType: file.type || "image/*",
+          localUploadState: "uploading",
+          x: 40,
+          y: 40,
+          width: 180,
+          height: 140,
+          rotation: 0,
+          zIndex: z,
+        });
+      }
+      setAttachments((prev) => [...prev, ...added]);
+      queueMicrotask(() => {
+        for (const a of added) {
+          const ent = pendingFileByIdRef.current.get(a.id);
+          if (ent) void runRemoteUpload(a.id, ent.file);
+        }
       });
     }
 
-    return uploads;
-  }
-
-  const onAttachmentsSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-
-    setUploading(true);
-    try {
-      const newOnes = await handleAttachments(files);
-      if (newOnes.length) {
-        setAttachments((prev) => {
-          const maxZ = prev.reduce((m, a) => Math.max(m, a.zIndex || 1), 1);
-          return [...prev, ...newOnes.map((a, idx) => ({ ...a, zIndex: maxZ + idx + 1 }))];
-        });
-        toast.success("Uploaded attachments");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Attachment upload failed";
-      toast.error(msg);
-    } finally {
-      setUploading(false);
-      // allow selecting same file again
-      e.target.value = "";
+    if (others.length) {
+      setOtherFilesUploading(true);
+      void (async () => {
+        try {
+          const newly: NoteAttachmentLayout[] = [];
+          for (const file of others) {
+            const url = await withNotebookUploadSlot(() => uploadNoteAttachment(file));
+            newly.push({
+              id: newAttachmentId(),
+              url,
+              mimeType: file.type || undefined,
+              x: 40,
+              y: 40,
+              width: 180,
+              height: 140,
+              rotation: 0,
+              zIndex: 1,
+            });
+          }
+          if (newly.length) {
+            setAttachments((prev) => {
+              const maxZ = prev.reduce((m, a) => Math.max(m, a.zIndex || 1), 1);
+              return [...prev, ...newly.map((a, idx) => ({ ...a, zIndex: maxZ + idx + 1 }))];
+            });
+            toast.success("Uploaded attachments");
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Attachment upload failed";
+          toast.error(msg);
+        } finally {
+          setOtherFilesUploading(false);
+        }
+      })();
     }
+
+    e.target.value = "";
   };
 
-  const attachmentsKey = useMemo(() => JSON.stringify(attachments ?? []), [attachments]);
+  const attachmentsKey = useMemo(
+    () => JSON.stringify(attachmentsToPersist(attachments)),
+    [attachments],
+  );
 
   const bringFront = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -385,7 +550,18 @@ export default function NotebookPage() {
   }, []);
 
   const deleteAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    setAttachments((prev) => {
+      const a = prev.find((x) => x.id === id);
+      if (a?.url.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(a.url);
+        } catch {
+          // ignore
+        }
+      }
+      pendingFileByIdRef.current.delete(id);
+      return prev.filter((x) => x.id !== id);
+    });
   }, []);
 
   const saveNote = async (opts?: { showToast?: boolean }) => {
@@ -399,6 +575,7 @@ export default function NotebookPage() {
     const nextTitle = title;
     const nextContent = content;
     const last = lastSavedRef.current;
+    const persistAttachments = attachmentsToPersist(attachments);
 
     if (last && last.title === nextTitle && last.content === nextContent && last.attachmentsKey === attachmentsKey)
       return;
@@ -422,7 +599,7 @@ export default function NotebookPage() {
             content: nextContent,
             raw_text: plainBody,
             structured_blocks: structuredBlocks,
-            attachments,
+            attachments: persistAttachments,
             created_by: isDeveloperRoute ? "developer" : user.id,
           };
           if (isGeneralFarmNotebook) {
@@ -455,7 +632,7 @@ export default function NotebookPage() {
               content: nextContent,
               raw_text: plainBody,
               structured_blocks: structuredBlocks,
-              attachments,
+              attachments: persistAttachments,
               ...(isDeveloperRoute ? { developer_updated: true } : null),
             })
             .eq("id", noteId);
@@ -515,7 +692,7 @@ export default function NotebookPage() {
       content,
       raw_text: htmlToPlainText(content),
       structured_blocks: parseNotebookContentToBlocks(htmlToPlainText(content)),
-      attachments,
+      attachments: attachmentsToPersist(attachments),
       created_by: "developer",
       source: "developer",
       source_note_id: noteId,
@@ -561,16 +738,13 @@ export default function NotebookPage() {
     }
   };
 
-  const structuredPreviewBlocks = useMemo(
-    () => parseNotebookContentToBlocks(htmlToPlainText(content)),
-    [content],
-  );
-
   const headerSubtitle = useMemo(() => {
     if (saving) return "Saving…";
     if (saveError) return "Save failed";
     return noteId ? "All changes saved" : "Draft";
   }, [saving, saveError, noteId]);
+
+  const atAttachmentLimit = attachments.length >= MAX_NOTEBOOK_ATTACHMENTS;
 
   if (loading) {
     return (
@@ -656,14 +830,23 @@ export default function NotebookPage() {
             className="rounded-xl"
             onClick={() => fileInputRef.current?.click()}
             disabled={
-              uploading ||
+              atAttachmentLimit ||
               saving ||
               deleting ||
               (!isDeveloperRoute && (scope.error != null || !companyId))
             }
+            title={
+              atAttachmentLimit
+                ? `Each note can have at most ${MAX_NOTEBOOK_ATTACHMENTS} attachments. Remove one to add more.`
+                : undefined
+            }
           >
             <Paperclip className="h-4 w-4 mr-2" />
-            {uploading ? "Uploading..." : "Attach"}
+            {atAttachmentLimit
+              ? "Max reached"
+              : otherFilesUploading
+                ? "Uploading…"
+                : "Attach"}
           </Button>
           <input
             ref={fileInputRef}
@@ -721,13 +904,6 @@ export default function NotebookPage() {
               onBringFront={bringFront}
             />
           ))}
-        </div>
-
-        <div className="notebook-smart-preview">
-          <div className="notebook-smart-preview-title">Structured preview</div>
-          <div className="notebook-smart-preview-body notebook-structured-preview-body">
-            <StructuredNotePreview blocks={structuredPreviewBlocks} />
-          </div>
         </div>
 
         {noteId ? (

@@ -46,14 +46,8 @@ const CURRENT_STATE_VERSION = '4'; // Increment this to force reset of broken st
 export type LockTimeoutSeconds = 10 | 30 | 60 | 300;
 export type InactivityGraceMs = 2000 | 5000 | 10000;
 
-// Debug flag - always log for now to help debug issues
-const DEBUG_LOCK = true;
-
 function debugLog(...args: unknown[]): void {
-  if (DEBUG_LOCK) {
-    // eslint-disable-next-line no-console
-    logger.log('[AppLock]', ...args);
-  }
+  logger.debug('[AppLock]', ...args);
 }
 
 /**

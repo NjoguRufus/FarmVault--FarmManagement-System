@@ -26,4 +26,6 @@ interface ImportMetaEnv {
   readonly VITE_ONESIGNAL_APP_ID?: string;
   /** Web Push VAPID public key (URL-safe base64). Pair with Edge secrets VAPID_* and `npm run generate:vapid`. */
   readonly VITE_VAPID_PUBLIC_KEY?: string;
+  /** When "true", enables verbose `logger.debug` (auth, nav, admin alerts, app lock). */
+  readonly VITE_DEBUG_LOGS?: string;
 }

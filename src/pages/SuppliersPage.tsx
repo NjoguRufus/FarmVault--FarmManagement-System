@@ -3,7 +3,8 @@ import { Plus, Search, Star, Phone, Mail, List, LayoutGrid, Pencil, Package } fr
 import { cn } from '@/lib/utils';
 import { Supplier } from '@/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createSupplier, listSuppliers, updateSupplier } from '@/services/suppliersService';
+import { createSupplier, updateSupplier } from '@/services/suppliersService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import { useInventoryItems } from '@/hooks/useInventory';
 import {
   Dialog,
@@ -81,7 +82,17 @@ export default function SuppliersPage() {
 
   const { data: suppliers = [], isLoading } = useQuery({
     queryKey: ['suppliers', companyId ?? 'none'],
-    queryFn: () => listSuppliers(companyId!),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });
