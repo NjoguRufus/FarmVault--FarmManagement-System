@@ -564,6 +564,39 @@ export default function NotebookPage() {
     });
   }, []);
 
+  const removeImageWithUndo = useCallback((snapshot: NoteAttachmentLayout, insertIndex: number) => {
+    const id = snapshot.id;
+    let undone = false;
+    setAttachments((prev) => prev.filter((x) => x.id !== id));
+    toast.message("Image removed — Undo", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          undone = true;
+          setAttachments((prev) => {
+            const next = [...prev];
+            const i = Math.max(0, Math.min(insertIndex, next.length));
+            next.splice(i, 0, snapshot);
+            return next;
+          });
+        },
+      },
+      duration: 6000,
+    });
+    window.setTimeout(() => {
+      if (undone) return;
+      if (attachmentsRef.current.some((x) => x.id === id)) return;
+      if (snapshot.url.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(snapshot.url);
+        } catch {
+          // ignore
+        }
+      }
+      pendingFileByIdRef.current.delete(id);
+    }, 6500);
+  }, []);
+
   const saveNote = async (opts?: { showToast?: boolean }) => {
     if (!isDeveloperRoute && scope.error) return;
     // Company workspace: tenant required. Developer route: company is optional (draft / global note).
@@ -894,13 +927,15 @@ export default function NotebookPage() {
             placeholder="Start writing…"
           />
 
-          {attachments.map((a) => (
+          {attachments.map((a, index) => (
             <DraggableAttachment
               key={a.id}
               attachment={a}
+              attachmentIndex={index}
               containerRef={canvasRef}
               onChange={updateAttachment}
               onDelete={deleteAttachment}
+              onRemoveImageWithUndo={removeImageWithUndo}
               onBringFront={bringFront}
             />
           ))}

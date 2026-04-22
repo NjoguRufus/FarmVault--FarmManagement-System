@@ -386,6 +386,42 @@
   cursor: grabbing;
 }
 
+.fv-attachment--image-selected {
+  box-shadow:
+    0 0 0 2px rgba(16, 185, 129, 0.55),
+    0 14px 28px rgba(0, 0, 0, 0.18);
+}
+
+.fv-attachment--image-dragging {
+  box-shadow:
+    0 0 0 2px rgba(16, 185, 129, 0.35),
+    0 20px 40px rgba(0, 0, 0, 0.22);
+}
+
+.dark .fv-attachment--image-selected {
+  box-shadow:
+    0 0 0 2px rgba(52, 211, 153, 0.45),
+    0 14px 28px rgba(0, 0, 0, 0.45);
+}
+
+.dark .fv-attachment--image-dragging {
+  box-shadow:
+    0 0 0 2px rgba(52, 211, 153, 0.35),
+    0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.fv-attachment--notebook-image {
+  cursor: pointer;
+}
+
+.fv-attachment--notebook-image:active {
+  cursor: pointer;
+}
+
+.fv-attachment--notebook-image.fv-attachment--image-dragging {
+  cursor: grabbing;
+}
+
 .attachment {
   position: absolute;
   cursor: grab;
@@ -414,6 +450,47 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
+}
+
+.fv-attachment-image-menu-wrap {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 35;
+  pointer-events: auto;
+}
+
+.fv-attachment-hamburger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.52);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.fv-attachment-hamburger:hover {
+  background: rgba(0, 0, 0, 0.68);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.fv-attachment-hamburger:active {
+  transform: scale(0.96);
+}
+
+.dark .fv-attachment-hamburger {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(17, 24, 39, 0.72);
+}
+
+.dark .fv-attachment-hamburger:hover {
+  background: rgba(17, 24, 39, 0.88);
 }
 
 .fv-attachment-upload-badge {

@@ -18,9 +18,14 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
-type ExpenseCategoryBase = 'labour' | 'fertilizer' | 'chemical' | 'tools' | 'fuel';
+import { cn, getExpenseCategoryLabel } from '@/lib/utils';
+import {
+  COMPANY_EXPENSE_CATEGORY_CORE_ORDER,
+  CUSTOM_EXPENSE_CATEGORIES_CHANGED,
+  addCustomExpenseCategory,
+  isBrokerExpenseCategorySlug,
+  loadCustomExpenseCategories,
+} from '@/lib/customExpenseCategoriesStorage';
 
 type DraftExpenseRow = {
   id: string;
@@ -98,6 +103,13 @@ export function AddExpenseModal({
     }
   }, [open, editingExpense, newRow]);
 
+  const [customCategoriesEpoch, setCustomCategoriesEpoch] = useState(0);
+  useEffect(() => {
+    const onStorage = () => setCustomCategoriesEpoch((e) => e + 1);
+    window.addEventListener(CUSTOM_EXPENSE_CATEGORIES_CHANGED, onStorage);
+    return () => window.removeEventListener(CUSTOM_EXPENSE_CATEGORIES_CHANGED, onStorage);
+  }, []);
+
   const categoriesQuery = useQuery({
     queryKey: ['financeExpenses', 'categories', companyId ?? 'none', farmId ?? 'all', projectId ?? 'all'],
     enabled: Boolean(companyId),
@@ -122,19 +134,41 @@ export function AddExpenseModal({
   });
 
   const categoryOptions = useMemo(() => {
-    const base: Array<{ value: string; label: string }> = [
-      { value: 'labour', label: 'Labour' },
-      { value: 'fertilizer', label: 'Fertilizer' },
-      { value: 'chemical', label: 'Chemical' },
-      { value: 'tools', label: 'Tools' },
-      { value: 'fuel', label: 'Fuel' },
-    ];
-    const seen = new Set(base.map((b) => b.value));
+    const seenLower = new Set<string>();
+    const out: Array<{ value: string; label: string }> = [];
+
+    for (const value of COMPANY_EXPENSE_CATEGORY_CORE_ORDER) {
+      seenLower.add(value.toLowerCase());
+      out.push({ value, label: getExpenseCategoryLabel(value) });
+    }
+
+    const stored = [...loadCustomExpenseCategories(companyId)].sort((a, b) =>
+      getExpenseCategoryLabel(a).localeCompare(getExpenseCategoryLabel(b), undefined, {
+        sensitivity: 'base',
+      }),
+    );
+    for (const c of stored) {
+      if (isBrokerExpenseCategorySlug(c)) continue;
+      const L = c.toLowerCase();
+      if (seenLower.has(L)) continue;
+      seenLower.add(L);
+      out.push({ value: c, label: c });
+    }
+
     const dynamic = (categoriesQuery.data ?? [])
-      .filter((c) => !seen.has(c))
-      .map((c) => ({ value: c, label: c }));
-    return [...dynamic, ...base];
-  }, [categoriesQuery.data]);
+      .filter((c) => !seenLower.has(c.toLowerCase()) && !isBrokerExpenseCategorySlug(c))
+      .sort((a, b) =>
+        getExpenseCategoryLabel(a).localeCompare(getExpenseCategoryLabel(b), undefined, {
+          sensitivity: 'base',
+        }),
+      );
+    for (const c of dynamic) {
+      seenLower.add(c.toLowerCase());
+      out.push({ value: c, label: c });
+    }
+
+    return out;
+  }, [categoriesQuery.data, companyId, customCategoriesEpoch]);
 
   function CategoryCombobox({
     value,
@@ -377,11 +411,15 @@ export function AddExpenseModal({
                       value={row.category}
                       options={categoryOptions}
                       disabled={saving}
-                      onChange={(next) =>
+                      onChange={(next) => {
+                        const trimmed = next.trim();
+                        if (trimmed) {
+                          addCustomExpenseCategory(companyId, trimmed);
+                        }
                         setRows((prev) =>
                           prev.map((r) => (r.id === row.id ? { ...r, category: next } : r)),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </div>
                 </div>

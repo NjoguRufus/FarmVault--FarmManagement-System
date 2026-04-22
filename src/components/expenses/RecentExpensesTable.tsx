@@ -5,11 +5,13 @@ import {
   ArrowUpToLine,
   Banknote,
   Box,
+  Droplets,
   FlaskConical,
   Fuel,
   Grid3x3,
   Link2,
   MoreHorizontal,
+  Package,
   Receipt,
   Shield,
   Sprout,
@@ -52,6 +54,27 @@ export type RecentExpenseTableRow =
 /** When there are more rows than this, the table body scrolls vertically with a max height ~5 rows. */
 const RECENT_EXPENSES_SCROLL_AFTER = 5;
 
+/** Above this, show "KES" on the first line and the figure on the next line. */
+const AMOUNT_TWO_LINE_ABOVE = 1_000_000;
+
+function RecentExpenseAmountCell({ amount }: { amount: number }) {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) {
+    return <p className="text-center text-sm font-normal text-muted-foreground">—</p>;
+  }
+  const numStr = n.toLocaleString();
+  const base = 'text-center text-sm font-normal tabular-nums text-foreground leading-snug';
+  if (n > AMOUNT_TWO_LINE_ABOVE) {
+    return (
+      <div className={base}>
+        <p className="leading-tight">KES</p>
+        <p className="leading-tight">{numStr}</p>
+      </div>
+    );
+  }
+  return <p className={base}>{`KES ${numStr}`}</p>;
+}
+
 /** Icon per category; align with `getCategoryColor` on `ExpensesPage` plus broker categories. */
 function getExpenseCategoryIcon(category: string): LucideIcon {
   const c = String(category || '')
@@ -60,8 +83,12 @@ function getExpenseCategoryIcon(category: string): LucideIcon {
     .replace(/[\s-]+/g, '_');
   if (c === 'labour' || c === 'labor' || c === 'picker_payout') return Users;
   if (c === 'fertilizer' || c === 'fertiliser') return Sprout;
+  if (c.includes('seed')) return Package;
   if (c === 'tools' || c === 'tool' || c === 'equipment' || c === 'machinery') return Wrench;
-  if (c === 'chemical' || c === 'chemicals' || c === 'pesticide') return FlaskConical;
+  if (c.includes('irrigation') || c.includes('watering') || c === 'irrigation') return Droplets;
+  if (c === 'chemical' || c === 'chemicals' || c.includes('pesticide') || c.includes('herbicide')) {
+    return FlaskConical;
+  }
   if (c === 'fuel') return Fuel;
   if (c === 'space') return Grid3x3;
   if (c === 'watchman') return Shield;
@@ -72,6 +99,29 @@ function getExpenseCategoryIcon(category: string): LucideIcon {
   if (c === 'broker_payment') return Banknote;
   if (c === 'other') return MoreHorizontal;
   return Receipt;
+}
+
+/** Rounded tile behind the icon — same idea as `ItemIcon` in `InventoryTable`. */
+function getExpenseCategoryIconBgClass(category: string): string {
+  const c = String(category || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, '_');
+  if (c === 'labour' || c === 'labor' || c === 'picker_payout' || c.includes('labour') || c.includes('labor')) {
+    return 'bg-emerald-50 dark:bg-emerald-950/35';
+  }
+  if (c === 'fertilizer' || c === 'fertiliser' || c.includes('fert')) return 'bg-lime-50 dark:bg-lime-950/30';
+  if (c.includes('seed')) return 'bg-green-50 dark:bg-green-950/35';
+  if (c === 'tools' || c === 'tool' || c.includes('equipment') || c.includes('machinery')) {
+    return 'bg-slate-100 dark:bg-slate-800/50';
+  }
+  if (c.includes('irrigation') || c.includes('water')) return 'bg-sky-50 dark:bg-sky-950/35';
+  if (c === 'chemical' || c.includes('chem') || c.includes('pesticide')) return 'bg-purple-50 dark:bg-purple-950/35';
+  if (c === 'fuel') return 'bg-amber-50 dark:bg-amber-950/35';
+  if (c === 'broker_payment') return 'bg-cyan-50 dark:bg-cyan-950/30';
+  if (c === 'other') return 'bg-muted/70';
+  if (c === 'space' || c === 'watchman' || c === 'ropes' || c === 'carton') return 'bg-stone-100 dark:bg-stone-800/45';
+  return 'bg-muted/60';
 }
 
 /** Text color only, matched to badge palette on the expenses page. */
@@ -96,9 +146,15 @@ function getExpenseCategoryIconClass(category: string): string {
 function ExpenseCategoryGlyph({ categoryKey }: { categoryKey: string }) {
   const Icon = getExpenseCategoryIcon(categoryKey);
   return (
-    <span className="mt-0.5 inline-flex shrink-0" aria-hidden>
-      <Icon className={cn('h-3.5 w-3.5', getExpenseCategoryIconClass(categoryKey))} strokeWidth={2} />
-    </span>
+    <div
+      className={cn(
+        'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+        getExpenseCategoryIconBgClass(categoryKey),
+      )}
+      aria-hidden
+    >
+      <Icon className={cn('h-4 w-4', getExpenseCategoryIconClass(categoryKey))} strokeWidth={2} />
+    </div>
   );
 }
 
@@ -106,7 +162,6 @@ export interface RecentExpensesTableProps {
   rows: RecentExpenseTableRow[];
   isLoading: boolean;
   collectionNameMap: Map<string, string>;
-  formatCurrency: (n: number) => string;
   getCategoryColor: (category: string) => string;
   onHarvestPayoutClick: (collectionId: string) => void;
   onPickerGroupClick: (group: {
@@ -127,7 +182,6 @@ export function RecentExpensesTable({
   rows,
   isLoading,
   collectionNameMap,
-  formatCurrency,
   getCategoryColor,
   onHarvestPayoutClick,
   onPickerGroupClick,
@@ -167,7 +221,7 @@ export function RecentExpensesTable({
         >
           <table className="w-full">
             <thead className="sticky top-0 z-10 shadow-[0_1px_0_0_hsl(var(--border))]">
-              <tr className="border-b border-border bg-muted text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border bg-muted text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 <th className="min-w-[200px] bg-muted px-3 py-2.5 text-left sm:min-w-[240px]">Description</th>
                 <th className="min-w-[100px] bg-muted whitespace-nowrap px-3 py-2.5 text-center">Amount</th>
                 <th className="min-w-[90px] bg-muted whitespace-nowrap px-3 py-2.5 text-left">Category</th>
@@ -190,7 +244,7 @@ export function RecentExpensesTable({
                       <div className="flex min-w-0 items-start gap-2">
                         <ExpenseCategoryGlyph categoryKey="labour" />
                         <div className="min-w-0 flex-1">
-                          <p className="whitespace-nowrap text-sm font-medium leading-tight text-foreground">Picker Payout</p>
+                          <p className="whitespace-nowrap text-sm font-normal leading-tight text-foreground">Picker Payout</p>
                           <p className="whitespace-nowrap text-[11px] leading-tight text-muted-foreground">
                             {row.collectionName}
                           </p>
@@ -198,10 +252,10 @@ export function RecentExpensesTable({
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <p className="text-sm font-medium tabular-nums text-foreground">{formatCurrency(row.totalPaid)}</p>
+                      <RecentExpenseAmountCell amount={row.totalPaid} />
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
+                      <span className={cn('fv-badge font-normal', getCategoryColor('labour'))}>labour</span>
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">
                       {payoutDate ? formatDate(payoutDate) : '—'}
@@ -227,16 +281,16 @@ export function RecentExpensesTable({
                     <td className="px-3 py-2.5">
                       <div className="flex min-w-0 items-start gap-2">
                         <ExpenseCategoryGlyph categoryKey="labour" />
-                        <p className="min-w-0 flex-1 break-words text-sm font-medium leading-tight text-foreground">
+                        <p className="min-w-0 flex-1 break-words text-sm font-normal leading-tight text-foreground">
                           {row.displayName}
                         </p>
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <p className="text-sm font-medium tabular-nums text-foreground">{formatCurrency(row.totalAmount)}</p>
+                      <RecentExpenseAmountCell amount={row.totalAmount} />
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
+                      <span className={cn('fv-badge font-normal', getCategoryColor('labour'))}>labour</span>
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">
                       {formatDate(row.latestDate)}
@@ -269,7 +323,7 @@ export function RecentExpensesTable({
                       <ExpenseCategoryGlyph categoryKey={categoryForIcon} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="min-w-0 break-words text-sm font-medium leading-tight text-foreground">
+                          <p className="min-w-0 break-words text-sm font-normal leading-tight text-foreground">
                             {expense.description}
                           </p>
                           {isTomatoPickerLabour && (
@@ -293,12 +347,12 @@ export function RecentExpensesTable({
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <p className="text-sm font-medium tabular-nums text-foreground">{formatCurrency(expense.amount)}</p>
+                    <RecentExpenseAmountCell amount={expense.amount} />
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <span
                       className={cn(
-                        'fv-badge',
+                        'fv-badge font-normal',
                         getCategoryColor(
                           (expense.category === 'picker_payout' ? 'labour' : String(expense.category)) as string,
                         ),
