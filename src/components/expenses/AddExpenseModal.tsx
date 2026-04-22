@@ -20,7 +20,7 @@ import {
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type ExpenseCategoryBase = 'labour' | 'fertilizer' | 'chemical' | 'fuel';
+type ExpenseCategoryBase = 'labour' | 'fertilizer' | 'chemical' | 'tools' | 'fuel';
 
 type DraftExpenseRow = {
   id: string;
@@ -126,6 +126,7 @@ export function AddExpenseModal({
       { value: 'labour', label: 'Labour' },
       { value: 'fertilizer', label: 'Fertilizer' },
       { value: 'chemical', label: 'Chemical' },
+      { value: 'tools', label: 'Tools' },
       { value: 'fuel', label: 'Fuel' },
     ];
     const seen = new Set(base.map((b) => b.value));

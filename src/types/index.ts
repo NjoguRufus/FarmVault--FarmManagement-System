@@ -433,6 +433,7 @@ export type ExpenseCategory =
   | 'labour'
   | 'fertilizer'
   | 'chemical'
+  | 'tools'
   | 'fuel'
   | 'other'
   // Broker market expense categories
