@@ -16,7 +16,8 @@ import { db } from '@/lib/db';
 import { createSeasonChallenge, deleteSeasonChallenge, updateSeasonChallenge } from '@/services/seasonChallengesService';
 import { useSeasonChallenges, invalidateSeasonChallengesQuery } from '@/hooks/useSeasonChallenges';
 import { getChallengeTemplates, upsertChallengeTemplate } from '@/services/challengeTemplatesService';
-import { createSupplier, listSuppliers } from '@/services/suppliersService';
+import { createSupplier } from '@/services/suppliersService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import { getCropTimeline } from '@/config/cropTimelines';
 import { calculateDaysSince, getStageForDay } from '@/utils/cropStages';
 import { getExpectedHarvestDate } from '@/utils/expectedHarvest';
@@ -64,12 +65,22 @@ export default function ProjectPlanningPage() {
 
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId],
-    queryFn: () => listSuppliers(companyId!),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });
   if (import.meta.env?.DEV && companyId) {
-    logger.log('[ProjectPlanningPage] suppliers load source', { source: 'supabase', count: suppliers.length });
+    logger.log('[ProjectPlanningPage] suppliers load source', { source: 'localData', count: suppliers.length });
   }
   const { challenges: allSeasonChallenges } = useSeasonChallenges(companyId, projectId ?? null);
   if (import.meta.env?.DEV && projectId) {

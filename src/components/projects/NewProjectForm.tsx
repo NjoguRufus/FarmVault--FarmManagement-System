@@ -10,7 +10,7 @@ import { createBudgetPool, getBudgetPoolsByCompany } from '@/services/budgetPool
 import { getChallengeTemplates } from '@/services/challengeTemplatesService';
 import { createProject } from '@/services/projectsService';
 import { addCropToCatalog } from '@/services/cropCatalogService';
-import { listFarmsByCompany } from '@/services/farmsService';
+import { FarmService } from '@/services/localData/FarmService';
 import {
   buildCustomCropTemplateForCatalog,
   cropSupportsEnvironment,
@@ -373,7 +373,18 @@ export function NewProjectForm({ onCancel, onSuccess, initialFarmId = null }: Ne
   });
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', user?.companyId ?? ''],
-    queryFn: () => listFarmsByCompany(user?.companyId ?? null),
+    queryFn: async () => {
+      const cid = user?.companyId;
+      if (!cid) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(cid);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(cid);
+    },
     enabled: Boolean(user?.companyId),
     staleTime: 30_000,
   });

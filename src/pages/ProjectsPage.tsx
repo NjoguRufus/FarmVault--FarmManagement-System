@@ -44,7 +44,8 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { logger } from "@/lib/logger";
 import { FarmFormModal } from '@/components/farms/FarmFormModal';
-import { listFarmsByCompany, updateFarm } from '@/services/farmsService';
+import { updateFarm } from '@/services/farmsService';
+import { FarmService } from '@/services/localData/FarmService';
 import { Farm } from '@/types';
 
 function isLegacyFarm(farm: Farm): boolean {
@@ -416,7 +417,18 @@ export default function ProjectsPage() {
   const visibleProjects = user ? projects.filter((p) => p.companyId === user.companyId) : [];
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', user?.companyId ?? ''],
-    queryFn: () => listFarmsByCompany(user?.companyId ?? null),
+    queryFn: async () => {
+      const cid = user?.companyId;
+      if (!cid) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(cid);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(cid);
+    },
     enabled: Boolean(user?.companyId),
   });
 

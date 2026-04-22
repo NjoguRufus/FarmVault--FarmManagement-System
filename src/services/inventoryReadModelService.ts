@@ -1,6 +1,8 @@
 import { db, requireCompanyId } from '@/lib/db';
 import { resolveCompanyIdForWrite } from '@/lib/tenant';
 import { logger } from "@/lib/logger";
+import type { InventoryItem } from '@/types';
+import { InventoryService } from '@/services/localData/InventoryService';
 
 /**
  * Inventory read models & RPC integration for the new Supabase schema.
@@ -55,6 +57,94 @@ export interface InventoryStockRow {
   farm_usage_notes?: string | null;
   /** Passed through when the stock view exposes inventory_items.row_version */
   row_version?: number | null;
+}
+
+function deriveInventoryStockStatus(
+  qty: number,
+  min: number | null | undefined,
+): InventoryStockStatus {
+  if (qty <= 0) return 'out';
+  if (min != null && min > 0 && qty < min) return 'low';
+  return 'ok';
+}
+
+function mapInventoryItemToStockRow(item: InventoryItem, companyId: string): InventoryStockRow {
+  const qty = item.quantity ?? 0;
+  const min = item.minThreshold ?? null;
+  const avg = item.pricePerUnit ?? null;
+  return {
+    id: item.id,
+    company_id: companyId,
+    name: item.name,
+    category: String(item.category),
+    category_name: null,
+    supplier_id: item.supplierId ?? null,
+    supplier_name: item.supplierName ?? null,
+    unit: item.unit,
+    current_stock: qty,
+    min_stock_level: min,
+    reorder_quantity: null,
+    average_cost: avg,
+    total_value: avg != null ? qty * avg : null,
+    stock_status: deriveInventoryStockStatus(qty, min),
+    row_version: item.rowVersion ?? null,
+  };
+}
+
+/** Reads `public.inventory_stock_view` (item master + live balances). New items are created in `inventory_item_master`, not legacy `inventory_items`. */
+function mapStockViewRowToInventoryStockRow(r: Record<string, unknown>): InventoryStockRow {
+  const category = r.category ?? r.category_id;
+  const qty = Number(r.current_stock ?? 0);
+  const minRaw = r.min_stock_level;
+  const min = minRaw != null && minRaw !== '' ? Number(minRaw) : null;
+  return {
+    id: String(r.id),
+    company_id: String(r.company_id),
+    name: String(r.name ?? ''),
+    category: String(category ?? ''),
+    category_name: (r.category_name as string) ?? null,
+    supplier_id: (r.supplier_id as string) ?? null,
+    supplier_name: (r.supplier_name as string) ?? null,
+    unit: String(r.unit ?? 'pieces'),
+    current_stock: Number.isFinite(qty) ? qty : 0,
+    min_stock_level: min,
+    reorder_quantity: r.reorder_quantity != null && r.reorder_quantity !== '' ? Number(r.reorder_quantity) : null,
+    average_cost: r.average_cost != null && r.average_cost !== '' ? Number(r.average_cost) : null,
+    total_value: r.total_value != null && r.total_value !== '' ? Number(r.total_value) : null,
+    stock_status:
+      (r.stock_status as InventoryStockStatus) ||
+      deriveInventoryStockStatus(Number.isFinite(qty) ? qty : 0, min),
+    unit_size: r.unit_size != null && r.unit_size !== '' ? Number(r.unit_size) : null,
+    unit_size_label: (r.unit_size_label as string) ?? null,
+    packaging_type: (r.packaging_type as PackagingType) ?? null,
+    description: (r.description as string) ?? null,
+    farm_usage_notes: (r.farm_usage_notes as string) ?? null,
+    row_version: r.row_version != null && r.row_version !== '' ? Number(r.row_version) : null,
+  };
+}
+
+/** Returns `null` if the view is missing or the query failed (caller falls back to legacy local cache). */
+async function fetchInventoryStockFromView(companyId: string): Promise<InventoryStockRow[] | null> {
+  try {
+    const { data, error } = await db
+      .public()
+      .from('inventory_stock_view')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('name', { ascending: true });
+    if (error) {
+      if (import.meta.env.DEV) {
+        logger.log('[inventory] inventory_stock_view unavailable', { message: error.message, code: (error as { code?: string }).code });
+      }
+      return null;
+    }
+    return (data ?? []).map((row) => mapStockViewRowToInventoryStockRow(row as Record<string, unknown>));
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      logger.log('[inventory] inventory_stock_view threw', e);
+    }
+    return null;
+  }
 }
 
 export interface InventoryTransactionRow {
@@ -168,66 +258,51 @@ export async function listInventoryStock(params: {
   stockStatus?: InventoryStockStatus | 'all';
 }): Promise<InventoryStockRow[]> {
   const tenant = requireCompanyId(params.companyId);
+  let rows: InventoryStockRow[] = [];
 
-  // NOTE: inventory_* views currently live in the public schema (see Supabase lints),
-  // but hold inventory data. We therefore read them via db.public().
-  let query = db
-    .public()
-    .from('inventory_stock_view')
-    .select('*')
-    .eq('company_id', tenant);
+  const tryView = typeof navigator === 'undefined' || navigator.onLine;
+  if (tryView) {
+    const fromView = await fetchInventoryStockFromView(tenant);
+    if (fromView != null) {
+      rows = fromView;
+    } else {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await InventoryService.pullRemote(tenant);
+        } catch {
+          // use IndexedDB
+        }
+      }
+      const items = await InventoryService.getInventoryItems(tenant);
+      rows = items.map((it) => mapInventoryItemToStockRow(it, tenant));
+    }
+  } else {
+    const items = await InventoryService.getInventoryItems(tenant);
+    rows = items.map((it) => mapInventoryItemToStockRow(it, tenant));
+  }
 
   if (params.categoryId) {
-    query = query.eq('category', params.categoryId);
+    rows = rows.filter((r) => r.category === params.categoryId);
   }
   if (params.supplierId) {
-    query = query.eq('supplier_id', params.supplierId);
+    rows = rows.filter((r) => r.supplier_id === params.supplierId);
   }
   if (params.stockStatus && params.stockStatus !== 'all') {
-    query = query.eq('stock_status', params.stockStatus);
+    rows = rows.filter((r) => r.stock_status === params.stockStatus);
   }
   if (params.search && params.search.trim()) {
-    const term = params.search.trim();
-    // Assumes the view has a tsvector or ILIKE-searchable name/sku/item_code fields.
-    query = query.or(
-      [
-        `name.ilike.%${term}%`,
-        `item_code.ilike.%${term}%`,
-        `sku.ilike.%${term}%`,
-        `supplier_name.ilike.%${term}%`,
-      ].join(','),
-    );
-  }
-
-  const { data, error } = await query.returns<InventoryStockRow[]>();
-  if (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('[inventory] listInventoryStock error:', {
-        message: error.message,
-        code: (error as any).code,
-        details: (error as any).details,
-      });
-    }
-    throw error;
-  }
-  
-  // DEBUG: Log raw response from Supabase
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    logger.log('[inventory] listInventoryStock raw response:', {
-      rowCount: data?.length ?? 0,
-      sample: data?.slice(0, 2).map(row => ({
-        id: row.id,
-        name: row.name,
-        current_stock: row.current_stock,
-        stock_status: row.stock_status,
-        unit: row.unit,
-      })),
+    const term = params.search.trim().toLowerCase();
+    rows = rows.filter((r) => {
+      const name = (r.name ?? '').toLowerCase();
+      const sup = (r.supplier_name ?? '').toLowerCase();
+      return name.includes(term) || sup.includes(term);
     });
   }
-  
-  return data ?? [];
+
+  if (import.meta.env.DEV) {
+    logger.log('[inventory] listInventoryStock', { rowCount: rows.length, tenant });
+  }
+  return rows;
 }
 
 export async function getInventoryItemStock(params: {
@@ -235,33 +310,42 @@ export async function getInventoryItemStock(params: {
   itemId: string;
 }): Promise<InventoryStockRow | null> {
   const tenant = requireCompanyId(params.companyId);
-  const { data, error } = await db
-    .public()
-    .from('inventory_stock_view')
-    .select('*')
-    .eq('company_id', tenant)
-    .eq('id', params.itemId)
-    .maybeSingle<InventoryStockRow>();
-
-  if (error) {
-    throw error;
+  if (typeof navigator === 'undefined' || navigator.onLine) {
+    try {
+      const { data, error } = await db
+        .public()
+        .from('inventory_stock_view')
+        .select('*')
+        .eq('company_id', tenant)
+        .eq('id', params.itemId)
+        .maybeSingle<Record<string, unknown>>();
+      if (!error && data) {
+        return mapStockViewRowToInventoryStockRow(data);
+      }
+    } catch {
+      // fall through to local
+    }
   }
-  return data ?? null;
+  if (typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      await InventoryService.pullRemote(tenant);
+    } catch {
+      // use local
+    }
+  }
+  const item = await InventoryService.getInventoryItemById(tenant, params.itemId);
+  if (!item) return null;
+  return mapInventoryItemToStockRow(item, tenant);
 }
 
 export async function listLowStockItems(companyId: string): Promise<InventoryStockRow[]> {
-  const tenant = requireCompanyId(companyId);
-  const { data, error } = await db
-    .public()
-    .from('inventory_low_stock_view')
-    .select('*')
-    .eq('company_id', tenant)
-    .returns<InventoryStockRow[]>();
-
-  if (error) {
-    throw error;
-  }
-  return data ?? [];
+  const all = await listInventoryStock({ companyId, stockStatus: 'all' });
+  return all.filter(
+    (r) =>
+      r.stock_status === 'low' ||
+      r.stock_status === 'out' ||
+      (r.current_stock ?? 0) <= 0,
+  );
 }
 
 export async function listInventoryTransactions(params: {

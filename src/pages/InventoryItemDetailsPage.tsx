@@ -20,7 +20,7 @@ import { InventoryUsageTable } from '@/components/inventory/InventoryUsageTable'
 import { LowStockBadge } from '@/components/inventory/LowStockBadge';
 import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import { RecordUsageModal } from '@/components/inventory/RecordUsageModal';
-import { listSuppliers } from '@/services/suppliersService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import type { Supplier } from '@/types';
 import type { PackagingType } from '@/services/inventoryReadModelService';
 
@@ -116,7 +116,17 @@ export default function InventoryItemDetailsPage() {
 
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ['suppliers', companyId ?? 'none'],
-    queryFn: () => listSuppliers(companyId ?? ''),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });

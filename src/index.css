@@ -257,36 +257,34 @@
     @apply bg-muted/20;
   }
 
-  /* Recent Expenses table: vertical separators between columns (same gradient bars as BottomNav) */
+  /* Recent Expenses: one shared table (border-collapse) so column rules are straight */
+  .fv-expenses-table-with-seps {
+    @apply border-collapse;
+  }
   .fv-expenses-table-with-seps th:not(:first-child),
   .fv-expenses-table-with-seps td:not(:first-child) {
-    @apply relative;
+    @apply border-l border-border/60 dark:border-border/70;
   }
-  .fv-expenses-table-with-seps th:not(:first-child)::before,
-  .fv-expenses-table-with-seps td:not(:first-child)::before {
-    content: '';
-    @apply pointer-events-none absolute left-0 top-[12%] bottom-[12%] w-px rounded-full;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(53, 107, 78, 0.27) 18%,
-      rgba(53, 107, 78, 0.37) 50%,
-      rgba(53, 107, 78, 0.27) 82%,
-      transparent 100%
-    );
-    box-shadow: 0 0 6px rgba(53, 107, 78, 0.08);
+
+  /* Solid header (no transparent header tint) when thead is sticky over rows */
+  .fv-recent-expenses-thead thead th {
+    @apply border-b border-border bg-muted !important;
+    @apply text-foreground shadow-sm;
   }
-  .dark .fv-expenses-table-with-seps th:not(:first-child)::before,
-  .dark .fv-expenses-table-with-seps td:not(:first-child)::before {
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(110, 207, 154, 0.31) 18%,
-      rgba(110, 207, 154, 0.43) 50%,
-      rgba(110, 207, 154, 0.31) 82%,
-      transparent 100%
-    );
-    box-shadow: 0 0 6px rgba(110, 207, 154, 0.09);
+  .dark .fv-recent-expenses-thead thead th {
+    @apply !bg-zinc-900;
+  }
+
+  /* Recent Expenses: column widths follow content; table is at least full width of the card */
+  .fv-recent-expenses-auto-cols {
+    width: max(100%, max-content);
+  }
+  .fv-recent-expenses-auto-cols td:first-child,
+  .fv-recent-expenses-auto-cols th:first-child {
+    @apply min-w-[9rem] max-w-none;
+  }
+  .fv-recent-expenses-auto-cols td {
+    @apply align-top;
   }
 
   /* Status Badges */

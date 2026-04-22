@@ -23,7 +23,7 @@ import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 import { logger } from "@/lib/logger";
-import { listFarmsByCompany } from '@/services/farmsService';
+import { FarmService } from '@/services/localData/FarmService';
 
 interface StaffNavbarProps {
   sidebarCollapsed: boolean;
@@ -71,7 +71,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   useEffect(() => {
     if (!import.meta.env.DEV || !companyId) return;
     // eslint-disable-next-line no-console
-    logger.log('[StaffNavbar] subscription badge state', {
+    logger.debug('[StaffNavbar] subscription badge state', {
       companyId,
       isActivePaid,
       isTrial,
@@ -91,7 +91,17 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', companyId ?? ''],
-    queryFn: () => listFarmsByCompany(companyId),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(companyId);
+    },
     enabled: Boolean(companyId),
   });
   const selectorFarms = farms.filter(
@@ -120,7 +130,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    logger.log('[StaffNavbar] employee identity loaded', {
+    logger.debug('[StaffNavbar] employee identity loaded', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,

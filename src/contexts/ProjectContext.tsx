@@ -11,8 +11,8 @@ import React, {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Project } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { listProjects } from '@/services/projectsService';
-import { listFarmsByCompany } from '@/services/farmsService';
+import { FarmService } from '@/services/localData/FarmService';
+import { ProjectService } from '@/services/localData/ProjectService';
 import { isProjectClosed } from '@/lib/projectClosed';
 
 function isLegacyPlaceholderFarm(f: { name: string; location: string }) {
@@ -78,7 +78,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     error: projectsQueryError,
   } = useQuery({
     queryKey: ['projects', companyId],
-    queryFn: () => listProjects(companyId),
+    queryFn: async () => {
+      if (companyId && typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await ProjectService.pullRemote(companyId);
+        } catch {
+          // keep local/empty; avoid blocking shell
+        }
+      }
+      return ProjectService.listProjects(companyId);
+    },
     enabled: canSubscribeProjects,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -90,7 +99,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     isLoading: isLoadingFarms,
   } = useQuery({
     queryKey: ['farms', companyId ?? ''],
-    queryFn: () => listFarmsByCompany(companyId),
+    queryFn: async () => {
+      if (companyId && typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(companyId);
+    },
     enabled: Boolean(companyId) && authReady && isAuthenticated,
     staleTime: 60_000,
     refetchOnWindowFocus: false,

@@ -17,7 +17,7 @@ import {
 import { getExpectedHarvestDate, getCropDaysToHarvest } from '@/utils/expectedHarvest';
 import { effectiveCurrentStage, resolveManualStageIndex } from '@/lib/seasonStageOverride';
 import { getProject, deleteProject as deleteProjectService } from '@/services/projectsService';
-import { getFinanceExpenses } from '@/services/financeExpenseService';
+import { ExpenseService } from '@/services/localData/ExpenseService';
 import { getBudgetPool } from '@/services/budgetPoolService';
 import { isInputExpenseCategory, isLabourExpenseCategory } from '@/lib/financeExpenseCategories';
 import { getCropHeroImage } from '@/lib/cropHeroImage';
@@ -126,7 +126,17 @@ export default function ProjectDetailsPage() {
   });
   const { data: financeExpensesRaw = [] } = useQuery({
     queryKey: ['project-finance-expenses', companyId, projectId],
-    queryFn: () => getFinanceExpenses(companyId!, { projectId: projectId! }),
+    queryFn: async () => {
+      if (!companyId || !projectId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await ExpenseService.pullRemote(companyId, { projectId });
+        } catch {
+          // ignore
+        }
+      }
+      return ExpenseService.list(companyId, { projectId });
+    },
     enabled: Boolean(companyId && projectId),
   });
   const allChallenges = allChallengesFromHook;

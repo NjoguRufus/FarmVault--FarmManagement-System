@@ -28,7 +28,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (!user) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[RequireOnboarding] Redirect to /sign-in (no user)', { authReady });
+      logger.debug('[RequireOnboarding] Redirect to /sign-in (no user)', { authReady });
     }
     return <SignInRedirect />;
   }
@@ -37,7 +37,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (isDeveloper || user.role === 'developer') {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
+      logger.debug('[RequireOnboarding] Developer bypass', { uid: user.id, companyId: user.companyId, role: user.role });
     }
     return <Navigate to="/developer" replace />;
   }
@@ -47,7 +47,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (pt === 'ambassador' || (pt === 'both' && !user.companyId)) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[RequireOnboarding] Ambassador profile bypass → /ambassador/console/dashboard', {
+      logger.debug('[RequireOnboarding] Ambassador profile bypass → /ambassador/console/dashboard', {
         profileUserType: pt,
         companyId: user.companyId,
       });
@@ -60,7 +60,7 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (setupIncomplete) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[RequireOnboarding] Onboarding required → /onboarding/company', {
+      logger.debug('[RequireOnboarding] Onboarding required → /onboarding/company', {
         companyId: user.companyId,
         role: user.role,
         setupIncomplete,
@@ -79,14 +79,14 @@ export function RequireOnboarding({ children }: RequireOnboardingProps) {
   if (employeeProfile) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      logger.log('[Auth] Redirecting employee to app entry / home');
+      logger.debug('[Auth] Redirecting employee to app entry / home');
     }
     return children;
   }
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    logger.log('[RequireOnboarding] Normal app path (no onboarding)', {
+    logger.debug('[RequireOnboarding] Normal app path (no onboarding)', {
       uid: user.id,
       companyId: user.companyId,
       role: user.role,

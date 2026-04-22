@@ -51,14 +51,14 @@ export function StaffLayout() {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    logger.log('[StaffShell] route using staff layout', {
+    logger.debug('[StaffShell] route using staff layout', {
       uid: user.id,
       role: user.role,
       employeeRole: (user as any).employeeRole,
       path: location.pathname,
     });
     // eslint-disable-next-line no-console
-    logger.log('[Responsive] staff layout breakpoint', {
+    logger.debug('[Responsive] staff layout breakpoint', {
       width,
       isDesktop,
       path: location.pathname,

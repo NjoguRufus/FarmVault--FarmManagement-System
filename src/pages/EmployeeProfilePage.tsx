@@ -22,7 +22,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { listEmployees } from '@/services/employeesSupabaseService';
+import { EmployeeService } from '@/services/localData/EmployeeService';
 import {
   getEffectivePermissionKeys,
   getEmployeeProjectAccess,
@@ -57,7 +57,17 @@ export default function EmployeeProfilePage() {
 
   const { data: employees = [], isLoading: loadingList } = useQuery({
     queryKey: ['employees', companyId],
-    queryFn: () => (companyId ? listEmployees(companyId) : Promise.resolve([])),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await EmployeeService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return EmployeeService.listEmployees(companyId);
+    },
     enabled: Boolean(companyId),
   });
 

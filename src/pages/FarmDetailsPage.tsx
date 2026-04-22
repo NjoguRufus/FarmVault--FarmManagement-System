@@ -3,8 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
-import { listFarmsByCompany } from '@/services/farmsService';
-import { getFinanceExpenses } from '@/services/financeExpenseService';
+import { FarmService } from '@/services/localData/FarmService';
+import { ExpenseService } from '@/services/localData/ExpenseService';
 import { getWorkCardsForCompany } from '@/services/operationsWorkCardService';
 import { formatDate } from '@/lib/dateUtils';
 import { ChevronLeft, Receipt, CalendarDays, Wrench } from 'lucide-react';
@@ -46,14 +46,34 @@ export default function FarmDetailsPage() {
 
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', companyId ?? ''],
-    queryFn: () => listFarmsByCompany(companyId),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(companyId);
+    },
     enabled: Boolean(companyId),
   });
   const farm = farms.find((f) => f.id === farmId);
 
   const { data: expenses = [] } = useQuery({
     queryKey: ['farm-expenses', companyId ?? '', farmId ?? ''],
-    queryFn: () => getFinanceExpenses(companyId ?? '', { farmId: farmId ?? null }),
+    queryFn: async () => {
+      if (!companyId || !farmId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await ExpenseService.pullRemote(companyId, { farmId });
+        } catch {
+          // ignore
+        }
+      }
+      return ExpenseService.list(companyId, { farmId });
+    },
     enabled: Boolean(companyId && farmId),
   });
 

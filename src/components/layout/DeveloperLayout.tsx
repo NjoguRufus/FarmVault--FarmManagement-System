@@ -53,7 +53,7 @@ export function DeveloperLayout() {
     const width = typeof window !== 'undefined' ? window.innerWidth : undefined;
     const isDesktop = typeof width === 'number' ? width >= 1024 : undefined;
     // eslint-disable-next-line no-console
-    logger.log('[DeveloperLayout] shell', {
+    logger.debug('[DeveloperLayout] shell', {
       width,
       isDesktop,
       path: location.pathname,

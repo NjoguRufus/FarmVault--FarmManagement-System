@@ -33,6 +33,8 @@ import { useAuth } from '@clerk/react';
 import { useAuth as useAppAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { INVENTORY_CATEGORIES_QUERY_KEY, INVENTORY_STOCK_QUERY_KEY } from '@/hooks/useInventoryReadModels';
 
 type PackagingType = 'single' | 'sack' | 'box' | 'bottle' | 'pack' | 'other';
 type UnitType = 'kg' | 'g' | 'litres' | 'ml' | 'pieces' | 'metres';
@@ -184,6 +186,7 @@ export function AddInventoryItemModal({
   const sessionCompanyId = (sessionClaims?.company_id as string | undefined)?.trim();
   const { user } = useAppAuth();
   const { addNotification } = useNotifications();
+  const queryClient = useQueryClient();
   const reducedMotion = useReducedMotion();
 
   const [step, setStep] = useState<WizardStep>(1);
@@ -780,6 +783,9 @@ export function AddInventoryItemModal({
       });
 
       toast.success('Inventory item created.');
+      void queryClient.invalidateQueries({ queryKey: [INVENTORY_STOCK_QUERY_KEY] });
+      void queryClient.invalidateQueries({ queryKey: [INVENTORY_CATEGORIES_QUERY_KEY] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa', activeCompanyId] });
       handleDialogOpenChange(false);
       onCreated?.();
     } catch (error: any) {

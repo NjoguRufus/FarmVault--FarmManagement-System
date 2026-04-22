@@ -42,8 +42,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
     if (clerkTokenGetter) {
       const token = await clerkTokenGetter();
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        logger.log('[Supabase] Token from bridge:', !!token ? 'exists' : 'null');
+        logger.debug('[Supabase] Token from bridge:', !!token ? 'exists' : 'null');
         if (token) {
           logJwtClaims(token, 'bridge');
         }
@@ -97,8 +96,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
     const token = await session.getToken({ template: CLERK_JWT_TEMPLATE_SUPABASE });
 
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      logger.log('[Supabase] Token from window.Clerk:', !!token ? 'exists' : 'null');
+      logger.debug('[Supabase] Token from window.Clerk:', !!token ? 'exists' : 'null');
       if (token) {
         logJwtClaims(token, 'window.Clerk');
       } else {
@@ -187,8 +185,7 @@ function logJwtClaims(token: string, source: string): void {
     const parts = token.split('.');
     if (parts.length === 3) {
       const payload = JSON.parse(atob(parts[1]));
-      // eslint-disable-next-line no-console
-      logger.log(`[Supabase] JWT claims (from ${source}):`, {
+      logger.debug(`[Supabase] JWT claims (from ${source}):`, {
         aud: payload.aud,
         role: payload.role,
         sub: payload.sub,

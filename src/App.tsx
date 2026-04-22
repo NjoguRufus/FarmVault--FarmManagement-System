@@ -9,6 +9,7 @@ import { ProjectProvider } from "@/contexts/ProjectContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { NotificationsTableBridge } from "@/components/notifications/NotificationsTableBridge";
 import { ConnectivityProvider } from "@/contexts/ConnectivityContext";
+import { LocalDataBootstrap } from "@/contexts/LocalDataBootstrap";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompanyDashboard } from "@/pages/dashboard/CompanyDashboard";
 import { DeveloperDashboard } from "@/pages/dashboard/DeveloperDashboard";
@@ -696,6 +697,7 @@ const App = () => (
             <NotificationProvider>
               <NotificationsTableBridge />
               <ConnectivityProvider>
+                <LocalDataBootstrap>
                 <TooltipProvider>
                   <Toaster />
                   <Sonner />
@@ -717,6 +719,7 @@ const App = () => (
                     </HelmetProvider>
                   </BrowserRouter>
                 </TooltipProvider>
+                </LocalDataBootstrap>
               </ConnectivityProvider>
             </NotificationProvider>
           </ProjectProvider>

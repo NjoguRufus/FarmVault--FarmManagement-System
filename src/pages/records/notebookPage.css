@@ -50,7 +50,9 @@
   border: none;
   box-shadow: none;
   background: #ffffff;
-  overflow: visible;
+  /* Keep the note surface from painting wider than the layout; the canvas itself clips images. */
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .developer-ribbon {
@@ -93,7 +95,8 @@
   border: none;
   box-shadow: none;
   background: rgba(17, 24, 39, 0.35);
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .title-input {
@@ -356,12 +359,17 @@
 
 .note-canvas {
   position: relative;
+  z-index: 0;
   width: 100%;
+  max-width: 100%;
   min-height: 600px;
-  overflow: visible;
+  /* Thumbnails and rotated transforms stay inside the editor, below app nav/shell (separate z-stacking). */
+  overflow: hidden;
+  isolation: isolate;
 }
 
 .fv-attachment {
+  contain: layout paint;
   position: absolute;
   cursor: grab;
   user-select: none;
@@ -399,6 +407,7 @@
 }
 
 .fv-attachment-body {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -407,11 +416,105 @@
   pointer-events: none;
 }
 
+.fv-attachment-upload-badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.01em;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.fv-attachment-upload-badge--error {
+  background: rgba(180, 83, 9, 0.92);
+}
+
+.fv-attachment-image-actions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.58) 0%,
+    rgba(0, 0, 0, 0.18) 65%,
+    transparent 100%
+  );
+  border-radius: 12px 12px 0 0;
+}
+
+.fv-attachment-image-actions-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.fv-attachment-image-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.fv-attachment-image-btn:hover {
+  background: rgba(0, 0, 0, 0.68);
+  border-color: rgba(255, 255, 255, 0.38);
+}
+
+.fv-attachment-image-btn--wide {
+  min-width: 36px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.fv-attachment-image-btn--remove {
+  background: rgba(185, 28, 28, 0.88);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.fv-attachment-image-btn--remove:hover {
+  background: rgba(153, 27, 27, 0.95);
+}
+
 .fv-attachment-body img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+}
+
+.fv-attachment-body img.fv-attachment-preview-img {
+  pointer-events: auto;
+  cursor: zoom-in;
+  user-select: none;
 }
 
 .fv-attachment-body a {
@@ -429,8 +532,7 @@
 
 .fv-attachment-toolbar {
   position: absolute;
-  top: -28px;
-  right: 0;
+  z-index: 4;
   display: flex;
   gap: 6px;
   padding: 4px;
@@ -438,6 +540,21 @@
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* Inside the card — do not use negative offsets (would be clipped with overflow:hidden on the canvas). */
+.fv-attachment-toolbar--file {
+  top: 6px;
+  right: 6px;
+  left: auto;
+  bottom: auto;
+}
+
+.fv-attachment-toolbar--image {
+  left: 6px;
+  right: auto;
+  top: auto;
+  bottom: 28px;
 }
 
 .dark .fv-attachment-toolbar {

@@ -29,9 +29,9 @@ import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
 import { listInventoryStock, recordInventoryUsage as recordInventoryUsageRpc } from '@/services/inventoryReadModelService';
 import { createWorkCard, recordWork, recordInventoryUsageForWorkCard } from '@/services/operationsWorkCardService';
-import { listFarmsByCompany } from '@/services/farmsService';
 import { createAdminAlert } from '@/services/adminAlertService';
-import { listSuppliers } from '@/services/suppliersService';
+import { FarmService } from '@/services/localData/FarmService';
+import { SupplierService } from '@/services/localData/SupplierService';
 import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
 import type { InputUsed } from '@/types';
 import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
@@ -136,7 +136,17 @@ export function LogWorkModal({
   });
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', companyId ?? ''],
-    queryFn: () => listFarmsByCompany(companyId),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await FarmService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return FarmService.listFarmsByCompany(companyId);
+    },
     enabled: Boolean(companyId),
   });
   const selectorFarms = useMemo(
@@ -217,7 +227,17 @@ export function LogWorkModal({
   });
   const { data: suppliers = [] } = useQuery({
     queryKey: ['suppliers', companyId ?? 'none'],
-    queryFn: () => listSuppliers(companyId ?? ''),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
     enabled: Boolean(companyId),
   });
 

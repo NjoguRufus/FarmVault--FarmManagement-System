@@ -1,11 +1,14 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { createFinanceExpense, getFinanceExpenses } from '@/services/financeExpenseService';
+import { ExpenseService } from '@/services/localData/ExpenseService';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Calendar as CalendarIcon } from 'lucide-react';
+import { toDate, formatDate } from '@/lib/dateUtils';
 import {
   Command,
   CommandEmpty,
@@ -26,6 +29,16 @@ type DraftExpenseRow = {
   category: string;
 };
 
+/** When set, the modal is in “edit this expense” mode (single row + date). */
+export type AddExpenseEditTarget = {
+  id: string;
+  companyId: string;
+  description: string;
+  amount: number;
+  category: string;
+  date: Date | string;
+};
+
 interface AddExpenseModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,6 +47,7 @@ interface AddExpenseModalProps {
   projectId?: string | null;
   createdBy?: string | null;
   onSaved?: () => void | Promise<void>;
+  editingExpense?: AddExpenseEditTarget | null;
 }
 
 export function AddExpenseModal({
@@ -44,9 +58,11 @@ export function AddExpenseModal({
   projectId = null,
   createdBy = null,
   onSaved,
+  editingExpense = null,
 }: AddExpenseModalProps) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
+  const [editExpenseDate, setEditExpenseDate] = useState<Date | undefined>(undefined);
 
   const newRow = useCallback((): DraftExpenseRow => {
     const id =
@@ -60,7 +76,27 @@ export function AddExpenseModal({
 
   const reset = () => {
     setRows([newRow()]);
+    setEditExpenseDate(undefined);
   };
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingExpense) {
+      const d0 = toDate(editingExpense.date) ?? new Date();
+      setEditExpenseDate(d0);
+      setRows([
+        {
+          id: editingExpense.id,
+          description: editingExpense.description,
+          amount: String(editingExpense.amount),
+          category: editingExpense.category,
+        },
+      ]);
+    } else {
+      setEditExpenseDate(undefined);
+      setRows([newRow()]);
+    }
+  }, [open, editingExpense, newRow]);
 
   const categoriesQuery = useQuery({
     queryKey: ['financeExpenses', 'categories', companyId ?? 'none', farmId ?? 'all', projectId ?? 'all'],
@@ -68,7 +104,14 @@ export function AddExpenseModal({
     staleTime: 60_000,
     queryFn: async () => {
       if (!companyId) return [];
-      const rows = await getFinanceExpenses(companyId, { farmId, projectId });
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await ExpenseService.pullRemote(companyId, { farmId, projectId });
+        } catch {
+          // ignore
+        }
+      }
+      const rows = await ExpenseService.list(companyId, { farmId, projectId });
       const uniq = new Set<string>();
       for (const r of rows) {
         const c = String(r.category ?? '').trim();
@@ -188,6 +231,50 @@ export function AddExpenseModal({
       return;
     }
 
+    if (editingExpense) {
+      const r = rows[0];
+      if (!r) {
+        toast.error('Nothing to save.');
+        return;
+      }
+      const amt = Number(r.amount);
+      if (!r.description.trim() || !Number.isFinite(amt) || amt <= 0) {
+        toast.error('Enter a valid description and amount.');
+        return;
+      }
+      if (!r.category.trim()) {
+        toast.error('Category is required.');
+        return;
+      }
+      const dateForSave = editExpenseDate ?? toDate(editingExpense.date);
+      if (!dateForSave) {
+        toast.error('Pick an expense date.');
+        return;
+      }
+      setSaving(true);
+      try {
+        await ExpenseService.update(editingExpense.id, {
+          companyId: editingExpense.companyId,
+          amount: amt,
+          note: r.description.trim(),
+          category: r.category.trim(),
+          expenseDate: dateForSave.toISOString().slice(0, 10),
+        });
+        await onSaved?.();
+        void queryClient.invalidateQueries({
+          queryKey: ['financeExpenses', 'categories', companyId ?? 'none', farmId ?? 'all', projectId ?? 'all'],
+        });
+        toast.success('Expense updated.');
+        onOpenChange(false);
+      } catch (err) {
+        console.error(err);
+        toast.error(err instanceof Error ? err.message : 'Could not update expense.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const cleaned = rows
       .map((r, idx) => ({ ...r, idx }))
       .filter((r) => r.description.trim() || r.amount.trim() || r.category.trim());
@@ -212,7 +299,7 @@ export function AddExpenseModal({
     setSaving(true);
     try {
       for (const r of cleaned) {
-        await createFinanceExpense({
+        await ExpenseService.create({
           companyId,
           farmId,
           projectId,
@@ -247,7 +334,7 @@ export function AddExpenseModal({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Expense</DialogTitle>
+          <DialogTitle>{editingExpense ? 'Edit expense' : 'Add Expense'}</DialogTitle>
         </DialogHeader>
         <form className="space-y-3" onSubmit={handleSave}>
           <div className="space-y-3">
@@ -255,7 +342,7 @@ export function AddExpenseModal({
               <div key={row.id} className="rounded-xl border border-border/60 bg-background/50 p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-muted-foreground">Expense {idx + 1}</div>
-                  {rows.length > 1 ? (
+                  {!editingExpense && rows.length > 1 ? (
                     <Button
                       type="button"
                       size="sm"
@@ -298,6 +385,34 @@ export function AddExpenseModal({
                   </div>
                 </div>
 
+                {editingExpense ? (
+                  <div>
+                    <span className="text-sm font-medium">Date</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-1 w-full justify-start text-left font-normal rounded-xl"
+                          disabled={saving}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4 opacity-60 shrink-0" />
+                          {formatDate(
+                            editExpenseDate ?? toDate(editingExpense.date) ?? new Date(),
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={editExpenseDate ?? toDate(editingExpense.date) ?? undefined}
+                          onSelect={(d) => d && setEditExpenseDate(d)}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                ) : null}
+
                 <div>
                   <label className="text-sm font-medium">Amount (KES)</label>
                   <Input
@@ -317,18 +432,20 @@ export function AddExpenseModal({
             ))}
           </div>
 
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => setRows((prev) => [...prev, newRow()])}
-              disabled={saving}
-            >
-              Add another expense
-            </Button>
-          </div>
+          {!editingExpense ? (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setRows((prev) => [...prev, newRow()])}
+                disabled={saving}
+              >
+                Add another expense
+              </Button>
+            </div>
+          ) : null}
 
           <DialogFooter className="flex flex-row gap-2 justify-end">
             <Button
@@ -341,7 +458,13 @@ export function AddExpenseModal({
               Cancel
             </Button>
             <Button type="submit" className="rounded-xl" disabled={saving}>
-              {saving ? 'Saving…' : rows.length > 1 ? 'Save Expenses' : 'Save Expense'}
+              {saving
+                ? 'Saving…'
+                : editingExpense
+                  ? 'Save changes'
+                  : rows.length > 1
+                    ? 'Save Expenses'
+                    : 'Save Expense'}
             </Button>
           </DialogFooter>
         </form>

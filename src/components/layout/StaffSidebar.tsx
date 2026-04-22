@@ -73,7 +73,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
 
   if (import.meta.env.DEV && user) {
     // eslint-disable-next-line no-console
-    logger.log('[StaffSidebar] visible nav items', {
+    logger.debug('[StaffSidebar] visible nav items', {
       uid: user.id,
       employeeName: displayName,
       employeeRole: displayRole,

@@ -124,7 +124,7 @@ export function BottomNav() {
       setIsDesktop(width >= 1024);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        logger.log('[Responsive] bottom nav viewport', { width, isDesktop: width >= 1024 });
+        logger.debug('[Responsive] bottom nav viewport', { width, isDesktop: width >= 1024 });
       }
     };
     update();

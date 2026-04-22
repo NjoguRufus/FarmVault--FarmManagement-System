@@ -55,7 +55,6 @@ import {
   applyHarvestCashPayment,
   payPickersFromWalletBatch,
   syncClosedCollectionToHarvestSale,
-  listHarvestCollections,
   listPickersByCollectionIds,
   listPickerIntakeByCollectionIds,
   listPickerPaymentsByCollectionIds,
@@ -67,6 +66,7 @@ import {
   updateHarvestPicker,
   getCompanyCollectionFinancialsAggregate,
 } from '@/services/harvestCollectionsService';
+import { HarvestService } from '@/services/localData/HarvestService';
 import {
   computeWalletSummary,
   getWalletLedgerEntries,
@@ -659,7 +659,17 @@ export default function HarvestCollectionsPage() {
 
   const { data: collectionsRaw = [], isLoading: loadingCollections } = useQuery({
     queryKey: ['harvestCollections', companyId, effectiveProjectId],
-    queryFn: () => listHarvestCollections(companyId!, effectiveProjectId ?? undefined),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await HarvestService.pullRemote(companyId, effectiveProjectId ?? null);
+        } catch {
+          // ignore
+        }
+      }
+      return HarvestService.listHarvestCollections(companyId, effectiveProjectId ?? null);
+    },
     enabled: !!companyId,
     staleTime: 15000,
     refetchOnWindowFocus: false,

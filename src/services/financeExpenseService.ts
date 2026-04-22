@@ -107,6 +107,7 @@ export type FinanceExpenseRow = {
   reference_id?: string | null;
   auto_generated?: boolean | null;
   crop_id?: string | null;
+  deleted_at?: string | null;
 };
 
 /** Shape compatible with Expense for listing (date as Date or string). */
@@ -263,6 +264,39 @@ export async function getFinanceExpenses(
         : undefined,
     };
   });
+}
+
+/**
+ * Raw rows for the local-first store / background pull (no harvest label enrichment).
+ */
+export async function fetchRawFinanceExpenseRows(
+  companyId: string,
+  options?: { farmId?: string | null; projectId?: string | null },
+): Promise<FinanceExpenseRow[]> {
+  if (!companyId) return [];
+  const farmId = options?.farmId ?? null;
+  const projectId = options?.projectId ?? null;
+  let q = db
+    .finance()
+    .from('expenses')
+    .select(
+      'id,company_id,farm_id,project_id,category,amount,currency,expense_date,note,created_by,created_at,row_version,source,reference_id,auto_generated,crop_id,deleted_at',
+    )
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .order('expense_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (farmId) {
+    q = q.eq('farm_id', farmId);
+  }
+  if (projectId) {
+    q = q.eq('project_id', projectId);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as FinanceExpenseRow[];
 }
 
 export interface CreateExpenseInput {

@@ -52,7 +52,7 @@ import { useBrokerTomatoRealtime } from '@/hooks/useBrokerTomatoRealtime';
 import { useTomatoSessionSummary } from '@/hooks/useTomatoSessionSummary';
 import { playNotificationSound } from '@/services/notificationSoundService';
 import { fetchDisplayNamesByClerkUserIds } from '@/services/profileClerkDisplayNames';
-import { listEmployees } from '@/services/employeesSupabaseService';
+import { EmployeeService } from '@/services/localData/EmployeeService';
 import type { Employee } from '@/types';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 import {
@@ -176,7 +176,17 @@ export default function TomatoHarvestSessionDetailPage() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees', companyId],
-    queryFn: () => listEmployees(companyId!),
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await EmployeeService.pullRemote(companyId);
+        } catch {
+          // ignore
+        }
+      }
+      return EmployeeService.listEmployees(companyId);
+    },
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });

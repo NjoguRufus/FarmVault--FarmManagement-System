@@ -19,7 +19,7 @@ export function OfflineSyncBanner() {
         status === 'online' && pendingCount > 0 && 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-200',
       ].filter(Boolean).join(' ')}
     >
-      {isOffline && <span>Offline — changes will sync when back online.</span>}
+      {isOffline && <span>Offline mode — your data will sync automatically.</span>}
       {status === 'syncing' && <span>Syncing…</span>}
       {isSyncFailed && (
         <>
