@@ -169,8 +169,13 @@ interface AddInventoryItemModalProps {
   companyId: string;
   categories: InventoryCategoryRow[];
   suppliers: Supplier[];
-  onCreated?: () => void;
+  /** Called after a successful create; includes new item id when available (e.g. pre-select in Log Work). */
+  onCreated?: (meta?: { itemId: string; name: string }) => void;
   createdBy?: string;
+  /** Pre-fill when opened from another surface (e.g. Log Work typeahead). */
+  externalPrefill?: { name: string; categoryTemplate?: string } | null;
+  /** Increment when `externalPrefill` should re-apply (same name, new open). */
+  externalPrefillNonce?: number;
 }
 
 export function AddInventoryItemModal({
@@ -181,6 +186,8 @@ export function AddInventoryItemModal({
   suppliers,
   onCreated,
   createdBy,
+  externalPrefill = null,
+  externalPrefillNonce = 0,
 }: AddInventoryItemModalProps) {
   const { sessionClaims } = useAuth();
   const sessionCompanyId = (sessionClaims?.company_id as string | undefined)?.trim();
@@ -588,6 +595,20 @@ export function AddInventoryItemModal({
     return () => window.cancelAnimationFrame(id);
   }, [open, step]);
 
+  useEffect(() => {
+    if (!open) return;
+    const raw = externalPrefill?.name?.trim();
+    if (!raw) return;
+    setName(raw);
+    const tpl = externalPrefill?.categoryTemplate?.trim();
+    if (tpl) {
+      handleCategoryChange(tpl);
+    }
+    setStep(1);
+    setSlideDir(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply when dialog opens / nonce bumps
+  }, [open, externalPrefillNonce, externalPrefill?.name, externalPrefill?.categoryTemplate]);
+
   const handleSubmit = async () => {
     if (step !== 3) return;
     if (!name.trim() || !categoryId || !unit) return;
@@ -787,7 +808,7 @@ export function AddInventoryItemModal({
       void queryClient.invalidateQueries({ queryKey: [INVENTORY_CATEGORIES_QUERY_KEY] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa', activeCompanyId] });
       handleDialogOpenChange(false);
-      onCreated?.();
+      onCreated?.({ itemId: created.id, name: name.trim() });
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create inventory item.');
     } finally {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Calendar as CalendarIcon, Plus, Trash2, MapPin, Briefcase, AlertCircle } from 'lucide-react';
 import {
   Dialog,
@@ -27,12 +27,15 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useQuery } from '@tanstack/react-query';
-import { listInventoryStock, recordInventoryUsage as recordInventoryUsageRpc } from '@/services/inventoryReadModelService';
+import { recordInventoryUsage as recordInventoryUsageRpc, type InventoryStockRow } from '@/services/inventoryReadModelService';
+import { useInventoryStock, useInventoryCategories } from '@/hooks/useInventoryReadModels';
+import { usePermissions } from '@/hooks/usePermissions';
 import { createWorkCard, recordWork, recordInventoryUsageForWorkCard } from '@/services/operationsWorkCardService';
 import { createAdminAlert } from '@/services/adminAlertService';
 import { FarmService } from '@/services/localData/FarmService';
 import { SupplierService } from '@/services/localData/SupplierService';
 import { RecordStockInModal } from '@/components/inventory/RecordStockInModal';
+import { AddInventoryItemModal } from '@/components/inventory/AddInventoryItemModal';
 import type { InputUsed } from '@/types';
 import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
 
@@ -88,13 +91,47 @@ function resolvePackageEmoji(packageLabel: string) {
   return '📌';
 }
 
-function isLiquidPackage(packageLabel: string) {
-  return packageLabel === 'bottles' || packageLabel === 'drums';
+function workCategoryToInventoryPrefillTemplate(workCategory: string): string | undefined {
+  switch (workCategory) {
+    case 'Fertilizer Application':
+      return 'template:fertilizer';
+    case 'Spraying':
+    case 'Pest Control':
+      return 'template:chemical';
+    case 'Watering':
+      return 'template:fuel';
+    case 'Planting':
+      return 'template:fertilizer';
+    case 'Tying':
+    case 'Harvesting':
+      return 'template:tying-ropes-sacks';
+    default:
+      return undefined;
+  }
+}
+
+/** Human-readable total usage with common unit conversions (g↔kg, ml↔L). */
+function formatUsageTally(baseQty: number, unitRaw: string): string {
+  if (!Number.isFinite(baseQty) || baseQty <= 0 || !unitRaw.trim()) return '';
+  const unit = unitRaw.trim().toLowerCase();
+  const parts: string[] = [`${baseQty.toLocaleString()} ${unitRaw.trim()} total`];
+  if (unit === 'ml' || unit === 'millilitre' || unit === 'millilitres') {
+    parts.push(`(${(baseQty / 1000).toFixed(2)} L)`);
+  }
+  if (unit === 'g' || unit === 'gram' || unit === 'grams') {
+    parts.push(`(${(baseQty / 1000).toFixed(3)} kg)`);
+  }
+  if (unit === 'kg' || unit === 'kgs' || unit === 'kilogram' || unit === 'kilograms') {
+    parts.push(`(${(baseQty * 1000).toLocaleString()} g)`);
+  }
+  return parts.join(' · ');
 }
 
 interface InputItem {
   itemId: string;
   itemName: string;
+  /** Typeahead text for inventory search */
+  itemSearchQuery: string;
   packageCount: number;
   baseQuantity: number;
   drumsSprayed: number;
@@ -103,6 +140,38 @@ interface InputItem {
   packageSize: number;
   packageUnitLabel: string;
   packageLabel: string;
+}
+
+function buildInputFieldsFromStockItem(item: InventoryStockRow): Pick<
+  InputItem,
+  | 'itemId'
+  | 'itemName'
+  | 'itemSearchQuery'
+  | 'unit'
+  | 'currentStock'
+  | 'packageSize'
+  | 'packageUnitLabel'
+  | 'packageLabel'
+  | 'packageCount'
+  | 'baseQuantity'
+  | 'drumsSprayed'
+> {
+  const packageLabel = resolvePackageLabel(item.packaging_type, item.name);
+  const packageSize = Number(item.unit_size ?? 1) > 0 ? Number(item.unit_size) : 1;
+  const packageUnitLabel = (item.unit_size_label ?? item.unit ?? '').trim();
+  return {
+    itemId: item.id,
+    itemName: item.name,
+    itemSearchQuery: item.name,
+    unit: item.unit,
+    currentStock: item.current_stock,
+    packageSize,
+    packageUnitLabel,
+    packageLabel,
+    packageCount: 0,
+    baseQuantity: 0,
+    drumsSprayed: 0,
+  };
 }
 
 export function LogWorkModal({
@@ -117,12 +186,21 @@ export function LogWorkModal({
   const { projects, activeProject, activeFarmId } = useProject();
   const companyId = user?.companyId ?? null;
   const { allWorkTypes } = useFarmWorkCategories(companyId);
+  const { can } = usePermissions();
+  const canAddInventoryItem = can('inventory', 'addItem') || can('inventory', 'create');
 
   const [saving, setSaving] = useState(false);
   const [workTypeQuery, setWorkTypeQuery] = useState('');
   const [workTypeMenuOpen, setWorkTypeMenuOpen] = useState(false);
   const [stockInOpen, setStockInOpen] = useState(false);
   const [stockInItemId, setStockInItemId] = useState<string | null>(null);
+  const [itemPickerOpenIdx, setItemPickerOpenIdx] = useState<number | null>(null);
+  const [addInventoryOpen, setAddInventoryOpen] = useState(false);
+  const [addInventoryPrefill, setAddInventoryPrefill] = useState<{ name: string; categoryTemplate?: string } | null>(
+    null,
+  );
+  const [addInventoryPrefillNonce, setAddInventoryPrefillNonce] = useState(0);
+  const pendingInputIndexForNewItemRef = useRef<number | null>(null);
   const [formData, setFormData] = useState({
     farmId: '',
     projectId: activeProject?.id ?? '',
@@ -207,6 +285,10 @@ export function LogWorkModal({
     setWorkTypeQuery(initialWorkCategory ?? '');
     setWorkTypeMenuOpen(false);
     setInputs([]);
+    setItemPickerOpenIdx(null);
+    setAddInventoryOpen(false);
+    setAddInventoryPrefill(null);
+    pendingInputIndexForNewItemRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     open,
@@ -219,12 +301,8 @@ export function LogWorkModal({
     selectorFarms,
   ]);
 
-  // Fetch inventory items for input selection
-  const { data: inventoryItems = [], refetch: refetchInventoryItems } = useQuery({
-    queryKey: ['inventory-stock', companyId],
-    queryFn: () => listInventoryStock({ companyId: companyId! }),
-    enabled: !!companyId,
-  });
+  const { items: inventoryItems = [], refetch: refetchInventoryItems } = useInventoryStock({ companyId });
+  const { categories: inventoryCategories = [] } = useInventoryCategories(companyId);
   const { data: suppliers = [] } = useQuery({
     queryKey: ['suppliers', companyId ?? 'none'],
     queryFn: async () => {
@@ -269,6 +347,7 @@ export function LogWorkModal({
         ...input,
         itemId: '',
         itemName: '',
+        itemSearchQuery: '',
         unit: '',
         currentStock: 0,
         packageCount: 0,
@@ -291,6 +370,7 @@ export function LogWorkModal({
       {
         itemId: '',
         itemName: '',
+        itemSearchQuery: '',
         packageCount: 0,
         baseQuantity: 0,
         drumsSprayed: 0,
@@ -303,8 +383,57 @@ export function LogWorkModal({
     ]);
   };
 
+  const selectInventoryItemForRow = useCallback((index: number, item: InventoryStockRow) => {
+    setInputs((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, ...buildInputFieldsFromStockItem(item) } : row)),
+    );
+    setItemPickerOpenIdx(null);
+  }, []);
+
+  const openAddInventoryFromRow = useCallback(
+    (index: number, searchRaw: string) => {
+      const q = searchRaw.trim();
+      if (!q) {
+        toast.message('Type a name first', {
+          description: 'Enter what you want to call the new inventory item.',
+        });
+        return;
+      }
+      if (!canAddInventoryItem) {
+        toast.error('You do not have permission to add inventory items.');
+        return;
+      }
+      pendingInputIndexForNewItemRef.current = index;
+      setAddInventoryPrefill({
+        name: q,
+        categoryTemplate: workCategoryToInventoryPrefillTemplate(formData.workCategory),
+      });
+      setAddInventoryPrefillNonce((n) => n + 1);
+      setAddInventoryOpen(true);
+      setItemPickerOpenIdx(null);
+    },
+    [canAddInventoryItem, formData.workCategory],
+  );
+
+  const handleInventoryItemCreated = useCallback(
+    async (meta?: { itemId: string; name: string }) => {
+      const result = await refetchInventoryItems();
+      const idx = pendingInputIndexForNewItemRef.current;
+      pendingInputIndexForNewItemRef.current = null;
+      const list = result.data ?? inventoryItems;
+      const id = meta?.itemId;
+      if (idx == null || !id) return;
+      const item = list.find((i) => i.id === id);
+      if (item) {
+        selectInventoryItemForRow(idx, item);
+      }
+    },
+    [refetchInventoryItems, inventoryItems, selectInventoryItemForRow],
+  );
+
   const removeInput = (index: number) => {
-    setInputs(prev => prev.filter((_, i) => i !== index));
+    setInputs((prev) => prev.filter((_, i) => i !== index));
+    setItemPickerOpenIdx((cur) => (cur === index ? null : cur));
   };
 
   const updateInput = (index: number, field: keyof InputItem, value: string | number) => {
@@ -312,23 +441,11 @@ export function LogWorkModal({
       if (i !== index) return input;
       
       if (field === 'itemId') {
-        const item = inventoryItems.find(inv => inv.id === value);
-        const packageLabel = resolvePackageLabel(item?.packaging_type, item?.name);
-        const packageSize = Number(item?.unit_size ?? 1) > 0 ? Number(item?.unit_size) : 1;
-        const packageUnitLabel = (item?.unit_size_label ?? item?.unit ?? '').trim();
-        return {
-          ...input,
-          itemId: value as string,
-          itemName: item?.name ?? '',
-          unit: item?.unit ?? '',
-          currentStock: item?.current_stock ?? 0,
-          packageSize,
-          packageUnitLabel,
-          packageLabel,
-          packageCount: 0,
-          baseQuantity: 0,
-          drumsSprayed: 0,
-        };
+        const item = inventoryItems.find((inv) => inv.id === value);
+        if (!item) {
+          return { ...input, itemId: value as string };
+        }
+        return { ...input, ...buildInputFieldsFromStockItem(item) };
       }
       if (field === 'packageCount') {
         const packageCount = Number(value) || 0;
@@ -362,6 +479,11 @@ export function LogWorkModal({
     }
     setSaving(true);
     try {
+      const drumsParts = inputs
+        .filter((i) => i.drumsSprayed > 0 && i.itemName)
+        .map((i) => `${i.itemName}: ${i.drumsSprayed} drum(s) sprayed`);
+      const notesCombined = [formData.notes.trim(), ...drumsParts].filter(Boolean).join('\n');
+
       // Step 1: Create the work card in "planned" status
       const effectiveWorkTitle = formData.workTitle.trim() || formData.workCategory;
       const workCard = await createWorkCard({
@@ -373,7 +495,7 @@ export function LogWorkModal({
         plannedDate: format(formData.workDate, 'yyyy-MM-dd'),
         plannedWorkers: formData.actualWorkers,
         plannedRatePerPerson: formData.actualRatePerPerson,
-        notes: formData.notes.trim() || null,
+        notes: notesCombined || null,
         allocatedManagerId: user?.id ?? null,
         allocatedWorkerName: user?.name ?? null,
         createdByAdminId: user?.id ?? '',
@@ -401,7 +523,7 @@ export function LogWorkModal({
         actualWorkers: formData.actualWorkers,
         actualRatePerPerson: formData.actualRatePerPerson,
         workDone: formData.workDone.trim(),
-        executionNotes: formData.notes.trim() || null,
+        executionNotes: notesCombined || null,
         inputsUsed,
         workerIds: [],
       });
@@ -668,72 +790,198 @@ export function LogWorkModal({
               </Button>
             </div>
 
-            {inputs.map((input, index) => (
+            {inputs.map((input, index) => {
+              const q = input.itemSearchQuery.trim().toLowerCase();
+              const rowCandidates = filteredInventoryItems.filter(
+                (it) => !q || it.name.toLowerCase().includes(q),
+              );
+              const exactNameMatch =
+                q.length > 0 &&
+                filteredInventoryItems.some((it) => it.name.trim().toLowerCase() === q);
+              const showAddNew =
+                canAddInventoryItem && q.length > 0 && !exactNameMatch && rowCandidates.length === 0;
+
+              return (
               <div key={index} className="flex gap-2 items-start p-3 rounded-lg border bg-muted/20">
                 <div className="flex-1 space-y-2">
-                  <Select
-                    value={input.itemId || 'none'}
-                    onValueChange={(v) => updateInput(index, 'itemId', v === 'none' ? '' : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select item</SelectItem>
-                      {filteredInventoryItems.length > 0 ? (
-                        filteredInventoryItems.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            <div className="flex items-center gap-2">
-                              {resolvePackageLabel(item.packaging_type, item.name) === 'sacks' ? (
-                                <img
-                                  src={resolvePackageEmoji('sacks')}
-                                  alt=""
-                                  aria-hidden
-                                  className="h-4 w-4 rounded-sm object-contain"
-                                />
-                              ) : (
-                                <span className="text-base leading-none" aria-hidden>
-                                  {resolvePackageEmoji(resolvePackageLabel(item.packaging_type, item.name))}
-                                </span>
-                              )}
-                              <span>
-                                {item.name} -{' '}
-                                {(() => {
-                                  const packageLabel = resolvePackageLabel(item.packaging_type, item.name);
-                                  const packageSize = Number(item.unit_size ?? 1) > 0 ? Number(item.unit_size) : 1;
-                                  const packageUnitLabel = (item.unit_size_label ?? item.unit ?? '').trim();
-                                  const availablePackages = item.current_stock / packageSize;
-                                  const packageCountText =
-                                    Number.isInteger(availablePackages)
-                                      ? String(Math.floor(availablePackages))
-                                      : availablePackages.toFixed(1).replace(/\.0$/, '');
-                                  return `${packageCountText} ${packageLabel} available`;
-                                })()}
-                              </span>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Inventory item (type to search)</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder={
+                          filteredInventoryItems.length === 0
+                            ? 'No items for this work type — add one below'
+                            : 'Type item name…'
+                        }
+                        value={input.itemSearchQuery}
+                        onFocus={() => setItemPickerOpenIdx(index)}
+                        onBlur={() =>
+                          window.setTimeout(() => setItemPickerOpenIdx((cur) => (cur === index ? null : cur)), 150)
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setInputs((prev) =>
+                            prev.map((row, i) =>
+                              i === index
+                                ? {
+                                    ...row,
+                                    itemSearchQuery: v,
+                                    itemId: '',
+                                    itemName: '',
+                                    unit: '',
+                                    currentStock: 0,
+                                    packageCount: 0,
+                                    baseQuantity: 0,
+                                    drumsSprayed: 0,
+                                    packageSize: 1,
+                                    packageUnitLabel: '',
+                                    packageLabel: 'units',
+                                  }
+                                : row,
+                            ),
+                          );
+                          setItemPickerOpenIdx(index);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && rowCandidates[0]) {
+                            e.preventDefault();
+                            selectInventoryItemForRow(index, rowCandidates[0]);
+                          }
+                        }}
+                      />
+                      {itemPickerOpenIdx === index && (
+                        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-52 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                          {filteredInventoryItems.length === 0 ? (
+                            <div className="flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground">
+                              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                              No inventory items match this work type. Type a new name and add it to inventory.
                             </div>
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-                          <AlertCircle className="h-4 w-4 shrink-0" />
-                          No matching inventory items for this work type
+                          ) : null}
+                          {rowCandidates.map((item) => {
+                            const packageLabel = resolvePackageLabel(item.packaging_type, item.name);
+                            const packageSize = Number(item.unit_size ?? 1) > 0 ? Number(item.unit_size) : 1;
+                            const availablePackages = item.current_stock / packageSize;
+                            const packageCountText =
+                              Number.isInteger(availablePackages)
+                                ? String(Math.floor(availablePackages))
+                                : availablePackages.toFixed(1).replace(/\.0$/, '');
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/60',
+                                  input.itemId === item.id && 'bg-muted',
+                                )}
+                                onMouseDown={(ev) => ev.preventDefault()}
+                                onClick={() => selectInventoryItemForRow(index, item)}
+                              >
+                                {packageLabel === 'sacks' ? (
+                                  <img
+                                    src={resolvePackageEmoji('sacks')}
+                                    alt=""
+                                    aria-hidden
+                                    className="h-4 w-4 shrink-0 rounded-sm object-contain"
+                                  />
+                                ) : (
+                                  <span className="text-base leading-none shrink-0" aria-hidden>
+                                    {resolvePackageEmoji(packageLabel)}
+                                  </span>
+                                )}
+                                <span>
+                                  {item.name} — {packageCountText} {packageLabel} available
+                                </span>
+                              </button>
+                            );
+                          })}
+                          {showAddNew ? (
+                            <button
+                              type="button"
+                              className="mt-1 flex w-full items-center gap-2 rounded-md border border-dashed border-primary/50 px-2 py-2 text-left text-sm font-medium text-primary hover:bg-muted/60"
+                              onMouseDown={(ev) => ev.preventDefault()}
+                              onClick={() => openAddInventoryFromRow(index, input.itemSearchQuery)}
+                            >
+                              <Plus className="h-4 w-4 shrink-0" />
+                              Add &quot;{input.itemSearchQuery.trim()}&quot; to inventory…
+                            </button>
+                          ) : null}
+                          {q.length > 0 && !showAddNew && rowCandidates.length === 0 && filteredInventoryItems.length > 0 ? (
+                            <p className="px-2 py-2 text-xs text-muted-foreground">No name match — try another spelling or add new.</p>
+                          ) : null}
                         </div>
                       )}
-                    </SelectContent>
-                  </Select>
-                  <div className={cn('grid gap-2', isLiquidPackage(input.packageLabel) ? 'grid-cols-2' : 'grid-cols-1')}>
+                    </div>
+                  </div>
+                  {formData.workCategory === 'Spraying' ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 sm:items-start">
+                        <div className="space-y-1">
+                          <Label className="text-xs font-medium text-foreground">Packages used</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="1"
+                            placeholder="0"
+                            value={input.packageCount || ''}
+                            onChange={(e) => updateInput(index, 'packageCount', parseFloat(e.target.value) || 0)}
+                            disabled={!input.itemId}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            How many packages used
+                            {input.packageLabel === 'sacks' ? (
+                              <img
+                                src={resolvePackageEmoji('sacks')}
+                                alt=""
+                                aria-hidden
+                                className="mx-1 inline-block h-4 w-4 rounded-sm object-contain align-text-bottom"
+                              />
+                            ) : (
+                              ` ${resolvePackageEmoji(input.packageLabel)} `
+                            )}
+                            {input.packageCount > 0 && input.itemId ? (
+                              <span>
+                                {' '}
+                                → {input.baseQuantity.toLocaleString()}{' '}
+                                {input.packageUnitLabel || input.unit || 'units'}{' '}
+                                <span className="text-muted-foreground">(deducted from stock)</span>
+                              </span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs font-medium text-foreground">Drums sprayed</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="1"
+                            placeholder="0"
+                            value={input.drumsSprayed || ''}
+                            onChange={(e) => updateInput(index, 'drumsSprayed', parseFloat(e.target.value) || 0)}
+                            disabled={!input.itemId}
+                          />
+                          <p className="text-xs text-muted-foreground">How many drums or tanks sprayed</p>
+                        </div>
+                      </div>
+                      {input.itemId && input.baseQuantity > 0 ? (
+                        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          {formatUsageTally(input.baseQuantity, input.packageUnitLabel || input.unit)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
                     <div className="space-y-1">
+                      <Label className="text-xs font-medium text-foreground">Packages used</Label>
                       <Input
                         type="number"
                         min={0}
                         step="1"
-                        placeholder="Qty"
+                        placeholder="0"
                         value={input.packageCount || ''}
                         onChange={(e) => updateInput(index, 'packageCount', parseFloat(e.target.value) || 0)}
+                        disabled={!input.itemId}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Qty
-                        {' '}
+                        How many packages used
                         {input.packageLabel === 'sacks' ? (
                           <img
                             src={resolvePackageEmoji('sacks')}
@@ -742,30 +990,24 @@ export function LogWorkModal({
                             className="mx-1 inline-block h-4 w-4 rounded-sm object-contain align-text-bottom"
                           />
                         ) : (
-                          `${resolvePackageEmoji(input.packageLabel)} `
+                          ` ${resolvePackageEmoji(input.packageLabel)} `
                         )}
-                        {input.packageCount > 0 && (
+                        {input.packageCount > 0 && input.itemId ? (
                           <span>
                             {' '}
-                            ({input.baseQuantity.toLocaleString()} {input.packageUnitLabel || input.unit || 'units'})
+                            → {input.baseQuantity.toLocaleString()}{' '}
+                            {input.packageUnitLabel || input.unit || 'units'}{' '}
+                            <span className="text-muted-foreground">(deducted from stock)</span>
                           </span>
-                        )}
+                        ) : null}
                       </p>
+                      {input.itemId && input.baseQuantity > 0 ? (
+                        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          {formatUsageTally(input.baseQuantity, input.packageUnitLabel || input.unit)}
+                        </p>
+                      ) : null}
                     </div>
-                    {isLiquidPackage(input.packageLabel) && (
-                      <div className="space-y-1">
-                        <Input
-                          type="number"
-                          min={0}
-                          step="1"
-                          placeholder="Drums sprayed"
-                          value={input.drumsSprayed || ''}
-                          onChange={(e) => updateInput(index, 'drumsSprayed', parseFloat(e.target.value) || 0)}
-                        />
-                        <p className="text-xs text-muted-foreground">Number of drums sprayed</p>
-                      </div>
-                    )}
-                  </div>
+                  )}
                   {input.itemId && input.baseQuantity > input.currentStock && (
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-amber-600">
@@ -795,7 +1037,8 @@ export function LogWorkModal({
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Row 5: Work Done */}
@@ -831,6 +1074,22 @@ export function LogWorkModal({
           void refetchInventoryItems();
         }}
       />
+      {canAddInventoryItem ? (
+        <AddInventoryItemModal
+          open={addInventoryOpen}
+          onOpenChange={(o) => {
+            setAddInventoryOpen(o);
+            if (!o) setAddInventoryPrefill(null);
+          }}
+          companyId={companyId ?? ''}
+          categories={inventoryCategories}
+          suppliers={suppliers}
+          createdBy={user?.id}
+          externalPrefill={addInventoryPrefill}
+          externalPrefillNonce={addInventoryPrefillNonce}
+          onCreated={(meta) => void handleInventoryItemCreated(meta)}
+        />
+      ) : null}
     </>
   );
 }

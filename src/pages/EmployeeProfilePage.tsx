@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChevronLeft, User, Shield, FolderKanban, History, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -31,13 +32,12 @@ import {
   listActivityLogs,
   logActivity,
 } from '@/services/employeeAccessService';
-import { AccessControlPermissionEditor } from '@/components/permissions/AccessControlPermissionEditor';
 import { PERMISSION_KEYS, type PermissionKey } from '@/config/accessControl';
 import { EMPLOYEE_ROLE_LABELS, type EmployeeRoleKey } from '@/config/accessControl';
 import { db } from '@/lib/db';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
-import type { Employee } from '@/types';
+import type { Employee, Project } from '@/types';
+import { isProjectClosed } from '@/lib/projectClosed';
 import { UserAvatar } from '@/components/UserAvatar';
 import { AnalyticsEvents, captureEvent } from '@/lib/analytics';
 
@@ -47,6 +47,7 @@ export default function EmployeeProfilePage() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { projects } = useProject();
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -90,8 +91,15 @@ export default function EmployeeProfilePage() {
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [projectAccessIds, setProjectAccessIds] = useState<string[]>([]);
   const [activityLogs, setActivityLogs] = useState<{ action: string; module: string | null; created_at: string }[]>([]);
-  const [savingPermissions, setSavingPermissions] = useState(false);
-  const [savingProjects, setSavingProjects] = useState(false);
+  const [savingAccess, setSavingAccess] = useState(false);
+
+  const assignableProjects = useMemo((): Project[] => {
+    if (!companyId) return [];
+    return projects
+      .filter((p) => p.companyId === companyId && !isProjectClosed(p))
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [companyId, projects]);
 
   useEffect(() => {
     if (!employeeId || !companyId || !employee) return;
@@ -112,21 +120,31 @@ export default function EmployeeProfilePage() {
     );
   }, [companyId, employeeId]);
 
-  const handleSavePermissions = useCallback(async () => {
+  const handleSaveAccess = useCallback(async () => {
     if (!companyId || !employeeId) return;
-    setSavingPermissions(true);
+    if (!canManagePermissions && !canEdit) return;
+    setSavingAccess(true);
     try {
-      await setEmployeePermissions(companyId, employeeId, allowedKeys);
+      if (canManagePermissions) {
+        await setEmployeePermissions(companyId, employeeId, allowedKeys);
+      }
+      if (canEdit) {
+        await setEmployeeProjectAccess(companyId, employeeId, projectAccessIds);
+      }
       await logActivity({
         companyId,
         employeeId,
-        action: 'Updated permissions',
+        action: 'Updated access (permissions and/or projects)',
         module: 'employees',
-        metadata: { updated_by: user?.id },
+        metadata: {
+          updated_by: user?.id,
+          project_count: projectAccessIds.length,
+          permissions_saved: canManagePermissions,
+          projects_saved: canEdit,
+        },
       });
-      toast({ title: 'Saved', description: 'Permissions updated.' });
+      toast({ title: 'Saved', description: 'Access settings updated.' });
 
-      // Refetch employees so Access tab reloads from saved employees.permissions JSON
       await queryClient.refetchQueries({ queryKey: ['employees', companyId] });
       const fresh = (queryClient.getQueryData(['employees', companyId]) as Employee[] | undefined) ?? [];
       const updated = fresh.find((e) => e.id === employeeId) ?? null;
@@ -140,29 +158,19 @@ export default function EmployeeProfilePage() {
     } catch (e) {
       toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
     } finally {
-      setSavingPermissions(false);
+      setSavingAccess(false);
     }
-  }, [companyId, employeeId, allowedKeys, user?.id, toast]);
-
-  const handleSaveProjectAccess = useCallback(async () => {
-    if (!companyId || !employeeId) return;
-    setSavingProjects(true);
-    try {
-      await setEmployeeProjectAccess(companyId, employeeId, projectAccessIds);
-      await logActivity({
-        companyId,
-        employeeId,
-        action: 'Updated project access',
-        module: 'employees',
-        metadata: { updated_by: user?.id, project_count: projectAccessIds.length },
-      });
-      toast({ title: 'Saved', description: 'Project access updated.' });
-    } catch (e) {
-      toast({ title: 'Error', description: (e as Error).message, variant: 'destructive' });
-    } finally {
-      setSavingProjects(false);
-    }
-  }, [companyId, employeeId, projectAccessIds, user?.id, toast]);
+  }, [
+    companyId,
+    employeeId,
+    allowedKeys,
+    projectAccessIds,
+    user?.id,
+    toast,
+    canManagePermissions,
+    canEdit,
+    queryClient,
+  ]);
 
   if (!companyId) {
     return (
@@ -365,9 +373,47 @@ export default function EmployeeProfilePage() {
                 </Accordion>
               </div>
 
-              {canManagePermissions && (
-                <Button className="mt-4" onClick={handleSavePermissions} disabled={savingPermissions}>
-                  {savingPermissions ? 'Saving…' : 'Save permissions'}
+              <div className="mt-6 rounded-lg border border-border/60 bg-muted/15 p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Projects they can access</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Leave none selected to allow <strong>all</strong> company projects (default). Select specific projects to
+                    limit Harvest, dashboards, and other project-scoped data.
+                  </p>
+                </div>
+                {assignableProjects.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No open projects in this company.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {assignableProjects.map((p) => {
+                      const checked = projectAccessIds.includes(p.id);
+                      return (
+                        <label
+                          key={p.id}
+                          className="flex items-center gap-2 rounded-md border border-border/50 bg-background/70 px-2.5 py-2 text-xs sm:text-sm"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            disabled={!canEdit}
+                            onCheckedChange={(next) => {
+                              const on = next === true;
+                              setProjectAccessIds((prev) => {
+                                if (on) return prev.includes(p.id) ? prev : [...prev, p.id];
+                                return prev.filter((id) => id !== p.id);
+                              });
+                            }}
+                          />
+                          <span className="truncate text-foreground">{p.name || p.id}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {(canManagePermissions || canEdit) && (
+                <Button className="mt-4" onClick={handleSaveAccess} disabled={savingAccess}>
+                  {savingAccess ? 'Saving…' : 'Save access settings'}
                 </Button>
               )}
             </CardContent>
@@ -378,7 +424,9 @@ export default function EmployeeProfilePage() {
           <Card>
             <CardHeader>
               <CardTitle>Project Access</CardTitle>
-              <p className="text-sm text-muted-foreground">Leave empty to allow access to all projects in the company.</p>
+              <p className="text-sm text-muted-foreground">
+                Choose projects under <strong>Access</strong> → &quot;Projects they can access&quot;, then save.
+              </p>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
@@ -386,11 +434,6 @@ export default function EmployeeProfilePage() {
                   ? 'This employee has access to all projects.'
                   : `${projectAccessIds.length} project(s) assigned.`}
               </p>
-              {canEdit && (
-                <Button className="mt-2" variant="outline" size="sm" onClick={() => navigate(`/employees?edit=${employeeId}&tab=projects`)}>
-                  Edit project access (in Employees list)
-                </Button>
-              )}
             </CardContent>
           </Card>
         </TabsContent>

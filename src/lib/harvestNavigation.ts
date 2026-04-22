@@ -1,4 +1,5 @@
 import type { Project } from '@/types';
+import { isProjectClosed } from '@/lib/projectClosed';
 import { hasFallbackHarvestModule, hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
 
 /** Prefix for harvest module routes when rendered inside the staff shell (`/staff/...`). */
@@ -21,6 +22,28 @@ export function isFrenchBeansCrop(cropType: unknown): boolean {
   const normalized = normalizeCropType(cropType);
   // Keep backward compatible aliases
   return normalized === 'french-beans' || normalized === 'frenchbeans' || normalized === 'french beans';
+}
+
+/**
+ * Pick which project should drive harvest routing for the current user.
+ * Prefer the active project when it is open and allowed; otherwise the first open allowed project.
+ */
+export function pickHarvestContextProject(
+  activeProject: Project | null | undefined,
+  companyProjects: Project[],
+  hasAccess: (projectId: string) => boolean,
+): Project | null {
+  const open = companyProjects.filter((p) => !isProjectClosed(p));
+  const allowedOpen = open.filter((p) => hasAccess(p.id));
+  if (
+    activeProject &&
+    !isProjectClosed(activeProject) &&
+    hasAccess(activeProject.id) &&
+    open.some((p) => p.id === activeProject.id)
+  ) {
+    return activeProject;
+  }
+  return allowedOpen[0] ?? null;
 }
 
 export function resolveHarvestEntryPath(

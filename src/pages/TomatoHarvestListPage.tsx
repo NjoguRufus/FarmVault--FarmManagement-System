@@ -28,6 +28,7 @@ import {
 } from '@/services/tomatoHarvestService';
 import { useToast } from '@/hooks/use-toast';
 import { hasTomatoHarvestModule } from '@/lib/cropModules';
+import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
 import { format } from 'date-fns';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 import { useTomatoSessionSummaries } from '@/hooks/useTomatoSessionSummary';
@@ -39,7 +40,7 @@ export default function TomatoHarvestListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { can: canKey } = useEmployeeAccess();
+  const { can: canKey, hasProjectAccess, isLoading: employeeAccessLoading } = useEmployeeAccess();
   const { activeProject, projects, setActiveProject } = useProject();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -61,6 +62,16 @@ export default function TomatoHarvestListPage() {
     return activeProject;
   }, [routeProjectId, projects, activeProject]);
 
+  const companyProjects = useMemo(
+    () => (companyId ? projects.filter((p) => p.companyId === companyId) : projects),
+    [projects, companyId],
+  );
+
+  const projectId = effectiveProject?.id ?? null;
+  const isTomatoProject = effectiveProject
+    ? hasTomatoHarvestModule(String(effectiveProject.cropTypeKey ?? effectiveProject.cropType ?? ''))
+    : false;
+
   useEffect(() => {
     if (!routeProjectId || !effectiveProject || effectiveProject.id !== routeProjectId) return;
     if (activeProject?.id === routeProjectId) return;
@@ -68,10 +79,29 @@ export default function TomatoHarvestListPage() {
     setActiveProject(effectiveProject as Project);
   }, [routeProjectId, effectiveProject, activeProject?.id, setActiveProject]);
 
-  const projectId = effectiveProject?.id ?? null;
-  const isTomatoProject = effectiveProject
-    ? hasTomatoHarvestModule(String(effectiveProject.cropTypeKey ?? effectiveProject.cropType ?? ''))
-    : false;
+  useEffect(() => {
+    if (employeeAccessLoading || !companyId) return;
+    if (!effectiveProject) return;
+    if (!hasProjectAccess(effectiveProject.id)) {
+      const fallback = companyProjects.find((p) => !isProjectClosed(p) && hasProjectAccess(p.id));
+      if (fallback) {
+        navigate(resolveHarvestEntryPath(fallback, harvestNavPrefix), { replace: true });
+      }
+      return;
+    }
+    if (!isTomatoProject) {
+      navigate(resolveHarvestEntryPath(effectiveProject, harvestNavPrefix), { replace: true });
+    }
+  }, [
+    employeeAccessLoading,
+    companyId,
+    effectiveProject,
+    isTomatoProject,
+    companyProjects,
+    hasProjectAccess,
+    navigate,
+    harvestNavPrefix,
+  ]);
 
   const { data: summaries = [], isLoading } = useQuery({
     queryKey: ['tomato-harvest-sessions', companyId, projectId],
@@ -142,22 +172,6 @@ export default function TomatoHarvestListPage() {
 
   if (!companyId) {
     return <p className="text-muted-foreground text-sm p-4">Sign in to manage tomato harvests.</p>;
-  }
-
-  if (routeProjectId && effectiveProject && !isTomatoProject) {
-    return (
-      <div className="space-y-4 p-4 animate-fade-in">
-        <button
-          type="button"
-          className="fv-btn fv-btn--secondary flex items-center gap-2"
-          onClick={() => navigate(harvestNavPrefix ? '/staff/staff-dashboard' : '/projects')}
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Back
-        </button>
-        <p className="text-muted-foreground">Tomato harvest is only available for tomato projects.</p>
-      </div>
-    );
   }
 
   return (

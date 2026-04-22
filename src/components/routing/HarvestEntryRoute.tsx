@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
-import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
+import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
+import { pickHarvestContextProject, resolveHarvestEntryPath } from '@/lib/harvestNavigation';
 
 /**
  * Central crop-aware "Harvest" entrypoint.
@@ -26,14 +28,27 @@ export function HarvestEntryRoute() {
 
 /** Same as {@link HarvestEntryRoute} but resolves paths under `/staff/...` (staff shell). */
 export function StaffHarvestEntryRoute() {
-  const { activeProject } = useProject();
+  const { user } = useAuth();
+  const { activeProject, projects } = useProject();
   const location = useLocation();
+  const { hasProjectAccess, isLoading } = useEmployeeAccess();
 
   const to = useMemo(() => {
-    const base = resolveHarvestEntryPath(activeProject, '/staff');
+    const cid = user?.companyId ?? null;
+    const companyProjects = cid ? projects.filter((p) => p.companyId === cid) : projects;
+    const picked = pickHarvestContextProject(activeProject, companyProjects, hasProjectAccess);
+    const base = resolveHarvestEntryPath(picked, '/staff');
     const search = location.search ?? '';
     return `${base}${search}`;
-  }, [activeProject, location.search]);
+  }, [activeProject, projects, hasProjectAccess, user?.companyId, location.search]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center p-6 text-sm text-muted-foreground">
+        Loading harvest…
+      </div>
+    );
+  }
 
   return <Navigate to={to} replace />;
 }
