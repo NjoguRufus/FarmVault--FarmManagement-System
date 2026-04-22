@@ -33,6 +33,7 @@ import type { Employee } from '@/types';
 import { logger } from "@/lib/logger";
 import { isProjectClosed } from '@/lib/projectClosed';
 import { useFarmWorkCategories } from '@/hooks/useFarmWorkCategories';
+import { workersCountFromInput } from '@/lib/workersInput';
 
 interface PlanWorkModalProps {
   open: boolean;
@@ -140,7 +141,7 @@ export function PlanWorkModal({
     workTitle: '',
     workCategory: '',
     plannedDate: new Date(),
-    plannedWorkers: 1,
+    plannedWorkersStr: '0',
     plannedRatePerPerson: 0,
     allocatedManagerId: '',
     notes: '',
@@ -163,7 +164,12 @@ export function PlanWorkModal({
         (activeProject && activeProject.farmId === preferredFarmId ? activeProject.id : null) ??
         (projectsForFarm.some((p) => p.id === prev.projectId) ? prev.projectId : null) ??
         '';
-      const next = { ...prev, farmId: preferredFarmId, projectId: preferredProjectId };
+      const next = {
+        ...prev,
+        farmId: preferredFarmId,
+        projectId: preferredProjectId,
+        plannedWorkersStr: '0',
+      };
       if (initialWorkCategory) {
         return {
           ...next,
@@ -176,7 +182,6 @@ export function PlanWorkModal({
         workTitle: '',
         workCategory: '',
         plannedDate: new Date(),
-        plannedWorkers: 1,
         plannedRatePerPerson: 0,
         allocatedManagerId: '',
         notes: '',
@@ -219,7 +224,8 @@ export function PlanWorkModal({
     setWorkTypeMenuOpen(false);
   };
 
-  const plannedTotal = formData.plannedWorkers * formData.plannedRatePerPerson;
+  const parsedPlannedWorkers = workersCountFromInput(formData.plannedWorkersStr);
+  const plannedTotal = parsedPlannedWorkers * formData.plannedRatePerPerson;
 
   const validateStepOne = () => {
     if (!formData.farmId) {
@@ -245,6 +251,12 @@ export function PlanWorkModal({
 
     setSaving(true);
     try {
+      const plannedWorkers = workersCountFromInput(formData.plannedWorkersStr);
+      if (plannedWorkers <= 0) {
+        toast.error('Planned workers must be greater than zero');
+        setSaving(false);
+        return;
+      }
       const effectiveWorkTitle = formData.workTitle.trim() || formData.workCategory;
       await createWorkCard({
         companyId: companyId!,
@@ -253,7 +265,7 @@ export function PlanWorkModal({
         workTitle: effectiveWorkTitle,
         workCategory: formData.workCategory,
         plannedDate: format(formData.plannedDate, 'yyyy-MM-dd'),
-        plannedWorkers: formData.plannedWorkers,
+        plannedWorkers,
         plannedRatePerPerson: formData.plannedRatePerPerson,
         notes: formData.notes.trim() || null,
         allocatedManagerId: formData.allocatedManagerId || null,
@@ -279,7 +291,7 @@ export function PlanWorkModal({
         workTitle: '',
         workCategory: '',
         plannedDate: new Date(),
-        plannedWorkers: 1,
+        plannedWorkersStr: '0',
         plannedRatePerPerson: 0,
         allocatedManagerId: '',
         notes: '',
@@ -448,12 +460,24 @@ export function PlanWorkModal({
                   <Input
                     id="plannedWorkers"
                     type="number"
-                    min={1}
-                    value={formData.plannedWorkers}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      plannedWorkers: parseInt(e.target.value) || 1
-                    }))}
+                    min={0}
+                    inputMode="numeric"
+                    value={formData.plannedWorkersStr}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        plannedWorkersStr: e.target.value,
+                      }))
+                    }
+                    onBlur={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        plannedWorkersStr:
+                          prev.plannedWorkersStr.trim() === ''
+                            ? '0'
+                            : String(workersCountFromInput(prev.plannedWorkersStr)),
+                      }))
+                    }
                   />
                 </div>
                 <div className="space-y-2">

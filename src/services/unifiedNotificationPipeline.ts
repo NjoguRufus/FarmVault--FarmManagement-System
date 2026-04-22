@@ -34,7 +34,7 @@ let deliverPredicate: ((payload: UnifiedEnqueuePayload) => boolean) | null = nul
 let buffer: UnifiedEnqueuePayload[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-const DEBOUNCE_MS = 420;
+const DEBOUNCE_MS = 650;
 
 /** Use before playing UI sound so staff-only users do not get company-admin alert audio. */
 export function unifiedNotificationWouldDeliverToUser(

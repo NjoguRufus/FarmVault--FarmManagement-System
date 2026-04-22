@@ -58,7 +58,29 @@ import { formatKes } from '@/components/reports/analyticsFormat';
 import { renderReport } from '@/lib/pdf/renderReport';
 import { printHtmlReport } from '@/lib/pdf/printHtmlReport';
 import { getCompany } from '@/services/companyService';
-import { AddExpenseModal, type AddExpenseEditTarget } from '@/components/expenses/AddExpenseModal';
+import {
+  AddExpenseModal,
+  type AddExpenseEditTarget,
+  type ExpenseSavedInventoryCandidate,
+} from '@/components/expenses/AddExpenseModal';
+import { AddInventoryItemModal } from '@/components/inventory/AddInventoryItemModal';
+import { INVENTORY_STOCK_QUERY_KEY, useInventoryCategories } from '@/hooks/useInventoryReadModels';
+import { SupplierService } from '@/services/localData/SupplierService';
+import type { Supplier } from '@/types';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  expenseCategoryToInventoryTemplate,
+  shouldPromptAddInventoryAfterExpense,
+} from '@/lib/expenseInventoryLink';
 import { RecentExpensesTable } from '@/components/expenses/RecentExpensesTable';
 import { Button } from '@/components/ui/button';
 
@@ -478,6 +500,16 @@ export default function ExpensesPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [expenseToEdit, setExpenseToEdit] = useState<ExpenseWithSyncState | null>(null);
+  const [inventoryLinkPromptOpen, setInventoryLinkPromptOpen] = useState(false);
+  const [inventoryLinkQueue, setInventoryLinkQueue] = useState<ExpenseSavedInventoryCandidate[]>([]);
+  const [addInventoryFromExpenseOpen, setAddInventoryFromExpenseOpen] = useState(false);
+  const [inventoryExternalPrefill, setInventoryExternalPrefill] = useState<{
+    name: string;
+    categoryTemplate?: string;
+    totalCostKes?: number;
+    countAsExpense?: boolean;
+  } | null>(null);
+  const [inventoryPrefillNonce, setInventoryPrefillNonce] = useState(0);
   useEffect(() => {
     if (searchParams.get('add') === '1') {
       setExpenseToEdit(null);
@@ -537,6 +569,24 @@ export default function ExpensesPage() {
   });
   
   const canCreateExpense = can('expenses', 'create');
+  const canAddInventoryItem = can('inventory', 'addItem') || can('inventory', 'create');
+  const { categories: inventoryCategories } = useInventoryCategories(companyId);
+  const { data: inventorySuppliers = [] } = useQuery<Supplier[]>({
+    queryKey: ['suppliers', companyId ?? 'none'],
+    queryFn: async () => {
+      if (!companyId) return [];
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          await SupplierService.pullRemote(companyId);
+        } catch {
+          /* ignore */
+        }
+      }
+      return SupplierService.listSuppliers(companyId);
+    },
+    enabled: Boolean(companyId),
+    staleTime: 60_000,
+  });
   const canEditExpense = can('expenses', 'edit');
   const canApproveExpense = can('expenses', 'approve');
   const canExportExpenseReport = can('reports', 'export');
@@ -631,6 +681,23 @@ export default function ExpensesPage() {
       setCategory('labour');
       setCustomCategory('');
       toast.success('Expense added.');
+
+      const descTrim = (description || '').trim();
+      if (
+        descTrim &&
+        Number.isFinite(amountNum) &&
+        amountNum > 0 &&
+        shouldPromptAddInventoryAfterExpense(categoryToSave)
+      ) {
+        if (!canAddInventoryItem || !companyId) {
+          toast.message('When you are ready, add this stock from the Inventory page.', {
+            description: 'Your expense is saved.',
+          });
+        } else {
+          setInventoryLinkQueue([{ description: descTrim, amount: amountNum, category: categoryToSave }]);
+          setInventoryLinkPromptOpen(true);
+        }
+      }
     } catch (error) {
       console.error('Failed to add expense:', error);
       toast.error('Failed to add expense.');
@@ -961,8 +1028,97 @@ export default function ExpensesPage() {
             await queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
             setExpenseToEdit(null);
           }}
+          onSavedWithInventoryCandidates={(rows) => {
+            if (!rows.length || !companyId) return;
+            if (!canAddInventoryItem) {
+              toast.message('When you are ready, add this stock from the Inventory page.', {
+                description: 'Your expense is saved.',
+              });
+              return;
+            }
+            setInventoryLinkQueue(rows);
+            setInventoryLinkPromptOpen(true);
+          }}
         />
       )}
+
+      <AlertDialog
+        open={inventoryLinkPromptOpen}
+        onOpenChange={(open) => {
+          setInventoryLinkPromptOpen(open);
+          if (!open) setInventoryLinkQueue([]);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add this purchase to inventory?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 sm:space-y-2">
+              {inventoryLinkQueue[0] ? (
+                <span className="block">
+                  <span className="font-medium text-foreground">{inventoryLinkQueue[0].description}</span>
+                  {' — '}
+                  KES {inventoryLinkQueue[0].amount.toLocaleString()} ({inventoryLinkQueue[0].category})
+                </span>
+              ) : null}
+              {inventoryLinkQueue.length > 1 ? (
+                <span className="block">
+                  You saved {inventoryLinkQueue.length} input-related lines. We&apos;ll open the form for the first;
+                  add the rest from Inventory if needed.
+                </span>
+              ) : null}
+              <span className="block">
+                &quot;Count as expense&quot; will be off in the inventory form so you don&apos;t double-count this
+                purchase.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not now</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const row = inventoryLinkQueue[0];
+                if (!row || !companyId) return;
+                const tpl = expenseCategoryToInventoryTemplate(row.category);
+                setInventoryExternalPrefill({
+                  name: row.description,
+                  categoryTemplate: tpl,
+                  totalCostKes: row.amount,
+                  countAsExpense: false,
+                });
+                setInventoryPrefillNonce((n) => n + 1);
+                setAddInventoryFromExpenseOpen(true);
+                setInventoryLinkPromptOpen(false);
+                setInventoryLinkQueue([]);
+              }}
+            >
+              Add to inventory
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {canAddInventoryItem && companyId ? (
+        <AddInventoryItemModal
+          open={addInventoryFromExpenseOpen}
+          onOpenChange={(open) => {
+            setAddInventoryFromExpenseOpen(open);
+            if (!open) setInventoryExternalPrefill(null);
+          }}
+          companyId={companyId}
+          categories={inventoryCategories}
+          suppliers={inventorySuppliers}
+          createdBy={user?.id}
+          farmId={activeProject?.farmId ?? selectedFarmId ?? null}
+          projectId={activeProject?.id ?? null}
+          externalPrefill={inventoryExternalPrefill}
+          externalPrefillNonce={inventoryPrefillNonce}
+          onCreated={() => {
+            void queryClient.invalidateQueries({ queryKey: ['financeExpenses'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard-expenses'] });
+            void queryClient.invalidateQueries({ queryKey: [INVENTORY_STOCK_QUERY_KEY] });
+          }}
+        />
+      ) : null}
 
       <Dialog open={!!payoutDetailCollectionId} onOpenChange={(open) => !open && setPayoutDetailCollectionId(null)}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-hidden flex flex-col">

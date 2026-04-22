@@ -38,6 +38,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
   const companyId = user?.companyId ?? null;
 
   const [saving, setSaving] = useState(false);
+  const [paymentNoteOpen, setPaymentNoteOpen] = useState(false);
   const [formData, setFormData] = useState({
     amount: 0,
     method: 'mpesa' as 'cash' | 'mpesa' | 'bank' | 'other',
@@ -47,6 +48,7 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
   // Initialize with actual total when modal opens
   useEffect(() => {
     if (workCard && open) {
+      setPaymentNoteOpen(false);
       setFormData({
         amount: workCard.actualTotal ?? workCard.plannedTotal ?? 0,
         method: 'mpesa',
@@ -196,18 +198,6 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
             </div>
           </div>
 
-          {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">Payment Notes</Label>
-            <Textarea
-              id="notes"
-              placeholder="Optional notes..."
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={2}
-            />
-          </div>
-
           {/* Summary */}
           <div className="rounded-lg border border-primary/25 bg-primary/10 p-4">
             <div className="flex items-center justify-between gap-3">
@@ -222,14 +212,53 @@ export function MarkPaidModal({ open, onOpenChange, workCard, onSuccess }: MarkP
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+        <DialogFooter className="!flex-row flex-nowrap items-center justify-end gap-2 space-x-0 sm:space-x-0">
+          <Button
+            variant="outline"
+            className="min-w-0 flex-1 sm:flex-initial"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving}>
+          <Button className="min-w-0 flex-1 sm:flex-initial" onClick={handleSubmit} disabled={saving}>
             {saving ? 'Processing...' : 'Confirm Payment'}
           </Button>
         </DialogFooter>
+
+        {paymentNoteOpen ? (
+          <div className="space-y-2">
+            <Label htmlFor="notes">Payment note</Label>
+            <Textarea
+              id="notes"
+              placeholder="Optional notes..."
+              value={formData.notes}
+              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+              rows={2}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setPaymentNoteOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        ) : (
+          <div className="flex justify-start">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs font-normal"
+              onClick={() => setPaymentNoteOpen(true)}
+            >
+              Add Payment Note
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

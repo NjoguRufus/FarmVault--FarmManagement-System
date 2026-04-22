@@ -26,6 +26,7 @@ import {
   isBrokerExpenseCategorySlug,
   loadCustomExpenseCategories,
 } from '@/lib/customExpenseCategoriesStorage';
+import { shouldPromptAddInventoryAfterExpense } from '@/lib/expenseInventoryLink';
 
 type DraftExpenseRow = {
   id: string;
@@ -44,6 +45,12 @@ export type AddExpenseEditTarget = {
   date: Date | string;
 };
 
+export type ExpenseSavedInventoryCandidate = {
+  description: string;
+  amount: number;
+  category: string;
+};
+
 interface AddExpenseModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -53,6 +60,8 @@ interface AddExpenseModalProps {
   createdBy?: string | null;
   onSaved?: () => void | Promise<void>;
   editingExpense?: AddExpenseEditTarget | null;
+  /** After new expenses are saved: rows whose category suggests inventory (fertilizer, chemical, fuel, …). */
+  onSavedWithInventoryCandidates?: (rows: ExpenseSavedInventoryCandidate[]) => void;
 }
 
 export function AddExpenseModal({
@@ -64,6 +73,7 @@ export function AddExpenseModal({
   createdBy = null,
   onSaved,
   editingExpense = null,
+  onSavedWithInventoryCandidates,
 }: AddExpenseModalProps) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -349,6 +359,16 @@ export function AddExpenseModal({
         queryKey: ['financeExpenses', 'categories', companyId ?? 'none', farmId ?? 'all', projectId ?? 'all'],
       });
       toast.success(cleaned.length === 1 ? 'Expense added.' : `Saved ${cleaned.length} expenses.`);
+      const inventoryCandidates: ExpenseSavedInventoryCandidate[] = cleaned
+        .filter((r) => shouldPromptAddInventoryAfterExpense(r.category))
+        .map((r) => ({
+          description: r.description.trim(),
+          amount: Number(r.amount),
+          category: r.category.trim(),
+        }));
+      if (inventoryCandidates.length && onSavedWithInventoryCandidates) {
+        onSavedWithInventoryCandidates(inventoryCandidates);
+      }
       reset();
       onOpenChange(false);
     } catch (error) {

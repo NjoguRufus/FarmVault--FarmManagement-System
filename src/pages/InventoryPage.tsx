@@ -416,6 +416,8 @@ export default function InventoryPage() {
           categories={allCategories}
           suppliers={allSuppliers}
           createdBy={user?.id}
+          farmId={activeProject?.farmId ?? null}
+          projectId={activeProject?.id ?? null}
           onCreated={handleInventoryChange}
         />
       )}
@@ -429,6 +431,8 @@ export default function InventoryPage() {
         companyId={effectiveCompanyId ?? ''}
         item={selectedItemForStock ?? stockItems[0] ?? null}
         suppliers={allSuppliers}
+        farmId={activeProject?.farmId ?? null}
+        projectId={activeProject?.id ?? null}
         onRecorded={handleInventoryChange}
       />
 
