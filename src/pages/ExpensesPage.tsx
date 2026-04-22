@@ -53,6 +53,7 @@ import { renderReport } from '@/lib/pdf/renderReport';
 import { printHtmlReport } from '@/lib/pdf/printHtmlReport';
 import { getCompany } from '@/services/companyService';
 import { AddExpenseModal, type AddExpenseEditTarget } from '@/components/expenses/AddExpenseModal';
+import { RecentExpensesTable } from '@/components/expenses/RecentExpensesTable';
 import { Button } from '@/components/ui/button';
 
 type ExpenseWithSyncState = Expense & {
@@ -428,6 +429,7 @@ export default function ExpensesPage() {
     const colors: Record<string, string> = {
       labour: 'bg-fv-success/20 text-fv-success',
       fertilizer: 'bg-fv-gold-soft text-fv-olive',
+      tools: 'bg-primary/15 text-primary',
       chemical: 'bg-fv-warning/20 text-fv-warning',
       fuel: 'bg-fv-info/20 text-fv-info',
       other: 'bg-muted text-muted-foreground',
@@ -1051,307 +1053,33 @@ export default function ExpensesPage() {
           </div>
         </div>
 
-        {/* Recent Expenses — section title is separate from the table header; columns size to content (table-auto) */}
+        {/* Recent Expenses — same table shell as Inventory list view (InventoryTable ListView) */}
         <div className="min-w-0 space-y-2.5 sm:space-y-3">
           <h3 className="px-4 text-base font-semibold leading-snug text-foreground tracking-tight sm:text-lg">
             Recent Expenses
           </h3>
-        {isLoading && (
-          <p className="pl-4 pr-4 text-sm text-muted-foreground">Loading expenses…</p>
-        )}
-
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border bg-white dark:bg-card">
-        {/* Desktop */}
-        <div className="hidden md:block min-h-0">
-          <div className="overflow-x-auto scrollbar-thin min-h-0">
-            <div
-              className={cn(
-                'w-full min-w-0',
-                recentTableRows.length > 5 &&
-                  'max-h-[16.5rem] sm:max-h-[18.5rem] overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]',
-                recentTableRows.length <= 5 && 'overflow-y-visible',
-              )}
-            >
-              <table
-                className="fv-table fv-recent-expenses-thead fv-expenses-table-with-seps fv-recent-expenses-auto-cols w-max min-w-full table-auto text-sm border-b-0 [&_th]:!px-4 [&_th]:!py-3 [&_td]:!px-4 [&_td]:!py-3"
-              >
-                <thead>
-                  <tr>
-                    <th className="sticky top-0 z-10 w-auto text-left align-top text-foreground whitespace-nowrap">
-                      Description
-                    </th>
-                    <th className="sticky top-0 z-10 w-auto text-left align-top text-foreground whitespace-nowrap">
-                      Category
-                    </th>
-                    <th className="sticky top-0 z-10 w-auto text-center align-top text-foreground whitespace-nowrap">
-                      Amount
-                    </th>
-                    <th className="sticky top-0 z-10 w-auto text-left align-top text-foreground whitespace-nowrap">
-                      Date
-                    </th>
-                  </tr>
-                </thead>
-            <tbody className="[&_tr]:bg-white dark:[&_tr]:bg-card [&_tr:hover]:bg-muted/30 dark:[&_tr:hover]:bg-muted/20">
-              {recentTableRows.map((row) => {
-                if (row.type === 'harvest_payout') {
-                  const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
-                  return (
-                    <tr
-                      key={row.key}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setPayoutDetailCollectionId(row.collectionId)}
-                    >
-                      <td>
-                        <div>
-                          <span className="font-medium text-foreground">Picker Payout</span>
-                          <p className="text-xs text-muted-foreground mt-0.5">{row.collectionName}</p>
-                        </div>
-                      </td>
-                      <td>
-                        <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
-                      </td>
-                      <td className="text-center font-medium tabular-nums align-top whitespace-nowrap">
-                        {formatCurrency(row.totalPaid)}
-                      </td>
-                      <td className="text-muted-foreground whitespace-nowrap">
-                        {payoutDate ? formatDate(payoutDate) : '—'}
-                      </td>
-                    </tr>
-                  );
-                }
-                if (row.type === 'picker_group') {
-                  return (
-                    <tr
-                      key={row.key}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setPickerPaymentDetailGroup(row)}
-                    >
-                      <td>
-                        <span className="font-medium text-foreground">{row.displayName}</span>
-                      </td>
-                      <td>
-                        <span className={cn('fv-badge', getCategoryColor('labour'))}>labour</span>
-                      </td>
-                      <td className="text-center font-medium tabular-nums align-top whitespace-nowrap">
-                        {formatCurrency(row.totalAmount)}
-                      </td>
-                      <td className="text-muted-foreground whitespace-nowrap">{formatDate(row.latestDate)}</td>
-                    </tr>
-                  );
-                }
-                const expense = row.expense;
-                const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
-                const collectionId = expense.meta?.harvestCollectionId;
-                const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
-                const isTomatoPickerLabour =
-                  expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
-                  Boolean(expense.meta?.tomatoHarvestSessionId);
-                const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
-
-                return (
-                  <tr
-                    key={row.key}
-                    className={
-                      isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''
-                    }
-                    onClick={
-                      isPickerPayout && collectionId
-                        ? () => setLaborPayoutDrawerCollectionId(collectionId)
-                        : () => {
-                            setExpenseDetail(row.expense);
-                            setExpenseDetailOpen(true);
-                          }
-                    }
-                  >
-                    <td className="min-w-0">
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium break-words text-foreground">{expense.description}</span>
-                          {isTomatoPickerLabour && (
-                            <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100">
-                              Auto-generated
-                            </span>
-                          )}
-                          {expense.pending && (
-                            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                              Syncing...
-                            </span>
-                          )}
-                        </div>
-                        {isTomatoPickerLabour && tomatoLabourNote ? (
-                          <span className="text-xs text-muted-foreground">{tomatoLabourNote}</span>
-                        ) : null}
-                        {isPickerPayout && collectionLabel && (
-                          <span className="text-xs text-muted-foreground">Collection: {collectionLabel}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <span className={cn('fv-badge', getCategoryColor(expense.category))}>
-                        {expense.category === 'picker_payout' ? 'labour' : expense.category}
-                      </span>
-                    </td>
-                    <td className="text-center font-medium tabular-nums align-top whitespace-nowrap">
-                      {formatCurrency(expense.amount)}
-                    </td>
-                    <td className="text-muted-foreground whitespace-nowrap">{formatDate(expense.date)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile — same auto column sizing; order: Description, Amount, Category, Date */}
-        <div className="md:hidden min-h-0">
-          <div className="overflow-x-auto scrollbar-thin min-h-0">
-            <div
-              className={cn(
-                'w-full min-w-0',
-                recentTableRows.length > 5 &&
-                  'max-h-[16.5rem] sm:max-h-[18.5rem] overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]',
-                recentTableRows.length <= 5 && 'overflow-y-visible',
-              )}
-            >
-                <table className="fv-table fv-recent-expenses-thead fv-expenses-table-with-seps fv-recent-expenses-auto-cols w-max min-w-full table-auto text-xs border-b-0 [&_th]:!px-2.5 [&_th]:!py-2.5 [&_td]:!px-2.5 [&_td]:!py-2.5">
-                  <thead>
-                    <tr>
-                      <th className="sticky top-0 z-10 w-auto text-left align-top text-[10px] text-foreground whitespace-nowrap">
-                        Description
-                      </th>
-                      <th className="sticky top-0 z-10 w-auto text-center align-top text-[10px] text-foreground whitespace-nowrap">
-                        Amount
-                      </th>
-                      <th className="sticky top-0 z-10 w-auto text-left align-top text-[10px] text-foreground whitespace-nowrap">
-                        Category
-                      </th>
-                      <th className="sticky top-0 z-10 w-auto text-left align-top text-[10px] text-foreground whitespace-nowrap">
-                        Date
-                      </th>
-                    </tr>
-                  </thead>
-            <tbody className="[&_tr]:bg-white dark:[&_tr]:bg-card [&_tr:hover]:bg-muted/30 dark:[&_tr:hover]:bg-muted/20">
-              {recentTableRows.map((row) => {
-                if (row.type === 'harvest_payout') {
-                  const payoutDate = row.harvestDate ? toDate(row.harvestDate) : null;
-                  return (
-                    <tr
-                      key={row.key}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setPayoutDetailCollectionId(row.collectionId)}
-                    >
-                      <td>
-                        <div>
-                          <span className="font-medium text-foreground">Picker Payout</span>
-                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{row.collectionName}</p>
-                        </div>
-                      </td>
-                      <td className="text-center text-[11px] font-medium tabular-nums align-top whitespace-nowrap">
-                        {formatCurrency(row.totalPaid)}
-                      </td>
-                      <td>
-                        <span className={cn('fv-badge text-[10px]', getCategoryColor('labour'))}>labour</span>
-                      </td>
-                      <td className="text-muted-foreground whitespace-nowrap text-[11px]">
-                        {payoutDate ? formatDate(payoutDate) : '—'}
-                      </td>
-                    </tr>
-                  );
-                }
-                if (row.type === 'picker_group') {
-                  return (
-                    <tr
-                      key={row.key}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setPickerPaymentDetailGroup(row)}
-                    >
-                      <td>
-                        <span className="font-medium text-foreground">{row.displayName}</span>
-                      </td>
-                      <td className="text-center text-[11px] font-medium tabular-nums align-top whitespace-nowrap">
-                        {formatCurrency(row.totalAmount)}
-                      </td>
-                      <td>
-                        <span className={cn('fv-badge text-[10px]', getCategoryColor('labour'))}>labour</span>
-                      </td>
-                      <td className="text-muted-foreground whitespace-nowrap text-[11px]">
-                        {formatDate(row.latestDate)}
-                      </td>
-                    </tr>
-                  );
-                }
-                const expense = row.expense;
-                const isPickerPayout = expense.meta?.source === 'harvest_wallet_picker_payment';
-                const collectionId = expense.meta?.harvestCollectionId;
-                const collectionLabel = collectionId ? collectionNameMap.get(collectionId) : null;
-                const isTomatoPickerLabour =
-                  expense.meta?.source === TOMATO_HARVEST_PICKER_LABOUR_EXPENSE_SOURCE &&
-                  Boolean(expense.meta?.tomatoHarvestSessionId);
-                const tomatoLabourNote = expense.meta?.harvestPickerLabourNote;
-
-                return (
-                  <tr
-                    key={row.key}
-                    className={
-                      isPickerPayout && collectionId ? 'cursor-pointer hover:bg-muted/50' : ''
-                    }
-                    onClick={
-                      isPickerPayout && collectionId
-                        ? () => setLaborPayoutDrawerCollectionId(collectionId)
-                        : () => {
-                            setExpenseDetail(row.expense);
-                            setExpenseDetailOpen(true);
-                          }
-                    }
-                  >
-                    <td>
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="font-medium break-words text-foreground leading-tight">{expense.description}</span>
-                          {isTomatoPickerLabour && (
-                            <span className="rounded-full border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[9px] font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-100">
-                              Auto-generated
-                            </span>
-                          )}
-                          {expense.pending && (
-                            <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
-                              Syncing...
-                            </span>
-                          )}
-                        </div>
-                        {isTomatoPickerLabour && tomatoLabourNote ? (
-                          <span className="text-[10px] text-muted-foreground line-clamp-2">{tomatoLabourNote}</span>
-                        ) : null}
-                        {isPickerPayout && collectionLabel && (
-                          <span className="text-[10px] text-muted-foreground line-clamp-1">Coll: {collectionLabel}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-center text-[11px] font-medium tabular-nums align-top whitespace-nowrap">
-                      {formatCurrency(expense.amount)}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <span
-                        className={cn(
-                          'fv-badge text-[10px]',
-                          getCategoryColor(expense.category === 'picker_payout' ? 'labour' : expense.category),
-                        )}
-                      >
-                        {expense.category === 'picker_payout' ? 'labour' : expense.category}
-                      </span>
-                    </td>
-                    <td className="text-muted-foreground whitespace-nowrap text-[11px]">{formatDate(expense.date)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-            </div>
-          </div>
-        </div>
-        </div>
+          <RecentExpensesTable
+            rows={recentTableRows}
+            isLoading={isLoading}
+            collectionNameMap={collectionNameMap}
+            formatCurrency={formatCurrency}
+            getCategoryColor={getCategoryColor}
+            onHarvestPayoutClick={(id) => setPayoutDetailCollectionId(id)}
+            onPickerGroupClick={(g) =>
+              setPickerPaymentDetailGroup({
+                collectionId: g.collectionId,
+                displayName: g.displayName,
+                totalAmount: g.totalAmount,
+                latestDate: g.latestDate,
+                expenses: g.expenses,
+              })
+            }
+            onExpenseOpen={(e) => {
+              setExpenseDetail(e);
+              setExpenseDetailOpen(true);
+            }}
+            onLaborPayoutOpen={(collectionId) => setLaborPayoutDrawerCollectionId(collectionId)}
+          />
         </div>
 
         {/* Expense by category — same title rhythm as Recent Expenses */}

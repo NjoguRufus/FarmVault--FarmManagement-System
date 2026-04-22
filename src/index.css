@@ -257,36 +257,6 @@
     @apply bg-muted/20;
   }
 
-  /* Recent Expenses: one shared table (border-collapse) so column rules are straight */
-  .fv-expenses-table-with-seps {
-    @apply border-collapse;
-  }
-  .fv-expenses-table-with-seps th:not(:first-child),
-  .fv-expenses-table-with-seps td:not(:first-child) {
-    @apply border-l border-border/60 dark:border-border/70;
-  }
-
-  /* Solid header (no transparent header tint) when thead is sticky over rows */
-  .fv-recent-expenses-thead thead th {
-    @apply border-b border-border bg-muted !important;
-    @apply text-foreground shadow-sm;
-  }
-  .dark .fv-recent-expenses-thead thead th {
-    @apply !bg-zinc-900;
-  }
-
-  /* Recent Expenses: column widths follow content; table is at least full width of the card */
-  .fv-recent-expenses-auto-cols {
-    width: max(100%, max-content);
-  }
-  .fv-recent-expenses-auto-cols td:first-child,
-  .fv-recent-expenses-auto-cols th:first-child {
-    @apply min-w-[9rem] max-w-none;
-  }
-  .fv-recent-expenses-auto-cols td {
-    @apply align-top;
-  }
-
   /* Status Badges */
   .fv-badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;

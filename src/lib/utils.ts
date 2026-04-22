@@ -25,6 +25,7 @@ const EXPENSE_CATEGORY_LABELS: Record<string, string> = {
   labour: "Labour",
   fertilizer: "Fertilizer",
   chemical: "Chemical",
+  tools: "Tools",
   fuel: "Fuel",
   other: "Other",
   space: "Crates Space",
