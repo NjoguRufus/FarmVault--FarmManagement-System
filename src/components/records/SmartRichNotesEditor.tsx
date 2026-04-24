@@ -198,14 +198,23 @@ function runSmartPass(root: HTMLElement) {
 
 function tryListContinue(e: React.KeyboardEvent<HTMLDivElement>, root: HTMLElement): boolean {
   if (e.key !== "Enter") return false;
+  
   const sel = window.getSelection();
   if (!sel?.rangeCount) return false;
+  
   const line = getLineDiv(root, sel);
   if (!line) return false;
 
   const text = (line.textContent || "").replace(/\u00a0/g, " ");
+  
+  const isNumberedList = /^(\s*)(\d+)\.\s/.test(text);
+  const isLetterList = /^(\s*)([A-Z])\.\s/.test(text) || /^(\s*)([a-z])\.\s/.test(text);
+  const isRomanList = /^(\s*)([IVXLCDM]+)\.\s/.test(text) || /^(\s*)([ivxlcdm]+)\)\s/.test(text);
+  
+  if (!isNumberedList && !isLetterList && !isRomanList) {
+    return false;
+  }
 
-  // numeric 1.
   let m = text.match(/^(\s*)(\d+)\.\s*(.*)$/);
   if (m) {
     const indent = m[1];
@@ -225,7 +234,6 @@ function tryListContinue(e: React.KeyboardEvent<HTMLDivElement>, root: HTMLEleme
     return true;
   }
 
-  // A. B.
   m = text.match(/^(\s*)([A-Z])\.\s*(.*)$/);
   if (m && m[2] >= "A" && m[2] <= "Z") {
     const indent = m[1];
@@ -248,7 +256,6 @@ function tryListContinue(e: React.KeyboardEvent<HTMLDivElement>, root: HTMLEleme
     return false;
   }
 
-  // a.
   m = text.match(/^(\s*)([a-z])\.\s*(.*)$/);
   if (m) {
     const indent = m[1];
@@ -271,52 +278,6 @@ function tryListContinue(e: React.KeyboardEvent<HTMLDivElement>, root: HTMLEleme
     return false;
   }
 
-  // a)
-  m = text.match(/^(\s*)([a-z])\)\s*(.*)$/);
-  if (m) {
-    const indent = m[1];
-    const letter = m[2];
-    const rest = m[3];
-    if (rest.trim() === "") {
-      e.preventDefault();
-      line.innerHTML = "<br>";
-      placeCaretInStart(line);
-      return true;
-    }
-    if (letter < "z") {
-      e.preventDefault();
-      const next = document.createElement("div");
-      next.textContent = `${indent}${String.fromCharCode(letter.charCodeAt(0) + 1)}) `;
-      line.parentNode?.insertBefore(next, line.nextSibling);
-      placeCaretAtEnd(next);
-      return true;
-    }
-    return false;
-  }
-
-  // i) roman lower
-  m = text.match(/^(\s*)([ivxlcdm]+)\)\s*(.*)$/i);
-  if (m) {
-    const indent = m[1];
-    const rom = m[2].toLowerCase();
-    const rest = m[3];
-    if (!ROMAN_LOWER.includes(rom)) return false;
-    if (rest.trim() === "") {
-      e.preventDefault();
-      line.innerHTML = "<br>";
-      placeCaretInStart(line);
-      return true;
-    }
-    const nxt = nextRoman(rom, false);
-    e.preventDefault();
-    const next = document.createElement("div");
-    next.textContent = `${indent}${nxt}) `;
-    line.parentNode?.insertBefore(next, line.nextSibling);
-    placeCaretAtEnd(next);
-    return true;
-  }
-
-  // I. II.
   m = text.match(/^(\s*)([IVXLCDM]+)\.\s*(.*)$/);
   if (m) {
     const indent = m[1];
@@ -375,10 +336,8 @@ function clampToolbarPosition(
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const half = opts.approxWidth / 2;
-  let x = left;
-  let y = top;
-  x = Math.min(vw - pad - half, Math.max(pad + half, x));
-  y = Math.max(pad, y);
+  let x = Math.min(vw - pad - half, Math.max(pad + half, left));
+  let y = Math.max(pad, top);
   if (y + opts.approxHeight > vh - pad) {
     y = Math.max(pad, vh - pad - opts.approxHeight);
   }
@@ -389,7 +348,6 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-/** Character offsets from start of root text (Range#toString), stable when wrapping keywords in spans. */
 function saveDomSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return null;
@@ -478,13 +436,14 @@ type Props = {
   onChange: (html: string) => void;
   placeholder?: string;
   className?: string;
-  /** Bump when server-loaded content should replace the editor (e.g. after fetch). */
   hydrateNonce: number;
 };
 
 export function SmartRichNotesEditor({ value, onChange, placeholder, className, hydrateNonce }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const smartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ✅ NEW: track whether the last keypress was Enter, to skip cursor restore in smart pass
+  const justPressedEnterRef = useRef(false);
   const selectionWasCollapsedRef = useRef(true);
   const suppressBlurToolbarRef = useRef(false);
   const [toolbar, setToolbar] = useState<{ top: number; left: number; visible: boolean }>({
@@ -492,8 +451,8 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     left: 0,
     visible: false,
   });
-  // Track which picker is open: 'highlight', 'color', or null
-  const [activePicker, setActivePicker] = useState<'highlight' | 'color' | null>(null);
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
   const [hasText, setHasText] = useState(false);
   const composing = useRef(false);
   const valueRef = useRef(value);
@@ -522,19 +481,23 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     onChange(el.innerHTML);
   }, [onChange]);
 
-  const scheduleSmart = useCallback(() => {
+  // ✅ FIXED: scheduleSmart now accepts a flag to skip cursor restoration
+  const scheduleSmart = useCallback((skipCursorRestore = false) => {
     if (smartTimer.current) clearTimeout(smartTimer.current);
     smartTimer.current = setTimeout(() => {
       const el = ref.current;
       if (!el) return;
       if (composing.current) return;
-      const snap = saveDomSelectionOffsets(el);
+
+      // Only save/restore cursor when NOT right after an Enter keypress
+      const snap = skipCursorRestore ? null : saveDomSelectionOffsets(el);
       runSmartPass(el);
       if (snap) {
         restoreDomSelectionOffsets(el, snap.start, snap.end);
         void el.focus({ preventScroll: true });
       }
       onChange(el.innerHTML);
+      justPressedEnterRef.current = false;
     }, 450);
   }, [onChange]);
 
@@ -545,63 +508,30 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     if (!sel || sel.isCollapsed || !el.contains(sel.anchorNode)) {
       selectionWasCollapsedRef.current = true;
       setToolbar((t) => ({ ...t, visible: false }));
-      setActivePicker(null);
-      return;
-    }
-
-    const becameExpanded = selectionWasCollapsedRef.current;
-
-    if (isAndroidWebView() && becameExpanded) {
-      suppressBlurToolbarRef.current = true;
-      el.blur();
-      window.setTimeout(() => {
-        el.focus({ preventScroll: true });
-        const s2 = window.getSelection();
-        let showed = false;
-        if (s2 && s2.rangeCount && el.contains(s2.anchorNode)) {
-          try {
-            const r0 = s2.getRangeAt(0);
-            const rect = r0.getBoundingClientRect();
-            if (rect.width > 0 || rect.height > 0) {
-              const above = rect.top - 52;
-              const rawLeft = rect.left + rect.width / 2;
-              const pos = clampToolbarPosition(rawLeft, above, { approxWidth: 360, approxHeight: 40 });
-              let top = pos.top;
-              if (top < 8) {
-                top = rect.bottom + 10;
-              }
-              const clamped = clampToolbarPosition(pos.left, top, { approxWidth: 360, approxHeight: 40 });
-              setToolbar({ top: clamped.top, left: clamped.left, visible: true });
-              showed = true;
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        selectionWasCollapsedRef.current = !showed;
-        window.setTimeout(() => {
-          suppressBlurToolbarRef.current = false;
-        }, 220);
-      }, 10);
+      setShowHighlightPicker(false);
+      setShowColorPicker(false);
       return;
     }
 
     selectionWasCollapsedRef.current = false;
 
-    const r = sel.getRangeAt(0).getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) {
-      selectionWasCollapsedRef.current = true;
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    
+    if (rect.width === 0 && rect.height === 0) {
       setToolbar((t) => ({ ...t, visible: false }));
       return;
     }
-    // Position toolbar above the selection (top edge of selection minus toolbar height)
-    let top = r.top - 44; // toolbar approx height ~40px plus a small gap
-    let left = r.left + r.width / 2;
-    // If not enough space above, place below
+    
+    let top = rect.top - 52;
+    let left = rect.left + rect.width / 2;
+    
     if (top < 8) {
-      top = r.bottom + 10;
+      top = rect.bottom + 12;
     }
-    const pos = clampToolbarPosition(left, top, { approxWidth: 360, approxHeight: 40 });
+    
+    const toolbarWidth = Math.min(420, window.innerWidth - 24);
+    const pos = clampToolbarPosition(left, top, { approxWidth: toolbarWidth, approxHeight: 44 });
     setToolbar({ top: pos.top, left: pos.left, visible: true });
   }, []);
 
@@ -626,7 +556,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
     document.execCommand(command, false, commandValue);
     emit();
-    updateToolbarPosition();
+    setTimeout(() => updateToolbarPosition(), 10);
   };
 
   const execHistory = (command: "undo" | "redo") => {
@@ -637,7 +567,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
       /* ignore */
     }
     emit();
-    updateToolbarPosition();
+    setTimeout(() => updateToolbarPosition(), 10);
   };
 
   const copySelection = useCallback(() => {
@@ -655,28 +585,29 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
   }, []);
 
-  const toggleHighlightPicker = () => {
-    if (activePicker === 'highlight') {
-      setActivePicker(null);
-    } else {
-      setActivePicker('highlight');
-    }
-  };
-
-  const toggleColorPicker = () => {
-    if (activePicker === 'color') {
-      setActivePicker(null);
-    } else {
-      setActivePicker('color');
-    }
-  };
-
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Tab") {
       if (handleTabIndent(e, ref.current!)) {
         emit();
         return;
       }
+      return;
+    }
+
+    if (e.key === "Enter") {
+      const isListContinued = tryListContinue(e, ref.current!);
+      if (isListContinued) {
+        e.preventDefault();
+        emit();
+        return;
+      }
+      // ✅ FIXED: mark that Enter was pressed and skip cursor restore in smart pass
+      justPressedEnterRef.current = true;
+      setTimeout(() => {
+        emit();
+        scheduleSmart(true); // pass true = skip cursor restore
+      }, 10);
+      return;
     }
 
     const mod = e.metaKey || e.ctrlKey;
@@ -702,8 +633,8 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
     if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
       e.preventDefault();
-      toggleColorPicker();
-      setToolbar((t) => ({ ...t, visible: true }));
+      setShowColorPicker(!showColorPicker);
+      setShowHighlightPicker(false);
       return;
     }
     if (mod && !e.shiftKey && e.key.toLowerCase() === "z") {
@@ -719,11 +650,6 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     if (mod && e.key.toLowerCase() === "y") {
       e.preventDefault();
       execHistory("redo");
-      return;
-    }
-
-    if (tryListContinue(e, ref.current!)) {
-      emit();
       return;
     }
   };
@@ -748,13 +674,26 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
   };
 
+  // Close pickers when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.picker-container')) {
+        setShowHighlightPicker(false);
+        setShowColorPicker(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
+
   return (
     <div className={cn("fv-smart-editor-wrap relative", className)}>
-      {/* Undo/Redo buttons on the editor itself - top right corner */}
-      <div className="fv-editor-history-row pointer-events-none flex justify-end gap-0.5 px-2 pb-1 sm:absolute sm:top-1 sm:right-3 sm:z-[4]">
+      {/* Undo/Redo buttons row */}
+      <div className="flex justify-end gap-1 pb-2 mb-2 border-b border-gray-100 sticky top-0 bg-white z-10">
         <button
           type="button"
-          className="fv-ft-btn pointer-events-auto h-7 w-7 opacity-90"
+          className="h-7 w-7 rounded-md bg-white shadow-sm border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
           title="Undo (⌘Z)"
           onClick={() => execHistory("undo")}
         >
@@ -762,7 +701,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
         </button>
         <button
           type="button"
-          className="fv-ft-btn pointer-events-auto h-7 w-7 opacity-90"
+          className="h-7 w-7 rounded-md bg-white shadow-sm border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
           title="Redo (⌘⇧Z)"
           onClick={() => execHistory("redo")}
         >
@@ -770,188 +709,183 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
         </button>
       </div>
 
-      {toolbar.visible ? (
+      {/* Editor content area */}
+      <div className="relative min-h-[200px]">
+        {!hasText && (
+          <div className="absolute left-0 right-0 top-0 text-muted-foreground/55 px-1 pt-1 text-base z-0 pointer-events-none select-none">
+            {placeholder}
+          </div>
+        )}
+
         <div
-          className="fv-format-toolbar"
+          ref={ref}
+          className="notebook-rich-editor notebook-textarea note-editor outline-none px-1"
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline
+          aria-label="Note body"
+          onInput={() => {
+            if (composing.current) return;
+            emit();
+            scheduleSmart();
+          }}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+            emit();
+            scheduleSmart();
+          }}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onMouseUp={updateToolbarPosition}
+          onKeyUp={updateToolbarPosition}
+          onBlur={() => {
+            setTimeout(() => {
+              if (suppressBlurToolbarRef.current) return;
+              const active = document.activeElement;
+              if (!active?.closest?.(".fixed")) {
+                setToolbar((t) => ({ ...t, visible: false }));
+                setShowHighlightPicker(false);
+                setShowColorPicker(false);
+              }
+            }, 150);
+          }}
+        />
+      </div>
+
+      {/* Floating Toolbar */}
+      {toolbar.visible && (
+        <div
+          className="fixed z-50 bg-white rounded-xl shadow-lg border border-gray-200"
           style={{
-            position: "fixed",
             top: toolbar.top,
             left: toolbar.left,
             transform: "translateX(-50%)",
-            zIndex: 60,
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: "4px",
-            background: "white",
-            borderRadius: "12px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            padding: "6px 12px",
-            border: "1px solid #e2e8f0",
           }}
           onPointerDown={(ev) => ev.preventDefault()}
         >
-          <button type="button" className="fv-ft-btn" title="Bold (⌘B)" onClick={() => exec("bold")}>
-            <Bold className="h-4 w-4" />
-          </button>
-          <button type="button" className="fv-ft-btn" title="Italic (⌘I)" onClick={() => exec("italic")}>
-            <Italic className="h-4 w-4" />
-          </button>
-          <button type="button" className="fv-ft-btn" title="Underline (⌘U)" onClick={() => exec("underline")}>
-            <Underline className="h-4 w-4" />
-          </button>
-          <div className="fv-ft-sep" style={{ width: "1px", height: "20px", background: "#e2e8f0", margin: "0 4px" }} />
-          <button type="button" className="fv-ft-btn" title="Copy" onClick={() => copySelection()}>
-            <Copy className="h-4 w-4" />
-          </button>
-          <div className="fv-ft-sep" style={{ width: "1px", height: "20px", background: "#e2e8f0", margin: "0 4px" }} />
-          
-          {/* Highlighter button with popup that closes color picker when opened */}
-          <div style={{ position: "relative" }}>
+          <div className="flex flex-row flex-nowrap items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1.5">
             <button
               type="button"
-              className="fv-ft-btn"
-              title="Highlight (⌘⇧H)"
-              onClick={toggleHighlightPicker}
-              style={{ display: "flex", alignItems: "center", gap: "2px", background: activePicker === 'highlight' ? "#e2e8f0" : "transparent" }}
+              className="h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors flex-shrink-0"
+              title="Bold (⌘B)"
+              onClick={() => exec("bold")}
             >
-              <Highlighter className="h-4 w-4" />
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              <Bold className="h-4 w-4" />
             </button>
-            {activePicker === 'highlight' && (
-              <div 
-                className="fv-ft-popover"
-                style={{ 
-                  position: "absolute", 
-                  top: "100%", 
-                  left: "0", 
-                  marginTop: "8px", 
-                  background: "white", 
-                  borderRadius: "8px", 
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", 
-                  padding: "8px", 
-                  display: "flex", 
-                  gap: "8px", 
-                  zIndex: 61,
-                  border: "1px solid #e2e8f0"
-                }}
-              >
-                {HIGHLIGHT_COLORS.map((c) => (
-                  <button
-                    key={c.name}
-                    type="button"
-                    className="fv-ft-swatch"
-                    style={{ background: c.value, width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "pointer" }}
-                    title={c.name}
-                    onClick={() => {
-                      exec("hiliteColor", c.value);
-                      setActivePicker(null);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Color picker button with popup that closes highlighter when opened */}
-          <div style={{ position: "relative" }}>
             <button
               type="button"
-              className="fv-ft-btn"
-              title="Text color (⌘⇧C)"
-              onClick={toggleColorPicker}
-              style={{ display: "flex", alignItems: "center", gap: "2px", background: activePicker === 'color' ? "#e2e8f0" : "transparent" }}
+              className="h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors flex-shrink-0"
+              title="Italic (⌘I)"
+              onClick={() => exec("italic")}
             >
-              <Palette className="h-4 w-4" />
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              <Italic className="h-4 w-4" />
             </button>
-            {activePicker === 'color' && (
-              <div 
-                className="fv-ft-popover"
-                style={{ 
-                  position: "absolute", 
-                  top: "100%", 
-                  left: "0", 
-                  marginTop: "8px", 
-                  background: "white", 
-                  borderRadius: "8px", 
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", 
-                  padding: "8px", 
-                  display: "flex", 
-                  gap: "8px", 
-                  zIndex: 61,
-                  border: "1px solid #e2e8f0"
+            <button
+              type="button"
+              className="h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors flex-shrink-0"
+              title="Underline (⌘U)"
+              onClick={() => exec("underline")}
+            >
+              <Underline className="h-4 w-4" />
+            </button>
+            
+            <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
+            
+            <button
+              type="button"
+              className="h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center hover:bg-gray-100 transition-colors flex-shrink-0"
+              title="Copy"
+              onClick={copySelection}
+            >
+              <Copy className="h-4 w-4" />
+            </button>
+            
+            <div className="w-px h-5 bg-gray-200 mx-1 flex-shrink-0" />
+            
+            {/* Highlighter button with picker */}
+            <div className="relative picker-container">
+              <button
+                type="button"
+                className={`h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center gap-0.5 transition-colors flex-shrink-0 ${showHighlightPicker ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+                title="Highlight (⌘⇧H)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHighlightPicker(!showHighlightPicker);
+                  setShowColorPicker(false);
                 }}
               >
-                {TEXT_COLORS.map((c) => (
-                  <button
-                    key={c.name}
-                    type="button"
-                    className="fv-ft-swatch fv-ft-swatch-ring"
-                    style={{ background: c.value, width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "pointer" }}
-                    title={c.name}
-                    onClick={() => {
-                      exec("foreColor", c.value);
-                      setActivePicker(null);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+                <Highlighter className="h-4 w-4" />
+                <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+              </button>
+              {showHighlightPicker && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex gap-2 z-[60] whitespace-nowrap">
+                  {HIGHLIGHT_COLORS.map((c) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className="w-7 h-7 rounded-md border border-gray-200 cursor-pointer transition-transform hover:scale-105 flex-shrink-0"
+                      style={{ background: c.value }}
+                      title={c.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        exec("hiliteColor", c.value);
+                        setShowHighlightPicker(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Color picker button with picker */}
+            <div className="relative picker-container">
+              <button
+                type="button"
+                className={`h-8 w-8 sm:h-7 sm:w-7 rounded-md flex items-center justify-center gap-0.5 transition-colors flex-shrink-0 ${showColorPicker ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+                title="Text color (⌘⇧C)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowColorPicker(!showColorPicker);
+                  setShowHighlightPicker(false);
+                }}
+              >
+                <Palette className="h-4 w-4" />
+                <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+              </button>
+              {showColorPicker && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex gap-2 z-[60] whitespace-nowrap">
+                  {TEXT_COLORS.map((c) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className="w-7 h-7 rounded-md border border-gray-200 cursor-pointer transition-transform hover:scale-105 flex-shrink-0"
+                      style={{ background: c.value }}
+                      title={c.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        exec("foreColor", c.value);
+                        setShowColorPicker(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      ) : null}
-
-      {!hasText ? (
-        <div className="fv-smart-editor-placeholder pointer-events-none select-none absolute left-0 right-0 top-0 text-muted-foreground/55 px-6 pt-2 text-lg z-0">
-          {placeholder}
-        </div>
-      ) : null}
-
-      <div
-        ref={ref}
-        className="notebook-rich-editor notebook-textarea note-editor"
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline
-        aria-label="Note body"
-        onInput={() => {
-          if (composing.current) return;
-          emit();
-          scheduleSmart();
-        }}
-        onCompositionStart={() => {
-          composing.current = true;
-        }}
-        onCompositionEnd={() => {
-          composing.current = false;
-          emit();
-          scheduleSmart();
-        }}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onMouseUp={updateToolbarPosition}
-        onKeyUp={updateToolbarPosition}
-        onBlur={() => {
-          setTimeout(() => {
-            if (suppressBlurToolbarRef.current) return;
-            const active = document.activeElement;
-            if (!active?.closest?.(".fv-format-toolbar")) {
-              setToolbar((t) => ({ ...t, visible: false }));
-              setActivePicker(null);
-            }
-          }, 150);
-        }}
-      />
+      )}
     </div>
   );
 }
 
 function escapeHtml(s: string) {
   return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
