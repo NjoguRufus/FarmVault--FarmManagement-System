@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Layers, Package, Plus, TrendingUp, Wallet } from 'lucide-react';
+import { HelpCircle, Layers, Package, Plus, TrendingUp, Wallet } from 'lucide-react';
+import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step } from 'react-joyride';
 import { useProject } from '@/contexts/ProjectContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -34,6 +35,9 @@ import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
 import { useTomatoSessionSummaries } from '@/hooks/useTomatoSessionSummary';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
+
+// Match the green from your fv-btn / New harvest button
+const PRIMARY_GREEN = '#16a34a'; // Tailwind green-600 — adjust to match your actual fv-btn color
 
 export default function TomatoHarvestListPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
@@ -137,6 +141,9 @@ export default function TomatoHarvestListPage() {
   const [newDate, setNewDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [newPickerRate, setNewPickerRate] = useState('30');
   const [creating, setCreating] = useState(false);
+  const [tourRun, setTourRun] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourSteps, setTourSteps] = useState<Step[]>([]);
 
   const openNew = () => {
     setNewDate(format(new Date(), 'yyyy-MM-dd'));
@@ -170,23 +177,118 @@ export default function TomatoHarvestListPage() {
     }
   };
 
+  const startTour = () => {
+    const baseSteps: Step[] = [
+      {
+        target: '[data-tour="tomato-harvest-tour-btn"]',
+        content: 'Use this button anytime to start the tomato harvest tour again.',
+        placement: 'bottom',
+        disableBeacon: true,
+      },
+      {
+        target: '[data-tour="tomato-harvest-new-btn"]',
+        content: 'Start a new tomato harvest session here.',
+        placement: 'bottom',
+      },
+      {
+        target: '[data-tour="tomato-harvest-list-stats"]',
+        content: 'These stats summarize buckets, crates, revenue, expenses, and net across sessions.',
+        placement: 'bottom',
+      },
+      {
+        target: '[data-tour="tomato-harvest-session-cards"]',
+        content: 'Open any session card to continue intake, market sales, and costs.',
+        placement: 'top',
+      },
+    ];
+    const available = baseSteps.filter((step) =>
+      typeof step.target === 'string' ? Boolean(document.querySelector(step.target)) : false,
+    );
+    if (available.length === 0) return;
+    setTourSteps(available);
+    setTourStepIndex(0);
+    setTourRun(true);
+  };
+
+  const onTourCallback = (data: CallBackProps) => {
+    const { action, index = 0, status, type } = data;
+    if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+      setTourRun(false);
+      setTourStepIndex(0);
+      return;
+    }
+    if (type === EVENTS.STEP_AFTER || type === EVENTS.TARGET_NOT_FOUND) {
+      const next = index + (action === ACTIONS.PREV ? -1 : 1);
+      if (next < 0 || next >= tourSteps.length) {
+        setTourRun(false);
+        setTourStepIndex(0);
+        return;
+      }
+      setTourStepIndex(next);
+    }
+  };
+
   if (!companyId) {
     return <p className="text-muted-foreground text-sm p-4">Sign in to manage tomato harvests.</p>;
   }
 
   return (
     <div className="space-y-5 sm:space-y-6 px-3 sm:px-4 lg:px-6 py-3 sm:py-4 animate-fade-in w-full">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button
-          type="button"
-          className="fv-btn fv-btn--secondary flex items-center gap-2"
-          onClick={() => navigate('/harvest-sales')}
+      <Joyride
+        steps={tourSteps}
+        run={tourRun}
+        stepIndex={tourStepIndex}
+        callback={onTourCallback}
+        continuous
+        showProgress
+        showSkipButton
+        disableOverlayClose
+        scrollToFirstStep
+        spotlightPadding={8}
+        locale={{
+          back: 'Previous',
+          close: 'Close',
+          last: 'Finish',
+          next: 'Next',
+          skip: 'Exit tour',
+        }}
+        styles={{
+          options: {
+            primaryColor: PRIMARY_GREEN,
+            zIndex: 10000,
+          },
+          buttonNext: {
+            backgroundColor: PRIMARY_GREEN,
+            color: '#ffffff',
+            fontSize: '14px',
+            padding: '8px 16px',
+            borderRadius: '6px',
+          },
+          buttonBack: {
+            color: PRIMARY_GREEN,
+            fontSize: '14px',
+            marginRight: '8px',
+          },
+          buttonSkip: {
+            color: '#6b7280',
+            fontSize: '14px',
+          },
+        }}
+      />
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+          onClick={startTour}
+          data-tour="tomato-harvest-tour-btn"
+          title="Take a Tour"
+          aria-label="Take a Tour"
         >
-          <ChevronLeft className="h-4 w-4" />
-          Harvest &amp; Sales
-        </button>
+          <HelpCircle className="h-4 w-4" />
+        </Button>
         {canCreate && projectId && isTomatoProject && (
-          <Button className="fv-btn" onClick={openNew} disabled={!canView}>
+          <Button className="fv-btn" onClick={openNew} disabled={!canView} data-tour="tomato-harvest-new-btn">
             <Plus className="h-4 w-4 mr-2" />
             New harvest
           </Button>
@@ -263,64 +365,62 @@ export default function TomatoHarvestListPage() {
               )}
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {summaries.map((s) => (
-                (() => {
-                  const computed = computedSummariesBySession.get(s.session.id);
-                  const cardRevenue = computed?.revenueTotal ?? 0;
-                  const cardNet = computed?.netProfit ?? 0;
-                  const cardPickers = computed?.pickersCount ?? s.pickerCount;
-                  return (
-                <button
-                  key={s.session.id}
-                  type="button"
-                  className="fv-card p-4 text-left w-full hover:border-primary/40 transition-colors space-y-2"
-                  onClick={() =>
-                    navigate(`${harvestNavPrefix}/tomato-harvest/${projectId}/session/${s.session.id}`)
-                  }
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-semibold">{sessionDisplayTitle(s.session)}</h3>
-                      <p className="text-xs text-muted-foreground">{formatDate(s.session.session_date)}</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-tour="tomato-harvest-session-cards">
+              {summaries.map((s) => {
+                const computed = computedSummariesBySession.get(s.session.id);
+                const cardRevenue = computed?.revenueTotal ?? 0;
+                const cardNet = computed?.netProfit ?? 0;
+                const cardPickers = computed?.pickersCount ?? s.pickerCount;
+                return (
+                  <button
+                    key={s.session.id}
+                    type="button"
+                    className="fv-card p-4 text-left w-full hover:border-primary/40 transition-colors space-y-2"
+                    onClick={() =>
+                      navigate(`${harvestNavPrefix}/tomato-harvest/${projectId}/session/${s.session.id}`)
+                    }
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold">{sessionDisplayTitle(s.session)}</h3>
+                        <p className="text-xs text-muted-foreground">{formatDate(s.session.session_date)}</p>
+                      </div>
+                      <span
+                        className={cn(
+                          'fv-badge shrink-0',
+                          s.session.status === 'completed' ? 'fv-badge--active' : 'fv-badge--warning',
+                        )}
+                      >
+                        {s.session.status === 'completed' ? 'Completed' : 'Collecting'}
+                        {s.dispatch?.status === 'pending' && s.session.sale_mode === 'market' ? ' · Market' : ''}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        'fv-badge shrink-0',
-                        s.session.status === 'completed' ? 'fv-badge--active' : 'fv-badge--warning',
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                      <span className="text-muted-foreground">Buckets</span>
+                      <span className="font-medium text-right">{s.totalBuckets}</span>
+                      <span className="text-muted-foreground">Crates</span>
+                      <span className="font-medium text-right">{s.session.packaging_count}</span>
+                      <span className="text-muted-foreground">Pickers</span>
+                      <span className="font-medium text-right">{cardPickers}</span>
+                      {canViewHarvestFinancials && (
+                        <>
+                          <span className="text-muted-foreground">Revenue</span>
+                          <span className="font-medium text-right">{formatKes(cardRevenue)}</span>
+                          <span className="text-muted-foreground">Net</span>
+                          <span
+                            className={cn(
+                              'font-medium text-right',
+                              cardNet >= 0 ? 'text-fv-info' : 'text-destructive',
+                            )}
+                          >
+                            {formatKes(cardNet)}
+                          </span>
+                        </>
                       )}
-                    >
-                      {s.session.status === 'completed' ? 'Completed' : 'Collecting'}
-                      {s.dispatch?.status === 'pending' && s.session.sale_mode === 'market' ? ' · Market' : ''}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                    <span className="text-muted-foreground">Buckets</span>
-                    <span className="font-medium text-right">{s.totalBuckets}</span>
-                    <span className="text-muted-foreground">Crates</span>
-                    <span className="font-medium text-right">{s.session.packaging_count}</span>
-                    <span className="text-muted-foreground">Pickers</span>
-                    <span className="font-medium text-right">{cardPickers}</span>
-                    {canViewHarvestFinancials && (
-                      <>
-                        <span className="text-muted-foreground">Revenue</span>
-                        <span className="font-medium text-right">{formatKes(cardRevenue)}</span>
-                        <span className="text-muted-foreground">Net</span>
-                        <span
-                          className={cn(
-                            'font-medium text-right',
-                            cardNet >= 0 ? 'text-fv-info' : 'text-destructive',
-                          )}
-                        >
-                          {formatKes(cardNet)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </button>
-                  );
-                })()
-              ))}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </>
