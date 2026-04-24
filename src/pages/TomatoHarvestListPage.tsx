@@ -36,8 +36,7 @@ import { useTomatoSessionSummaries } from '@/hooks/useTomatoSessionSummary';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
 
-// Match the green from your fv-btn / New harvest button
-const PRIMARY_GREEN = '#16a34a'; // Tailwind green-600 — adjust to match your actual fv-btn color
+const PRIMARY_GREEN = '#14532d';
 
 export default function TomatoHarvestListPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
