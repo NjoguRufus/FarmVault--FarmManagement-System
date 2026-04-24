@@ -66,6 +66,9 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   if (canOperations) {
     items.push({ label: 'Farm Work', path: '/staff/operations' });
   }
+  if (can('notes', 'view') || effectivePermissionKeys.has('notes.view')) {
+    items.push({ label: 'Notes', path: '/staff/notes' });
+  }
 
   const displayName = fullName ?? user?.email ?? 'User';
 
@@ -153,6 +156,8 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
                         ? 'staff-nav-expenses'
                         : item.path === '/staff/operations'
                         ? 'staff-nav-operations'
+                        : item.path === '/staff/notes'
+                        ? 'staff-nav-notes'
                         : undefined
                     }
                     className={cn(

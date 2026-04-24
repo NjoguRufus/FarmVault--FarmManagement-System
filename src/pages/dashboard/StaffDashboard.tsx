@@ -282,6 +282,7 @@ export function StaffDashboard() {
           recentActivityLogs={canSeeCropStage ? activityLogs : undefined}
           advisorySummary={canSeeCropStage ? advisorySummary ?? undefined : undefined}
           compact
+          showCompactMetrics
         />
       </div>
 
