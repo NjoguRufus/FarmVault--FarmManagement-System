@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useStaff } from '@/contexts/StaffContext';
+import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
 import { cn } from '@/lib/utils';
 import { resolveUserDisplayName } from '@/lib/userDisplayName';
 import {
@@ -41,6 +42,7 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
     isSwitchingProject,
   } = useProject();
   const { fullName, roleLabel, companyName: staffCompanyName, companyId } = useStaff();
+  const { hasProjectAccess } = useEmployeeAccess();
   const { startTour: startStaffTour } = useStaffTour();
   const {
     isTrial,
@@ -88,7 +90,9 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
   const displayRole = roleLabel ?? 'Staff';
 
   const companyProjects = companyId ? projects.filter((p) => p.companyId === companyId) : projects;
-  const selectableCompanyProjects = companyProjects.filter((p) => !isProjectClosed(p));
+  const selectableCompanyProjects = companyProjects.filter(
+    (p) => !isProjectClosed(p) && hasProjectAccess(p.id),
+  );
   const { data: farms = [] } = useQuery({
     queryKey: ['farms', companyId ?? ''],
     queryFn: async () => {

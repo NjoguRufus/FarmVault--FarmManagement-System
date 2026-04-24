@@ -89,6 +89,8 @@ export interface CropStageProgressCardProps {
   advisorySummary?: { headline: string; body: string; why: string } | null;
   /** Compact mode for staff: hide detailed metrics + Updates & Advisory drawer. */
   compact?: boolean;
+  /** When compact, still show day/finish metrics section. */
+  showCompactMetrics?: boolean;
 }
 
 const formatStageDate = (date: Date) =>
@@ -295,6 +297,7 @@ export function CropStageProgressCard({
   recentActivityLogs = null,
   advisorySummary = null,
   compact = false,
+  showCompactMetrics = false,
 }: CropStageProgressCardProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showRecents, setShowRecents] = useState(true);
@@ -377,7 +380,7 @@ export function CropStageProgressCard({
           daysCompleted={daysCompleted}
           estimatedFinish={estimatedHarvestStart}
           daysLeft={daysLeft}
-          showMetrics={!compact}
+          showMetrics={!compact || showCompactMetrics}
           primaryMetricLabel={compact ? undefined : `Day ${daysCompleted} of ${dayOf}`}
           primaryMetricDetail={compact ? undefined : `${daysCompleted} ${daysCompleted === 1 ? 'day' : 'days'} since planting`}
           secondaryMetricLabel={compact ? undefined : `Est. harvest start ${estimatedHarvestStart}`}
@@ -507,7 +510,7 @@ export function CropStageProgressCard({
         daysCompleted={daysCompleted}
         estimatedFinish={formatStageDate(stageDetails.end)}
         daysLeft={daysLeft}
-        showMetrics={!compact}
+          showMetrics={!compact || showCompactMetrics}
         className={hasDrawer ? progressCardClass : cardClasses}
       />
       {hasDrawer && (

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Scale, Package, Wallet, Tractor, Lock } from 'lucide-react';
+import { Home, Scale, Package, Wallet, Tractor, Lock, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -76,6 +76,9 @@ export function StaffBottomNav() {
   }
   if (canOperations) {
     items.push({ label: 'Farm Work', path: '/staff/operations', icon: Tractor });
+  }
+  if (can('notes', 'view') || effectivePermissionKeys.has('notes.view')) {
+    items.push({ label: 'Notes', path: '/staff/notes', icon: FileText });
   }
 
   if (items.length === 0) return null;
