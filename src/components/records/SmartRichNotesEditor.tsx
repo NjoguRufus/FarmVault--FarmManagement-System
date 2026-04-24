@@ -492,8 +492,8 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     left: 0,
     visible: false,
   });
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [highlightOpen, setHighlightOpen] = useState(false);
+  // Track which picker is open: 'highlight', 'color', or null
+  const [activePicker, setActivePicker] = useState<'highlight' | 'color' | null>(null);
   const [hasText, setHasText] = useState(false);
   const composing = useRef(false);
   const valueRef = useRef(value);
@@ -545,8 +545,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     if (!sel || sel.isCollapsed || !el.contains(sel.anchorNode)) {
       selectionWasCollapsedRef.current = true;
       setToolbar((t) => ({ ...t, visible: false }));
-      setPaletteOpen(false);
-      setHighlightOpen(false);
+      setActivePicker(null);
       return;
     }
 
@@ -566,12 +565,12 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
             if (rect.width > 0 || rect.height > 0) {
               const above = rect.top - 52;
               const rawLeft = rect.left + rect.width / 2;
-              const pos = clampToolbarPosition(rawLeft, above, { approxWidth: 360, approxHeight: 52 });
+              const pos = clampToolbarPosition(rawLeft, above, { approxWidth: 360, approxHeight: 40 });
               let top = pos.top;
               if (top < 8) {
                 top = rect.bottom + 10;
               }
-              const clamped = clampToolbarPosition(pos.left, top, { approxWidth: 360, approxHeight: 52 });
+              const clamped = clampToolbarPosition(pos.left, top, { approxWidth: 360, approxHeight: 40 });
               setToolbar({ top: clamped.top, left: clamped.left, visible: true });
               showed = true;
             }
@@ -595,12 +594,14 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
       setToolbar((t) => ({ ...t, visible: false }));
       return;
     }
-    let top = r.top - 48;
+    // Position toolbar above the selection (top edge of selection minus toolbar height)
+    let top = r.top - 44; // toolbar approx height ~40px plus a small gap
     let left = r.left + r.width / 2;
+    // If not enough space above, place below
     if (top < 8) {
       top = r.bottom + 10;
     }
-    const pos = clampToolbarPosition(left, top, { approxWidth: 360, approxHeight: 52 });
+    const pos = clampToolbarPosition(left, top, { approxWidth: 360, approxHeight: 40 });
     setToolbar({ top: pos.top, left: pos.left, visible: true });
   }, []);
 
@@ -654,6 +655,22 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
   }, []);
 
+  const toggleHighlightPicker = () => {
+    if (activePicker === 'highlight') {
+      setActivePicker(null);
+    } else {
+      setActivePicker('highlight');
+    }
+  };
+
+  const toggleColorPicker = () => {
+    if (activePicker === 'color') {
+      setActivePicker(null);
+    } else {
+      setActivePicker('color');
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Tab") {
       if (handleTabIndent(e, ref.current!)) {
@@ -685,7 +702,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     }
     if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
       e.preventDefault();
-      setPaletteOpen(true);
+      toggleColorPicker();
       setToolbar((t) => ({ ...t, visible: true }));
       return;
     }
@@ -733,6 +750,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
 
   return (
     <div className={cn("fv-smart-editor-wrap relative", className)}>
+      {/* Undo/Redo buttons on the editor itself - top right corner */}
       <div className="fv-editor-history-row pointer-events-none flex justify-end gap-0.5 px-2 pb-1 sm:absolute sm:top-1 sm:right-3 sm:z-[4]">
         <button
           type="button"
@@ -751,6 +769,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
           <Redo2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
       {toolbar.visible ? (
         <div
           className="fv-format-toolbar"
@@ -760,16 +779,18 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
             left: toolbar.left,
             transform: "translateX(-50%)",
             zIndex: 60,
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: "4px",
+            background: "white",
+            borderRadius: "12px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            padding: "6px 12px",
+            border: "1px solid #e2e8f0",
           }}
           onPointerDown={(ev) => ev.preventDefault()}
         >
-          <button type="button" className="fv-ft-btn" title="Undo (⌘Z)" onClick={() => execHistory("undo")}>
-            <Undo2 className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" className="fv-ft-btn" title="Redo (⌘⇧Z)" onClick={() => execHistory("redo")}>
-            <Redo2 className="h-3.5 w-3.5" />
-          </button>
-          <div className="fv-ft-sep" />
           <button type="button" className="fv-ft-btn" title="Bold (⌘B)" onClick={() => exec("bold")}>
             <Bold className="h-4 w-4" />
           </button>
@@ -779,53 +800,105 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
           <button type="button" className="fv-ft-btn" title="Underline (⌘U)" onClick={() => exec("underline")}>
             <Underline className="h-4 w-4" />
           </button>
-          <div className="fv-ft-sep" />
+          <div className="fv-ft-sep" style={{ width: "1px", height: "20px", background: "#e2e8f0", margin: "0 4px" }} />
           <button type="button" className="fv-ft-btn" title="Copy" onClick={() => copySelection()}>
             <Copy className="h-4 w-4" />
           </button>
-          <div className="fv-ft-sep" />
-          <details className="fv-ft-details" open={highlightOpen} onToggle={(ev) => setHighlightOpen((ev.target as HTMLDetailsElement).open)}>
-            <summary className="fv-ft-summary" title="Highlight">
+          <div className="fv-ft-sep" style={{ width: "1px", height: "20px", background: "#e2e8f0", margin: "0 4px" }} />
+          
+          {/* Highlighter button with popup that closes color picker when opened */}
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="fv-ft-btn"
+              title="Highlight (⌘⇧H)"
+              onClick={toggleHighlightPicker}
+              style={{ display: "flex", alignItems: "center", gap: "2px", background: activePicker === 'highlight' ? "#e2e8f0" : "transparent" }}
+            >
               <Highlighter className="h-4 w-4" />
               <ChevronDown className="h-3 w-3 opacity-60" />
-            </summary>
-            <div className="fv-ft-popover">
-              {HIGHLIGHT_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  type="button"
-                  className="fv-ft-swatch"
-                  style={{ background: c.value }}
-                  title={c.name}
-                  onClick={() => {
-                    exec("hiliteColor", c.value);
-                    setHighlightOpen(false);
-                  }}
-                />
-              ))}
-            </div>
-          </details>
-          <details className="fv-ft-details" open={paletteOpen} onToggle={(ev) => setPaletteOpen((ev.target as HTMLDetailsElement).open)}>
-            <summary className="fv-ft-summary" title="Text color (⌘⇧C)">
+            </button>
+            {activePicker === 'highlight' && (
+              <div 
+                className="fv-ft-popover"
+                style={{ 
+                  position: "absolute", 
+                  top: "100%", 
+                  left: "0", 
+                  marginTop: "8px", 
+                  background: "white", 
+                  borderRadius: "8px", 
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", 
+                  padding: "8px", 
+                  display: "flex", 
+                  gap: "8px", 
+                  zIndex: 61,
+                  border: "1px solid #e2e8f0"
+                }}
+              >
+                {HIGHLIGHT_COLORS.map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    className="fv-ft-swatch"
+                    style={{ background: c.value, width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "pointer" }}
+                    title={c.name}
+                    onClick={() => {
+                      exec("hiliteColor", c.value);
+                      setActivePicker(null);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Color picker button with popup that closes highlighter when opened */}
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="fv-ft-btn"
+              title="Text color (⌘⇧C)"
+              onClick={toggleColorPicker}
+              style={{ display: "flex", alignItems: "center", gap: "2px", background: activePicker === 'color' ? "#e2e8f0" : "transparent" }}
+            >
               <Palette className="h-4 w-4" />
               <ChevronDown className="h-3 w-3 opacity-60" />
-            </summary>
-            <div className="fv-ft-popover">
-              {TEXT_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  type="button"
-                  className="fv-ft-swatch fv-ft-swatch-ring"
-                  style={{ background: c.value }}
-                  title={c.name}
-                  onClick={() => {
-                    exec("foreColor", c.value);
-                    setPaletteOpen(false);
-                  }}
-                />
-              ))}
-            </div>
-          </details>
+            </button>
+            {activePicker === 'color' && (
+              <div 
+                className="fv-ft-popover"
+                style={{ 
+                  position: "absolute", 
+                  top: "100%", 
+                  left: "0", 
+                  marginTop: "8px", 
+                  background: "white", 
+                  borderRadius: "8px", 
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", 
+                  padding: "8px", 
+                  display: "flex", 
+                  gap: "8px", 
+                  zIndex: 61,
+                  border: "1px solid #e2e8f0"
+                }}
+              >
+                {TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    className="fv-ft-swatch fv-ft-swatch-ring"
+                    style={{ background: c.value, width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #e2e8f0", cursor: "pointer" }}
+                    title={c.name}
+                    onClick={() => {
+                      exec("foreColor", c.value);
+                      setActivePicker(null);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -866,8 +939,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
             const active = document.activeElement;
             if (!active?.closest?.(".fv-format-toolbar")) {
               setToolbar((t) => ({ ...t, visible: false }));
-              setPaletteOpen(false);
-              setHighlightOpen(false);
+              setActivePicker(null);
             }
           }, 150);
         }}
