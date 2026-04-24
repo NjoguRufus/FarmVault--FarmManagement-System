@@ -5,6 +5,33 @@
   gap: 12px;
   padding-bottom: 32px;
   width: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.notebook-shell * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Rich text surface: selectable text, no iOS callout on the field itself */
+.note-editor {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: none;
+}
+
+/* Inline images pasted into the note body (not attachment cards) */
+.note-editor img {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+  max-width: 100%;
+}
+
+/* Attachment thumbnails: suppress system “save image” long-press; drag uses the card layer */
+.fv-attachment img,
+.fv-attachment-body img {
+  -webkit-touch-callout: none;
 }
 
 .notes-editor-wrapper {
@@ -107,6 +134,9 @@
   font-size: 22px;
   font-weight: 650;
   background: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: none;
 }
 
 .notebook-textarea-wrap {
@@ -117,6 +147,17 @@
 .fv-smart-editor-wrap {
   width: 100%;
   min-height: 80vh;
+}
+
+.fv-editor-history-row .fv-ft-btn {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
+}
+
+.dark .fv-editor-history-row .fv-ft-btn {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(17, 24, 39, 0.65);
 }
 
 .notebook-rich-editor.notebook-textarea {
@@ -196,6 +237,10 @@
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+  touch-action: manipulation;
+  max-width: min(100vw - 16px, 380px);
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .dark .fv-format-toolbar {

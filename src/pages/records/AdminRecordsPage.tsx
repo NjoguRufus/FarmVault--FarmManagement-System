@@ -31,7 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { FARM_NOTEBOOK_GENERAL_SLUG } from '@/constants/farmNotebook';
-import { resolveNotesBasePath } from '@/lib/routing/farmerAppPaths';
+import { isStaffPersonalNotebookPath, resolveNotesBasePath } from '@/lib/routing/farmerAppPaths';
 import SeasonChallengesPage from '@/pages/SeasonChallengesPage';
 import {
   listFarmNotebookAdminNotes,
@@ -59,6 +59,8 @@ type NotebookEntryRow = {
   updated_at?: string | null;
   source?: string | null;
   is_admin_note?: boolean | null;
+  visibility_scope?: string | null;
+  staff_owner_user_id?: string | null;
 };
 
 type CropStats = { count: number; lastActivity: string | null };
@@ -67,6 +69,12 @@ type CropStats = { count: number; lastActivity: string | null };
 function notebookEntryPathSlug(cropSlug: string | null | undefined): string {
   const s = String(cropSlug ?? '').trim();
   return s ? encodeURIComponent(s) : FARM_NOTEBOOK_GENERAL_SLUG;
+}
+
+function shortStaffOwnerLabel(userId: string | null | undefined): string {
+  const s = String(userId ?? '').trim();
+  if (!s) return 'Member';
+  return s.length <= 12 ? s : `${s.slice(0, 8)}…`;
 }
 
 function formatRelativeTime(iso: string | null): string {
@@ -96,6 +104,18 @@ export default function AdminRecordsPage() {
   const { authReady, user } = useAuth();
   const navigate = useNavigate();
   const { isDeveloper, companyId: scopeCompanyId } = useCompanyScope();
+  const staffPersonalNotebook = isStaffPersonalNotebookPath(location.pathname);
+  const isCompanyAdminUser = useMemo(() => {
+    const r = String(user?.role ?? '').toLowerCase();
+    return (
+      r === 'company-admin' ||
+      r === 'company_admin' ||
+      r === 'admin' ||
+      r === 'owner'
+    );
+  }, [user?.role]);
+  const showStaffNotesSnapshot =
+    !staffPersonalNotebook && (isDeveloper || isCompanyAdminUser);
   const { activeProject, activeFarmId } = useProject();
   const queryClient = useQueryClient();
 
@@ -161,6 +181,10 @@ export default function AdminRecordsPage() {
       const projectId = activeProject?.id ?? null;
       if (farmId) insertRow.farm_id = farmId;
       if (projectId) insertRow.project_id = projectId;
+      if (staffPersonalNotebook) {
+        insertRow.visibility_scope = 'staff_personal';
+        insertRow.staff_owner_user_id = user.id;
+      }
 
       const { data, error } = await db
         .public()
@@ -274,15 +298,21 @@ export default function AdminRecordsPage() {
   };
 
   const cropStatsQuery = useQuery({
-    queryKey: ['records', 'notebook', 'crop-stats', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
+    queryKey: [
+      'records',
+      'notebook',
+      'crop-stats',
+      isDeveloper ? 'developer' : String(scopeCompanyId ?? ''),
+      staffPersonalNotebook ? 'staff-personal' : 'company',
+    ],
     enabled: authReady && companyReady,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<Record<string, CropStats>> => {
-      const { data, error } = await db
-        .public()
-        .from('farm_notebook_entries')
-        .select('crop_slug, created_at');
+      let q = db.public().from('farm_notebook_entries').select('crop_slug, created_at');
+      if (staffPersonalNotebook) q = q.eq('visibility_scope', 'staff_personal');
+      else q = q.neq('visibility_scope', 'staff_personal');
+      const { data, error } = await q;
       if (error) throw error;
 
       const stats: Record<string, CropStats> = {};
@@ -301,17 +331,53 @@ export default function AdminRecordsPage() {
   });
 
   const recentNotesQuery = useQuery({
-    queryKey: ['records', 'notebook', 'recent-notes', isDeveloper ? 'developer' : String(scopeCompanyId ?? '')],
+    queryKey: [
+      'records',
+      'notebook',
+      'recent-notes',
+      isDeveloper ? 'developer' : String(scopeCompanyId ?? ''),
+      staffPersonalNotebook ? 'staff-personal' : 'company',
+    ],
     enabled: authReady && companyReady,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    queryFn: async (): Promise<NotebookEntryRow[]> => {
+      let q = db
+        .public()
+        .from('farm_notebook_entries')
+        .select(
+          'id, crop_slug, title, content, company_id, created_at, updated_at, source, is_admin_note, visibility_scope, staff_owner_user_id',
+        )
+        .order('updated_at', { ascending: false })
+        .limit(40);
+      if (staffPersonalNotebook) q = q.eq('visibility_scope', 'staff_personal');
+      else q = q.neq('visibility_scope', 'staff_personal');
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data as NotebookEntryRow[]) ?? [];
+    },
+  });
+
+  const staffPersonalNotesAdminQuery = useQuery({
+    queryKey: [
+      'records',
+      'notebook',
+      'staff-personal-admin-snapshot',
+      isDeveloper ? 'developer' : String(scopeCompanyId ?? ''),
+    ],
+    enabled: authReady && companyReady && showStaffNotesSnapshot,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotebookEntryRow[]> => {
       const { data, error } = await db
         .public()
         .from('farm_notebook_entries')
-        .select('id, crop_slug, title, content, company_id, created_at, updated_at, source, is_admin_note')
+        .select(
+          'id, crop_slug, title, content, company_id, created_at, updated_at, source, is_admin_note, visibility_scope, staff_owner_user_id',
+        )
+        .eq('visibility_scope', 'staff_personal')
         .order('updated_at', { ascending: false })
-        .limit(40);
+        .limit(48);
       if (error) throw error;
       return (data as NotebookEntryRow[]) ?? [];
     },
@@ -564,10 +630,12 @@ export default function AdminRecordsPage() {
             </span>
             <div>
               <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[34px]">
-                Farm notebook
+                {staffPersonalNotebook ? 'My notebook' : 'Farm notebook'}
               </h1>
               <p className="text-sm leading-relaxed text-muted-foreground sm:text-[15px]">
-                Crops, your notes, and season challenges — organized in one place.
+                {staffPersonalNotebook
+                  ? 'Your private notes — only you and company admins can open them. Same editor as the shared farm notebook.'
+                  : 'Crops, your notes, and season challenges — organized in one place.'}
               </p>
             </div>
           </div>
@@ -712,6 +780,36 @@ export default function AdminRecordsPage() {
           </TabsContent>
 
           <TabsContent value="notes" className="mt-0 space-y-6">
+            {showStaffNotesSnapshot &&
+            staffPersonalNotesAdminQuery.isSuccess &&
+            (staffPersonalNotesAdminQuery.data?.length ?? 0) > 0 ? (
+              <section className={cn(glassCard(), 'p-6 space-y-4')}>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Staff notes</h2>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                    Notes your team created in the staff app (private to each person). This block only appears when
+                    someone has added at least one. To push a message to staff, use{' '}
+                    <span className="font-medium text-foreground">Admin notes</span> when that tab is available.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                  {staffPersonalNotesAdminQuery.data!.map((n) => (
+                    <RecordNotebookEntryCard
+                      key={`staff-${n.id}`}
+                      to={`${notesBasePath}/${notebookEntryPathSlug(n.crop_slug)}/${encodeURIComponent(n.id)}`}
+                      title={(n.title ?? '').trim() || 'Untitled'}
+                      content={n.content}
+                      cropSlug={n.crop_slug}
+                      updatedAt={n.updated_at ?? null}
+                      createdAt={n.created_at ?? null}
+                      isFromDeveloper={String(n.source ?? '').toLowerCase() === 'developer'}
+                      topBadge={`Staff · ${shortStaffOwnerLabel(n.staff_owner_user_id)}`}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             {recentNotesQuery.isLoading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -804,9 +902,14 @@ export default function AdminRecordsPage() {
                               {(n.title ?? '').trim() || 'Untitled'}
                             </Link>
                           </div>
-                          <p className="mt-2 text-sm text-muted-foreground line-clamp-4">
-                            {(n.content ?? '').trim() || 'No content yet…'}
-                          </p>
+                          {(n.content ?? '').trim() ? (
+                            <div
+                              className="mt-2 text-sm text-muted-foreground line-clamp-4 whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{ __html: String(n.content ?? '') }}
+                            />
+                          ) : (
+                            <p className="mt-2 text-sm text-muted-foreground">No content yet…</p>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -857,9 +960,14 @@ export default function AdminRecordsPage() {
                               {(n.title ?? '').trim() || 'Untitled'}
                             </p>
                           </div>
-                          <p className="mt-2 text-sm text-muted-foreground line-clamp-6 whitespace-pre-wrap">
-                            {(n.content ?? '').trim() || 'No content yet…'}
-                          </p>
+                          {(n.content ?? '').trim() ? (
+                            <div
+                              className="mt-2 text-sm text-muted-foreground line-clamp-6 whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{ __html: String(n.content ?? '') }}
+                            />
+                          ) : (
+                            <p className="mt-2 text-sm text-muted-foreground">No content yet…</p>
+                          )}
                         </li>
                       ))}
                     </ul>

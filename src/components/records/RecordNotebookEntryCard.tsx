@@ -31,6 +31,8 @@ export interface RecordNotebookEntryCardProps {
   updatedAt: string | null;
   createdAt: string | null;
   isFromDeveloper?: boolean;
+  /** Optional pill above the title (e.g. staff notebook badge). */
+  topBadge?: string | null;
 }
 
 /**
@@ -44,6 +46,7 @@ export function RecordNotebookEntryCard({
   updatedAt,
   createdAt,
   isFromDeveloper,
+  topBadge,
 }: RecordNotebookEntryCardProps) {
   const updated = updatedAt ?? createdAt;
   const displayTitle = title.trim() || 'Untitled';
@@ -73,6 +76,11 @@ export function RecordNotebookEntryCard({
       {isFromDeveloper ? (
         <div className="relative mb-2 w-fit rounded-md bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
           From Developer
+        </div>
+      ) : null}
+      {topBadge ? (
+        <div className="relative mb-2 w-fit rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+          {topBadge}
         </div>
       ) : null}
 
