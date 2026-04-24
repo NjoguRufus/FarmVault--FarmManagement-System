@@ -1,5 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bold, Italic, Underline, Highlighter, Palette, ChevronDown } from "lucide-react";
+import {
+  Bold,
+  Copy,
+  Italic,
+  Underline,
+  Highlighter,
+  Palette,
+  ChevronDown,
+  Undo2,
+  Redo2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { looksLikeRichHtml, plainTextToEditorHtml } from "@/lib/notebook/htmlToPlainText";
 
@@ -330,6 +341,126 @@ function tryListContinue(e: React.KeyboardEvent<HTMLDivElement>, root: HTMLEleme
   return false;
 }
 
+function isAndroidWebView(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent);
+}
+
+function fallbackCopyPlainText(text: string) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  ta.style.top = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand("copy");
+    toast.success("Copied");
+  } catch {
+    toast.error("Copy failed");
+  }
+  document.body.removeChild(ta);
+}
+
+function clampToolbarPosition(
+  left: number,
+  top: number,
+  opts: { approxWidth: number; approxHeight: number },
+): { left: number; top: number } {
+  if (typeof window === "undefined") return { left, top };
+  const pad = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const half = opts.approxWidth / 2;
+  let x = left;
+  let y = top;
+  x = Math.min(vw - pad - half, Math.max(pad + half, x));
+  y = Math.max(pad, y);
+  if (y + opts.approxHeight > vh - pad) {
+    y = Math.max(pad, vh - pad - opts.approxHeight);
+  }
+  return { left: x, top: y };
+}
+
+function clampInt(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/** Character offsets from start of root text (Range#toString), stable when wrapping keywords in spans. */
+function saveDomSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+
+  const pre = range.cloneRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  pre.setEnd(range.endContainer, range.endOffset);
+  const end = pre.toString().length;
+  return { start, end };
+}
+
+function restoreDomSelectionOffsets(root: HTMLElement, start: number, end: number): void {
+  const orderedStart = Math.min(start, end);
+  const orderedEnd = Math.max(start, end);
+
+  const textNodes: { node: Text; len: number }[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n: Node | null;
+  while ((n = walker.nextNode())) {
+    const tn = n as Text;
+    textNodes.push({ node: tn, len: tn.textContent?.length ?? 0 });
+  }
+
+  const total = textNodes.reduce((s, x) => s + x.len, 0);
+  if (total === 0) return;
+
+  const s0 = clampInt(orderedStart, 0, total);
+  const e0 = clampInt(orderedEnd, 0, total);
+
+  let pos = 0;
+  let startNode: Text | null = null;
+  let startOff = 0;
+  let endNode: Text | null = null;
+  let endOff = 0;
+
+  for (const { node, len } of textNodes) {
+    if (startNode === null && pos + len >= s0) {
+      startNode = node;
+      startOff = s0 - pos;
+    }
+    if (endNode === null && pos + len >= e0) {
+      endNode = node;
+      endOff = e0 - pos;
+      break;
+    }
+    pos += len;
+  }
+
+  if (!startNode || !endNode) return;
+
+  const maxS = startNode.textContent?.length ?? 0;
+  const maxE = endNode.textContent?.length ?? 0;
+  startOff = clampInt(startOff, 0, maxS);
+  endOff = clampInt(endOff, 0, maxE);
+
+  const sel = window.getSelection();
+  const r = document.createRange();
+  try {
+    r.setStart(startNode, startOff);
+    r.setEnd(endNode, endOff);
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+  } catch {
+    /* ignore */
+  }
+}
+
 function handleTabIndent(e: React.KeyboardEvent, root: HTMLElement) {
   if (e.key !== "Tab") return false;
   const sel = window.getSelection();
@@ -354,6 +485,8 @@ type Props = {
 export function SmartRichNotesEditor({ value, onChange, placeholder, className, hydrateNonce }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const smartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionWasCollapsedRef = useRef(true);
+  const suppressBlurToolbarRef = useRef(false);
   const [toolbar, setToolbar] = useState<{ top: number; left: number; visible: boolean }>({
     top: 0,
     left: 0,
@@ -394,7 +527,13 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     smartTimer.current = setTimeout(() => {
       const el = ref.current;
       if (!el) return;
+      if (composing.current) return;
+      const snap = saveDomSelectionOffsets(el);
       runSmartPass(el);
+      if (snap) {
+        restoreDomSelectionOffsets(el, snap.start, snap.end);
+        void el.focus({ preventScroll: true });
+      }
       onChange(el.innerHTML);
     }, 450);
   }, [onChange]);
@@ -404,19 +543,65 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     if (!el) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !el.contains(sel.anchorNode)) {
+      selectionWasCollapsedRef.current = true;
       setToolbar((t) => ({ ...t, visible: false }));
       setPaletteOpen(false);
       setHighlightOpen(false);
       return;
     }
+
+    const becameExpanded = selectionWasCollapsedRef.current;
+
+    if (isAndroidWebView() && becameExpanded) {
+      suppressBlurToolbarRef.current = true;
+      el.blur();
+      window.setTimeout(() => {
+        el.focus({ preventScroll: true });
+        const s2 = window.getSelection();
+        let showed = false;
+        if (s2 && s2.rangeCount && el.contains(s2.anchorNode)) {
+          try {
+            const r0 = s2.getRangeAt(0);
+            const rect = r0.getBoundingClientRect();
+            if (rect.width > 0 || rect.height > 0) {
+              const above = rect.top - 52;
+              const rawLeft = rect.left + rect.width / 2;
+              const pos = clampToolbarPosition(rawLeft, above, { approxWidth: 360, approxHeight: 52 });
+              let top = pos.top;
+              if (top < 8) {
+                top = rect.bottom + 10;
+              }
+              const clamped = clampToolbarPosition(pos.left, top, { approxWidth: 360, approxHeight: 52 });
+              setToolbar({ top: clamped.top, left: clamped.left, visible: true });
+              showed = true;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        selectionWasCollapsedRef.current = !showed;
+        window.setTimeout(() => {
+          suppressBlurToolbarRef.current = false;
+        }, 220);
+      }, 10);
+      return;
+    }
+
+    selectionWasCollapsedRef.current = false;
+
     const r = sel.getRangeAt(0).getBoundingClientRect();
     if (r.width === 0 && r.height === 0) {
+      selectionWasCollapsedRef.current = true;
       setToolbar((t) => ({ ...t, visible: false }));
       return;
     }
-    const top = r.top - 48;
-    const left = r.left + r.width / 2;
-    setToolbar({ top, left, visible: true });
+    let top = r.top - 48;
+    let left = r.left + r.width / 2;
+    if (top < 8) {
+      top = r.bottom + 10;
+    }
+    const pos = clampToolbarPosition(left, top, { approxWidth: 360, approxHeight: 52 });
+    setToolbar({ top: pos.top, left: pos.left, visible: true });
   }, []);
 
   useEffect(() => {
@@ -442,6 +627,32 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
     emit();
     updateToolbarPosition();
   };
+
+  const execHistory = (command: "undo" | "redo") => {
+    ref.current?.focus();
+    try {
+      document.execCommand(command, false, undefined);
+    } catch {
+      /* ignore */
+    }
+    emit();
+    updateToolbarPosition();
+  };
+
+  const copySelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const text = sel.toString();
+    if (!text.trim()) return;
+    if (navigator.clipboard && window.isSecureContext) {
+      void navigator.clipboard.writeText(text).then(
+        () => toast.success("Copied"),
+        () => fallbackCopyPlainText(text),
+      );
+    } else {
+      fallbackCopyPlainText(text);
+    }
+  }, []);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Tab") {
@@ -478,6 +689,21 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
       setToolbar((t) => ({ ...t, visible: true }));
       return;
     }
+    if (mod && !e.shiftKey && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      execHistory("undo");
+      return;
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      execHistory("redo");
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      execHistory("redo");
+      return;
+    }
 
     if (tryListContinue(e, ref.current!)) {
       emit();
@@ -507,6 +733,24 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
 
   return (
     <div className={cn("fv-smart-editor-wrap relative", className)}>
+      <div className="fv-editor-history-row pointer-events-none flex justify-end gap-0.5 px-2 pb-1 sm:absolute sm:top-1 sm:right-3 sm:z-[4]">
+        <button
+          type="button"
+          className="fv-ft-btn pointer-events-auto h-7 w-7 opacity-90"
+          title="Undo (⌘Z)"
+          onClick={() => execHistory("undo")}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          className="fv-ft-btn pointer-events-auto h-7 w-7 opacity-90"
+          title="Redo (⌘⇧Z)"
+          onClick={() => execHistory("redo")}
+        >
+          <Redo2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
       {toolbar.visible ? (
         <div
           className="fv-format-toolbar"
@@ -517,8 +761,15 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
             transform: "translateX(-50%)",
             zIndex: 60,
           }}
-          onMouseDown={(ev) => ev.preventDefault()}
+          onPointerDown={(ev) => ev.preventDefault()}
         >
+          <button type="button" className="fv-ft-btn" title="Undo (⌘Z)" onClick={() => execHistory("undo")}>
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" className="fv-ft-btn" title="Redo (⌘⇧Z)" onClick={() => execHistory("redo")}>
+            <Redo2 className="h-3.5 w-3.5" />
+          </button>
+          <div className="fv-ft-sep" />
           <button type="button" className="fv-ft-btn" title="Bold (⌘B)" onClick={() => exec("bold")}>
             <Bold className="h-4 w-4" />
           </button>
@@ -527,6 +778,10 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
           </button>
           <button type="button" className="fv-ft-btn" title="Underline (⌘U)" onClick={() => exec("underline")}>
             <Underline className="h-4 w-4" />
+          </button>
+          <div className="fv-ft-sep" />
+          <button type="button" className="fv-ft-btn" title="Copy" onClick={() => copySelection()}>
+            <Copy className="h-4 w-4" />
           </button>
           <div className="fv-ft-sep" />
           <details className="fv-ft-details" open={highlightOpen} onToggle={(ev) => setHighlightOpen((ev.target as HTMLDetailsElement).open)}>
@@ -582,7 +837,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
 
       <div
         ref={ref}
-        className="notebook-rich-editor notebook-textarea"
+        className="notebook-rich-editor notebook-textarea note-editor"
         contentEditable
         suppressContentEditableWarning
         role="textbox"
@@ -607,6 +862,7 @@ export function SmartRichNotesEditor({ value, onChange, placeholder, className, 
         onKeyUp={updateToolbarPosition}
         onBlur={() => {
           setTimeout(() => {
+            if (suppressBlurToolbarRef.current) return;
             const active = document.activeElement;
             if (!active?.closest?.(".fv-format-toolbar")) {
               setToolbar((t) => ({ ...t, visible: false }));

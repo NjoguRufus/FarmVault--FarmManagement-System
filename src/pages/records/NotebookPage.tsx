@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Paperclip, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Paperclip, Save, Share2, Trash2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { db, requireCompanyId } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { useCompanyScope } from "@/hooks/useCompanyScope";
@@ -17,13 +18,22 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import type { NoteAttachmentLayout } from "@/components/records/DraggableAttachment";
 import { DraggableAttachment } from "@/components/records/DraggableAttachment";
 import { SmartRichNotesEditor } from "@/components/records/SmartRichNotesEditor";
-import { resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
+import { isStaffPersonalNotebookPath, resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
 import { parseNotebookContentToBlocks } from "@/lib/notebook/parseNotebookContentToBlocks";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./notebookPage.css";
@@ -33,6 +43,8 @@ import {
   prepareImageForStorageUpload,
   withNotebookUploadSlot,
 } from "@/lib/notebook/notebookAttachmentUpload";
+import { listEmployees } from "@/services/employeesSupabaseService";
+import { companySendNotebookNoteToStaffUser } from "@/services/notebookAdminNotesService";
 
 const MAX_NOTEBOOK_ATTACHMENTS = 10;
 
@@ -73,6 +85,7 @@ export default function NotebookPage() {
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
   const notesBase = resolveNotesBasePath(location.pathname);
+  const staffPersonalNotebook = isStaffPersonalNotebookPath(location.pathname);
 
   const [noteId, setNoteId] = useState<string | null>(noteIdParam && noteIdParam !== "new" ? noteIdParam : null);
   const [loading, setLoading] = useState<boolean>(() => !!noteIdParam && noteIdParam !== "new");
@@ -89,6 +102,10 @@ export default function NotebookPage() {
   const [currentNoteCompanyId, setCurrentNoteCompanyId] = useState<string | null>(null);
   const [noteSource, setNoteSource] = useState<string | null>(null);
   const [editorHydrate, setEditorHydrate] = useState(0);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareTargetClerkId, setShareTargetClerkId] = useState("");
+  const [shareSending, setShareSending] = useState(false);
+  const queryClient = useQueryClient();
   const [draftAttachmentScopeId] = useState(() => {
     return typeof crypto !== "undefined" && "randomUUID" in crypto
       ? (crypto as any).randomUUID()
@@ -159,10 +176,40 @@ export default function NotebookPage() {
     return list.map(attachmentForPersistence).filter((x): x is NoteAttachmentLayout => x != null);
   }
 
+  const notebookShellRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     document.body.classList.add("fv-notebook-fullwidth");
     return () => {
       document.body.classList.remove("fv-notebook-fullwidth");
+    };
+  }, []);
+
+  /** Mobile: block native context menu / image callouts inside the note editor shell only. */
+  useEffect(() => {
+    const shell = notebookShellRef.current;
+    if (!shell) return;
+
+    const onContextMenu = (e: MouseEvent) => {
+      if (shell.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target || !shell.contains(target)) return;
+      if (target.tagName === "IMG" && target.closest(".note-editor")) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("touchstart", onTouchStart, { capture: true, passive: false });
+
+    return () => {
+      document.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("touchstart", onTouchStart, { capture: true } as AddEventListenerOptions);
     };
   }, []);
 
@@ -225,6 +272,68 @@ export default function NotebookPage() {
       return null;
     }
   }, [scope.companyId, scope.error, isDeveloperRoute, developerCompanyId]);
+
+  const shareCompanyId = useMemo(() => {
+    if (isDeveloperRoute) {
+      const v = String(currentNoteCompanyId ?? developerCompanyId ?? "").trim();
+      return v || null;
+    }
+    return companyId;
+  }, [isDeveloperRoute, currentNoteCompanyId, developerCompanyId, companyId]);
+
+  const canShareNotebook = useMemo(() => {
+    if (!shareCompanyId) return false;
+    const r = String(user?.role ?? "").toLowerCase();
+    if (r === "developer") return true;
+    return (
+      r === "company-admin" ||
+      r === "company_admin" ||
+      r === "admin" ||
+      r === "owner"
+    );
+  }, [shareCompanyId, user?.role]);
+
+  const { data: shareEmployees = [] } = useQuery({
+    queryKey: ["notebook", "share-employees", shareCompanyId ?? ""],
+    queryFn: () => listEmployees(shareCompanyId!),
+    enabled: Boolean(shareOpen && shareCompanyId && canShareNotebook),
+  });
+
+  const shareTargets = useMemo(() => {
+    return shareEmployees.filter(
+      (e) => e.status === "active" && String(e.authUserId ?? "").trim() !== "",
+    );
+  }, [shareEmployees]);
+
+  const submitShareToStaff = async () => {
+    const cid = String(shareCompanyId ?? "").trim();
+    const tid = String(shareTargetClerkId ?? "").trim();
+    if (!cid || !tid) {
+      toast.error("Choose a staff member.");
+      return;
+    }
+    const richBody = String(content ?? "").trim();
+    const plain = htmlToPlainText(richBody).trim();
+    const body = richBody || "";
+    setShareSending(true);
+    try {
+      await companySendNotebookNoteToStaffUser({
+        companyId: cid,
+        targetUserId: tid,
+        title: title.trim() || "Notebook note",
+        content: body || plain || "(Empty note)",
+      });
+      toast.success("Shared with staff");
+      setShareOpen(false);
+      setShareTargetClerkId("");
+      void queryClient.invalidateQueries({ queryKey: ["records", "farm-notebook-admin-notes"] });
+      void queryClient.invalidateQueries({ queryKey: ["records", "notebook", "admin-shared"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not share note.");
+    } finally {
+      setShareSending(false);
+    }
+  };
 
   useEffect(() => {
     setNoteId(noteIdParam && noteIdParam !== "new" ? noteIdParam : null);
@@ -640,6 +749,10 @@ export default function NotebookPage() {
             if (farmId) insertRow.farm_id = farmId;
             if (projectId) insertRow.project_id = projectId;
           }
+          if (!isDeveloperRoute && staffPersonalNotebook && user.id) {
+            insertRow.visibility_scope = "staff_personal";
+            insertRow.staff_owner_user_id = user.id;
+          }
           const { data, error } = await db
             .public()
             .from("farm_notebook_entries")
@@ -779,21 +892,20 @@ export default function NotebookPage() {
 
   const atAttachmentLimit = attachments.length >= MAX_NOTEBOOK_ATTACHMENTS;
 
-  if (loading) {
-    return (
-      <div className="min-h-[70vh] rounded-2xl border border-border/60 bg-background/40 p-10 flex items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Loading note…
-      </div>
-    );
-  }
-
   return (
+    <div ref={notebookShellRef} className="w-full">
+      {loading ? (
+        <div className="min-h-[70vh] rounded-2xl border border-border/60 bg-background/40 p-10 flex items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading note…
+        </div>
+      ) : (
     <div className="notebook-shell notes-editor-wrapper">
       <div className="notebook-topbar">
         <Button
           variant="ghost"
-          className="rounded-xl"
+          size="sm"
+          className="rounded-md px-2.5"
           onClick={() => {
             if (typeof window !== 'undefined' && window.history.length > 1) {
               navigate(-1);
@@ -804,7 +916,7 @@ export default function NotebookPage() {
             );
           }}
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
           Back
         </Button>
 
@@ -858,9 +970,31 @@ export default function NotebookPage() {
               Send to Company
             </Button>
           ) : null}
+          {canShareNotebook ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 w-8 shrink-0 rounded-md p-0"
+              title="Share with staff"
+              disabled={
+                saving ||
+                deleting ||
+                !shareCompanyId ||
+                (!isDeveloperRoute && (scope.error != null || !companyId))
+              }
+              onClick={() => {
+                setShareTargetClerkId("");
+                setShareOpen(true);
+              }}
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
           <Button
             variant="outline"
-            className="rounded-xl"
+            size="sm"
+            className="rounded-md px-2.5"
             onClick={() => fileInputRef.current?.click()}
             disabled={
               atAttachmentLimit ||
@@ -874,7 +1008,7 @@ export default function NotebookPage() {
                 : undefined
             }
           >
-            <Paperclip className="h-4 w-4 mr-2" />
+            <Paperclip className="h-3.5 w-3.5 mr-1.5" />
             {atAttachmentLimit
               ? "Max reached"
               : otherFilesUploading
@@ -890,11 +1024,12 @@ export default function NotebookPage() {
             accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
           />
           <Button
-            className="rounded-xl"
+            size="sm"
+            className="rounded-md px-2.5"
             onClick={() => void saveNote({ showToast: true })}
             disabled={saving || deleting || (!isDeveloperRoute && (scope.error != null || !companyId))}
           >
-            <Save className="h-4 w-4 mr-2" />
+            <Save className="h-3.5 w-3.5 mr-1.5" />
             {saving ? "Saving…" : "Save"}
           </Button>
         </div>
@@ -956,6 +1091,68 @@ export default function NotebookPage() {
         ) : null}
       </div>
 
+      <Dialog
+        open={shareOpen}
+        onOpenChange={(open) => {
+          setShareOpen(open);
+          if (!open) setShareTargetClerkId("");
+        }}
+      >
+        <DialogContent className="sm:max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle>Share with staff</DialogTitle>
+            <DialogDescription>
+              Keeps the note formatting in their Admin notes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="fv-share-staff">Staff</Label>
+            <Select value={shareTargetClerkId || undefined} onValueChange={setShareTargetClerkId}>
+              <SelectTrigger id="fv-share-staff" className="rounded-md">
+                <SelectValue placeholder="Choose staff" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                {shareTargets.map((e) => {
+                  const uid = String(e.authUserId ?? "").trim();
+                  if (!uid) return null;
+                  return (
+                    <SelectItem key={e.id} value={uid}>
+                      {e.name}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {shareTargets.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No active linked staff yet.
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-md"
+              disabled={shareSending}
+              onClick={() => setShareOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="rounded-md"
+              disabled={shareSending || !shareTargetClerkId}
+              onClick={() => void submitShareToStaff()}
+            >
+              {shareSending ? "Sending…" : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {showDeleteConfirm ? (
         <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => !open && setShowDeleteConfirm(false)}>
           <AlertDialogContent>
@@ -979,6 +1176,8 @@ export default function NotebookPage() {
           </AlertDialogContent>
         </AlertDialog>
       ) : null}
+    </div>
+      )}
     </div>
   );
 }

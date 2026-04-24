@@ -11,3 +11,9 @@ export function resolveNotesBasePath(pathname: string): string {
   if (p.startsWith('/staff/notes')) return '/staff/notes';
   return FARMER_NOTES_PATH;
 }
+
+/** Staff shell notebook: entries are private to each staff member (see visibility_scope). */
+export function isStaffPersonalNotebookPath(pathname: string): boolean {
+  const p = (pathname || '/').replace(/\/+/g, '/');
+  return p.startsWith('/staff/notes');
+}

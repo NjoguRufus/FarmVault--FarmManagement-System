@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { fetchDeveloperCompanies } from "@/services/developerService";
 import { NotesCard } from "@/components/records/NotesCard";
-import { resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
+import { isStaffPersonalNotebookPath, resolveNotesBasePath } from "@/lib/routing/farmerAppPaths";
 import { htmlToPlainText } from "@/lib/notebook/htmlToPlainText";
 import "./cropDetailsNotes.css";
 
@@ -49,6 +49,7 @@ export default function CropDetailsPage() {
   const scope = useCompanyScope();
   const isDeveloperRoute = location.pathname.startsWith("/developer/records");
   const notesBase = resolveNotesBasePath(location.pathname);
+  const staffPersonalNotebook = isStaffPersonalNotebookPath(location.pathname);
 
   const [rows, setRows] = useState<FarmNotebookEntryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,6 +105,11 @@ export default function CropDetailsPage() {
             return;
           }
           q = q.eq("company_id", companyId);
+          if (staffPersonalNotebook) {
+            q = q.eq("visibility_scope", "staff_personal");
+          } else {
+            q = q.neq("visibility_scope", "staff_personal");
+          }
         }
 
         const { data, error: qErr } = await q;
@@ -122,7 +128,7 @@ export default function CropDetailsPage() {
     return () => {
       cancelled = true;
     };
-  }, [scope.companyId, scope.error, cropSlug, user?.id, isDeveloperRoute]);
+  }, [scope.companyId, scope.error, cropSlug, user?.id, isDeveloperRoute, staffPersonalNotebook]);
 
   useEffect(() => {
     let cancelled = false;

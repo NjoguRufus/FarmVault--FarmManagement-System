@@ -82,3 +82,28 @@ export async function sendFarmNotebookAdminNote(input: {
   if (data == null) return '';
   return String(data);
 }
+
+/** Company admin / owner: send note body to one staff member (Clerk user id). */
+export async function companySendNotebookNoteToStaffUser(input: {
+  companyId: string;
+  targetUserId: string;
+  title: string;
+  content: string;
+}): Promise<string> {
+  const cid = (input.companyId ?? '').trim();
+  const uid = (input.targetUserId ?? '').trim();
+  if (!cid || !uid) {
+    throw new Error('Company and staff member are required');
+  }
+  const { data, error } = await supabase.rpc('rpc_company_send_farm_notebook_note_to_user', {
+    p_company_id: cid,
+    p_target_user_id: uid,
+    p_title: input.title,
+    p_content: input.content,
+  });
+  if (error) {
+    throw new Error(error.message ?? 'Failed to share note');
+  }
+  if (data == null) return '';
+  return String(data);
+}
