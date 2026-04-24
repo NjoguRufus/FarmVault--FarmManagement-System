@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, TrendingUp, Wallet, Package, BarChart3 } from 'lucide-react';
+import { BarChart3, HelpCircle, Package, Plus, TrendingUp, Wallet } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
 import { useEmployeeAccess } from '@/hooks/useEmployeeAccess';
@@ -21,6 +21,7 @@ import {
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
 import { useFallbackSessionSummaries } from '@/hooks/useFallbackSessionSummary';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step } from 'react-joyride';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
 
@@ -113,6 +114,9 @@ export default function FallbackHarvestListPage() {
   const { bySessionId: computedSummariesBySession } = useFallbackSessionSummaries(companyId, sessionIds);
 
   const [creating, setCreating] = useState(false);
+  const [tourRun, setTourRun] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourSteps, setTourSteps] = useState<Step[]>([]);
 
   const totals = useMemo(() => {
     return sessions.reduce(
@@ -148,6 +152,57 @@ export default function FallbackHarvestListPage() {
     }
   }
 
+  const startTour = () => {
+    const baseSteps: Step[] = [
+      {
+        target: '[data-tour="fallback-harvest-tour-btn"]',
+        content: 'Use this button anytime to restart the fallback harvest tour.',
+        placement: 'bottom',
+        disableBeacon: true,
+      },
+      {
+        target: '[data-tour="fallback-harvest-new-btn"]',
+        content: 'Create a new fallback harvest session here.',
+        placement: 'bottom',
+      },
+      {
+        target: '[data-tour="fallback-harvest-stats"]',
+        content: 'These cards show total units, revenue, expenses, and net profit.',
+        placement: 'bottom',
+      },
+      {
+        target: '[data-tour="fallback-harvest-session-cards"]',
+        content: 'Open any session card to record harvest, sales, and expenses.',
+        placement: 'top',
+      },
+    ];
+    const available = baseSteps.filter((step) =>
+      typeof step.target === 'string' ? Boolean(document.querySelector(step.target)) : false,
+    );
+    if (available.length === 0) return;
+    setTourSteps(available);
+    setTourStepIndex(0);
+    setTourRun(true);
+  };
+
+  const onTourCallback = (data: CallBackProps) => {
+    const { action, index = 0, status, type } = data;
+    if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+      setTourRun(false);
+      setTourStepIndex(0);
+      return;
+    }
+    if (type === EVENTS.STEP_AFTER || type === EVENTS.TARGET_NOT_FOUND) {
+      const next = index + (action === ACTIONS.PREV ? -1 : 1);
+      if (next < 0 || next >= tourSteps.length) {
+        setTourRun(false);
+        setTourStepIndex(0);
+        return;
+      }
+      setTourStepIndex(next);
+    }
+  };
+
   if (!projectId) {
     return (
       <div className="space-y-4">
@@ -159,15 +214,40 @@ export default function FallbackHarvestListPage() {
 
   return (
     <div className="space-y-5 sm:space-y-6 px-3 sm:px-4 lg:px-6 py-3 sm:py-4 animate-fade-in w-full">
+      <Joyride
+        steps={tourSteps}
+        run={tourRun}
+        stepIndex={tourStepIndex}
+        callback={onTourCallback}
+        continuous
+        showProgress
+        showSkipButton
+        disableOverlayClose
+        scrollToFirstStep
+        spotlightPadding={8}
+      />
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Harvest</h1>
           <p className="text-xs text-muted-foreground">Modular harvest sessions (all crops except tomatoes and french beans).</p>
         </div>
-        <Button onClick={onCreateSession} disabled={creating}>
-          <Plus className="mr-2 h-4 w-4" />
-          New session
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+            onClick={startTour}
+            data-tour="fallback-harvest-tour-btn"
+            title="Take a Tour"
+            aria-label="Take a Tour"
+          >
+            <HelpCircle className="h-4 w-4" />
+          </Button>
+          <Button onClick={onCreateSession} disabled={creating} data-tour="fallback-harvest-new-btn">
+            <Plus className="mr-2 h-4 w-4" />
+            New session
+          </Button>
+        </div>
       </div>
 
       <div
@@ -175,6 +255,7 @@ export default function FallbackHarvestListPage() {
           'grid gap-2 sm:gap-3',
           'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4',
         )}
+        data-tour="fallback-harvest-stats"
       >
         <SimpleStatCard
           layout="mobile-compact"
@@ -212,7 +293,7 @@ export default function FallbackHarvestListPage() {
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-tour="fallback-harvest-session-cards">
         {isLoading ? (
           <p className="text-sm text-muted-foreground sm:col-span-2 xl:col-span-3">Loading…</p>
         ) : sessions.length === 0 ? (

@@ -25,8 +25,10 @@ export function isAppRoutePath(pathname: string): boolean {
     '/operations',
     '/inventory',
     '/harvest',
+    '/harvest-sessions',
     '/harvest-sales',
     '/harvest-collections',
+    '/tomato-harvest',
     '/suppliers',
     '/challenges',
     '/employees',
@@ -48,6 +50,9 @@ export function isAppRoutePath(pathname: string): boolean {
 
 export function isPublicRoutePath(pathname: string): boolean {
   const p = pathname || '/';
+  // In-app harvest routes that can look like SEO slugs (`/tomato-*`) must stay in app routing.
+  if (p === '/tomato-harvest' || p.startsWith('/tomato-harvest/')) return false;
+  if (p === '/harvest-sessions' || p.startsWith('/harvest-sessions/')) return false;
   // Referral short links: /r/CODE (must not use prefix "/r" — would match /register, etc.)
   if (p === '/r' || p.startsWith('/r/')) return true;
   // In-app Farm Work (shares /farm-* with marketing SEO URLs like /farm-management-…).
