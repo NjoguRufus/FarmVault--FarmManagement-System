@@ -29,6 +29,7 @@ import type { Supplier } from '@/types';
 import {
   createInventoryCategory,
   createInventoryItem,
+  listInventoryStock,
   recordInventoryStockIn,
   logInventoryAuditEvent,
 } from '@/services/inventoryReadModelService';
@@ -683,6 +684,51 @@ export function AddInventoryItemModal({
         defaultCropStageId: undefined,
       } as const;
 
+      const normalizedItemName = name.trim().toLowerCase();
+      const existingExact = (await listInventoryStock({
+        companyId: activeCompanyId,
+        search: name.trim(),
+      })).find((row) => row.name.trim().toLowerCase() === normalizedItemName);
+
+      if (existingExact) {
+        const existingTotalCost = (avgCost ?? 0) * stockQuantity;
+        await recordInventoryStockIn({
+          companyId: activeCompanyId,
+          itemId: existingExact.id,
+          quantity: stockQuantity,
+          unitCost: avgCost ?? 0,
+          transactionType: 'purchase',
+          supplierId: resolvedSupplierId,
+          date: new Date().toISOString(),
+          notes: `Existing item detected while adding item. Converted to stock-in.${showAdvanced && notes ? ` ${notes}` : ''}`,
+        });
+        await logInventoryAuditEvent({
+          companyId: activeCompanyId,
+          action: 'STOCK_IN',
+          inventoryItemId: existingExact.id,
+          itemName: existingExact.name,
+          quantity: stockQuantity,
+          unit: existingExact.unit,
+          actorUserId: user?.id ?? createdBy,
+          actorName: user?.name ?? user?.email,
+          notes: 'Auto-converted duplicate add-item to stock-in',
+          metadata: {
+            source: 'add_inventory_duplicate_to_stock_in',
+            enteredName: name.trim(),
+            enteredUnit: normalizedUnit,
+            stockInUnitCost: avgCost ?? 0,
+            stockInTotalCost: existingTotalCost,
+          },
+        });
+
+        toast.success('Item already exists. Recorded as stock-in instead.');
+        void queryClient.invalidateQueries({ queryKey: [INVENTORY_STOCK_QUERY_KEY] });
+        void queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-supa', activeCompanyId] });
+        handleDialogOpenChange(false);
+        onCreated?.({ itemId: existingExact.id, name: existingExact.name });
+        return;
+      }
+
       const created = await createInventoryItem(finalInsertPayload);
 
       const rpcPayload = {
@@ -764,6 +810,39 @@ export function AddInventoryItemModal({
       handleDialogOpenChange(false);
       onCreated?.({ itemId: created.id, name: name.trim() });
     } catch (error: any) {
+      const code = (error as { code?: string })?.code;
+      const message = String((error as { message?: string })?.message ?? '');
+      const isDuplicateName =
+        code === '23505' &&
+        (message.includes('uq_inventory_item_master_company_name') ||
+          message.toLowerCase().includes('duplicate key value'));
+      if (isDuplicateName) {
+        try {
+          const existingExact = (await listInventoryStock({
+            companyId: activeCompanyId,
+            search: name.trim(),
+          })).find((row) => row.name.trim().toLowerCase() === name.trim().toLowerCase());
+          if (existingExact) {
+            await recordInventoryStockIn({
+              companyId: activeCompanyId,
+              itemId: existingExact.id,
+              quantity: stockQuantity,
+              unitCost: avgCost ?? 0,
+              transactionType: 'purchase',
+              supplierId: resolvedSupplierId,
+              date: new Date().toISOString(),
+              notes: `Duplicate item create fallback to stock-in.${showAdvanced && notes ? ` ${notes}` : ''}`,
+            });
+            toast.success('Item already exists. Recorded as stock-in instead.');
+            void queryClient.invalidateQueries({ queryKey: [INVENTORY_STOCK_QUERY_KEY] });
+            handleDialogOpenChange(false);
+            onCreated?.({ itemId: existingExact.id, name: existingExact.name });
+            return;
+          }
+        } catch {
+          // fall through to error toast
+        }
+      }
       toast.error(error?.message || 'Failed to create inventory item.');
     } finally {
       setSaving(false);

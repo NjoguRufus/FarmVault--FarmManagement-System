@@ -122,11 +122,16 @@ async function applyInventoryDeltasForWorkCardEdit(params: {
 }
 
 interface InputEntry {
+  id: string;
   itemId: string;
   itemName: string;
   quantity: number;
   unit: string;
   currentStock?: number;
+}
+
+function createInputEntryId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `input-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function RecordWorkModal({
@@ -205,6 +210,7 @@ export function RecordWorkModal({
       });
       setInputs(
         baseline.map((i) => ({
+          id: createInputEntryId(),
           itemId: i.itemId,
           itemName: i.itemName,
           quantity: i.quantity,
@@ -258,14 +264,15 @@ export function RecordWorkModal({
     }
 
     setInputs(prev => [
-      ...prev,
       {
+        id: createInputEntryId(),
         itemId: item.id,
         itemName: item.name,
         quantity: qty,
         unit: item.unit ?? 'units',
         currentStock: item.current_stock,
       },
+      ...prev,
     ]);
 
     setSelectedInputId('');
@@ -273,8 +280,8 @@ export function RecordWorkModal({
     setShowInputSelector(false);
   };
 
-  const handleRemoveInput = (index: number) => {
-    setInputs(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveInput = (id: string) => {
+    setInputs(prev => prev.filter((row) => row.id !== id));
   };
 
   const handleWorkerToggle = (employeeId: string) => {
@@ -599,7 +606,7 @@ export function RecordWorkModal({
               <div className="space-y-2">
                 {inputs.map((input, idx) => (
                   <div
-                    key={idx}
+                    key={input.id}
                     className={cn(
                       'flex items-center justify-between p-3 rounded-lg border',
                       input.currentStock !== undefined && input.quantity > input.currentStock
@@ -625,7 +632,7 @@ export function RecordWorkModal({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleRemoveInput(idx)}
+                        onClick={() => handleRemoveInput(input.id)}
                     >
                       <X className="h-4 w-4" />
                     </Button>

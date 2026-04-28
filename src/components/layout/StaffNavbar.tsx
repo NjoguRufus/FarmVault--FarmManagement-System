@@ -178,19 +178,19 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
           <DropdownMenu>
             <DropdownMenuTrigger
               data-tour="project-selector"
-              className="hidden sm:flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1.5 text-xs sm:text-sm hover:bg-muted transition-colors"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1.5 text-xs sm:text-sm hover:bg-muted transition-colors max-w-[42vw] sm:max-w-none"
             >
               {activeProject ? (
                 <>
                   <span className="text-base sm:text-lg">{cropTypeKeyEmoji(activeProject.cropType)}</span>
-                  <span className="font-medium hidden md:inline max-w-[140px] truncate">
+                  <span className="font-medium max-w-[120px] sm:max-w-[140px] truncate">
                     {activeProject.name}
                   </span>
                 </>
               ) : activeFarmSummary ? (
                 <>
                   <span className="text-base sm:text-lg">🌾</span>
-                  <span className="font-medium hidden md:inline max-w-[140px] truncate">
+                  <span className="font-medium max-w-[120px] sm:max-w-[140px] truncate">
                     {activeFarmSummary.name}
                   </span>
                 </>

@@ -129,6 +129,7 @@ function formatUsageTally(baseQty: number, unitRaw: string): string {
 }
 
 interface InputItem {
+  id: string;
   itemId: string;
   itemName: string;
   /** Typeahead text for inventory search */
@@ -196,6 +197,7 @@ export function LogWorkModal({
   const [stockInOpen, setStockInOpen] = useState(false);
   const [stockInItemId, setStockInItemId] = useState<string | null>(null);
   const [itemPickerOpenIdx, setItemPickerOpenIdx] = useState<number | null>(null);
+  const [expandedInputId, setExpandedInputId] = useState<string | null>(null);
   const [addInventoryOpen, setAddInventoryOpen] = useState(false);
   const [addInventoryPrefill, setAddInventoryPrefill] = useState<{ name: string; categoryTemplate?: string } | null>(
     null,
@@ -292,6 +294,7 @@ export function LogWorkModal({
     setWorkTypeMenuOpen(false);
     setInputs([]);
     setItemPickerOpenIdx(null);
+    setExpandedInputId(null);
     setAddInventoryOpen(false);
     setAddInventoryPrefill(null);
     pendingInputIndexForNewItemRef.current = null;
@@ -372,9 +375,10 @@ export function LogWorkModal({
   }, [handleWorkCategoryChange]);
 
   const addInput = () => {
+    const newId = globalThis.crypto?.randomUUID?.() ?? `input-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setInputs(prev => [
-      ...prev,
       {
+        id: newId,
         itemId: '',
         itemName: '',
         itemSearchQuery: '',
@@ -387,7 +391,9 @@ export function LogWorkModal({
         packageUnitLabel: '',
         packageLabel: 'units',
       },
+      ...prev,
     ]);
+    setExpandedInputId(newId);
   };
 
   const selectInventoryItemForRow = useCallback((index: number, item: InventoryStockRow) => {
@@ -439,7 +445,14 @@ export function LogWorkModal({
   );
 
   const removeInput = (index: number) => {
-    setInputs((prev) => prev.filter((_, i) => i !== index));
+    setInputs((prev) => {
+      const removed = prev[index];
+      const next = prev.filter((_, i) => i !== index);
+      if (removed?.id && expandedInputId === removed.id) {
+        setExpandedInputId(next[0]?.id ?? null);
+      }
+      return next;
+    });
     setItemPickerOpenIdx((cur) => (cur === index ? null : cur));
   };
 
@@ -813,6 +826,7 @@ export function LogWorkModal({
             </div>
 
             {inputs.map((input, index) => {
+              const isExpanded = expandedInputId ? expandedInputId === input.id : index === 0;
               const q = input.itemSearchQuery.trim().toLowerCase();
               const rowCandidates = filteredInventoryItems.filter(
                 (it) => !q || it.name.toLowerCase().includes(q),
@@ -824,8 +838,40 @@ export function LogWorkModal({
                 canAddInventoryItem && q.length > 0 && !exactNameMatch && rowCandidates.length === 0;
 
               return (
-              <div key={index} className="flex gap-2 items-start p-3 rounded-lg border bg-muted/20">
-                <div className="flex-1 space-y-2">
+              <div key={input.id} className="flex gap-2 items-start p-3 rounded-lg border bg-muted/20">
+                {!isExpanded ? (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{input.itemName || input.itemSearchQuery || 'Input item'}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Packages: {input.packageCount || 0}
+                        {formData.workCategory === 'Spraying' ? ` · Drums: ${input.drumsSprayed || 0}` : ''}
+                        {input.itemId && input.baseQuantity > 0
+                          ? ` · ${formatUsageTally(input.baseQuantity, input.packageUnitLabel || input.unit)}`
+                          : ''}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setExpandedInputId(input.id)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeInput(index)}
+                      className="shrink-0 text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                <div className="flex-1 min-w-0 space-y-2">
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Inventory item (type to search)</Label>
                     <div className="relative">
@@ -1054,10 +1100,12 @@ export function LogWorkModal({
                   variant="ghost"
                   size="icon"
                   onClick={() => removeInput(index)}
-                  className="text-destructive hover:text-destructive"
+                  className="shrink-0 text-destructive hover:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
+                  </>
+                )}
               </div>
               );
             })}

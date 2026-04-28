@@ -8,13 +8,16 @@ export function looksLikeRichHtml(s: string): boolean {
 export function htmlToPlainText(html: string): string {
   if (!html || !html.trim()) return "";
   const noComments = html.replace(/<!--[\s\S]*?-->/g, " ");
+  const normalizeNbspTokens = (s: string) =>
+    s
+      .replace(/&nbsp;|&#160;|&amp;nbsp;/gi, " ")
+      .replace(/\u00a0/g, " ");
   if (typeof window === "undefined") {
-    return noComments.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return normalizeNbspTokens(noComments).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   }
   const d = document.createElement("div");
   d.innerHTML = noComments;
-  return (d.textContent || d.innerText || "")
-    .replace(/\u00a0/g, " ")
+  return normalizeNbspTokens(d.textContent || d.innerText || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((l) => l.trimEnd())
