@@ -65,25 +65,20 @@ export default function AcceptInvitationPage() {
               />
             </div>
             <h1 className="text-lg md:text-2xl font-semibold text-white drop-shadow-md">
-              You’ve been invited to join FarmVault
+              Join FarmVault
             </h1>
             <p className="text-xs md:text-sm text-white/90 drop-shadow-md">
-              Complete your employee account to join your company’s existing FarmVault workspace.
-            </p>
-            <p className="text-[11px] md:text-xs text-white/80 drop-shadow-md">
-              The invited email from your admin is locked by Clerk in this flow and cannot be changed.
-              You are joining an existing company, not creating a new one.
+              Complete sign up to access your FarmVault Workspace.
             </p>
             {invitedEmail && (
               <p className="text-xs md:text-sm text-white/90 mt-1 drop-shadow-md">
-                You’ll join using this email:{" "}
+                Invited email:{" "}
                 <span className="font-semibold">{invitedEmail}</span>
               </p>
             )}
             {hasErrorStatus && (
               <p className="text-xs md:text-sm text-red-100 mt-1 drop-shadow-md">
-                This invitation link may be invalid or expired. You can try signing in with the invited email,
-                or ask your admin to send a new invitation.
+                This invite link is invalid or expired. Ask your admin for a new one.
               </p>
             )}
           </div>
@@ -92,7 +87,7 @@ export default function AcceptInvitationPage() {
             {invitedEmail && (
               <div className="mb-4 text-left space-y-1">
                 <label className="text-xs font-medium text-foreground/80">
-                  Invited email (cannot be changed)
+                  Invited email
                 </label>
                 <input
                   className="fv-input text-sm bg-muted/60 cursor-not-allowed"

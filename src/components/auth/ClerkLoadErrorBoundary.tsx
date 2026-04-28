@@ -1,6 +1,6 @@
 /**
  * Catches Clerk JS load failures (e.g. CORS, failed_to_load_clerk_js) so the app
- * does not freeze. Shows fallback UI with link to emergency access.
+ * does not freeze.
  */
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 
@@ -77,8 +77,8 @@ export class ClerkLoadErrorBoundary extends Component<Props, State> {
               </h1>
               <p className="text-sm text-muted-foreground">
                 {showClerkFallback
-                  ? "Sign-in could not load. Use emergency access to continue farm operations, or try again later."
-                  : "An unexpected error occurred. Try reloading or use emergency access."}
+                  ? "Sign-in could not load. Please try again."
+                  : "An unexpected error occurred. Please try again."}
               </p>
               {import.meta.env.DEV && error && (
                 <pre className="mt-4 text-left text-xs bg-muted p-3 rounded-md overflow-auto max-h-32">
@@ -87,16 +87,10 @@ export class ClerkLoadErrorBoundary extends Component<Props, State> {
               )}
             </div>
             <div className="flex flex-col gap-3">
-              <a
-                href="/emergency-access"
-                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Use emergency access
-              </a>
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                className="text-sm text-muted-foreground hover:text-foreground underline"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Try again
               </button>
