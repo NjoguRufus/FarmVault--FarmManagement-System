@@ -19,7 +19,12 @@ function cropContextLabel(slug: string | null | undefined): string {
 function plainExcerpt(htmlOrText: string | null | undefined, maxLen: number): string {
   const raw = String(htmlOrText ?? '').trim();
   if (!raw) return '';
-  const stripped = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const stripped = raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;|&amp;nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   return stripped.length > maxLen ? `${stripped.slice(0, maxLen)}…` : stripped;
 }
 

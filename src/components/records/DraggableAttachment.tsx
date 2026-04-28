@@ -46,6 +46,20 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function touchDistance(t: TouchList) {
+  if (t.length < 2) return 0.0001;
+  const a = t[0];
+  const b = t[1];
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 0.0001;
+}
+
+function touchAngleDeg(t: TouchList) {
+  if (t.length < 2) return 0;
+  const a = t[0];
+  const b = t[1];
+  return (Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX) * 180) / Math.PI;
+}
+
 function snap10(n: number) {
   return Math.round(n / 10) * 10;
 }
@@ -110,6 +124,13 @@ function DraggableAttachmentImpl({
   const longPressActivatedRef = useRef(false);
   const tapSuppressedRef = useRef(false);
   const lastPointerRef = useRef({ x: 0, y: 0 });
+  const imageTwoFingerRef = useRef<{
+    d0: number;
+    a0: number;
+    w0: number;
+    h0: number;
+    r0: number;
+  } | null>(null);
 
   const showImage = useMemo(() => showAttachmentAsImage(attachment), [attachment]);
 
@@ -209,12 +230,6 @@ function DraggableAttachmentImpl({
       ...a,
       rotation: (a.rotation + deltaDeg + 360) % 360,
     });
-  };
-
-  const setRotationAbsolute = (rotationDeg: number) => {
-    onBringFront(attachment.id);
-    const a = attachmentRef.current;
-    onChange({ ...a, rotation: (rotationDeg + 360) % 360 });
   };
 
   const removeImageNow = useCallback(() => {
@@ -322,6 +337,69 @@ function DraggableAttachmentImpl({
       window.removeEventListener("pointercancel", onUp);
     };
   }, [clearLongPressTimer, commitMove, commitResize, handleImageTap]);
+
+  useEffect(() => {
+    if (!showImage) return;
+    const target = attachmentRootRef.current;
+    if (!target) return;
+    const options = { passive: false } as const;
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      const a = attachmentRef.current;
+      imageTwoFingerRef.current = {
+        d0: touchDistance(e.touches),
+        a0: touchAngleDeg(e.touches),
+        w0: a.width,
+        h0: a.height,
+        r0: a.rotation,
+      };
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const g = imageTwoFingerRef.current;
+      if (!g || e.touches.length < 2) return;
+      e.preventDefault();
+      const el = containerRef.current;
+      if (!el) return;
+      const bounds = el.getBoundingClientRect();
+      const d1 = touchDistance(e.touches);
+      const a1 = touchAngleDeg(e.touches);
+      const scale = d1 / g.d0;
+      const nextW = clamp(snap10(g.w0 * scale), 120, Math.max(120, bounds.width));
+      const nextH = clamp(snap10(g.h0 * scale), 90, Math.max(90, bounds.height));
+      let da = a1 - g.a0;
+      while (da > 180) da -= 360;
+      while (da < -180) da += 360;
+      const nextRotation = (g.r0 + da + 360) % 360;
+      const a = attachmentRef.current;
+      const maxX = Math.max(0, bounds.width - nextW);
+      const maxY = Math.max(0, bounds.height - nextH);
+      onChangeRef.current({
+        ...a,
+        width: nextW,
+        height: nextH,
+        x: clamp(a.x, 0, maxX),
+        y: clamp(a.y, 0, maxY),
+        rotation: nextRotation,
+      });
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) imageTwoFingerRef.current = null;
+    };
+
+    target.addEventListener("touchstart", onStart, options);
+    target.addEventListener("touchmove", onMove, options);
+    target.addEventListener("touchend", onEnd, options);
+    target.addEventListener("touchcancel", onEnd, options);
+    return () => {
+      target.removeEventListener("touchstart", onStart, options);
+      target.removeEventListener("touchmove", onMove, options);
+      target.removeEventListener("touchend", onEnd, options);
+      target.removeEventListener("touchcancel", onEnd, options);
+    };
+  }, [containerRef, showImage]);
 
   const onPointerDownDrag = (ev: React.PointerEvent<HTMLDivElement>) => {
     ev.stopPropagation();
@@ -432,7 +510,7 @@ function DraggableAttachmentImpl({
           width: attachment.width,
           height: attachment.height,
           zIndex: Math.min(attachment.zIndex, 20),
-          transform: `rotate(${attachment.rotation}deg)${showImage && isDragging ? " scale(1.02)" : ""}`,
+          transform: showImage && isDragging ? "scale(1.02)" : undefined,
           transition: showImage ? "transform 0.15s ease, box-shadow 0.15s ease" : undefined,
         }}
         onPointerDown={onPointerDownDrag}
@@ -524,6 +602,11 @@ function DraggableAttachmentImpl({
                 url={attachment.url}
                 previewName={previewName}
                 tourVisible={tourVisible}
+                imageStyle={{
+                  transform: `rotate(${attachment.rotation}deg)`,
+                  transformOrigin: "center center",
+                  transition: "transform 0.2s ease",
+                }}
                 onImageKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
@@ -564,7 +647,6 @@ function DraggableAttachmentImpl({
           previewName={previewName}
           rotation={attachment.rotation}
           onRotationDelta={(d) => nudgeRotation(d)}
-          onAbsoluteRotation={setRotationAbsolute}
           onRequestRemove={removeImageNow}
         />
       ) : null}

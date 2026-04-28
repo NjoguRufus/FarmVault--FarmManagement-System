@@ -77,9 +77,7 @@ export function StaffBottomNav() {
   if (canOperations) {
     items.push({ label: 'Farm Work', path: '/staff/operations', icon: Tractor });
   }
-  if (can('notes', 'view') || effectivePermissionKeys.has('notes.view')) {
-    items.push({ label: 'Notes', path: '/staff/notes', icon: FileText });
-  }
+  items.push({ label: 'Notes', path: '/staff/notes', icon: FileText });
 
   if (items.length === 0) return null;
 

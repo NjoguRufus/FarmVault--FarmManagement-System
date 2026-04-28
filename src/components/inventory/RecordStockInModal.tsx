@@ -17,6 +17,36 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 
+const UNIT_OPTIONS = ['ml', 'litres', 'grams', 'kg', 'pieces', 'meters'] as const;
+type StockInUnit = (typeof UNIT_OPTIONS)[number];
+
+function normalizeUnit(raw: string | null | undefined): StockInUnit | null {
+  const u = String(raw ?? '').trim().toLowerCase();
+  if (u === 'l' || u === 'liter' || u === 'litre' || u === 'liters') return 'litres';
+  if (u === 'g' || u === 'gram') return 'grams';
+  if (u === 'kgs' || u === 'kilogram') return 'kg';
+  if (u === 'piece') return 'pieces';
+  if (u === 'meter' || u === 'metre') return 'meters';
+  if ((UNIT_OPTIONS as readonly string[]).includes(u)) return u as StockInUnit;
+  return null;
+}
+
+function compatibleUnits(baseUnit: StockInUnit): StockInUnit[] {
+  if (baseUnit === 'litres' || baseUnit === 'ml') return ['litres', 'ml'];
+  if (baseUnit === 'kg' || baseUnit === 'grams') return ['kg', 'grams'];
+  return [baseUnit];
+}
+
+function toBaseQuantity(quantity: number, from: StockInUnit, to: StockInUnit): number | null {
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  if (from === to) return quantity;
+  if (from === 'ml' && to === 'litres') return quantity / 1000;
+  if (from === 'litres' && to === 'ml') return quantity * 1000;
+  if (from === 'grams' && to === 'kg') return quantity / 1000;
+  if (from === 'kg' && to === 'grams') return quantity * 1000;
+  return null;
+}
+
 interface RecordStockInModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -50,6 +80,7 @@ export function RecordStockInModal({
   const [supplierId, setSupplierId] = useState<'none' | string>('none');
   const [date, setDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [quantityUnit, setQuantityUnit] = useState<StockInUnit>('pieces');
   const [countAsExpensePurchase, setCountAsExpensePurchase] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -62,6 +93,12 @@ export function RecordStockInModal({
     if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(c) || c <= 0) return null;
     return q * c;
   }, [quantity, unitCost]);
+  const baseUnit = useMemo<StockInUnit>(() => normalizeUnit(item?.unit) ?? 'pieces', [item?.unit]);
+  const quantityUnitOptions = useMemo(() => compatibleUnits(baseUnit), [baseUnit]);
+  const convertedQuantity = useMemo(() => {
+    const qty = Number(quantity);
+    return toBaseQuantity(qty, quantityUnit, baseUnit);
+  }, [quantity, quantityUnit, baseUnit]);
 
   const isPurchase = transactionType.toLowerCase() === 'purchase';
   const expenseToggleEnabled =
@@ -72,6 +109,7 @@ export function RecordStockInModal({
       const today = new Date().toISOString().slice(0, 10);
       setDate(today);
       setCountAsExpensePurchase(true);
+      setQuantityUnit(normalizeUnit(item?.unit) ?? 'pieces');
       if (item?.supplier_id) {
         setSupplierId(item.supplier_id as string);
       }
@@ -94,15 +132,20 @@ export function RecordStockInModal({
       toast.error('Quantity and unit cost must be greater than zero.');
       return;
     }
+    if (!convertedQuantity || convertedQuantity <= 0) {
+      toast.error('Invalid quantity conversion for selected unit.');
+      return;
+    }
     setSaving(true);
     try {
       const totalCost = qty * cost;
+      const baseUnitCost = totalCost / convertedQuantity;
 
       await recordInventoryStockIn({
         companyId,
         itemId: item.id,
-        quantity: qty,
-        unitCost: cost,
+        quantity: convertedQuantity,
+        unitCost: baseUnitCost,
         transactionType,
         supplierId: supplierId === 'none' ? undefined : supplierId,
         date: date || new Date().toISOString(),
@@ -114,14 +157,19 @@ export function RecordStockInModal({
         action: 'STOCK_IN',
         inventoryItemId: item.id,
         itemName: item.name,
-        quantity: qty,
+        quantity: convertedQuantity,
         unit: item.unit || 'units',
         actorUserId: user?.id,
         actorName: user?.name ?? user?.email,
         notes: notes || undefined,
         metadata: { 
           transactionType, 
-          unitCost: cost,
+          enteredQuantity: qty,
+          enteredUnit: quantityUnit,
+          enteredUnitCost: cost,
+          convertedQuantity,
+          convertedToUnit: baseUnit,
+          unitCost: baseUnitCost,
           totalCost,
         },
       });
@@ -140,7 +188,7 @@ export function RecordStockInModal({
             projectId: resolvedProjectId,
             category: 'inventory_purchase',
             amount: totalCost,
-            note: `Inventory stock-in: ${item.name} (${qty} ${item.unit || 'units'} @ KES ${cost.toLocaleString()})`,
+            note: `Inventory stock-in: ${item.name} (${qty} ${quantityUnit} -> ${convertedQuantity.toLocaleString()} ${baseUnit} @ KES ${cost.toLocaleString()}/${quantityUnit})`,
             expenseDate: date || new Date().toISOString().slice(0, 10),
             createdBy: user?.id ?? null,
             source: INVENTORY_STOCK_IN_EXPENSE_SOURCE,
@@ -170,7 +218,7 @@ export function RecordStockInModal({
 
       addNotification({
         title: 'Stock Added',
-        message: `${user?.name ?? 'User'} added ${qty} ${item.unit || 'units'} to ${item.name}`,
+        message: `${user?.name ?? 'User'} added ${convertedQuantity.toLocaleString()} ${baseUnit} to ${item.name}`,
         toastType: 'success',
       });
 
@@ -203,7 +251,7 @@ export function RecordStockInModal({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Quantity</label>
                 <Input
@@ -214,6 +262,21 @@ export function RecordStockInModal({
                   min={0}
                   required
                 />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-foreground">Unit</label>
+                <Select value={quantityUnit} onValueChange={(v) => setQuantityUnit(v as StockInUnit)}>
+                  <SelectTrigger className="fv-input">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {quantityUnitOptions.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-foreground">Unit Cost</label>
@@ -228,6 +291,11 @@ export function RecordStockInModal({
                 />
               </div>
             </div>
+            {quantity && convertedQuantity && quantityUnit !== baseUnit ? (
+              <p className="text-xs text-muted-foreground">
+                Auto-convert: {Number(quantity).toLocaleString()} {quantityUnit} = {convertedQuantity.toLocaleString()} {baseUnit}
+              </p>
+            ) : null}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">

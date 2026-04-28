@@ -66,9 +66,7 @@ export function StaffSidebar({ collapsed, onToggle }: StaffSidebarProps) {
   if (canOperations) {
     items.push({ label: 'Farm Work', path: '/staff/operations' });
   }
-  if (can('notes', 'view') || effectivePermissionKeys.has('notes.view')) {
-    items.push({ label: 'Notes', path: '/staff/notes' });
-  }
+  items.push({ label: 'Notes', path: '/staff/notes' });
 
   const displayName = fullName ?? user?.email ?? 'User';
 
