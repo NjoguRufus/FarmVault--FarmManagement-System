@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { logError } from '@/lib/errors/appError';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -70,18 +71,20 @@ export async function fetchBootstrapCoreProfile(
 
     lastError = error;
     if (!isTransientProfileLookupError(error)) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn('[fetchBootstrapCoreProfile] core.profiles lookup warning:', error);
-      }
+      logError(error, {
+        operation: 'fetchBootstrapCoreProfile',
+        userId: id,
+        attempt,
+      });
       return null;
     }
   }
 
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.warn('[fetchBootstrapCoreProfile] core.profiles lookup failed after retries:', lastError);
-  }
+  logError(lastError, {
+    operation: 'fetchBootstrapCoreProfile.retriesExhausted',
+    userId: id,
+    attempts: maxAttempts,
+  });
   return null;
 }
 

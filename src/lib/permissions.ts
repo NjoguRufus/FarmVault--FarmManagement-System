@@ -185,7 +185,7 @@ export function expandFlatPermissions(flat: Record<string, boolean> | null | und
     const parts = key.split('.');
     if (parts.length === 0) return;
 
-    let cursor: any = base;
+    let cursor: Record<string, unknown> = base as unknown as Record<string, unknown>;
     for (let i = 0; i < parts.length; i += 1) {
       const part = parts[i];
       if (i === parts.length - 1) {
@@ -197,7 +197,7 @@ export function expandFlatPermissions(flat: Record<string, boolean> | null | und
         if (!isPlainObject(cursor[part])) {
           cursor[part] = {};
         }
-        cursor = cursor[part];
+        cursor = cursor[part] as Record<string, unknown>;
       }
     }
   });

@@ -1,59 +1,116 @@
+/**
+ * Tenant membership recovery utilities.
+ *
+ * pickFirstExistingMembershipCompany — finds the user's most-recent membership
+ * whose company row still exists. Uses a single DB RPC (pick_first_existing_membership)
+ * instead of the previous N+1 pattern (fetch rows → call company_exists per row).
+ */
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
+import { logError } from '@/lib/errors/appError';
+
+/**
+ * Returns the newest company membership the user has where the company still exists.
+ * Single DB round-trip via the pick_first_existing_membership RPC.
+ */
+export async function pickFirstExistingMembershipCompany(
+  clerkUserId: string,
+): Promise<{ companyId: string; role: string } | null> {
+  if (!clerkUserId) return null;
+
+  try {
+    const { data, error } = await supabase.rpc('pick_first_existing_membership', {
+      p_clerk_user_id: clerkUserId,
+    });
+
+    if (error) {
+      logError(error, {
+        operation: 'pickFirstExistingMembershipCompany',
+        userId: clerkUserId,
+      });
+      // Fall through to legacy client-side path below
+    } else if (data && Array.isArray(data) && data.length > 0) {
+      const row = data[0] as { company_id: string; role: string };
+      if (row.company_id) {
+        return { companyId: String(row.company_id), role: row.role || 'employee' };
+      }
+    } else if (data && !Array.isArray(data) && (data as { company_id?: string }).company_id) {
+      const row = data as { company_id: string; role: string };
+      return { companyId: String(row.company_id), role: row.role || 'employee' };
+    }
+  } catch (rpcError) {
+    logError(rpcError, {
+      operation: 'pickFirstExistingMembershipCompany.rpc',
+      userId: clerkUserId,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fallback: client-side query path used if RPC is unavailable or returns null.
+  // This path still makes multiple round-trips but is only hit on RPC failure.
+  // ---------------------------------------------------------------------------
+  return legacyPickFirstExistingMembership(clerkUserId);
+}
+
+async function legacyPickFirstExistingMembership(
+  clerkUserId: string,
+): Promise<{ companyId: string; role: string } | null> {
+  try {
+    const { data: coreRows } = await db
+      .core()
+      .from('company_members')
+      .select('company_id, role, created_at')
+      .eq('clerk_user_id', clerkUserId)
+      .order('created_at', { ascending: false });
+
+    const fromCore = await firstMembershipWithExistingCompany(coreRows as MemRow[] | null);
+    if (fromCore) return fromCore;
+
+    const { data: pubRows } = await db
+      .public()
+      .from('company_members')
+      .select('company_id, role, created_at')
+      .eq('clerk_user_id', clerkUserId)
+      .order('created_at', { ascending: false });
+
+    const fromPub = await firstMembershipWithExistingCompany(pubRows as MemRow[] | null);
+    if (fromPub) return fromPub;
+
+    // Legacy user_id column (pre-Clerk migration rows)
+    const { data: legacyRows } = await db
+      .public()
+      .from('company_members')
+      .select('company_id, role, created_at')
+      .eq('user_id', clerkUserId)
+      .order('created_at', { ascending: false });
+
+    return firstMembershipWithExistingCompany(legacyRows as MemRow[] | null);
+  } catch (err) {
+    logError(err, { operation: 'legacyPickFirstExistingMembership', userId: clerkUserId });
+    return null;
+  }
+}
 
 type MemRow = { company_id: string | null; role?: string | null };
 
-async function firstMembershipWithExistingCompany(rows: MemRow[] | null | undefined): Promise<{
-  companyId: string;
-  role: string;
-} | null> {
+async function firstMembershipWithExistingCompany(
+  rows: MemRow[] | null | undefined,
+): Promise<{ companyId: string; role: string } | null> {
   if (!rows?.length) return null;
   for (const row of rows) {
     const cid = row.company_id != null ? String(row.company_id) : '';
     if (!cid) continue;
     const { data: exists } = await supabase.rpc('company_exists', { p_company_id: cid });
     if (exists === true) {
-      const r = row.role != null ? String(row.role).trim() : '';
-      return { companyId: cid, role: r || 'employee' };
+      return { companyId: cid, role: (row.role ?? '').trim() || 'employee' };
     }
   }
   return null;
 }
 
 /**
- * Picks the newest company membership whose company row still exists (core then public.company_members).
- */
-export async function pickFirstExistingMembershipCompany(
-  clerkUserId: string,
-): Promise<{ companyId: string; role: string } | null> {
-  const { data: coreRows } = await db
-    .core()
-    .from('company_members')
-    .select('company_id, role, created_at')
-    .eq('clerk_user_id', clerkUserId)
-    .order('created_at', { ascending: false });
-
-  const fromCore = await firstMembershipWithExistingCompany(coreRows as MemRow[] | null);
-  if (fromCore) return fromCore;
-
-  const pub = db.public().from('company_members').select('company_id, role, created_at');
-  let { data: pubRows } = await pub.eq('clerk_user_id', clerkUserId).order('created_at', { ascending: false });
-  if (!pubRows?.length) {
-    const legacy = await db
-      .public()
-      .from('company_members')
-      .select('company_id, role, created_at')
-      .eq('user_id', clerkUserId)
-      .order('created_at', { ascending: false });
-    pubRows = legacy.data;
-  }
-
-  return firstMembershipWithExistingCompany(pubRows as MemRow[] | null);
-}
-
-/**
- * Keeps legacy public.profiles in sync with core.profiles (STK edge + helpers still read public on some paths).
- * Omit email when you must not overwrite an existing public email; omit activeCompanyId when not changing workspace.
+ * Keeps legacy public.profiles in sync with core.profiles.
+ * STK edge + helpers still read public on some paths.
  */
 export async function mirrorPublicProfileForClerkUser(
   clerkUserId: string,
@@ -81,18 +138,32 @@ export async function mirrorPublicProfileForClerkUser(
   }
 
   const { error } = await db.public().from('profiles').upsert(row, { onConflict: 'id' });
-  if (error && import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.warn('[mirrorPublicProfileForClerkUser] public.profiles upsert:', error.message);
+  if (error) {
+    logError(error, {
+      operation: 'mirrorPublicProfileForClerkUser',
+      userId: clerkUserId,
+    });
   }
 }
 
-export async function repairProfileActiveCompany(clerkUserId: string, companyId: string | null): Promise<void> {
+export async function repairProfileActiveCompany(
+  clerkUserId: string,
+  companyId: string | null,
+): Promise<void> {
   const nowIso = new Date().toISOString();
-  await db
+  const { error } = await db
     .core()
     .from('profiles')
     .update({ active_company_id: companyId, updated_at: nowIso })
     .eq('clerk_user_id', clerkUserId);
+
+  if (error) {
+    logError(error, {
+      operation: 'repairProfileActiveCompany',
+      userId: clerkUserId,
+      companyId,
+    });
+  }
+
   await mirrorPublicProfileForClerkUser(clerkUserId, undefined, companyId);
 }

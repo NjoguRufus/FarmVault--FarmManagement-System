@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { normalizeAuthEmail } from '@/lib/auth/normalizeAuthEmail';
+import { logError } from '@/lib/errors/appError';
 
 export type ResolvePlatformProfileAction = 'existing' | 'merged_from_email' | 'created';
 
@@ -25,10 +26,10 @@ export async function resolveOrCreatePlatformUser(params: {
   });
 
   if (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn('[Auth] resolve_or_ensure_platform_profile failed:', error);
-    }
+    logError(error, {
+      operation: 'resolveOrCreatePlatformUser',
+      userId: clerkUserId,
+    });
     return null;
   }
 

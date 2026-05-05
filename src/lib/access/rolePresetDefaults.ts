@@ -121,11 +121,21 @@ export const ROLE_PRESET_DEFAULT_PERMISSIONS: Record<RolePresetKey, PermissionMa
 /**
  * Map legacy DB role string to RolePresetKey for default permissions.
  * Preserves unknown roles as 'custom' so we don't break existing data.
+ *
+ * Lookup strategy:
+ *  1. Try the raw normalized string (lowercase, trimmed).
+ *  2. Try with hyphens replaced by underscores (handles 'operations-manager' → 'operations_manager').
+ * This two-pass approach avoids the bug where the replace transform made
+ * hyphenated keys (e.g. 'full-access') unreachable in the map.
  */
 export function roleToPreset(role: string | null | undefined): RolePresetKey {
   if (!role || typeof role !== 'string') return 'custom';
-  const key = role.trim().toLowerCase().replace(/-/g, '_');
-  return LEGACY_ROLE_TO_PRESET[key] ?? 'custom';
+  const raw = role.trim().toLowerCase();
+  // Pass 1: exact match (handles keys stored with hyphens in the map)
+  if (LEGACY_ROLE_TO_PRESET[raw]) return LEGACY_ROLE_TO_PRESET[raw];
+  // Pass 2: normalize hyphens to underscores (handles 'operations-manager' → 'operations_manager')
+  const underscored = raw.replace(/-/g, '_');
+  return LEGACY_ROLE_TO_PRESET[underscored] ?? 'custom';
 }
 
 /** Map preset key to legacy DB role string for saving (backward-safe). */

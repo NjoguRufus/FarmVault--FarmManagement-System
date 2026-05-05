@@ -1,8 +1,17 @@
 begin;
 
--- Drop the old employees_permission_preset_check constraint that only allowed
--- legacy preset names (farm_manager, supervisor, etc.) and add an updated one
--- that also includes the current frontend role keys (operations-manager, sales-broker).
+-- ===========================================================================
+-- Fix employees_permission_preset_check constraint
+--
+-- The original constraint (migration 20260307000000) only allowed legacy
+-- preset names (farm_manager, supervisor, etc.) that no longer match the
+-- frontend's TypeScript EmployeeRoleKey / PermissionPresetKey enums.
+--
+-- This migration replaces the constraint with a unified allowlist covering:
+--   • Legacy DB values (backward compat with existing rows)
+--   • Current TypeScript preset keys used by the UI
+--   • Role keys sent by useAddEmployeeForm / addEmployee
+-- ===========================================================================
 
 do $$
 begin
@@ -19,7 +28,7 @@ begin
     add constraint employees_permission_preset_check
     check (
       permission_preset in (
-        -- legacy presets (keep for backward compat with existing rows)
+        -- ── Legacy preset names (pre-refactor; keep for existing rows) ──
         'admin',
         'farm_manager',
         'supervisor',
@@ -27,10 +36,20 @@ begin
         'finance_officer',
         'inventory_officer',
         'viewer',
-        -- current frontend role keys
+
+        -- ── Current EmployeeRoleKey values (accessControl.ts) ──
         'operations-manager',
         'sales-broker',
-        -- catch-all
+
+        -- ── Current PermissionPresetKey values (permissions.ts) ──
+        'inventory-clerk',
+        'finance-clerk',
+        'operations-staff',
+        'harvest-intake-staff',
+        'manager',
+        'full-access',
+
+        -- ── Catch-all for custom permission sets ──
         'custom'
       )
     );
