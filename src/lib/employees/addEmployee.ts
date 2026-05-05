@@ -22,6 +22,17 @@ export interface AddEmployeeInput {
   created_by_clerk_id?: string | null;
 }
 
+const DB_VALID_PERMISSION_PRESETS = new Set([
+  'admin', 'farm_manager', 'supervisor', 'weighing_clerk',
+  'finance_officer', 'inventory_officer', 'viewer',
+  'operations-manager', 'sales-broker', 'custom',
+]);
+
+function toDbPreset(preset: string | null | undefined): string {
+  if (!preset) return 'custom';
+  return DB_VALID_PERMISSION_PRESETS.has(preset) ? preset : 'custom';
+}
+
 export async function addEmployee(input: AddEmployeeInput): Promise<{ employee_id: string }> {
   const companyId = input.company_id;
   const email = input.email?.trim();
@@ -55,7 +66,7 @@ export async function addEmployee(input: AddEmployeeInput): Promise<{ employee_i
     phone: input.phone ?? null,
     role: input.role ?? preset,
     department: input.department ?? null,
-    permission_preset: input.permission_preset ?? preset,
+    permission_preset: toDbPreset(input.permission_preset ?? preset),
     permissions,
     status: 'invited' as const,
   };

@@ -3,6 +3,7 @@ import { useUser } from '@clerk/react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
 import { isDevEmail } from '@/lib/devAccess';
+import { getClerkUserEmail } from '@/lib/clerkUserEmail';
 
 interface UseIsDeveloperState {
   isDeveloper: boolean;
@@ -20,7 +21,7 @@ export function useIsDeveloper(): UseIsDeveloperState {
   useEffect(() => {
     let cancelled = false;
     const clerkUserId = user?.id ?? null;
-    const email = user?.primaryEmailAddress?.emailAddress ?? null;
+    const email = getClerkUserEmail(user);
 
     if (!clerkUserId) {
       setState({ isDeveloper: false, loading: false });
@@ -77,7 +78,7 @@ export function useIsDeveloper(): UseIsDeveloperState {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, toast]);
+  }, [user?.id, user?.primaryEmailAddress?.emailAddress, user?.email, toast]);
 
   return state;
 }

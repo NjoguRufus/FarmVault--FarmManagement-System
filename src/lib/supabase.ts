@@ -1,14 +1,16 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logger } from "@/lib/logger";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
 // Prefer the new publishable key; fall back to anon for backwards compatibility.
 const supabaseKey =
-  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
-  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim() ??
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
 
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase configuration. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
+  throw new Error(
+    'Missing Supabase configuration. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY or VITE_SUPABASE_ANON_KEY.',
+  );
 }
 
 /**

@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { getDefaultPermissions, getFullAccessPermissions, resolvePermissions, expandFlatPermissions } from '@/lib/permissions';
 import { resolveEffectiveAccess, type EffectiveAccess } from '@/lib/access';
 import { useToast } from '@/components/ui/use-toast';
+import { getClerkUserEmail } from '@/lib/clerkUserEmail';
 import { isDevEmail } from '@/lib/devAccess';
 import { linkCurrentUserToInvitedEmployee } from '@/lib/employees/linkCurrentUserToInvitedEmployee';
 import { resolveOrCreatePlatformUser } from '@/lib/auth/resolveOrCreatePlatformUser';
@@ -807,12 +808,12 @@ export function AuthProvider({
 
       try {
         setTenantSessionTrust('verified');
-        const fallbackEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? '';
+        const email = getClerkUserEmail(clerkUser);
+        const fallbackEmail = email ?? '';
         const oauthHints = clerkOAuthDisplayHints(clerkUser);
 
         // 1) Determine developer status as early as possible.
         const devRoute = isCurrentRouteDev();
-        const email = clerkUser?.primaryEmailAddress?.emailAddress ?? null;
         let dev = false;
 
         try {
@@ -1707,7 +1708,7 @@ export function AuthProvider({
     return () => {
       cancelled = true;
     };
-  }, [clerkLoaded, isSignedIn, userId]);
+  }, [clerkLoaded, isSignedIn, userId, clerkUser?.primaryEmailAddress?.emailAddress, clerkUser?.email]);
 
   const login = async (email: string, password: string) => {
     if (clerkState === null) {
