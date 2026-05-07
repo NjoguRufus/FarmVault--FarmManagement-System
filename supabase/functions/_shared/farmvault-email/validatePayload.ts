@@ -191,7 +191,7 @@ export function validateSendFarmVaultEmailBody(raw: unknown): ValidateResult {
     if (isNonEmptyString(dataObj.recipientName)) {
       recipientName = dataObj.recipientName.trim().slice(0, 200);
     }
-    const allowedCat = new Set(["announcement", "appreciation", "support", "onboarding", "other"]);
+    const allowedCat = new Set(["announcement", "appreciation", "support", "onboarding", "other", "companion_test", "companion_broadcast"]);
     let category: string | undefined;
     if (isNonEmptyString(dataObj.category)) {
       const c = dataObj.category.trim().toLowerCase().slice(0, 50);

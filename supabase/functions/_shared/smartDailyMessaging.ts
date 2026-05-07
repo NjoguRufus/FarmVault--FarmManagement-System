@@ -2,7 +2,10 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   EVENING_GENERAL_POOL,
   MORNING_GENERAL_POOL,
+  inactivityPoolForTier,
+  inactivityTierFromDays,
   pickRotatingLine,
+  type InactivityTier,
 } from "./smartDailyMessagingPools.ts";
 
 export type SmartMessageCategory =
@@ -339,19 +342,156 @@ export async function fetchInventoryDeductCountWeek(
   return typeof count === "number" ? count : 0;
 }
 
+/** Fetch total sales/revenue for the week from harvest_sales or sales records. */
+async function fetchWeeklyRevenue(
+  admin: SupabaseClient,
+  companyId: string,
+  startStr: string,
+  endStr: string,
+): Promise<number> {
+  // Try finance.sales first, then harvest.harvest_sales, gracefully return 0 if neither exists.
+  const tables: Array<{ schema: string; table: string; amountCol: string; dateCol: string }> = [
+    { schema: "finance", table: "sales",           amountCol: "amount",       dateCol: "sale_date" },
+    { schema: "harvest", table: "harvest_sales",   amountCol: "total_amount", dateCol: "sale_date" },
+    { schema: "finance", table: "harvest_income",  amountCol: "amount",       dateCol: "income_date" },
+    { schema: "public",  table: "sales",           amountCol: "amount",       dateCol: "sale_date" },
+  ];
+  for (const t of tables) {
+    try {
+      const { data, error } = await (admin as SupabaseClient)
+        .schema(t.schema)
+        .from(t.table)
+        .select(t.amountCol)
+        .eq("company_id", companyId)
+        .gte(t.dateCol, startStr)
+        .lte(t.dateCol, endStr);
+      if (error || !data) continue;
+      const total = (data as Record<string, unknown>[]).reduce(
+        (sum, r) => sum + Number(r[t.amountCol] ?? 0),
+        0,
+      );
+      if (total > 0) return total;
+    } catch {
+      // table doesn't exist in this project — try next
+    }
+  }
+  return 0;
+}
+
+/**
+ * Count how many distinct calendar days in the last `lookbackDays` had at least one work log.
+ * Returns a streak (consecutive days ending today) and total active days in the window.
+ */
+async function fetchActivityStreak(
+  admin: SupabaseClient,
+  companyId: string,
+  todayStr: string,
+  timeZone: string,
+): Promise<{ streakDays: number; activeDaysThisWeek: number }> {
+  // Build array of last 28 date strings (YYYY-MM-DD) ending today.
+  const days: string[] = [];
+  const { y: ty, m: tm, day: td } = ymdInTimeZone(new Date(), timeZone);
+  for (let i = 0; i < 28; i++) {
+    const dt = new Date(Date.UTC(ty, tm - 1, td - i));
+    const ds = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    days.push(ds);
+  }
+  if (days.length === 0) return { streakDays: 0, activeDaysThisWeek: 0 };
+
+  const oldest = days[days.length - 1];
+  const { data, error } = await admin
+    .schema("public")
+    .from("work_logs")
+    .select("date")
+    .eq("company_id", companyId)
+    .gte("date", oldest)
+    .lte("date", todayStr);
+  if (error || !data) return { streakDays: 0, activeDaysThisWeek: 0 };
+
+  const activeDays = new Set((data as { date: string }[]).map((r) => String(r.date ?? "").slice(0, 10)));
+
+  // Streak: count consecutive days from today backwards that have activity.
+  let streakDays = 0;
+  for (const d of days) {
+    if (activeDays.has(d)) streakDays++;
+    else break;
+  }
+
+  // Active days this past week (last 7 days).
+  const weekDays = days.slice(0, 7);
+  const activeDaysThisWeek = weekDays.filter((d) => activeDays.has(d)).length;
+
+  return { streakDays, activeDaysThisWeek };
+}
+
+/** Fetch the name of the most active project this week (by work log count). */
+async function fetchTopProjectThisWeek(
+  admin: SupabaseClient,
+  companyId: string,
+  startStr: string,
+  endStr: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .schema("public")
+    .from("work_logs")
+    .select("project_id")
+    .eq("company_id", companyId)
+    .gte("date", startStr)
+    .lte("date", endStr)
+    .not("project_id", "is", null);
+  if (error || !data?.length) return null;
+
+  const counts = new Map<string, number>();
+  for (const r of data as { project_id: string }[]) {
+    const pid = String(r.project_id ?? "").trim();
+    if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+
+  let topId = "";
+  let topCount = 0;
+  for (const [id, n] of counts) {
+    if (n > topCount) { topCount = n; topId = id; }
+  }
+  if (!topId) return null;
+
+  const { data: proj } = await admin
+    .schema("projects")
+    .from("projects")
+    .select("name")
+    .eq("id", topId)
+    .maybeSingle();
+  const name = String((proj as { name?: string } | null)?.name ?? "").trim();
+  return name || null;
+}
+
+export type WeeklyAnalyticsResult = {
+  operations: number;
+  expenses: number;
+  harvestLabel: string;
+  inventoryUsed: number;
+  revenue: number;
+  streakDays: number;
+  activeDaysThisWeek: number;
+  topProject: string | null;
+};
+
 export async function fetchWeeklyAnalytics(
   admin: SupabaseClient,
   companyId: string,
   d: Date,
   timeZone: string,
-): Promise<{ operations: number; expenses: number; harvestLabel: string; inventoryUsed: number }> {
+): Promise<WeeklyAnalyticsResult> {
   const { startStr, endStr } = weekBoundsEndingLocalDate(d, timeZone);
   const { startIso } = localYmdBoundsUtc(startStr, timeZone);
   const { endIso } = localYmdBoundsUtc(endStr, timeZone);
+  const todayStr = localDateString(d, timeZone);
+
   const operations = await fetchWorkLogsCount(admin, companyId, startStr, endStr);
-  const exp = await fetchExpenseTotals(admin, companyId, localDateString(d, timeZone), startStr, endStr);
+  const exp = await fetchExpenseTotals(admin, companyId, todayStr, startStr, endStr);
   const harvestLabel = await fetchHarvestWeekTotals(admin, companyId, startStr, endStr);
   const inventoryUsed = await fetchInventoryDeductCountWeek(admin, companyId, startIso, endIso);
+
   let opCount = operations;
   if (opCount === 0) {
     const projectIds = await activeProjectIdsForCompany(admin, companyId);
@@ -377,11 +517,22 @@ export async function fetchWeeklyAnalytics(
       .is("deleted_at", null);
     opCount = hCount + (typeof e === "number" ? e : 0) + inventoryUsed;
   }
+
+  const [revenue, streak, topProject] = await Promise.all([
+    fetchWeeklyRevenue(admin, companyId, startStr, endStr),
+    fetchActivityStreak(admin, companyId, todayStr, timeZone),
+    fetchTopProjectThisWeek(admin, companyId, startStr, endStr),
+  ]);
+
   return {
     operations: opCount,
     expenses: exp.weekTotal,
     harvestLabel,
     inventoryUsed,
+    revenue,
+    streakDays: streak.streakDays,
+    activeDaysThisWeek: streak.activeDaysThisWeek,
+    topProject,
   };
 }
 
@@ -642,6 +793,206 @@ export async function insertFarmerInbox(
   });
   if (error) console.warn("[smartDailyMessaging] inbox insert", error.message);
 }
+
+// ---------------------------------------------------------------------------
+// Notification preferences
+// ---------------------------------------------------------------------------
+
+export type CompanionPreferences = {
+  morning_enabled: boolean;
+  evening_enabled: boolean;
+  inactivity_enabled: boolean;
+  weekly_summary_enabled: boolean;
+  email_enabled: boolean;
+  in_app_enabled: boolean;
+  /** IANA timezone for per-user send-window filtering. Default: Africa/Nairobi. */
+  timezone: string;
+};
+
+const DEFAULT_PREFS: CompanionPreferences = {
+  morning_enabled: true,
+  evening_enabled: true,
+  inactivity_enabled: true,
+  weekly_summary_enabled: true,
+  email_enabled: true,
+  in_app_enabled: true,
+  timezone: "Africa/Nairobi",
+};
+
+export async function loadCompanionPreferences(
+  admin: SupabaseClient,
+  clerkUserId: string,
+): Promise<CompanionPreferences> {
+  const { data, error } = await admin
+    .schema("public")
+    .from("notification_preferences")
+    .select(
+      "morning_enabled,evening_enabled,inactivity_enabled,weekly_summary_enabled,email_enabled,in_app_enabled,preferred_time_zone",
+    )
+    .eq("clerk_user_id", clerkUserId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[smartDailyMessaging] load prefs", error.message);
+    return { ...DEFAULT_PREFS };
+  }
+  if (!data) return { ...DEFAULT_PREFS };
+  const r = data as Partial<CompanionPreferences> & { preferred_time_zone?: string };
+  return {
+    morning_enabled:        r.morning_enabled        ?? DEFAULT_PREFS.morning_enabled,
+    evening_enabled:        r.evening_enabled        ?? DEFAULT_PREFS.evening_enabled,
+    inactivity_enabled:     r.inactivity_enabled     ?? DEFAULT_PREFS.inactivity_enabled,
+    weekly_summary_enabled: r.weekly_summary_enabled ?? DEFAULT_PREFS.weekly_summary_enabled,
+    email_enabled:          r.email_enabled          ?? DEFAULT_PREFS.email_enabled,
+    in_app_enabled:         r.in_app_enabled         ?? DEFAULT_PREFS.in_app_enabled,
+    timezone:               r.preferred_time_zone?.trim() || DEFAULT_PREFS.timezone,
+  };
+}
+
+// ─── Timezone window helpers ─────────────────────────────────────────────────
+
+/**
+ * Returns the current hour (0–23) in the given IANA timezone.
+ * Used to determine whether it is "morning" or "evening" for a specific user.
+ */
+export function localHourInTimeZone(d: Date, tz: string): number {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
+    const h = fmt.formatToParts(d).find((p) => p.type === "hour")?.value ?? "0";
+    const n = parseInt(h === "24" ? "0" : h, 10);
+    return Number.isNaN(n) ? 0 : n;
+  } catch {
+    return new Date().getUTCHours();
+  }
+}
+
+/**
+ * Returns true if the current time in `tz` falls within [startHour, endHour).
+ * Used by the cron to skip companies whose farmers are asleep.
+ */
+export function isInLocalTimeWindow(tz: string, startHour: number, endHour: number): boolean {
+  return isInLocalTimeWindowAt(new Date(), tz, startHour, endHour);
+}
+
+export function isInLocalTimeWindowAt(d: Date, tz: string, startHour: number, endHour: number): boolean {
+  const h = localHourInTimeZone(d, tz);
+  return h >= startHour && h < endHour;
+}
+
+/**
+ * Returns true when the current day in `tz` is Sunday.
+ * Used by the weekly-summary run to skip non-Sunday companies.
+ */
+export function isLocalSunday(tz: string): boolean {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" });
+    return fmt.format(new Date()).toLowerCase().startsWith("sun");
+  } catch {
+    return new Date().getUTCDay() === 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tiered inactivity detection
+// ---------------------------------------------------------------------------
+
+export type InactivityResult = {
+  tier: InactivityTier;
+  daysInactive: number;
+  message: string;
+  alreadySentThisWeek: boolean;
+};
+
+/** Days between two Date values (UTC day boundaries). */
+function daysBetweenDates(from: Date, to: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((to.getTime() - from.getTime()) / msPerDay);
+}
+
+/** Returns the ISO date string (YYYY-MM-DD) for the Sunday that starts the current UTC week. */
+function currentUtcWeekStart(): string {
+  const now = new Date();
+  const dow = now.getUTCDay(); // 0 = Sunday
+  const sunday = new Date(now);
+  sunday.setUTCDate(now.getUTCDate() - dow);
+  sunday.setUTCHours(0, 0, 0, 0);
+  return sunday.toISOString().slice(0, 10);
+}
+
+/** Check whether a given tier was already sent this calendar week (UTC Sunday-based). */
+async function inactivityTierSentThisWeek(
+  admin: SupabaseClient,
+  clerkUserId: string,
+  companyId: string,
+  tier: InactivityTier,
+): Promise<boolean> {
+  const weekStart = currentUtcWeekStart();
+  const { data } = await admin
+    .schema("public")
+    .from("companion_inactivity_log")
+    .select("id")
+    .eq("clerk_user_id", clerkUserId)
+    .eq("company_id", companyId)
+    .eq("tier", tier)
+    .eq("week_start", weekStart)
+    .limit(1)
+    .maybeSingle();
+  return !!(data as { id?: string } | null)?.id;
+}
+
+/** Record that a tier was sent so it won't repeat this week. */
+export async function recordInactivityTierSent(
+  admin: SupabaseClient,
+  clerkUserId: string,
+  companyId: string,
+  tier: InactivityTier,
+): Promise<void> {
+  const weekStart = currentUtcWeekStart();
+  const { error } = await admin
+    .schema("public")
+    .from("companion_inactivity_log")
+    .insert({ clerk_user_id: clerkUserId, company_id: companyId, tier, week_start: weekStart });
+  if (error && !error.message.includes("duplicate") && !error.message.includes("unique")) {
+    console.warn("[smartDailyMessaging] record inactivity tier", error.message);
+  }
+}
+
+/**
+ * Determine if a user is inactive and which tier applies.
+ * Returns null if the user is active, or if preferences disable inactivity nudges,
+ * or if the tier was already sent this week.
+ *
+ * `lastActivityAt` should be the best available proxy for last active time —
+ * typically profile.updated_at (updated on each Clerk sign-in sync).
+ */
+export async function detectInactivityTier(
+  admin: SupabaseClient,
+  clerkUserId: string,
+  companyId: string,
+  lastActivityAt: Date | null,
+  prefs: CompanionPreferences,
+): Promise<InactivityResult | null> {
+  if (!prefs.inactivity_enabled) return null;
+  if (!lastActivityAt) return null;
+
+  const now = new Date();
+  const daysInactive = daysBetweenDates(lastActivityAt, now);
+  const tier = inactivityTierFromDays(daysInactive);
+  if (!tier) return null; // active (< 2 days)
+
+  const alreadySent = await inactivityTierSentThisWeek(admin, clerkUserId, companyId, tier);
+
+  // Pick a rotating message from the tier pool using day-of-year as seed.
+  const doy = Math.floor(now.getTime() / (24 * 60 * 60 * 1000));
+  const pool = inactivityPoolForTier(tier);
+  const idx = Math.abs(doy + clerkUserId.charCodeAt(0)) % pool.length;
+  const message = pool[idx] ?? pool[0];
+
+  return { tier, daysInactive, message, alreadySentThisWeek: alreadySent };
+}
+
+// ---------------------------------------------------------------------------
+// Optional SMS hook
+// ---------------------------------------------------------------------------
 
 /** Optional SMS hook: POST JSON to FARMVAULT_SMS_WEBHOOK_URL if set. */
 export async function sendOptionalFarmerSms(phone: string | null | undefined, body: string): Promise<void> {

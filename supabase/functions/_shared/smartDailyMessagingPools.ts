@@ -202,6 +202,96 @@ function buildPool(cores: string[], tails: string[], prefix: "morning" | "evenin
 export const MORNING_GENERAL_POOL: string[] = buildPool(MORNING_CORE, MORNING_TAIL, "morning");
 export const EVENING_GENERAL_POOL: string[] = buildPool(EVENING_CORE, EVENING_TAIL, "evening");
 
+// ---------------------------------------------------------------------------
+// Inactivity companion nudge pools — tiered by days inactive.
+// Tone: warm, welcoming, never guilt-tripping. The farmer should feel supported.
+// ---------------------------------------------------------------------------
+
+/** 2 days inactive — gentle, curious, low-pressure. */
+export const INACTIVITY_2D_POOL: string[] = [
+  "🌱 Your farm journey is still here — ready when you are.",
+  "🚜 A quick check-in keeps your farm story moving forward.",
+  "🌾 It's a great day to log something. FarmVault remembers everything.",
+  "📊 Your records are safe and complete. Let's add to them together.",
+  "🌱 Every entry you make builds a clearer picture of your season.",
+  "🚜 Your workspace is ready and waiting — come see what's changed.",
+  "🌾 Small updates today make next season much easier to plan.",
+  "📦 Step back in whenever you're ready. Your farm is always here.",
+  "🌱 Progress happens one record at a time. Start with one small update.",
+  "🚜 Let's pick up where you left off — your farm data is all here.",
+];
+
+/** 5 days inactive — warmer, personally acknowledging, still calm. */
+export const INACTIVITY_5D_POOL: string[] = [
+  "🌾 A few days away is natural. Your farm story is waiting for its next chapter.",
+  "🌱 Farming is hard work in and out of the app. Whenever you're ready, we're here.",
+  "🚜 Your farm records are safe and untouched — ready to continue.",
+  "📊 Every farmer has busier seasons. Come back to FarmVault when the moment is right.",
+  "🌾 Your workspace is exactly as you left it. Step back in and keep growing.",
+  "🌱 Even a five-minute update can capture a whole day's worth of progress.",
+  "🚜 Your farm data tells your story. Let's keep writing it together.",
+  "📦 It's been a few days — and we've been thinking about your farm. Come on back.",
+  "🌾 The best time to update your records is now. The second best was yesterday.",
+  "🌱 We kept everything safe for you. Your farm is ready when you are.",
+];
+
+/** 7 days inactive — heartfelt, caring, hopeful. Reminds without pressure. */
+export const INACTIVITY_7D_POOL: string[] = [
+  "🌾 A week away — and your farm records are still here, complete and safe.",
+  "🌱 Whatever kept you busy, we hope things are going well. FarmVault is ready.",
+  "🚜 Real farming happens in the field, not just the app. Come back when you can.",
+  "📊 Your farm data is preserved and waiting. Let's continue your journey.",
+  "🌾 Consistency creates stronger farms. One update today is a step forward.",
+  "🌱 Your farm deserves consistent records — and so does your peace of mind.",
+  "🚜 We haven't forgotten about you or your farm. Everything is safe and ready.",
+  "📦 It's been a week — a gentle reminder that your farm story is still unfolding.",
+  "🌾 No matter how long the pause, your farm journey doesn't have to start over.",
+  "🌱 Your workspace is intact. Your data is safe. You can pick up right where you left off.",
+];
+
+/** 14 days inactive — deeply personal, hopeful, no judgment. */
+export const INACTIVITY_14D_POOL: string[] = [
+  "🌾 It's been a while, and we've been thinking about you. Your farm is still here.",
+  "🌱 Two weeks away — your workspace is unchanged, your data is complete, and we're still here.",
+  "🚜 No matter how long the break, FarmVault is ready to help you pick up where you left off.",
+  "📊 Every farmer has seasons of rest. Whenever you're ready to track again, we're here.",
+  "🌾 Your farm data is safe, your records are intact. Come back whenever the time is right.",
+  "🌱 We don't measure worth by how often you log in. When you're ready, we're ready.",
+  "🚜 Your farm journey is not behind — it's just paused. Let's continue it together.",
+  "📦 Two weeks is a long time in farming. We kept everything exactly as you left it.",
+  "🌾 Growth comes in seasons. We'll be here at the start of yours — whenever that is.",
+  "🌱 FarmVault is your farming companion for the long haul. Take your time, then come back.",
+];
+
+export type InactivityTier = "2d" | "5d" | "7d" | "14d";
+
+export function inactivityPoolForTier(tier: InactivityTier): string[] {
+  switch (tier) {
+    case "2d":  return INACTIVITY_2D_POOL;
+    case "5d":  return INACTIVITY_5D_POOL;
+    case "7d":  return INACTIVITY_7D_POOL;
+    case "14d": return INACTIVITY_14D_POOL;
+  }
+}
+
+export function inactivityTierFromDays(days: number): InactivityTier | null {
+  if (days >= 14) return "14d";
+  if (days >= 7)  return "7d";
+  if (days >= 5)  return "5d";
+  if (days >= 2)  return "2d";
+  return null;
+}
+
+export function inactivityTierSubject(tier: InactivityTier, farmName: string): string {
+  const name = farmName.trim() || "your farm";
+  switch (tier) {
+    case "2d":  return `${name} — a quick check-in from FarmVault`;
+    case "5d":  return `Your farm journey is still here`;
+    case "7d":  return `We've been thinking about ${name}`;
+    case "14d": return `A message from your farming companion`;
+  }
+}
+
 /** Message template buckets (structure requested for product/docs). */
 export function getFarmerMessageTemplateJson(): {
   morning: {

@@ -26,12 +26,20 @@ import {
   updateEmailLogRow,
 } from "../_shared/emailLogs.ts";
 import { renderFarmVaultEmail } from "../_shared/farmvault-email/renderFarmVaultEmail.ts";
+import {
+  buildCompanionMorningEmail,
+  buildCompanionEveningEmail,
+  buildCompanionInactivityEmail,
+  buildCompanionWeeklySummaryEmail,
+} from "../_shared/farmvault-email/companionEmailTemplates.ts";
+import type { WeeklySummaryStats } from "../_shared/farmvault-email/companionEmailTemplates.ts";
 import type {
   FarmVaultEmailType,
   SendFarmVaultEmailPayload,
 } from "../_shared/farmvault-email/types.ts";
 import { validateSendFarmVaultEmailBody } from "../_shared/farmvault-email/validatePayload.ts";
-import { getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
+import { getFarmVaultEmailFrom, getFarmVaultEmailFromForEmailType } from "../_shared/farmvaultEmailFrom.ts";
+import type { InactivityTier } from "../_shared/smartDailyMessagingPools.ts";
 import { serveFarmVaultEdge } from "../_shared/withEdgeLogging.ts";
 
 const corsHeaders = {
@@ -203,12 +211,48 @@ serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
 
   const admin = getServiceRoleClientForEmailLogs();
 
+  // Resolve category early — needed for both rendering and sender selection.
+  const customCategory =
+    payload.emailType === "custom_manual"
+      ? ((payload.data as { category?: string | null }).category ?? "")
+      : "";
+
   let subject: string;
   let html: string;
   try {
-    const rendered = renderFarmVaultEmail(payload.emailType, payload.data);
-    subject = rendered.subject;
-    html = rendered.html;
+    if (customCategory.startsWith("companion_")) {
+      // Companion emails are fully standalone — bypass renderFarmVaultEmail and the shared shell.
+      const cMeta         = (payload.metadata ?? {}) as Record<string, unknown>;
+      const companionType = String(cMeta.companionType || "morning");
+      const displayName   = String(cMeta.displayName   || "");
+      const farmName      = String(cMeta.farmName      || "");
+      const messageText   = String(cMeta.messageText   || (payload.data as { subject?: string }).subject || "FarmVault");
+      const messageHtml   = String(cMeta.messageHtml   || `<p style="margin:0">${messageText}</p>`);
+      const isTest        = customCategory === "companion_test";
+
+      let rendered: { subject: string; html: string };
+      if (companionType === "evening") {
+        rendered = buildCompanionEveningEmail({ displayName, messageText, messageHtml, farmName });
+      } else if (companionType === "inactivity") {
+        const tier = (cMeta.companionTier as InactivityTier | undefined) || "2d";
+        rendered = buildCompanionInactivityEmail({ displayName, tier, nudgeMessage: messageText, farmName });
+      } else if (companionType === "weekly") {
+        const weeklyStats: WeeklySummaryStats = {
+          operations: 0, expenses: 0, harvestLabel: "—", inventoryUsed: 0,
+          weekStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          weekEnd:   new Date().toISOString().slice(0, 10),
+        };
+        rendered = buildCompanionWeeklySummaryEmail({ displayName, stats: weeklyStats, summaryMessage: messageText, summaryHtml: messageHtml, farmName });
+      } else {
+        rendered = buildCompanionMorningEmail({ displayName, messageText, messageHtml, farmName });
+      }
+      subject = isTest ? `[TEST] ${rendered.subject}` : rendered.subject;
+      html    = rendered.html;
+    } else {
+      const rendered = renderFarmVaultEmail(payload.emailType, payload.data);
+      subject = rendered.subject;
+      html    = rendered.html;
+    }
   } catch (e) {
     console.error("[send-farmvault-email] Template render failed", e);
     const errText = e instanceof Error ? e.message : String(e);
@@ -249,7 +293,9 @@ serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
     return jsonResponse({ error: "Email service not configured" }, 500);
   }
 
-  const from = farmVaultFromForEmailType(payload.emailType);
+  const from = customCategory.startsWith("companion_")
+    ? getFarmVaultEmailFrom("companion")
+    : farmVaultFromForEmailType(payload.emailType);
 
   const meta = buildEmailMetadataSummary(payload.metadata ?? null, payloadDataAsRecord(payload));
   meta.source = "send-farmvault-email";

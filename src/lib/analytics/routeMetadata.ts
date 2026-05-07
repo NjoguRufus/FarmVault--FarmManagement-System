@@ -29,6 +29,7 @@ const ROUTE_RULES: RouteRule[] = [
   { pattern: '/developer/feedback-inbox', end: true, meta: { page_name: 'Developer feedback', module_name: 'developer' } },
   { pattern: '/developer/audit-logs', end: true, meta: { page_name: 'Developer audit logs', module_name: 'developer' } },
   { pattern: '/developer/email-center', end: true, meta: { page_name: 'Developer email center', module_name: 'developer' } },
+  { pattern: '/developer/notification-testing', end: true, meta: { page_name: 'Developer notification testing', module_name: 'developer' } },
   { pattern: '/developer', end: true, meta: { page_name: 'Developer home', module_name: 'developer' } },
   { pattern: '/admin/companies', end: true, meta: { page_name: 'Admin companies', module_name: 'developer' } },
   { pattern: '/admin/users/pending', end: true, meta: { page_name: 'Admin pending users', module_name: 'developer' } },

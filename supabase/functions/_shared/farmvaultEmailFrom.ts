@@ -4,35 +4,42 @@
  *
  * Do not use noreply@ or Resend’s default onboarding domain in production.
  *
- * Optional env overrides (only these):
- *   FARMVAULT_EMAIL_FROM_ONBOARDING | FARMVAULT_EMAIL_FROM_BILLING | FARMVAULT_EMAIL_FROM_ALERTS |
+ * Sender identities by purpose:
+ *   companion  → companion@  — morning / evening / inactivity / weekly companion notifications
+ *   onboarding → hello@      — welcome, company approval, onboarding lifecycle
+ *   billing    → billing@    — invoices, receipts, subscription events sent to tenants
+ *   alerts     → alerts@     — trial expiry, system-level operational alerts
+ *   developer  → alerts@     — developer inbox (same address, distinct display name)
+ *   support    → support@    — support correspondence
+ *
+ * Optional env overrides:
+ *   FARMVAULT_EMAIL_FROM_COMPANION | FARMVAULT_EMAIL_FROM_ONBOARDING |
+ *   FARMVAULT_EMAIL_FROM_BILLING   | FARMVAULT_EMAIL_FROM_ALERTS     |
  *   FARMVAULT_EMAIL_FROM_DEVELOPER | FARMVAULT_EMAIL_FROM_SUPPORT
  * Aliases: FARMVAULT_EMAIL_FROM_HELLO → onboarding; FARMVAULT_BILLING_EMAIL_FROM → billing
  */
 
 export type FarmVaultEmailSenderKey = keyof typeof EMAIL_SENDERS;
 
-/**
- * Signup / onboarding / welcome → hello@
- * Payment / billing / receipts / subscription lifecycle to tenant → billing@
- * Trial reminders, engagement, daily summaries → alerts@
- * Developer inbox (same mailbox, distinct display name) → FarmVault System <alerts@>
- */
 export const EMAIL_SENDERS = {
+  /** Smart Companion daily messages — warm, human, farm-companion tone. */
+  companion:  "FarmVault Companion <companion@farmvault.africa>",
   onboarding: "FarmVault <hello@farmvault.africa>",
-  billing: "FarmVault Billing <billing@farmvault.africa>",
-  alerts: "FarmVault Alerts <alerts@farmvault.africa>",
-  /** Developer-facing alerts; same address as alerts, branded as System */
-  developer: "FarmVault System <alerts@farmvault.africa>",
-  support: "FarmVault Support <support@farmvault.africa>",
+  billing:    "FarmVault Billing <billing@farmvault.africa>",
+  /** Trial reminders, system-level operational alerts. */
+  alerts:     "FarmVault Alerts <alerts@farmvault.africa>",
+  /** Developer-facing alerts; same address as alerts, branded as System. */
+  developer:  "FarmVault System <alerts@farmvault.africa>",
+  support:    "FarmVault Support <support@farmvault.africa>",
 } as const;
 
 const ENV_KEY: Record<FarmVaultEmailSenderKey, string> = {
+  companion:  "FARMVAULT_EMAIL_FROM_COMPANION",
   onboarding: "FARMVAULT_EMAIL_FROM_ONBOARDING",
-  billing: "FARMVAULT_EMAIL_FROM_BILLING",
-  alerts: "FARMVAULT_EMAIL_FROM_ALERTS",
-  developer: "FARMVAULT_EMAIL_FROM_DEVELOPER",
-  support: "FARMVAULT_EMAIL_FROM_SUPPORT",
+  billing:    "FARMVAULT_EMAIL_FROM_BILLING",
+  alerts:     "FARMVAULT_EMAIL_FROM_ALERTS",
+  developer:  "FARMVAULT_EMAIL_FROM_DEVELOPER",
+  support:    "FARMVAULT_EMAIL_FROM_SUPPORT",
 };
 
 const LEGACY_BILLING = "FARMVAULT_BILLING_EMAIL_FROM";
@@ -70,6 +77,20 @@ export function getFarmVaultEmailFromForEmailType(emailType: string): string {
   ]);
   if (developerInboxTypes.has(t)) return getFarmVaultEmailFrom("developer");
 
+  // Smart Companion daily messages → greetings@ (warm companion identity)
+  const companionTypes = new Set([
+    "smart_farmer_morning",
+    "smart_farmer_evening",
+    "engagement_inactivity",
+    "smart_farmer_weekly",
+    // legacy aliases kept for backward compatibility with existing email_logs rows
+    "engagement_morning",
+    "engagement_evening_reminder",
+    "engagement_weekly_summary",
+  ]);
+  if (companionTypes.has(t)) return getFarmVaultEmailFrom("companion");
+  if (t.startsWith("smart_farmer_")) return getFarmVaultEmailFrom("companion");
+
   const onboardingTypes = new Set([
     "welcome",
     "company_approved",
@@ -101,19 +122,15 @@ export function getFarmVaultEmailFromForEmailType(emailType: string): string {
     "company_trial_expiring_soon",
     "company_trial_expired",
     "subscription_expired",
-    "engagement_morning",
-    "engagement_evening_reminder",
-    "engagement_inactivity",
-    "engagement_weekly_summary",
     "daily_summary",
   ]);
   if (alertsTypes.has(t)) return getFarmVaultEmailFrom("alerts");
 
-  if (t.startsWith("engagement_")) return getFarmVaultEmailFrom("alerts");
-
   if (t.includes("trial_expir") || t.includes("subscription_expired")) {
     return getFarmVaultEmailFrom("alerts");
   }
+
+  if (t.startsWith("engagement_")) return getFarmVaultEmailFrom("companion");
 
   if (
     t.includes("billing_receipt") ||

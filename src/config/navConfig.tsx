@@ -28,6 +28,7 @@ import {
   ClipboardCheck,
   Scale,
   Plug,
+  FlaskConical,
 } from 'lucide-react';
 import {
   FARMER_FARM_WORK_PATH,
@@ -135,6 +136,7 @@ export const developerNavConfig: NavItem[] = [
   { label: 'Feedback inbox', path: '/developer/feedback-inbox', icon: MessageSquare, group: 'more' },
   { label: 'Audit Logs', path: '/developer/audit-logs', icon: FileText, group: 'more' },
   { label: 'Email Center', path: '/developer/email-center', icon: Mail, group: 'more' },
+  { label: 'Notification Testing', path: '/developer/notification-testing', icon: FlaskConical, group: 'more' },
   { label: 'Integrations', path: '/developer/integrations', icon: Plug, group: 'more' },
   { label: 'Notes', path: '/developer/records', icon: NotebookPen, group: 'more' },
   { label: 'Company Migrations', path: '/developer/company-migrations', icon: ArrowRightLeft, group: 'more' },

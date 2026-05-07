@@ -99,6 +99,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
       case '/developer/backups':
         return 'Operations & Monitoring';
       case '/developer/email-center':
+      case '/developer/notification-testing':
       case '/developer/feedback-inbox':
         return 'Communication';
       case '/developer/audit-logs':

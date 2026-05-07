@@ -183,6 +183,7 @@ import DeveloperCodeRedPage from "@/pages/developer/DeveloperCodeRedPage";
 import DeveloperFeedbackInboxPage from "@/pages/developer/DeveloperFeedbackInboxPage";
 import DeveloperAuditLogsPage from "@/pages/developer/DeveloperAuditLogsPage";
 import DeveloperEmailCenterPage from "@/pages/developer/DeveloperEmailCenterPage";
+import DeveloperNotificationTestingPage from "@/pages/developer/DeveloperNotificationTestingPage";
 import DeveloperHomePage from "@/pages/developer/DeveloperHomePage";
 import DeveloperRecordViewPage from "@/pages/developer/DeveloperRecordViewPage";
 import DeveloperCompanyMigrationsPage from "@/pages/developer/DeveloperCompanyMigrationsPage";
@@ -661,6 +662,7 @@ const AppRoutesWithLock = () => (
         <Route path="feedback-inbox" element={<DeveloperFeedbackInboxPage />} />
         <Route path="audit-logs" element={<DeveloperAuditLogsPage />} />
         <Route path="email-center" element={<DeveloperEmailCenterPage />} />
+        <Route path="notification-testing" element={<DeveloperNotificationTestingPage />} />
         <Route path="email-logs" element={<Navigate to="/developer/email-center" replace />} />
         <Route path="records" element={<DeveloperRecordsPage />} />
         <Route path="records/:cropSlug" element={<CropDetailsPage />} />

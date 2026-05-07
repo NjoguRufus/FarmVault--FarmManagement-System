@@ -89,25 +89,38 @@ function getNotificationPrefs(userId: string | undefined): {
 
 function formatAlertTitle(alert: AdminAlertRow): string {
   const actionMap: Record<string, string> = {
+    // Inventory
     CREATE: 'created',
     ITEM_CREATED: 'created',
     STOCK_IN: 'restocked',
-    STOCK_DEDUCTED: 'deducted from',
-    DEDUCT: 'deducted from',
+    STOCK_DEDUCTED: 'deducted stock from',
+    DEDUCT: 'deducted stock from',
     EDIT_ITEM: 'edited',
     ITEM_EDITED: 'edited',
-    DELETE: 'archived',
+    DELETE: 'deleted',
     ITEM_DELETED: 'deleted',
     ITEM_ARCHIVED: 'archived',
     RESTORE: 'restored',
     ITEM_RESTORED: 'restored',
     USAGE: 'recorded usage for',
     USAGE_RECORDED: 'recorded usage for',
+    // Operations
+    WORK_LOGGED: 'logged an operation —',
+    WORK_EDITED: 'edited an operation —',
+    WORK_PAID: 'marked as paid —',
+    // Finance
+    EXPENSE_RECORDED: 'recorded an expense —',
+    EXPENSE_CREATED: 'recorded an expense —',
   };
   const actionVerb = actionMap[alert.action] || alert.action.toLowerCase().replace(/_/g, ' ');
-  const actor = alert.actor_name || 'Someone';
-  const target = alert.target_label || 'an item';
-  return `${actor} ${actionVerb} ${target}`;
+  const actor =
+    alert.actor_name?.trim() ||
+    (typeof alert.metadata?.loggedBy === 'string' ? (alert.metadata.loggedBy as string).trim() : null) ||
+    (typeof alert.metadata?.actor_name === 'string' ? (alert.metadata.actor_name as string).trim() : null) ||
+    (typeof alert.metadata?.user_name === 'string' ? (alert.metadata.user_name as string).trim() : null) ||
+    'Unknown user';
+  const target = alert.target_label?.trim() || '';
+  return target ? `${actor} ${actionVerb} ${target}` : `${actor} ${actionVerb.replace(/ —$/, '')}`;
 }
 
 function formatAlertMessage(alert: AdminAlertRow): string | undefined {

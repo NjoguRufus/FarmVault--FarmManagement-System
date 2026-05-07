@@ -587,14 +587,16 @@ export function LogWorkModal({
       // Step 5: Create admin alert
       await createAdminAlert({
         companyId: companyId!,
-        type: 'work_logged',
-        title: 'Work Logged',
-        message: `${user?.name ?? 'Employee'} logged work: ${effectiveWorkTitle}`,
-        severity: 'info',
+        module: 'operations',
+        action: 'WORK_LOGGED',
+        severity: 'normal',
+        actorUserId: user?.id ?? undefined,
+        actorName: user?.name ?? undefined,
+        targetId: workCard.id,
+        targetLabel: effectiveWorkTitle,
         metadata: {
           workCardId: workCard.id,
           workTitle: effectiveWorkTitle,
-          loggedBy: user?.name,
         },
       });
 

@@ -28,7 +28,7 @@ import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
-import { NavbarNotificationBell } from '@/components/layout/NavbarNotificationBell';
+import { SmartCompanionCenter } from '@/components/companion/SmartCompanionCenter';
 import { logger } from "@/lib/logger";
 
 interface TopNavbarProps {
@@ -478,7 +478,13 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
             </button>
           )}
 
-          <NavbarNotificationBell variant="main" />
+          {/* Unified notification bell — companion messages + system alerts + preferences */}
+          {user && !isDeveloperNav && (
+            <SmartCompanionCenter
+              companyId={user.companyId ?? null}
+              clerkUserId={user.id ?? null}
+            />
+          )}
 
           <FarmVaultUserMenu
             accountLabel="My Account"
