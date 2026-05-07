@@ -146,13 +146,13 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
   morning: {
     default: [
       {
-        subject: 'Good morning, {name}! Your farm is waiting for you',
+        subject: '☀️ Good morning, {name}! Your farm is waiting for you',
         greeting: 'Good morning, {name}! ☀️',
         body: 'A new farming day begins. Check in on your crops, review any pending operations, and log today\'s progress in FarmVault. Small steps every day lead to a great harvest.',
         cta: 'Open my farm dashboard',
       },
       {
-        subject: 'Good morning, {name} — start your farming day with intention',
+        subject: '☀️ Good morning, {name} — start your farming day with intention',
         greeting: 'Rise and shine, {name}!',
         body: 'Your farm doesn\'t wait — and neither should you. Take a moment this morning to review your project stages, check inventory levels, and plan today\'s operations. You\'ve got this.',
         cta: 'View today\'s tasks',
@@ -162,13 +162,13 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
   evening: {
     default: [
       {
-        subject: 'Good evening, {name} — how did the farm do today?',
+        subject: '🌙 Good evening, {name} — how did the farm do today?',
         greeting: 'Good evening, {name}.',
         body: 'Another day on the farm done. Take a moment to log any work completed, update your harvest records, or note what needs attention tomorrow. Consistent tracking is what separates good farms from great ones.',
         cta: 'Log today\'s progress',
       },
       {
-        subject: 'Well done today, {name} — your farm records are waiting',
+        subject: '🌙 Well done today, {name} — your farm records are waiting',
         greeting: 'Evening, {name}.',
         body: 'The sun is setting on another farming day. Whether today was productive or challenging, logging your progress in FarmVault helps you see the bigger picture across seasons.',
         cta: 'Update my records',
@@ -178,7 +178,7 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
   inactivity: {
     '2d': [
       {
-        subject: '{name}, we noticed you\'ve been away — your farm misses you',
+        subject: '🌿 {name}, we noticed you\'ve been away — your farm misses you',
         greeting: 'Hey {name},',
         body: 'It\'s been a couple of days since you last checked in on FarmVault. Your crops, expenses, and operations are waiting. Even a quick 5-minute log-in helps you stay on top of your farm.',
         cta: 'Check in on my farm',
@@ -186,7 +186,7 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
     ],
     '5d': [
       {
-        subject: '{name}, five days away — everything is still here for you',
+        subject: '🌿 {name}, five days away — everything is still here for you',
         greeting: 'Hello {name},',
         body: 'We\'ve missed you this week. Farming is busy, and we understand — but FarmVault is here to make it easier, not harder. Come back and see what\'s changed on your farm.',
         cta: 'Return to FarmVault',
@@ -194,7 +194,7 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
     ],
     '7d': [
       {
-        subject: '{name}, a week has passed — your farm is waiting',
+        subject: '🌿 {name}, a week has passed — your farm is waiting',
         greeting: 'Dear {name},',
         body: 'A whole week without FarmVault. We haven\'t forgotten about you, and your farm data is safe and waiting. Whenever you\'re ready, we\'re here to help you track every harvest, expense, and milestone.',
         cta: 'Come back to my farm',
@@ -202,7 +202,7 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
     ],
     '14d': [
       {
-        subject: '{name}, two weeks — we genuinely miss you on FarmVault',
+        subject: '🌿 {name}, two weeks — we genuinely miss you on FarmVault',
         greeting: 'Dear {name},',
         body: 'Two weeks is a long time away. We\'ve been thinking about you and your farm. Life gets busy, seasons change, and challenges come — but FarmVault is here through all of it. Come back at your own pace.',
         cta: 'I\'m ready to return',
@@ -212,7 +212,7 @@ const SAMPLE_MESSAGES: Record<NotificationType, Record<string, { subject: string
   weekly: {
     default: [
       {
-        subject: '{name}, your weekly farm summary is ready',
+        subject: '📊 {name}, your weekly farm summary is ready',
         greeting: 'Hello {name},',
         body: 'Here\'s what happened on your farm this week:\n\n• Operations logged: —\n• Harvest records: —\n• Expenses tracked: —\n• Inventory updates: —\n\nKeep up the great work. Every record you log makes next season\'s planning easier.',
         cta: 'View my full summary',
@@ -256,76 +256,6 @@ const TYPE_FOOTER_TAGLINE: Record<NotificationType, string> = {
   inactivity: "We're still here with you, always.",
   weekly:     'Your farm story, written week by week.',
 };
-
-function buildCompanionHtml(
-  type: NotificationType,
-  tier: InactivityTier | null,
-  seed: number,
-  farmName: string,
-  recipientName: string,
-): string {
-  const sample = getSampleMessage(type, tier, seed);
-  const name = recipientName || farmName || 'Farmer';
-  const greeting = sample.greeting.replace(/\{name\}/g, name);
-  const font = 'Arial, Helvetica, sans-serif';
-
-  const hero = type === 'inactivity' && tier ? TIER_HERO[tier] : TYPE_HERO_STYLE[type];
-  const tagline = TYPE_FOOTER_TAGLINE[type];
-
-  const heroEmoji = type === 'morning' ? '☀️' : type === 'evening' ? '🌙' : type === 'weekly' ? '🏆' : '🌿';
-  const heroSubtitle = type === 'morning'
-    ? `A new farming day begins — ${farmName || 'your farm'} is ready for you.`
-    : type === 'evening'
-      ? `Another farming day complete. ${farmName || 'Your farm'}, you showed up.`
-      : type === 'weekly'
-        ? `Here is what ${farmName || 'your farm'} accomplished this week.`
-        : `Your farm is still here. We're still here with you.`;
-
-  return `
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 0 0;">
-  <tr>
-    <td style="background:${hero.gradient};background-color:${hero.fallback};padding:28px 28px 24px 28px;text-align:center;border-radius:10px 10px 0 0;">
-      <p style="margin:0 0 6px 0;font-family:${font};font-size:20px;font-weight:700;color:#ffffff;line-height:1.3;">${heroEmoji} ${greeting}</p>
-      <p style="margin:0;font-family:${font};font-size:13px;color:rgba(255,255,255,0.88);line-height:1.55;">${heroSubtitle}</p>
-    </td>
-  </tr>
-  <tr>
-    <td style="padding:24px 28px 8px 28px;background-color:#ffffff;font-family:${font};">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-        <tr>
-          <td style="padding:16px 18px;background-color:${hero.cardBg};border-left:4px solid ${hero.cardBorder};border-radius:0 10px 10px 0;font-size:14px;line-height:1.75;color:#374151;white-space:pre-line;">
-            ${sample.body}
-          </td>
-        </tr>
-        <tr>
-          <td align="center" style="padding:22px 0 8px 0;">
-            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-              <tr>
-                <td align="center" bgcolor="#1f6f43" style="background-color:#1f6f43;border-radius:10px;">
-                  <a href="#" style="display:inline-block;padding:13px 32px;font-family:${font};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;line-height:1.2;">
-                    ${sample.cta}
-                  </a>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:10px 0 4px 0;font-family:${font};font-size:12px;color:#9ca3af;font-style:italic;text-align:center;">
-            ${tagline}
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-<p style="font-family:${font};font-size:11px;color:#9ca3af;margin:20px 0 0 0;border-top:1px solid #f3f4f6;padding-top:14px;">
-  This is a <strong>developer test</strong> of the FarmVault Smart Companion Notification system.
-  Company context: <strong>${farmName || 'Unknown'}</strong>.
-  Not triggered by the production cron — will not affect real users.
-</p>
-`.trim();
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -534,11 +464,6 @@ export default function DeveloperNotificationTestingPage() {
     [broadcastType, effectiveBroadcastTier, broadcastPreviewSeed],
   );
 
-  const broadcastPreviewAccent =
-    broadcastType === 'morning' ? 'bg-amber-500' :
-    broadcastType === 'evening' ? 'bg-violet-500' :
-    broadcastType === 'inactivity' ? 'bg-orange-500' : 'bg-emerald-500';
-
   // Sync auto-detected type unless user overrode
   useEffect(() => {
     if (!broadcastTypeOverride) {
@@ -600,6 +525,7 @@ export default function DeveloperNotificationTestingPage() {
               farmName: companyName,
               messageText,
               messageHtml,
+              messageSubject: subject,
             },
             companyName,
             triggeredBy: 'developer_broadcast',
@@ -676,6 +602,7 @@ export default function DeveloperNotificationTestingPage() {
           farmName: resolvedFarmName || '',
           messageText,
           messageHtml,
+          messageSubject: subject,
         },
         ...(resolvedFarmName ? { companyName: resolvedFarmName } : {}),
         triggeredBy: 'developer_notification_test',
@@ -1389,37 +1316,72 @@ export default function DeveloperNotificationTestingPage() {
             </div>
 
             <div className="rounded-xl border border-border/60 bg-white dark:bg-zinc-950 overflow-hidden shadow-sm">
-              <div className={`h-1.5 w-full ${broadcastPreviewAccent} opacity-80`} />
-              <div className="p-5 sm:p-6 space-y-4">
-                <div className="space-y-0.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Subject</p>
-                  <p className="text-sm font-medium text-foreground">
-                    {broadcastPreview.subject.replace(/\{name\}/g, '[Company Name]')}
-                  </p>
-                </div>
-                <Separator className="bg-border/50" />
-                <div className="flex items-center gap-2">
-                  <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary">FV</span>
+              {/* Subject bar */}
+              <div className="border-b border-border/40 px-5 py-3 bg-muted/30">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Subject line</p>
+                <p className="text-sm font-medium text-foreground">
+                  {broadcastPreview.subject.replace(/\{name\}/g, '[Company Name]')}
+                </p>
+              </div>
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-border/30 px-5 py-3 bg-white dark:bg-zinc-950">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-base" aria-label="FarmVault mascot">
+                    🌱
                   </div>
-                  <span className="text-xs font-semibold text-foreground">FarmVault</span>
+                  <span className="text-[11px] text-muted-foreground font-medium">FarmVault Companion</span>
                 </div>
-                <div className="space-y-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    {broadcastType === 'inactivity' && effectiveBroadcastTier
-                      ? `Inactivity nudge (${effectiveBroadcastTier})`
-                      : NOTIFICATION_TYPES.find((t) => t.value === broadcastType)?.label} — FarmVault Companion
-                  </p>
-                  <p className="text-lg font-bold text-foreground">
-                    {broadcastPreview.greeting.replace('{name}', '[Company Name]')}
-                  </p>
+                <img src="/Logo/fv.png" alt="FarmVault" className="h-6 w-auto object-contain opacity-90" />
+              </div>
+              {/* Hero gradient */}
+              <div
+                style={{
+                  background: broadcastType === 'inactivity' && effectiveBroadcastTier
+                    ? TIER_HERO[effectiveBroadcastTier].gradient
+                    : TYPE_HERO_STYLE[broadcastType].gradient,
+                }}
+                className="px-6 py-6 text-center"
+              >
+                <p className="text-lg font-bold text-white leading-snug mb-1">
+                  {broadcastType === 'morning' ? '☀️' : broadcastType === 'evening' ? '🌙' : broadcastType === 'weekly' ? '🏆' : '🌿'}{' '}
+                  {broadcastPreview.greeting.replace(/\{name\}/g, '[Company Name]')}
+                </p>
+                <p className="text-[13px] text-white/85 leading-relaxed">
+                  {broadcastType === 'morning'
+                    ? 'A new farming day begins — your farm is ready for you.'
+                    : broadcastType === 'evening'
+                      ? 'Another farming day complete. Your farm, you showed up.'
+                      : broadcastType === 'weekly'
+                        ? 'Here is what your farm accomplished this week.'
+                        : "Your farm is still here. We're still here with you."}
+                </p>
+              </div>
+              {/* Body */}
+              <div className="p-5 sm:p-6 space-y-4 bg-white dark:bg-zinc-950">
+                <div
+                  style={{
+                    backgroundColor: broadcastType === 'inactivity' && effectiveBroadcastTier
+                      ? TIER_HERO[effectiveBroadcastTier].cardBg
+                      : TYPE_HERO_STYLE[broadcastType].cardBg,
+                    borderLeftColor: broadcastType === 'inactivity' && effectiveBroadcastTier
+                      ? TIER_HERO[effectiveBroadcastTier].cardBorder
+                      : TYPE_HERO_STYLE[broadcastType].cardBorder,
+                  }}
+                  className="border-l-4 rounded-r-xl px-4 py-3.5"
+                >
                   <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-line">{broadcastPreview.body}</p>
-                  <div>
-                    <span style={{ backgroundColor: '#1f6f43' }} className="inline-block rounded-lg px-4 py-2.5 text-sm font-semibold text-white">
-                      {broadcastPreview.cta}
-                    </span>
-                  </div>
                 </div>
+                <div>
+                  <span style={{ backgroundColor: '#1f6f43' }} className="inline-block rounded-xl px-5 py-2.5 text-sm font-semibold text-white">
+                    {broadcastPreview.cta}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground italic">{TYPE_FOOTER_TAGLINE[broadcastType]}</p>
+                <Separator className="bg-border/40" />
+                <p className="text-[11px] text-muted-foreground">
+                  <strong>Broadcast</strong> — sent to all selected companies via the FarmVault Companion pipeline.
+                  Each company receives a personalized version of this message.
+                </p>
               </div>
             </div>
           </div>

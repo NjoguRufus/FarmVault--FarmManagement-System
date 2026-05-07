@@ -144,7 +144,7 @@ export function buildCompanionMorningEmail(opts: {
   const url     = opts.appUrl ?? "https://app.farmvault.africa";
   const farm    = opts.farmName ? escapeHtml(opts.farmName) : "your farm";
   const greeting = warmGreeting(opts.displayName, "☀️");
-  const subject  = opts.messageText.split("\n")[0].slice(0, 140);
+  const subject  = "☀️ " + opts.messageText.split("\n")[0].slice(0, 138);
 
   const heroRow = `<tr>
 <td style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 42%,#1f6f43 100%);background-color:#d97706;padding:34px 32px 30px 32px;text-align:center;">
@@ -159,11 +159,6 @@ export function buildCompanionMorningEmail(opts: {
 <tr>
 <td style="padding:20px 22px;background-color:#fffdf0;border-left:4px solid #f59e0b;border-radius:0 12px 12px 0;font-size:15px;line-height:1.8;color:#374151;">
 ${opts.messageHtml}
-</td>
-</tr>
-<tr>
-<td style="padding:20px 0 4px 0;font-family:${FONT};font-size:14px;line-height:1.75;color:#4b5563;">
-Open FarmVault to log today's work, check your farm records, or plan what comes next. Every small update builds a stronger, clearer picture of your season.
 </td>
 </tr>
 <tr>
@@ -190,7 +185,7 @@ Your farming companion is always with you. 🌿
 </tr>`;
 
   const html =
-    docOpen(opts.messageText.slice(0, 100), "Your FarmVault Morning", "#fffbf2") +
+    docOpen(`A new farming day begins — ${farm} is ready for you.`, "Your FarmVault Morning", "#fffbf2") +
     headerRow("#f3f0e8") +
     heroRow +
     contentRow +
@@ -220,7 +215,7 @@ export function buildCompanionEveningEmail(opts: {
   const farm     = opts.farmName ? escapeHtml(opts.farmName) : "your farm";
   const isWeekly = opts.isWeeklySummary ?? false;
   const greeting = warmGreeting(opts.displayName, "🌙");
-  const subject  = opts.messageText.split("\n")[0].slice(0, 140);
+  const subject  = "🌙 " + opts.messageText.split("\n")[0].slice(0, 138);
 
   const reflectionLine = isWeekly
     ? `Here is a look back at everything ${farm} accomplished this week. Every record you logged tells the story of your season.`
@@ -244,11 +239,6 @@ ${isWeekly ? "Another week written into your farm story." : `Another farming day
 <tr>
 <td style="padding:20px 22px;background-color:#f0f1fa;border-left:4px solid #6366f1;border-radius:0 12px 12px 0;font-size:15px;line-height:1.8;color:#374151;">
 ${opts.messageHtml}
-</td>
-</tr>
-<tr>
-<td style="padding:20px 0 4px 0;font-family:${FONT};font-size:14px;line-height:1.75;color:#4b5563;">
-${escapeHtml(reflectionLine)}
 </td>
 </tr>
 <tr>
@@ -277,7 +267,7 @@ Rest well. Your farm story continues tomorrow. 🌾
   const emailTitle = isWeekly ? "Your Weekly Farm Summary" : "Your FarmVault Evening";
 
   const html =
-    docOpen(opts.messageText.slice(0, 100), emailTitle, "#f2f3fb") +
+    docOpen(isWeekly ? `Here is a look back at ${farm} this week.` : `Another farming day complete — ${farm}, you showed up.`, emailTitle, "#f2f3fb") +
     headerRow("#e8e6f5") +
     heroRow +
     contentRow +
@@ -425,10 +415,10 @@ FarmVault — your farming companion, always here. 🌾
 </tr>`;
 
   const subjects: Record<InactivityTier, string> = {
-    "2d":  opts.farmName ? `${opts.farmName} — a quick check-in from FarmVault` : "A quick check-in from your farming companion",
-    "5d":  "Your farm journey is still here",
-    "7d":  opts.farmName ? `We've been thinking about ${opts.farmName}` : "We've been thinking about your farm",
-    "14d": "A message from your farming companion",
+    "2d":  opts.farmName ? `🌿 ${opts.farmName} — a quick check-in from FarmVault` : "🌿 A quick check-in from your farming companion",
+    "5d":  opts.farmName ? `🌿 ${opts.farmName}, your farm journey is still here` : "🌿 Your farm journey is still here",
+    "7d":  opts.farmName ? `🌿 We've been thinking about ${opts.farmName}` : "🌿 We've been thinking about your farm",
+    "14d": opts.farmName ? `🌿 A message for ${opts.farmName} from FarmVault` : "🌿 A message from your farming companion",
   };
 
   const html =
@@ -622,8 +612,8 @@ Keep growing. Your companion is always watching over your farm. 🌾
 
   return {
     subject: opts.farmName
-      ? `${opts.farmName} — your weekly FarmVault summary`
-      : "Your weekly FarmVault farm summary",
+      ? `📊 ${opts.farmName} — your weekly FarmVault summary`
+      : "📊 Your weekly FarmVault farm summary",
     html,
   };
 }

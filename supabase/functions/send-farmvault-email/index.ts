@@ -223,12 +223,17 @@ serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
     if (customCategory.startsWith("companion_")) {
       // Companion emails are fully standalone — bypass renderFarmVaultEmail and the shared shell.
       const cMeta         = (payload.metadata ?? {}) as Record<string, unknown>;
-      const companionType = String(cMeta.companionType || "morning");
-      const displayName   = String(cMeta.displayName   || "");
-      const farmName      = String(cMeta.farmName      || "");
-      const messageText   = String(cMeta.messageText   || (payload.data as { subject?: string }).subject || "FarmVault");
-      const messageHtml   = String(cMeta.messageHtml   || `<p style="margin:0">${messageText}</p>`);
-      const isTest        = customCategory === "companion_test";
+      const companionType  = String(cMeta.companionType || "morning");
+      const displayName    = String(cMeta.displayName   || "");
+      const farmName       = String(cMeta.farmName      || "");
+      const messageText    = String(cMeta.messageText   || (payload.data as { subject?: string }).subject || "FarmVault");
+      const messageHtml    = String(cMeta.messageHtml   || `<p style="margin:0">${messageText}</p>`);
+      const messageSubject = typeof cMeta.messageSubject === "string" && cMeta.messageSubject.trim()
+        ? cMeta.messageSubject.trim()
+        : null;
+      const isTest         = customCategory === "companion_test";
+
+      console.log("[send-farmvault-email] companion path", { customCategory, isTest, companionType, messageSubject });
 
       let rendered: { subject: string; html: string };
       if (companionType === "evening") {
@@ -246,7 +251,7 @@ serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
       } else {
         rendered = buildCompanionMorningEmail({ displayName, messageText, messageHtml, farmName });
       }
-      subject = isTest ? `[TEST] ${rendered.subject}` : rendered.subject;
+      subject = isTest ? `[TEST] ${messageSubject ?? rendered.subject}` : (messageSubject ?? rendered.subject);
       html    = rendered.html;
     } else {
       const rendered = renderFarmVaultEmail(payload.emailType, payload.data);
