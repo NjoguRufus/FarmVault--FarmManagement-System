@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -49,6 +49,15 @@ import { useToast } from '@/hooks/use-toast';
 import { invokeSendFarmVaultEmail } from '@/lib/email';
 import { supabase } from '@/lib/supabase';
 import { fetchCompanyWorkspaceNotifyPayload, listCompanies } from '@/services/developerAdminService';
+import { renderBannerVariant, type BannerVariantKey } from '@/components/companion/banners/BannerVariants';
+import '@/components/companion/banners/banner-tokens.css';
+import {
+  buildCompanionMorningEmail,
+  buildCompanionEveningEmail,
+  buildCompanionInactivityEmail,
+  buildCompanionWeeklySummaryEmail,
+  paragraphsToHtml,
+} from '@/emails/companion/buildCompanionEmail';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -346,6 +355,58 @@ async function fetchBroadcastLogs(triggeredBy: string): Promise<BroadcastLogRow[
   return (data ?? []) as BroadcastLogRow[];
 }
 
+// ─── Banner preview helpers ───────────────────────────────────────────────────
+
+function notifTypeToBannerKey(type: NotificationType, tier: InactivityTier | null): BannerVariantKey {
+  if (type === 'weekly') return 'weekly';
+  if (type === 'inactivity') return tier === '14d' ? 'missyou' : 'inactive';
+  if (type === 'evening') return 'evening';
+  return 'morning'; // morning type always shows morning banner in the test preview
+}
+
+function ScaledBannerPreview({ variantKey, name, farmName, messageText }: {
+  variantKey: BannerVariantKey;
+  name: string;
+  farmName: string;
+  messageText: string;
+}) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const update = (w: number) => setScale(w / 1600);
+    update(el.getBoundingClientRect().width);
+    const obs = new ResizeObserver(([entry]) => update(entry.contentRect.width));
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const outerHeight = scale !== null ? Math.round(900 * scale) : 0;
+
+  return (
+    <div
+      ref={outerRef}
+      className="fv-banner-root"
+      style={{
+        width: '100%',
+        height: outerHeight,
+        overflow: 'hidden',
+        position: 'relative',
+        borderRadius: 12,
+        visibility: scale !== null ? 'visible' : 'hidden',
+      }}
+    >
+      {scale !== null && (
+        <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 1600, height: 900 }}>
+          {renderBannerVariant(variantKey, { name, farmName, messageText: messageText || undefined })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function DeveloperNotificationTestingPage() {
@@ -366,6 +427,7 @@ export default function DeveloperNotificationTestingPage() {
   const [recipientName, setRecipientName] = useState('');
   const [previewSeed, setPreviewSeed] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'email' | 'banner'>('banner');
 
   // ── Broadcast state ─────────────────────────────────────────────────────────
   const detectedContext = useMemo(() => detectCurrentContext(), []);
@@ -430,6 +492,34 @@ export default function DeveloperNotificationTestingPage() {
     () => getSampleMessage(notifType, effectiveTier, previewSeed),
     [notifType, effectiveTier, previewSeed],
   );
+
+  // Compile the actual email HTML — same function the edge function uses.
+  const emailHtml = useMemo(() => {
+    const displayName = recipientName.trim() || resolvedFarmName || 'Farmer';
+    const farmName    = resolvedFarmName || '';
+    const messageText = preview.body;
+    const messageHtml = paragraphsToHtml(messageText);
+
+    if (notifType === 'evening') {
+      return buildCompanionEveningEmail({ displayName, farmName, messageText, messageHtml }).html;
+    }
+    if (notifType === 'inactivity') {
+      return buildCompanionInactivityEmail({ displayName, farmName, tier: effectiveTier ?? '2d', messageText, messageHtml }).html;
+    }
+    if (notifType === 'weekly') {
+      return buildCompanionWeeklySummaryEmail({ displayName, farmName, messageText, messageHtml }).html;
+    }
+    return buildCompanionMorningEmail({ displayName, farmName, messageText, messageHtml }).html;
+  }, [notifType, effectiveTier, recipientName, resolvedFarmName, preview.body]);
+
+  // Preview HTML — same as email HTML but mascot loaded from local public folder
+  // so we can see it while developing without needing the frontend deployed.
+  const previewEmailHtml = useMemo(() =>
+    emailHtml.replace(
+      'https://app.farmvault.africa/mascot/mascot%201.png',
+      '/mascot/mascot%201.png',
+    ),
+  [emailHtml]);
   // Test logs
   const {
     data: logs,
@@ -511,7 +601,7 @@ export default function DeveloperNotificationTestingPage() {
           const bSample = getSampleMessage(broadcastType, effectiveBroadcastTier, broadcastPreviewSeed);
           const subject = buildEmailSubject(broadcastType, effectiveBroadcastTier, companyName, companyName);
           const messageText = bSample.body;
-          const messageHtml = `<p style="margin:0;white-space:pre-line;">${messageText}</p>`;
+          const messageHtml = paragraphsToHtml(messageText);
 
           const result = await invokeSendFarmVaultEmail({
             emailType: 'custom_manual',
@@ -588,7 +678,7 @@ export default function DeveloperNotificationTestingPage() {
       const displayName = recipientName.trim() || resolvedFarmName || 'Farmer';
       const subject = buildEmailSubject(notifType, effectiveTier, resolvedFarmName, displayName);
       const messageText = sample.body;
-      const messageHtml = `<p style="margin:0;white-space:pre-line;">${messageText}</p>`;
+      const messageHtml = paragraphsToHtml(messageText);
 
       const result = await invokeSendFarmVaultEmail({
         emailType: 'custom_manual',
@@ -779,98 +869,63 @@ export default function DeveloperNotificationTestingPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold tracking-tight text-foreground">Live preview</h2>
-                <p className="text-sm text-muted-foreground">Approximation of what the companion email will look like.</p>
+                <p className="text-sm text-muted-foreground">
+                  {previewMode === 'banner' ? 'In-app banner — exactly what users see on the dashboard.' : 'Approximation of what the companion email will look like.'}
+                </p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5 shrink-0"
-                onClick={() => setPreviewSeed((s) => s + 1)}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Regenerate
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex rounded-lg border border-border/60 overflow-hidden text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMode('banner')}
+                    className={`px-3 py-1.5 transition-colors ${previewMode === 'banner' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted/50'}`}
+                  >
+                    Banner
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMode('email')}
+                    className={`px-3 py-1.5 border-l border-border/60 transition-colors ${previewMode === 'email' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted/50'}`}
+                  >
+                    Email
+                  </button>
+                </div>
+                {previewMode === 'email' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5"
+                    onClick={() => setPreviewSeed((s) => s + 1)}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Regenerate
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <div className="rounded-xl border border-border/60 bg-white dark:bg-zinc-950 overflow-hidden shadow-sm">
-              {/* Subject bar */}
-              <div className="border-b border-border/40 px-5 py-3 bg-muted/30">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">Subject line</p>
-                <p className="text-sm font-medium text-foreground">
-                  [TEST] {preview.subject.replace(/\{name\}/g, recipientName.trim() || resolvedFarmName || 'Farmer')}
-                </p>
-              </div>
-              {/* Mascot + Logo header — mirrors production email header */}
-              <div className="flex items-center justify-between border-b border-border/30 px-5 py-3 bg-white dark:bg-zinc-950">
-                <div className="flex items-center gap-2.5">
-                  {/* Mascot placeholder */}
-                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-base" aria-label="FarmVault mascot">
-                    🌱
-                  </div>
-                  <span className="text-[11px] text-muted-foreground font-medium">FarmVault Companion</span>
-                </div>
-                {/* Logo */}
-                <img
-                  src="/Logo/fv.png"
-                  alt="FarmVault"
-                  className="h-6 w-auto object-contain opacity-90"
+            {/* In-app banner preview */}
+            {previewMode === 'banner' && (
+              <ScaledBannerPreview
+                variantKey={notifTypeToBannerKey(notifType, effectiveTier)}
+                name={recipientName.trim() || resolvedFarmName || 'Farmer'}
+                farmName={resolvedFarmName || recipientName.trim() || ''}
+                messageText={preview.body}
+              />
+            )}
+
+            {/* Email preview — exact compiled HTML sent via Resend, rendered in a sandboxed iframe */}
+            {previewMode === 'email' && (
+              <div style={{ maxWidth: 640, margin: '0 auto' }}>
+                <iframe
+                  srcDoc={previewEmailHtml}
+                  title="Email preview"
+                  sandbox="allow-same-origin allow-scripts"
+                  style={{ width: '100%', height: 720, border: 'none', borderRadius: 12, display: 'block' }}
                 />
               </div>
-              {/* Hero gradient banner — type-specific */}
-              <div
-                style={{
-                  background: notifType === 'inactivity' && effectiveTier
-                    ? TIER_HERO[effectiveTier].gradient
-                    : TYPE_HERO_STYLE[notifType].gradient,
-                }}
-                className="px-6 py-6 text-center"
-              >
-                <p className="text-lg font-bold text-white leading-snug mb-1">
-                  {notifType === 'morning' ? '☀️' : notifType === 'evening' ? '🌙' : notifType === 'weekly' ? '🏆' : '🌿'}{' '}
-                  {preview.greeting.replace(/\{name\}/g, recipientName.trim() || resolvedFarmName || 'Farmer')}
-                </p>
-                <p className="text-[13px] text-white/85 leading-relaxed">
-                  {notifType === 'morning'
-                    ? `A new farming day begins — ${resolvedFarmName || 'your farm'} is ready for you.`
-                    : notifType === 'evening'
-                      ? `Another farming day complete. ${resolvedFarmName || 'Your farm'}, you showed up.`
-                      : notifType === 'weekly'
-                        ? `Here is what ${resolvedFarmName || 'your farm'} accomplished this week.`
-                        : `Your farm is still here. We're still here with you.`}
-                </p>
-              </div>
-              {/* Message body */}
-              <div className="p-5 sm:p-6 space-y-4 bg-white dark:bg-zinc-950">
-                <div
-                  style={{
-                    backgroundColor: notifType === 'inactivity' && effectiveTier
-                      ? TIER_HERO[effectiveTier].cardBg
-                      : TYPE_HERO_STYLE[notifType].cardBg,
-                    borderLeftColor: notifType === 'inactivity' && effectiveTier
-                      ? TIER_HERO[effectiveTier].cardBorder
-                      : TYPE_HERO_STYLE[notifType].cardBorder,
-                  }}
-                  className="border-l-4 rounded-r-xl px-4 py-3.5"
-                >
-                  <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-line">{preview.body}</p>
-                </div>
-                <div>
-                  <span
-                    style={{ backgroundColor: '#1f6f43' }}
-                    className="inline-block rounded-xl px-5 py-2.5 text-sm font-semibold text-white"
-                  >
-                    {preview.cta}
-                  </span>
-                </div>
-                <p className="text-[11px] text-muted-foreground italic">{TYPE_FOOTER_TAGLINE[notifType]}</p>
-                <Separator className="bg-border/40" />
-                <p className="text-[11px] text-muted-foreground">
-                  <strong>Developer test</strong> — sent from the FarmVault Notification Testing console.
-                  Company: <strong>{resolvedFarmName || 'Not set'}</strong>.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* 4. Send settings */}

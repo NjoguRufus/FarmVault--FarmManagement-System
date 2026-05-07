@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
+
+/* Tokens are scoped to .fv-banner-root to avoid polluting app-level CSS variables */
+.fv-banner-root {
+  --fv-forest-deep: oklch(0.22 0.04 145);
+  --fv-forest: oklch(0.32 0.06 145);
+  --fv-forest-mid: oklch(0.42 0.08 145);
+  --fv-vault: oklch(0.48 0.11 145);
+  --fv-vault-soft: oklch(0.62 0.09 145);
+  --fv-leaf: oklch(0.72 0.13 142);
+
+  --fv-harvest: oklch(0.78 0.14 80);
+  --fv-harvest-deep: oklch(0.66 0.15 70);
+  --fv-amber: oklch(0.74 0.13 60);
+
+  --fv-parchment: oklch(0.97 0.015 85);
+  --fv-parchment-warm: oklch(0.94 0.025 80);
+  --fv-cream: oklch(0.99 0.008 85);
+
+  --fv-ink: oklch(0.18 0.02 145);
+  --fv-ink-soft: oklch(0.32 0.02 145);
+  --fv-mute: oklch(0.55 0.015 145);
+  --fv-line: oklch(0.88 0.01 100);
+
+  --fv-alert: oklch(0.68 0.16 40);
+  --fv-positive: oklch(0.62 0.14 145);
+  --fv-info: oklch(0.62 0.10 230);
+
+  --fv-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+  --fv-body: "Inter", system-ui, sans-serif;
+  --fv-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --fv-r-sm: 10px;
+  --fv-r-md: 16px;
+  --fv-r-lg: 22px;
+  --fv-r-xl: 32px;
+
+  --fv-shadow-card: 0 1px 0 rgba(255,255,255,0.6) inset, 0 8px 24px -12px rgba(20, 40, 25, 0.18), 0 2px 6px -2px rgba(20, 40, 25, 0.08);
+  --fv-shadow-cta: 0 1px 0 rgba(255,255,255,0.18) inset, 0 12px 28px -10px oklch(0.32 0.06 145 / 0.45), 0 4px 10px -4px oklch(0.22 0.04 145 / 0.35);
+  --fv-shadow-pop: 0 24px 60px -24px rgba(20, 40, 25, 0.35);
+}
+
+.fv-banner-root * {
+  box-sizing: border-box;
+}
+
+.fv-banner-root .fv-banner {
+  font-family: var(--fv-body);
+  color: var(--fv-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.fv-banner-root .fv-display {
+  font-family: var(--fv-display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.fv-banner-root .fv-eyebrow {
+  font-family: var(--fv-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fv-mute);
+}
+
+.fv-banner-root .fv-mono {
+  font-family: var(--fv-mono);
+}
