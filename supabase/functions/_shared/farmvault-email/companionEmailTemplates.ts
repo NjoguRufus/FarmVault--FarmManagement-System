@@ -52,7 +52,9 @@ const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Brico
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-function ea(s: string): string {
+export { C, DISPLAY_FONT, BODY_FONT, MONO_FONT, APP_URL, LOGO_URL, MASCOT_URL };
+
+export function ea(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
@@ -61,7 +63,7 @@ function ea(s: string): string {
  * First paragraph: 17px bold, ink. Rest: 16px normal, inkSoft.
  * Used so Deno-side emails render identically to the live preview.
  */
-function paragraphsToHtml(text: string): string {
+export function paragraphsToHtml(text: string): string {
   const paras = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
   if (paras.length === 0) return "";
   const [first, ...rest] = paras;
@@ -72,7 +74,7 @@ function paragraphsToHtml(text: string): string {
 
 // ─── Layout primitives ───────────────────────────────────────────────────────
 
-function companionOpen(preheader: string, title: string): string {
+export function companionOpen(preheader: string, title: string): string {
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" style="color-scheme:light;"><head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
@@ -121,7 +123,7 @@ function companionOpen(preheader: string, title: string): string {
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" class="email-card" bgcolor="${C.parchment}" style="max-width:600px;border-radius:20px;overflow:hidden;background-color:${C.parchment};">`;
 }
 
-function companionClose(): string {
+export function companionClose(): string {
   return `</table>
 </td></tr>
 </table>
@@ -134,7 +136,7 @@ function companionClose(): string {
  *  LEFT (56%): dark forest gradient — FarmVault logo · headline · date chip · optional subline
  *  RIGHT (44%): parchment — mascot sits flush on the harvest gold divider line
  */
-function bannerPanel(opts: {
+export function bannerPanel(opts: {
   headline: string;    // use \n for two-line display (e.g. "Good morning,\nFarmer.")
   headlineAccent?: string;  // color for line 2, defaults to harvest gold
   subline?: string;
@@ -184,7 +186,7 @@ function bannerPanel(opts: {
 }
 
 /** CTA button — bulletproof dark pill. Background on both <td> and <a> so Gmail mobile can't strip it. */
-function ctaButton(label: string, href: string): string {
+export function ctaButton(label: string, href: string): string {
   return `<table class="cta-table" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:34px auto 0;">
 <tr>
 <td align="center" bgcolor="${C.forestDeep}" style="border-radius:8px;background-color:${C.forestDeep};">
@@ -198,7 +200,7 @@ function ctaButton(label: string, href: string): string {
 }
 
 /** Dark premium footer — minimal, elegant, confident. */
-function footerRow(tagline: string): string {
+export function footerRow(tagline: string): string {
   return `<tr>
 <td class="footer-td" bgcolor="${C.forestDeep}" style="padding:26px 40px 30px;background-color:${C.forestDeep};font-family:${BODY_FONT};text-align:center;">
 <p class="footer-brand" style="margin:0 0 7px 0;font-family:${DISPLAY_FONT};font-size:16px;font-weight:700;color:${C.cream};letter-spacing:-0.015em;">Farm<span style="color:${C.harvest};">Vault</span></p>

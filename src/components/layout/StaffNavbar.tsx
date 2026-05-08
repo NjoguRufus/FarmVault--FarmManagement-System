@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { cropTypeKeyEmoji } from '@/lib/cropEmoji';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
+import { SyncStatusIndicator } from '@/components/sync/SyncStatusIndicator';
 import { logger } from "@/lib/logger";
 import { FarmService } from '@/services/localData/FarmService';
 
@@ -348,6 +349,8 @@ export function StaffNavbar({ sidebarCollapsed, onSidebarToggle }: StaffNavbarPr
               <span className="leading-tight">Pro trial ended — ask admin to pick a plan</span>
             </div>
           )}
+
+          <SyncStatusIndicator className="hidden sm:flex" />
 
           <FarmVaultUserMenu
             accountLabel="My Staff Account"

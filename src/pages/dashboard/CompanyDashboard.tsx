@@ -116,6 +116,7 @@ export function CompanyDashboard() {
   const queryCompanyId = companyDataQueriesEnabled ? companyId : null;
   const canLoadProjects = companyDataQueriesEnabled && Boolean(isDeveloper || companyId);
   const [welcomeWizardOpen, setWelcomeWizardOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [tenantRecoveryBusy, setTenantRecoveryBusy] = useState(false);
   /** When navbar is “All Projects”, clicking a row in Your Farm Progress scopes the four financial stat cards to this project (toggle off by clicking again or Show All). */
   const [dashboardFocusProjectId, setDashboardFocusProjectId] = useState<string | null>(null);

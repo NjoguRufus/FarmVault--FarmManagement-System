@@ -383,7 +383,7 @@ function ScaledBannerPreview({ variantKey, name, farmName, messageText }: {
     return () => obs.disconnect();
   }, []);
 
-  const outerHeight = scale !== null ? Math.round(900 * scale) : 0;
+  const outerHeight = scale !== null ? Math.round(500 * scale) : 0;
 
   return (
     <div
@@ -399,7 +399,7 @@ function ScaledBannerPreview({ variantKey, name, farmName, messageText }: {
       }}
     >
       {scale !== null && (
-        <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 1600, height: 900 }}>
+        <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 1600, height: 500 }}>
           {renderBannerVariant(variantKey, { name, farmName, messageText: messageText || undefined })}
         </div>
       )}

@@ -16,7 +16,7 @@ interface BannerShellProps {
 export function BannerShell({ children, sceneTint = 'morning', sceneMood = 'Golden hour, barn + windmill', sceneTime = '06:30' }: BannerShellProps) {
   return (
     <div className="fv-banner" style={{
-      width: 1600, height: 900,
+      width: 1600, height: 500,
       position: 'relative', overflow: 'hidden',
       background: 'var(--fv-parchment)', isolation: 'isolate',
     }}>
@@ -45,7 +45,7 @@ export function BannerShell({ children, sceneTint = 'morning', sceneMood = 'Gold
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
         gridTemplateRows: 'auto 1fr auto',
-        padding: '56px 64px', gap: 0,
+        padding: '40px 56px', gap: 0,
       }}>
         {children}
       </div>
@@ -83,8 +83,8 @@ export function ZoneHero({ children }: { children: React.ReactNode }) {
 
 export function ZoneMascot({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ gridColumn: '2 / 3', gridRow: '1 / 4', position: 'relative', marginRight: -64, marginTop: -56, marginBottom: -56 }}>
-      <div style={{ position: 'absolute', inset: 0, padding: '56px 0 56px 40px' }}>
+    <div style={{ gridColumn: '2 / 3', gridRow: '1 / 4', position: 'relative', marginRight: -56, marginTop: -40, marginBottom: -40 }}>
+      <div style={{ position: 'absolute', inset: 0, paddingLeft: 16 }}>
         {children}
       </div>
     </div>

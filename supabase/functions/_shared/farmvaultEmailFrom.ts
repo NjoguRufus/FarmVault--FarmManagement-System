@@ -24,6 +24,8 @@ export type FarmVaultEmailSenderKey = keyof typeof EMAIL_SENDERS;
 export const EMAIL_SENDERS = {
   /** Smart Companion daily messages — warm, human, farm-companion tone. */
   companion:  "FarmVault Companion <companion@farmvault.africa>",
+  /** Employee companion messages — team-oriented, warm, motivating. */
+  team:       "FarmVault Team <team@farmvault.africa>",
   onboarding: "FarmVault <hello@farmvault.africa>",
   billing:    "FarmVault Billing <billing@farmvault.africa>",
   /** Trial reminders, system-level operational alerts. */
@@ -35,6 +37,7 @@ export const EMAIL_SENDERS = {
 
 const ENV_KEY: Record<FarmVaultEmailSenderKey, string> = {
   companion:  "FARMVAULT_EMAIL_FROM_COMPANION",
+  team:       "FARMVAULT_EMAIL_FROM_TEAM",
   onboarding: "FARMVAULT_EMAIL_FROM_ONBOARDING",
   billing:    "FARMVAULT_EMAIL_FROM_BILLING",
   alerts:     "FARMVAULT_EMAIL_FROM_ALERTS",
@@ -77,7 +80,10 @@ export function getFarmVaultEmailFromForEmailType(emailType: string): string {
   ]);
   if (developerInboxTypes.has(t)) return getFarmVaultEmailFrom("developer");
 
-  // Smart Companion daily messages → greetings@ (warm companion identity)
+  // Employee companion messages → team@ (warm, team-oriented identity)
+  if (t.startsWith("employee_companion_")) return getFarmVaultEmailFrom("team");
+
+  // Smart Companion daily messages → companion@ (warm companion identity)
   const companionTypes = new Set([
     "smart_farmer_morning",
     "smart_farmer_evening",

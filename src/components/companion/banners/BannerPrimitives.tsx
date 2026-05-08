@@ -39,19 +39,6 @@ export function SceneSlot({ mood = 'Golden hour, barn + windmill', time = '06:30
         position: 'absolute', inset: 0,
         background: 'repeating-linear-gradient(45deg, transparent 0 60px, rgba(255,255,255,0.03) 60px 61px)',
       }} />
-      <div style={{
-        position: 'absolute', right: 20, top: 20,
-        background: 'oklch(0.18 0.02 145 / 0.6)', backdropFilter: 'blur(10px)',
-        color: 'oklch(0.97 0.015 85)', fontFamily: 'var(--fv-mono)', fontSize: 10,
-        padding: '8px 12px', borderRadius: 8,
-        border: '1px solid oklch(0.97 0.015 85 / 0.15)',
-        letterSpacing: '0.06em', display: 'flex', gap: 10, alignItems: 'center',
-      }}>
-        <span style={{ opacity: 0.6 }}>SCENE</span>
-        <span>{mood}</span>
-        <span style={{ opacity: 0.6 }}>·</span>
-        <span>{time}</span>
-      </div>
     </div>
   );
 }

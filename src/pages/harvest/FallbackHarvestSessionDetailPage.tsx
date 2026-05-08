@@ -36,16 +36,12 @@ import {
   addDirectIntakeUnits,
   addFallbackMarketExpenseLines,
   addFallbackMarketSalesEntry,
-  addFallbackPicker,
-  addFallbackPickerLog,
   fetchFallbackMarketDispatchForSession,
   fetchFallbackSession,
   linkFinanceExpenseToFallbackSession,
   listFallbackExpenseTemplates,
   listFallbackMarketExpenseLines,
   listFallbackMarketSalesEntries,
-  listFallbackPickerLogs,
-  listFallbackPickers,
   recordFallbackExpenseTemplateUsage,
   updateFallbackMarketSalesEntry,
   updateFallbackSession,
@@ -58,6 +54,8 @@ import {
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
 import { useFallbackSessionSummary } from '@/hooks/useFallbackSessionSummary';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import { useFallbackSessionDetail } from '@/hooks/useFallbackHarvestRepository';
+import { SyncStatusIndicator } from '@/components/sync/SyncStatusIndicator';
 import { formatDate } from '@/lib/dateUtils';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
@@ -133,17 +131,15 @@ export default function FallbackHarvestSessionDetailPage() {
     staleTime: 60_000,
   });
 
-  const { data: pickers = [] } = useQuery({
-    queryKey: ['fallback-pickers', companyId, sessionId],
-    enabled: Boolean(companyId && sessionId),
-    queryFn: () => listFallbackPickers({ companyId: companyId ?? '', sessionId: sessionId ?? '' }),
-  });
-
-  const { data: pickerLogs = [] } = useQuery({
-    queryKey: ['fallback-picker-logs', companyId, sessionId],
-    enabled: Boolean(companyId && sessionId),
-    queryFn: () => listFallbackPickerLogs({ companyId: companyId ?? '', sessionId: sessionId ?? '' }),
-  });
+  // Local-first: pickers and picker logs come from Dexie for instant + offline reads
+  const {
+    pickers,
+    pickerLogs,
+    addPicker: addPickerLocal,
+    recordPickerLog: recordPickerLogLocal,
+    totalUnitsForSession: localTotalUnits,
+    totalsByPicker,
+  } = useFallbackSessionDetail(companyId, sessionId);
 
   const brokerEmployees = useMemo(() => {
     return (employees ?? []).filter((e: Employee) => {
@@ -371,22 +367,25 @@ export default function FallbackHarvestSessionDetailPage() {
     const name = pickerName.trim();
     if (!name) return;
     try {
-      await addFallbackPicker({ companyId, sessionId, name });
+      await addPickerLocal({ session_id: sessionId, name });
       setPickerName('');
       setShowAddPicker(false);
-      void qc.invalidateQueries({ queryKey: ['fallback-pickers', companyId, sessionId] });
     } catch (e: any) {
       toast({ title: 'Failed to add picker', description: e?.message ?? String(e), variant: 'destructive' });
     }
   }
 
   async function onLogPickerUnits(p: FallbackPickerRow, units: number) {
-    if (!companyId || !sessionId) return;
+    if (!companyId || !sessionId || !editorUserId) return;
     if (!Number.isFinite(units) || units <= 0) return;
     try {
-      await addFallbackPickerLog({ companyId, sessionId, pickerId: p.id, units });
-      void qc.invalidateQueries({ queryKey: ['fallback-picker-logs', companyId, sessionId] });
-      void qc.invalidateQueries({ queryKey: ['fallback-harvest-session', companyId, sessionId] });
+      await recordPickerLogLocal({
+        session_id: sessionId,
+        picker_id: p.id,
+        units,
+        recorded_by: editorUserId,
+      });
+      // Realtime hook will invalidate session summary on the server side when synced
     } catch (e: any) {
       toast({ title: 'Failed to log picker units', description: e?.message ?? String(e), variant: 'destructive' });
     }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query'; // still used by useFallbackSessionSummaries internally
 import { BarChart3, HelpCircle, Package, Plus, TrendingUp, Wallet } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProject } from '@/contexts/ProjectContext';
@@ -13,14 +13,12 @@ import { useToast } from '@/hooks/use-toast';
 import { isProjectClosed } from '@/lib/projectClosed';
 import { hasHarvestCollectionsModule, hasTomatoHarvestModule } from '@/lib/cropModules';
 import { resolveHarvestEntryPath } from '@/lib/harvestNavigation';
-import {
-  createFallbackSession,
-  listFallbackSessionsForProject,
-  type FallbackHarvestSessionRow,
-} from '@/services/fallbackHarvestService';
+import { type FallbackHarvestSessionRow } from '@/services/fallbackHarvestService';
 import { useFallbackHarvestRealtime } from '@/hooks/useFallbackHarvestRealtime';
 import { useFallbackSessionSummaries } from '@/hooks/useFallbackSessionSummary';
 import { useHarvestNavPrefix } from '@/hooks/useHarvestNavPrefix';
+import { useFallbackSessionsLocal } from '@/hooks/useFallbackHarvestRepository';
+import { SyncStatusIndicator } from '@/components/sync/SyncStatusIndicator';
 import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step } from 'react-joyride';
 
 const formatKes = (n: number) => `KES ${Math.round(n).toLocaleString('en-KE')}`;
@@ -98,17 +96,15 @@ export default function FallbackHarvestListPage() {
     harvestNavPrefix,
   ]);
 
+  // Keep realtime subscription so other users' changes still invalidate remote pulls
   useFallbackHarvestRealtime({ companyId, projectId });
 
-  const { data: sessions = [], isLoading } = useQuery({
-    queryKey: ['fallback-harvest-sessions', companyId, projectId],
-    enabled: Boolean(companyId && projectId),
-    queryFn: () =>
-      listFallbackSessionsForProject({
-        companyId: companyId ?? '',
-        projectId: projectId ?? '',
-      }),
-  });
+  // Local-first: reads from Dexie, syncs to Supabase in background
+  const {
+    sessions,
+    isLoading,
+    createSession: createSessionLocal,
+  } = useFallbackSessionsLocal(companyId, projectId);
 
   const sessionIds = useMemo(() => sessions.map((s) => s.id), [sessions]);
   const { bySessionId: computedSummariesBySession } = useFallbackSessionSummaries(companyId, sessionIds);
@@ -133,17 +129,18 @@ export default function FallbackHarvestListPage() {
   }, [sessions, computedSummariesBySession]);
 
   async function onCreateSession() {
-    if (!companyId || !projectId) return;
+    if (!companyId || !projectId || !user?.id) return;
     setCreating(true);
     try {
-      const created = await createFallbackSession({
-        companyId,
-        projectId,
-        cropId: null,
-        unitType: 'bags',
-        containerType: 'bags',
+      const created = await createSessionLocal({
+        project_id: projectId,
+        session_date: new Date().toISOString().slice(0, 10),
+        use_pickers: true,
+        unit_type: 'bags',
+        container_type: 'bags',
+        destination: 'FARM',
+        created_by: user.id,
       });
-      void qc.invalidateQueries({ queryKey: ['fallback-harvest-sessions', companyId, projectId] });
       navigate(`${harvestNavPrefix}/harvest-sessions/${projectId}/session/${created.id}`, { replace: true });
     } catch (e: any) {
       toast({ title: 'Failed to create session', description: e?.message ?? String(e), variant: 'destructive' });

@@ -31,6 +31,15 @@ import {
   buildCompanionWeeklySummaryEmail,
   type WeeklySummaryStats,
 } from "../_shared/farmvault-email/companionEmailTemplates.ts";
+import {
+  buildEmployeeMorningEmail,
+  buildEmployeeEveningEmail,
+  buildEmployeeWeeklySummaryEmail,
+  TYPE_EMPLOYEE_MORNING,
+  TYPE_EMPLOYEE_EVENING,
+  TYPE_EMPLOYEE_WEEKLY,
+  type EmployeeWeeklyStats,
+} from "../_shared/farmvault-email/employeeCompanionTemplates.ts";
 import { getFarmVaultEmailFrom } from "../_shared/farmvaultEmailFrom.ts";
 import { sendResendWithEmailLog } from "../_shared/resendSendLogged.ts";
 import { createServiceRoleSupabaseClient } from "../_shared/supabaseAdmin.ts";
@@ -62,6 +71,89 @@ const TYPE_INACTIVITY = "engagement_inactivity";
 const TYPE_WEEKLY     = "smart_farmer_weekly";
 const TYPE_TRIAL_EXPIRING = "company_trial_expiring_soon";
 const TYPE_TRIAL_EXPIRED  = "company_trial_expired";
+
+// Employee morning message pool — motivating, warm, human. No task-assignment language.
+const EMPLOYEE_MORNING_LINES = [
+  "Another great farming day begins. Your work on the farm makes a real difference — every task completed helps the whole team succeed.",
+  "Good morning! Every row you tend, every crop you check — your hands are what keep this farm alive and growing.",
+  "A new farming day is here. Your dedication and consistency are what great farms are built on. Show up, do great work.",
+  "Your work on the farm matters more than you know. Today is another chance to make your mark and keep things moving.",
+  "Morning! Farming is built on people who show up every day — and that person is you. Let's make today count.",
+  "Each farming day is a fresh start. Your effort, your attention, your care — that is what turns a farm into something great.",
+  "The farm is counting on great people like you. Your contribution today helps the whole operation move forward.",
+  "Every task you complete today, however small, is part of something bigger. Your work builds this farm season by season.",
+  "Another farming morning. Your consistency is one of the farm's greatest strengths — keep that energy going today.",
+  "The best farming teams are built on people who care. Thank you for being one of them. Let's have a great day.",
+];
+
+const EMPLOYEE_EVENING_LINES = [
+  "Another farming day done. Whatever today brought — the long rows, the heat, the details — your presence on the farm matters.",
+  "Well done today. Farming is hard work, and you showed up. That consistency is what builds great farm operations.",
+  "The day is done. Your effort today, however big or small, helped keep the farm moving. That is worth recognising.",
+  "Every farming day you complete adds to the farm's story. Thank you for your contribution today.",
+  "Rest well tonight. Your hard work today is exactly what this farm needs — see you tomorrow for another great day.",
+  "Farming takes dedication, and you showed it today. Whatever you accomplished, it matters to the whole team.",
+  "Another day on the farm done right. Your consistency and reliability are what great farm teams are made of.",
+  "Good work today. Take a moment to log anything from the day — your records help the whole team stay aligned.",
+  "The farm appreciates every hand that works it. Your effort today made a difference. Rest well.",
+  "Today's farming work is done. You showed up, you contributed, and that is exactly what makes a great team member.",
+];
+
+function pickEmployeeLine(pool: string[], clerkUserId: string, day: string): string {
+  const hash = [...`${clerkUserId}:${day}`].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
+  return pool[Math.abs(hash) % pool.length];
+}
+
+async function loadEmployeeWeeklyStats(
+  admin: SupabaseClient,
+  clerkUserId: string,
+  companyId: string,
+  now: Date,
+  tz: string,
+): Promise<EmployeeWeeklyStats> {
+  const weekStart = new Date(now);
+  weekStart.setUTCDate(weekStart.getUTCDate() - 6);
+  weekStart.setUTCHours(0, 0, 0, 0);
+
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  try {
+    // Count operations logged by this user this week
+    const { count: opsCount } = await admin
+      .schema("core")
+      .from("farm_operations")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("created_by", clerkUserId)
+      .gte("created_at", weekStart.toISOString());
+
+    // Approximate days active from operation timestamps
+    const { data: opDays } = await admin
+      .schema("core")
+      .from("farm_operations")
+      .select("created_at")
+      .eq("company_id", companyId)
+      .eq("created_by", clerkUserId)
+      .gte("created_at", weekStart.toISOString());
+
+    const uniqueDays = new Set(
+      ((opDays ?? []) as { created_at: string }[]).map((r) =>
+        new Date(r.created_at).toLocaleDateString("en-CA", { timeZone: tz })
+      )
+    );
+
+    return {
+      operationsLogged: opsCount ?? 0,
+      daysActive:       uniqueDays.size,
+      streakDays:       uniqueDays.size,
+      weekStart:        fmt(weekStart),
+      weekEnd:          fmt(now),
+      topActivity:      null,
+    };
+  } catch {
+    return { operationsLogged: 0, daysActive: 0, streakDays: 0, weekStart: fmt(weekStart), weekEnd: fmt(now) };
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -117,12 +209,17 @@ async function loadEligibleCompanies(admin: SupabaseClient): Promise<CompanyRow[
   return rows.filter((c) => (c.subscription_status ?? "") !== "expired");
 }
 
-type MemberRow = { company_id: string; clerk_user_id: string };
+type MemberRow = { company_id: string; clerk_user_id: string; role: string | null };
 
-function isCompanyScheduledNotifyRole(role: string | null | undefined): boolean {
-  const r = (role ?? "").toLowerCase().replace(/[-_\s]/g, "");
-  if (r === "employee") return false;
+function isCompanyScheduledNotifyRole(_role: string | null | undefined): boolean {
+  // All roles (including employees) receive companion notifications.
+  // Role-specific template routing happens inside each run function.
   return true;
+}
+
+function isEmployeeRole(role: string | null | undefined): boolean {
+  const r = (role ?? "").toLowerCase().replace(/[-_\s]/g, "");
+  return r === "employee" || r === "fieldworker" || r === "picker" || r === "scout";
 }
 
 type ProfileRow = {
@@ -150,7 +247,7 @@ async function loadMembersForCompanies(
   const rows = (data ?? []) as { company_id: string; clerk_user_id: string; role: string | null }[];
   return rows
     .filter((r) => isCompanyScheduledNotifyRole(r.role))
-    .map(({ company_id, clerk_user_id }) => ({ company_id, clerk_user_id }));
+    .map(({ company_id, clerk_user_id, role }) => ({ company_id, clerk_user_id, role }));
 }
 
 async function loadProfiles(admin: SupabaseClient, clerkIds: string[]): Promise<Map<string, ProfileRow>> {
@@ -299,19 +396,31 @@ async function runMorning(params: {
     if (await alreadySentDedupe(params.logAdmin, TYPE_MORNING, dedupeKey)) { skipped++; continue; }
 
     const name = displayName(p);
-    const { subject, html } = buildCompanionMorningEmail({
-      displayName: name,
-      messageText: pick.text,
-      messageHtml: pick.html,
-      appUrl: params.appUrl,
-      farmName: companyName !== "your workspace" ? companyName : undefined,
-    });
+    const farmArg = companyName !== "your workspace" ? companyName : undefined;
+
+    let subject: string, html: string, emailType: string, emailFrom: string;
+    if (isEmployeeRole(m.role)) {
+      const empText = pickEmployeeLine(EMPLOYEE_MORNING_LINES, m.clerk_user_id, localDay);
+      ({ subject, html } = buildEmployeeMorningEmail({
+        displayName: name, messageText: empText,
+        appUrl: params.appUrl, farmName: farmArg, role: m.role,
+      }));
+      emailType = TYPE_EMPLOYEE_MORNING;
+      emailFrom = getFarmVaultEmailFrom("team");
+    } else {
+      ({ subject, html } = buildCompanionMorningEmail({
+        displayName: name, messageText: pick.text, messageHtml: pick.html,
+        appUrl: params.appUrl, farmName: farmArg,
+      }));
+      emailType = TYPE_MORNING;
+      emailFrom = params.from;
+    }
 
     const r = await sendResendWithEmailLog({
       admin: params.logAdmin, resendKey: params.resendKey,
-      from: params.from, to: email, subject, html,
-      email_type: TYPE_MORNING, company_id: m.company_id, company_name: companyName,
-      metadata: { run: "morning", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey, category: pick.category },
+      from: emailFrom, to: email, subject, html,
+      email_type: emailType, company_id: m.company_id, company_name: companyName,
+      metadata: { run: "morning", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey, category: pick.category, role: m.role ?? undefined },
     });
 
     if (r.ok) {
@@ -384,20 +493,31 @@ async function runEvening(params: {
     if (await alreadySentDedupe(params.logAdmin, TYPE_EVENING, dedupeKey)) { skipped++; continue; }
 
     const name = displayName(p);
-    const { subject, html } = buildCompanionEveningEmail({
-      displayName: name,
-      messageText: pick.text,
-      messageHtml: pick.html,
-      appUrl: params.appUrl,
-      farmName: companyName !== "your workspace" ? companyName : undefined,
-      isWeeklySummary: false,
-    });
+    const farmArg = companyName !== "your workspace" ? companyName : undefined;
+
+    let subject: string, html: string, emailType: string, emailFrom: string;
+    if (isEmployeeRole(m.role)) {
+      const empText = pickEmployeeLine(EMPLOYEE_EVENING_LINES, m.clerk_user_id, localDay);
+      ({ subject, html } = buildEmployeeEveningEmail({
+        displayName: name, messageText: empText,
+        appUrl: params.appUrl, farmName: farmArg,
+      }));
+      emailType = TYPE_EMPLOYEE_EVENING;
+      emailFrom = getFarmVaultEmailFrom("team");
+    } else {
+      ({ subject, html } = buildCompanionEveningEmail({
+        displayName: name, messageText: pick.text, messageHtml: pick.html,
+        appUrl: params.appUrl, farmName: farmArg, isWeeklySummary: false,
+      }));
+      emailType = TYPE_EVENING;
+      emailFrom = params.from;
+    }
 
     const r = await sendResendWithEmailLog({
       admin: params.logAdmin, resendKey: params.resendKey,
-      from: params.from, to: email, subject, html,
-      email_type: TYPE_EVENING, company_id: m.company_id, company_name: companyName,
-      metadata: { run: "evening", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey, category: pick.category },
+      from: emailFrom, to: email, subject, html,
+      email_type: emailType, company_id: m.company_id, company_name: companyName,
+      metadata: { run: "evening", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey, category: pick.category, role: m.role ?? undefined },
     });
 
     if (r.ok) {
@@ -595,20 +715,32 @@ async function runWeekly(params: {
     };
 
     const name = displayName(p);
-    const { subject, html } = buildCompanionWeeklySummaryEmail({
-      displayName: name,
-      stats,
-      summaryMessage: pick.text,
-      summaryHtml: pick.html,
-      appUrl: params.appUrl,
-      farmName: companyName !== "your workspace" ? companyName : undefined,
-    });
+    const farmArg = companyName !== "your workspace" ? companyName : undefined;
+
+    let subject: string, html: string, emailType: string, emailFrom: string;
+    if (isEmployeeRole(m.role)) {
+      const empStats = await loadEmployeeWeeklyStats(params.admin, m.clerk_user_id, m.company_id, now, tz);
+      const empSummary = pickEmployeeLine(EMPLOYEE_EVENING_LINES, m.clerk_user_id, localDay);
+      ({ subject, html } = buildEmployeeWeeklySummaryEmail({
+        displayName: name, stats: empStats, summaryMessage: empSummary,
+        appUrl: params.appUrl, farmName: farmArg,
+      }));
+      emailType = TYPE_EMPLOYEE_WEEKLY;
+      emailFrom = getFarmVaultEmailFrom("team");
+    } else {
+      ({ subject, html } = buildCompanionWeeklySummaryEmail({
+        displayName: name, stats, summaryMessage: pick.text, summaryHtml: pick.html,
+        appUrl: params.appUrl, farmName: farmArg,
+      }));
+      emailType = TYPE_WEEKLY;
+      emailFrom = params.from;
+    }
 
     const r = await sendResendWithEmailLog({
       admin: params.logAdmin, resendKey: params.resendKey,
-      from: params.from, to: email, subject, html,
-      email_type: TYPE_WEEKLY, company_id: m.company_id, company_name: companyName,
-      metadata: { run: "weekly", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey },
+      from: emailFrom, to: email, subject, html,
+      email_type: emailType, company_id: m.company_id, company_name: companyName,
+      metadata: { run: "weekly", clerk_user_id: m.clerk_user_id, dedupe_key: dedupeKey, role: m.role ?? undefined },
     });
 
     if (r.ok) {

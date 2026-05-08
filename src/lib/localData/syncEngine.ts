@@ -5,6 +5,7 @@ import {
   getEntityById,
   markEntityStatus,
   upsertEntityRow,
+  writeFailedSync,
 } from '@/lib/localData/entityRepository';
 import {
   getPendingLocalSyncQueue,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/localData/types';
 import { getLocalDataDB } from '@/lib/localData/indexedDb';
 import { createHarvestCollection } from '@/services/harvestCollectionsService';
+import { isHarvestAction, handleHarvestAction } from '@/lib/sync/harvestSyncHandlers';
 
 let running = false;
 
@@ -376,6 +378,12 @@ async function processOne(
     return;
   }
 
+  // Harvest sub-operations (sessions, pickers, picker logs, dispatches, sales, expense lines)
+  if (isHarvestAction(a)) {
+    await handleHarvestAction(a, client, item);
+    return;
+  }
+
   throw new Error(`No handler: ${a} on ${t}`);
 }
 
@@ -428,6 +436,18 @@ export async function runLocalDataSyncEngine(companyId?: string | null): Promise
             } catch {
               // best-effort
             }
+          }
+          // Write to permanent failed_syncs log for user visibility
+          try {
+            await writeFailedSync({
+              action_type: item.action_type,
+              table_name: item.table_name,
+              payload: item.payload,
+              error_message: msg,
+              company_id: item.company_id,
+            });
+          } catch {
+            // best-effort
           }
         }
         failed += 1;

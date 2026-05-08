@@ -1,7 +1,30 @@
 import { getLocalDataDB, tableForEntity } from '@/lib/localData/indexedDb';
-import type { LocalEntityRow, LocalEntityTable, LocalSyncStatus } from '@/lib/localData/types';
+import type {
+  LocalDraftRow,
+  LocalEntityRow,
+  LocalEntityTable,
+  LocalFailedSyncRow,
+  LocalSyncStatus,
+  LocalActionType,
+} from '@/lib/localData/types';
 
 const nowIso = () => new Date().toISOString();
+
+let _deviceId: string | null = null;
+
+function getDeviceId(): string {
+  if (_deviceId) return _deviceId;
+  const stored = localStorage.getItem('fv_device_id');
+  if (stored) { _deviceId = stored; return stored; }
+  const id = crypto.randomUUID();
+  localStorage.setItem('fv_device_id', id);
+  _deviceId = id;
+  return id;
+}
+
+function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && !navigator.onLine;
+}
 
 export function mergeTimestamps(created: string, updated: string): { created_at: string; updated_at: string } {
   return {
@@ -58,6 +81,8 @@ export function buildLocalRow(params: {
   syncStatus: LocalSyncStatus;
   createdAt?: string;
   updatedAt?: string;
+  offlineCreated?: boolean;
+  deletedAt?: string | null;
 }): LocalEntityRow {
   const t = mergeTimestamps(params.createdAt ?? nowIso(), params.updatedAt ?? nowIso());
   return {
@@ -66,6 +91,9 @@ export function buildLocalRow(params: {
     created_at: t.created_at,
     updated_at: t.updated_at,
     sync_status: params.syncStatus,
+    offline_created: params.offlineCreated ?? isOffline(),
+    device_id: getDeviceId(),
+    deleted_at: params.deletedAt ?? null,
     data: params.data,
   };
 }
@@ -120,6 +148,12 @@ export async function countPendingForCompany(companyId: string): Promise<number>
     'suppliers',
     'expenses',
     'notes',
+    'harvest_sessions',
+    'harvest_session_pickers',
+    'harvest_picker_logs',
+    'harvest_dispatches',
+    'harvest_sales',
+    'harvest_expense_lines',
   ];
   let n = 0;
   for (const t of tables) {
@@ -128,4 +162,96 @@ export async function countPendingForCompany(companyId: string): Promise<number>
       .count();
   }
   return n;
+}
+
+// ─── Session-scoped entity queries ───────────────────────────────────────────
+
+export async function listEntitiesBySession(
+  table: LocalEntityTable,
+  sessionId: string,
+): Promise<LocalEntityRow[]> {
+  return tableForEntity(table)
+    .filter((r) => r.data['session_id'] === sessionId && !r.deleted_at)
+    .toArray();
+}
+
+export async function listEntitiesByDispatch(
+  table: LocalEntityTable,
+  dispatchId: string,
+): Promise<LocalEntityRow[]> {
+  return tableForEntity(table)
+    .filter((r) => r.data['dispatch_id'] === dispatchId && !r.deleted_at)
+    .toArray();
+}
+
+export async function softDeleteEntity(
+  table: LocalEntityTable,
+  id: string,
+): Promise<void> {
+  const row = await tableForEntity(table).get(id);
+  if (!row) return;
+  await tableForEntity(table).put({ ...row, deleted_at: nowIso(), updated_at: nowIso() });
+}
+
+// ─── Failed sync log ──────────────────────────────────────────────────────────
+
+export async function writeFailedSync(
+  item: Omit<LocalFailedSyncRow, 'id' | 'failed_at'> & { id?: string },
+): Promise<void> {
+  const db = getLocalDataDB();
+  await db.failed_syncs.put({
+    ...item,
+    id: item.id ?? crypto.randomUUID(),
+    failed_at: nowIso(),
+  });
+}
+
+export async function listFailedSyncs(companyId: string): Promise<LocalFailedSyncRow[]> {
+  return getLocalDataDB().failed_syncs
+    .where('company_id').equals(companyId).toArray();
+}
+
+export async function clearFailedSync(id: string): Promise<void> {
+  await getLocalDataDB().failed_syncs.delete(id);
+}
+
+// ─── Draft helpers ────────────────────────────────────────────────────────────
+
+export async function saveDraft(
+  draft: Omit<LocalDraftRow, 'created_at' | 'updated_at'> & { id?: string },
+): Promise<string> {
+  const db = getLocalDataDB();
+  const id = draft.id ?? crypto.randomUUID();
+  const now = nowIso();
+  const existing = await db.drafts.get(id);
+  await db.drafts.put({
+    ...draft,
+    id,
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+  });
+  return id;
+}
+
+export async function getDraft(id: string): Promise<LocalDraftRow | undefined> {
+  return getLocalDataDB().drafts.get(id);
+}
+
+export async function deleteDraft(id: string): Promise<void> {
+  await getLocalDataDB().drafts.delete(id);
+}
+
+export async function markEntitySynced(
+  table: LocalEntityTable,
+  id: string,
+  serverData?: Record<string, unknown>,
+): Promise<void> {
+  const row = await tableForEntity(table).get(id);
+  if (!row) return;
+  await tableForEntity(table).put({
+    ...row,
+    sync_status: 'synced',
+    last_synced_at: nowIso(),
+    data: serverData ? { ...row.data, ...serverData } : row.data,
+  });
 }

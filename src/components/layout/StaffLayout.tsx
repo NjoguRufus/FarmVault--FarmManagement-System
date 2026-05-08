@@ -12,6 +12,7 @@ import { StaffTourProvider } from '@/tour/StaffTourProvider';
 import { useCompanySubscriptionRealtime } from '@/hooks/useCompanySubscriptionRealtime';
 import { logger } from "@/lib/logger";
 import { APP_ENTRY_PATH } from '@/lib/routing/appEntryPaths';
+import { OfflineSyncBanner } from '@/components/status/OfflineSyncBanner';
 
 export function StaffLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -77,6 +78,7 @@ export function StaffLayout() {
             sidebarCollapsed={sidebarCollapsed}
             onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
+          <OfflineSyncBanner />
           <main
             className={cn(
               'pt-16 min-h-screen transition-all duration-300',

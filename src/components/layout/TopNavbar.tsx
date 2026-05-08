@@ -29,6 +29,7 @@ import { isProjectClosed } from '@/lib/projectClosed';
 import { onUpgradeModalOpen } from '@/lib/upgradeModalEvents';
 import { FarmVaultUserMenu } from '@/components/auth/FarmVaultUserMenu';
 import { SmartCompanionCenter } from '@/components/companion/SmartCompanionCenter';
+import { SyncStatusIndicator } from '@/components/sync/SyncStatusIndicator';
 import { logger } from "@/lib/logger";
 
 interface TopNavbarProps {
@@ -476,6 +477,11 @@ export function TopNavbar({ sidebarCollapsed, onSidebarToggle }: TopNavbarProps)
               <AlertTriangle className="h-3 w-3" />
               Subscription expired – Upgrade
             </button>
+          )}
+
+          {/* Sync status — shows offline / syncing / synced / failed */}
+          {user && !isDeveloperNav && (
+            <SyncStatusIndicator className="hidden sm:flex" />
           )}
 
           {/* Unified notification bell — companion messages + system alerts + preferences */}
