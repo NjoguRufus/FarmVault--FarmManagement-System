@@ -13,7 +13,7 @@
 // Body JSON: { "run": "morning" | "evening" | "inactivity" | "weekly" | "trial_expiring" | "trial_expired" | "system_push" }
 //
 // Cron schedule (pg_cron, UTC):
-//   03:30  daily        → morning         (6:30 EAT)
+//   05:00  daily        → morning         (8:00 AM EAT)
 //   16:00  Mon–Sat      → evening         (7:00 PM EAT)
 //   16:00  Sunday       → weekly          (7:00 PM EAT)
 //   09:00  daily        → inactivity      (12:00 noon EAT)
@@ -265,10 +265,9 @@ async function runMorning(params: {
 
     const prefs = await loadCompanionPreferences(params.admin, m.clerk_user_id);
     if (!prefs.morning_enabled) { skipped++; continue; }
-    // Timezone window: only send when it is 5:30 AM – 10:00 AM in the user's local timezone.
-    // The pg_cron fires at 3:30 UTC (6:30 EAT). Users in other zones are skipped and
-    // will be reached when additional cron entries cover their UTC morning window.
-    if (!isInLocalTimeWindow(prefs.timezone, 5, 10)) { skipped++; continue; }
+    // Timezone window: only send when it is 7:00 AM – 10:00 AM in the user's local timezone.
+    // The pg_cron fires at 05:00 UTC (08:00 EAT). Users outside this window are skipped.
+    if (!isInLocalTimeWindow(prefs.timezone, 7, 10)) { skipped++; continue; }
 
     const company    = companyById.get(m.company_id);
     const companyName = company?.name ?? "your workspace";

@@ -43,9 +43,9 @@ const C = {
 
 // ─── Typography ──────────────────────────────────────────────────────────────
 
-const DISPLAY_FONT = '"Bricolage Grotesque", Georgia, "Times New Roman", serif';
-const BODY_FONT    = '"Inter", Arial, Helvetica, sans-serif';
-const MONO_FONT    = '"JetBrains Mono", "Courier New", monospace';
+const DISPLAY_FONT = "'Bricolage Grotesque', Georgia, 'Times New Roman', serif";
+const BODY_FONT    = "'Inter', Arial, Helvetica, sans-serif";
+const MONO_FONT    = "'JetBrains Mono', 'Courier New', monospace";
 
 // Google Fonts import — honoured by Apple Mail, Outlook.com, Fastmail; ignored by Gmail (falls back gracefully)
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&family=Inter:wght@400;500;600&display=swap');`;
@@ -56,34 +56,69 @@ function ea(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
-function warmGreeting(displayName: string, emoji: string): string {
-  const name = displayName?.trim();
-  if (!name || name === "there" || name === "Farmer") return `Hello there ${emoji}`;
-  return `Hello ${escapeHtml(name)} ${emoji}`;
+/**
+ * Mirrors React Email's <BodyParagraphs> component exactly.
+ * First paragraph: 17px bold, ink. Rest: 16px normal, inkSoft.
+ * Used so Deno-side emails render identically to the live preview.
+ */
+function paragraphsToHtml(text: string): string {
+  const paras = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+  if (paras.length === 0) return "";
+  const [first, ...rest] = paras;
+  const firstHtml = `<p class="body-p1" style="margin:0 0 16px 0;font-family:${BODY_FONT};font-size:17px;font-weight:600;line-height:1.65;color:${C.ink};white-space:pre-line;">${escapeHtml(first)}</p>`;
+  const restHtml  = rest.map(p => `<p class="body-p" style="margin:0 0 16px 0;font-family:${BODY_FONT};font-size:16px;line-height:1.85;color:${C.inkSoft};white-space:pre-line;">${escapeHtml(p)}</p>`).join("");
+  return firstHtml + restHtml;
 }
 
 // ─── Layout primitives ───────────────────────────────────────────────────────
 
 function companionOpen(preheader: string, title: string): string {
   return `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml"><head>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" style="color-scheme:light;"><head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="color-scheme" content="light" />
-<meta name="supported-color-schemes" content="light" />
+<meta name="color-scheme" content="light only" />
+<meta name="supported-color-schemes" content="light only" />
 <title>${escapeHtml(title)}</title>
 <style>${FONT_IMPORT}
+  /* ── Mobile ─────────────────────────────────────────── */
   @media only screen and (max-width:600px){
-    .banner-left{width:100%!important;display:block!important;}
-    .banner-scene{display:none!important;width:0!important;overflow:hidden!important;}
+    .email-outer{padding:12px 8px 28px 8px!important;}
+    .email-card{width:100%!important;border-radius:12px!important;}
+    .banner-left{padding:24px 10px 28px 18px!important;}
+    .banner-scene{padding:0 8px 0 0!important;}
+    .mascot-img{width:150px!important;height:150px!important;}
+    .headline{font-size:24px!important;line-height:1.12!important;}
+    .content-td{padding:28px 20px 32px 20px!important;}
+    .cta-table{width:auto!important;}
+  }
+  /* ── Force exact palette in dark mode — block Gmail/Samsung inversion ── */
+  @media (prefers-color-scheme:dark){
+    /* Outer wrapper */
+    .email-outer{background-color:${C.forestMid}!important;}
+    .email-card{background-color:${C.parchment}!important;}
+    /* Hero — keep dark forest green, not warm brown */
+    .banner-outer{border-bottom:3px solid ${C.harvest}!important;}
+    .banner-left{background:linear-gradient(150deg,${C.forestDeep} 0%,${C.forest} 100%)!important;background-color:${C.forestDeep}!important;}
+    .banner-scene{background-color:${C.parchment}!important;color:${C.ink}!important;}
+    .headline{color:${C.cream}!important;}
+    /* Content body */
+    .content-td{background-color:${C.parchment}!important;color:${C.ink}!important;}
+    .body-p1{color:${C.ink}!important;}
+    .body-p{color:${C.inkSoft}!important;}
+    .closing-p{color:${C.mute}!important;}
+    /* Footer — keep dark forest green */
+    .footer-td{background-color:${C.forestDeep}!important;}
+    .footer-brand{color:${C.cream}!important;}
+    .footer-tag{color:rgba(253,252,248,0.42)!important;}
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:${C.parchmentWarm};">
+<body style="margin:0;padding:0;background-color:${C.forestMid};color-scheme:light;">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:${C.parchmentWarm};">
-<tr><td align="center" style="padding:24px 16px 40px 16px;">
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;border-radius:16px;overflow:hidden;background-color:${C.parchment};">`;
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="${C.forestMid}" style="background-color:${C.forestMid};">
+<tr><td class="email-outer" align="center" style="padding:28px 16px 44px 16px;" bgcolor="${C.forestMid}">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" class="email-card" bgcolor="${C.parchment}" style="max-width:600px;border-radius:20px;overflow:hidden;background-color:${C.parchment};">`;
 }
 
 function companionClose(): string {
@@ -94,61 +129,52 @@ function companionClose(): string {
 }
 
 /**
- * Banner panel — the email equivalent of the FarmVault Banner System.
+ * Banner panel — cinematic dark-forest hero + parchment mascot column.
  *
- *  LEFT (58%): parchment — FarmVault logo · eyebrow · big headline · subline
- *  RIGHT (42%): scene gradient — mascot image centred on the colour field
- *
- * sceneGradient: CSS gradient (background shorthand)
- * sceneFallback: solid hex fallback for MSO / plain clients
+ *  LEFT (56%): dark forest gradient — FarmVault logo · headline · date chip · optional subline
+ *  RIGHT (44%): parchment — mascot sits flush on the harvest gold divider line
  */
 function bannerPanel(opts: {
-  eyebrow: string;
-  headline: string;      // use \n for the vault-green second line (e.g. "Good morning,\nFarmer.")
-  subline: string;
-  sceneGradient: string;
-  sceneFallback: string;
+  headline: string;    // use \n for two-line display (e.g. "Good morning,\nFarmer.")
+  headlineAccent?: string;  // color for line 2, defaults to harvest gold
+  subline?: string;
 }): string {
   const [h1, h2] = opts.headline.split("\n");
+  const accentColor = opts.headlineAccent ?? C.harvest;
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return `<tr>
-<td style="padding:0;border-bottom:3px solid ${C.harvest};">
+<td class="banner-outer" style="padding:0;border-bottom:3px solid ${C.harvest};">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
 <tr>
-<!--[if mso]><td width="350" valign="top" style="width:350px;background-color:${C.parchment};"><![endif]-->
-<!--[if !mso]><!--><td class="banner-left" valign="top" style="width:58%;min-width:260px;background-color:${C.parchment};padding:32px 24px 36px 32px;vertical-align:top;"><!--<![endif]-->
+<!--[if mso]><td width="336" valign="top" style="width:336px;background:${C.forestDeep};"><![endif]-->
+<!--[if !mso]><!--><td class="banner-left" valign="top" bgcolor="${C.forestDeep}"
+  style="width:56%;background:linear-gradient(150deg,${C.forestDeep} 0%,${C.forest} 100%);background-color:${C.forestDeep};padding:52px 24px 56px 36px;vertical-align:top;"><!--<![endif]-->
 
-  <!-- Logo row -->
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px 0;">
-  <tr>
-  <td valign="middle">
-  <img src="${ea(LOGO_URL)}" width="100" height="auto" alt="FarmVault" style="display:block;border:0;outline:none;height:24px;width:auto;max-width:120px;" />
-  </td>
-  </tr>
+  <!-- Logo (dark-mode version) -->
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 32px 0;">
+  <tr><td>
+  <img src="${ea(LOGO_URL)}" width="110" height="26" alt="FarmVault"
+    style="display:block;border:0;outline:none;height:26px;width:auto;" />
+  </td></tr>
   </table>
 
-  <!-- Eyebrow -->
-  <p style="margin:0 0 10px 0;font-family:${MONO_FONT};font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.vaultSoft};">${escapeHtml(opts.eyebrow)}</p>
+  <!-- Greeting — cream on dark forest -->
+  <p class="headline" style="margin:0 0 12px 0;font-family:${DISPLAY_FONT};font-size:46px;font-weight:700;color:${C.cream};line-height:1.06;letter-spacing:-0.03em;word-break:break-word;">${escapeHtml(h1)}${h2 ? `<br/><span style="color:${accentColor};">${escapeHtml(h2)}</span>` : ""}</p>
 
-  <!-- Headline — line 1 (ink) + line 2 (vault green) -->
-  <p style="margin:0 0 16px 0;font-family:${DISPLAY_FONT};font-size:40px;font-weight:700;color:${C.ink};line-height:1.04;letter-spacing:-0.025em;word-break:break-word;">${escapeHtml(h1)}${h2 ? `<br/><span style="color:${C.vault};">${escapeHtml(h2)}</span>` : ""}</p>
+  <!-- Date chip -->
+  <p style="margin:${opts.subline ? "0 0 14px 0" : "0"};font-family:${BODY_FONT};font-size:11px;color:rgba(253,252,248,0.48);letter-spacing:0.07em;text-transform:uppercase;">${escapeHtml(today)}</p>
 
-  <!-- Subline -->
-  <p style="margin:0;font-family:${BODY_FONT};font-size:13px;line-height:1.65;color:${C.mute};">${escapeHtml(opts.subline)}</p>
+  ${opts.subline ? `<!-- Subline -->
+  <p style="margin:0;font-family:${BODY_FONT};font-size:13px;line-height:1.65;color:rgba(253,252,248,0.68);">${escapeHtml(opts.subline)}</p>` : ""}
 
-<!--[if mso]></td><td width="250" valign="top" style="width:250px;"><![endif]-->
-<!--[if !mso]><!--></td><td class="banner-scene" valign="top" style="width:42%;min-width:160px;background-color:${C.parchment};text-align:center;padding:0;"><!--<![endif]-->
+<!--[if mso]></td><td width="264" valign="bottom" style="width:264px;background-color:${C.parchment};"><![endif]-->
+<!--[if !mso]><!--></td><td class="banner-scene" valign="bottom" bgcolor="${C.parchment}"
+  style="width:44%;background-color:${C.parchment};text-align:center;padding:0 4px;line-height:0;vertical-align:bottom;"><!--<![endif]-->
 
-  <!-- Mascot — prominent in the scene column, matching the banner's ZoneMascot -->
-  <table role="presentation" width="100%" height="100%" cellspacing="0" cellpadding="0" border="0">
-  <tr>
-  <td align="center" valign="middle" style="padding:24px 16px;">
-  <img src="${ea(MASCOT_URL)}" width="200" height="200" alt="FarmVault Companion"
-    style="display:block;border:0;outline:none;width:200px;height:200px;object-fit:contain;margin:0 auto;
-           filter:drop-shadow(0 8px 24px rgba(0,0,0,0.28));" />
-  </td>
-  </tr>
-  </table>
+  <!-- Mascot sits flush on the gold divider line -->
+  <img src="${ea(MASCOT_URL)}" width="260" height="260" alt="FarmVault Companion" class="mascot-img"
+    style="display:block;border:0;outline:none;width:260px;height:260px;object-fit:contain;margin:0 auto;" />
 
 <!--[if mso]></td><![endif]-->
 </tr>
@@ -157,42 +183,26 @@ function bannerPanel(opts: {
 </tr>`;
 }
 
-/** Leaf rule separator — echoes the FarmVault Banner System's signature divider. */
-function leafRule(): string {
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:18px 0;">
-<tr>
-<td style="border-top:2px solid ${C.vault};width:60px;" width="60"></td>
-<td width="34" align="center" style="padding:0 8px;">
-<svg width="18" height="14" viewBox="0 0 18 14" xmlns="http://www.w3.org/2000/svg" style="display:block;">
-<path d="M2 7 C 2 3, 6 1, 9 1 C 12 1, 16 3, 16 7 C 13 7, 9 9, 9 13 C 9 9, 5 7, 2 7 Z" fill="${C.leaf}"/>
-</svg>
-</td>
-<td style="border-top:2px solid ${C.vault};opacity:0.4;"></td>
-</tr>
-</table>`;
-}
-
-/** CTA button row. */
+/** CTA button — bulletproof dark pill. Background on both <td> and <a> so Gmail mobile can't strip it. */
 function ctaButton(label: string, href: string): string {
-  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+  return `<table class="cta-table" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:34px auto 0;">
 <tr>
-<td align="center" style="border-radius:999px;background:linear-gradient(180deg,${C.vault} 0%,${C.forest} 100%);background-color:${C.vault};box-shadow:0 8px 20px rgba(30,44,33,0.30);">
+<td align="center" bgcolor="${C.forestDeep}" style="border-radius:8px;background-color:${C.forestDeep};">
 <a href="${ea(href)}" target="_blank" rel="noopener noreferrer"
-  style="display:inline-block;padding:15px 38px;font-family:${BODY_FONT};font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:999px;mso-line-height-rule:exactly;line-height:1.2;letter-spacing:-0.005em;">
-${escapeHtml(label)} &nbsp;→
+  style="background-color:${C.forestDeep};display:inline-block;padding:14px 36px;font-family:${BODY_FONT};font-size:15px;font-weight:600;color:${C.cream};-webkit-text-fill-color:${C.cream};text-decoration:none;border-radius:8px;mso-line-height-rule:exactly;line-height:1.3;letter-spacing:-0.01em;">
+<span style="color:${C.cream};-webkit-text-fill-color:${C.cream};">${escapeHtml(label)}</span>
 </a>
 </td>
 </tr>
 </table>`;
 }
 
-/** Card footer inside the email card. */
-function footerRow(tagline: string, bg: string): string {
+/** Dark premium footer — minimal, elegant, confident. */
+function footerRow(tagline: string): string {
   return `<tr>
-<td style="padding:22px 32px 28px 32px;background-color:${bg};font-family:${BODY_FONT};font-size:13px;line-height:1.65;color:${C.mute};text-align:center;border-top:1px solid ${C.line};">
-<p style="margin:0 0 4px 0;font-family:${DISPLAY_FONT};font-size:15px;font-weight:700;color:${C.inkSoft};">Farm<span style="color:${C.harvestDeep};">Vault</span></p>
-<p style="margin:0 0 3px 0;font-size:12px;color:${C.mute};">Smart Farm Management · Track Harvest · Labor · Expenses</p>
-<p style="margin:8px 0 0 0;font-size:13px;font-style:italic;color:${C.inkSoft};">${escapeHtml(tagline)}</p>
+<td class="footer-td" bgcolor="${C.forestDeep}" style="padding:26px 40px 30px;background-color:${C.forestDeep};font-family:${BODY_FONT};text-align:center;">
+<p class="footer-brand" style="margin:0 0 7px 0;font-family:${DISPLAY_FONT};font-size:16px;font-weight:700;color:${C.cream};letter-spacing:-0.015em;">Farm<span style="color:${C.harvest};">Vault</span></p>
+<p class="footer-tag" style="margin:0;font-size:11px;color:rgba(253,252,248,0.42);letter-spacing:0.07em;text-transform:uppercase;">${escapeHtml(tagline)}</p>
 </td>
 </tr>`;
 }
@@ -217,33 +227,14 @@ export function buildCompanionMorningEmail(opts: {
   const firstName = opts.displayName?.trim().split(/[\s,]/)[0] || opts.displayName || "Farmer";
 
   const heroPanelRow = bannerPanel({
-    eyebrow: "◇ MORNING BRIEFING",
     headline: `Good morning,\n${firstName}.`,
-    subline: `A new farming day begins — ${farm} is ready for you.`,
-    sceneGradient: `linear-gradient(160deg,${C.harvest} 0%,${C.harvestDeep} 45%,${C.forest} 100%)`,
-    sceneFallback: C.harvestDeep,
   });
 
   const contentRow = `<tr>
-<td style="padding:28px 36px 36px 36px;background-color:${C.parchment};font-family:${BODY_FONT};">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-<tr><td>${leafRule()}</td></tr>
-<tr>
-<td style="padding:20px 22px;background-color:${C.cream};border-left:4px solid ${C.harvest};border-radius:0 12px 12px 0;font-size:15px;line-height:1.8;color:${C.inkSoft};">
-${opts.messageHtml}
-</td>
-</tr>
-<tr>
-<td align="center" style="padding:26px 0 8px 0;">
-${ctaButton("Open My Farm Dashboard", `${url}/home`)}
-</td>
-</tr>
-<tr>
-<td style="padding:14px 0 4px 0;font-family:${BODY_FONT};font-size:13px;color:${C.mute};font-style:italic;text-align:center;">
-Your farming companion is always with you. 🌿
-</td>
-</tr>
-</table>
+<td class="content-td" bgcolor="${C.parchment}" style="padding:44px 40px 48px;background-color:${C.parchment};font-family:${BODY_FONT};color:${C.ink}">
+${paragraphsToHtml(opts.messageText)}
+${ctaButton("Start Today's Journey →", `${url}/home`)}
+<p class="closing-p" style="margin:24px 0 0 0;font-family:${BODY_FONT};font-size:12px;color:${C.mute};font-style:italic;text-align:center;line-height:1.6;">Your farming companion walks this journey with you.</p>
 </td>
 </tr>`;
 
@@ -251,7 +242,7 @@ Your farming companion is always with you. 🌿
     companionOpen(`A new farming day begins — ${farm} is ready for you.`, "Your FarmVault Morning") +
     heroPanelRow +
     contentRow +
-    footerRow("Every farming day brings new growth.", C.parchmentWarm) +
+    footerRow("Every farming day brings new growth.") +
     companionClose();
 
   return { subject, html };
@@ -278,43 +269,24 @@ export function buildCompanionEveningEmail(opts: {
 
   const firstName = opts.displayName?.trim().split(/[\s,]/)[0] || opts.displayName || "Farmer";
 
-  const eyebrow   = isWeekly ? "◇ YOUR WEEK ON THE FARM" : "◇ EVENING WRAP";
-  const headline  = isWeekly ? "Here's your\nfarm summary." : `Good evening,\n${firstName}.`;
-  const subline   = isWeekly
+  const headline    = isWeekly ? `This week,\n${farm}.` : `Good evening,\n${firstName}.`;
+  const subline     = isWeekly
     ? `Another week written into ${farm}'s story.`
     : `Another farming day complete — ${farm}, you showed up.`;
-  const ctaLabel  = isWeekly ? "See My Week's Summary" : "Log Today's Work";
-  const ctaHref   = isWeekly ? `${url}/home` : `${url}/farm-work`;
-  const tagline   = "Rest well. Your farm story continues tomorrow.";
+  const ctaLabel    = isWeekly ? "View This Week →" : "Log Today's Progress →";
+  const ctaHref     = isWeekly ? `${url}/home` : `${url}/farm-work`;
+  const closingLine = isWeekly
+    ? "Every week written down becomes next season's wisdom."
+    : "Rest well. Your farm story continues tomorrow.";
+  const tagline     = isWeekly ? "Your farm story, written week by week." : "Rest well. Your farm story continues tomorrow.";
 
-  const heroPanelRow = bannerPanel({
-    eyebrow,
-    headline,
-    subline,
-    sceneGradient: `linear-gradient(160deg,${C.forestDeep} 0%,${C.forest} 55%,${C.vault} 100%)`,
-    sceneFallback: C.forest,
-  });
+  const heroPanelRow = bannerPanel({ headline, subline });
 
   const contentRow = `<tr>
-<td style="padding:28px 36px 36px 36px;background-color:${C.parchment};font-family:${BODY_FONT};">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-<tr><td>${leafRule()}</td></tr>
-<tr>
-<td style="padding:20px 22px;background-color:${C.cream};border-left:4px solid ${C.leaf};border-radius:0 12px 12px 0;font-size:15px;line-height:1.8;color:${C.inkSoft};">
-${opts.messageHtml}
-</td>
-</tr>
-<tr>
-<td align="center" style="padding:26px 0 8px 0;">
+<td class="content-td" bgcolor="${C.parchment}" style="padding:44px 40px 48px;background-color:${C.parchment};font-family:${BODY_FONT};color:${C.ink}">
+${paragraphsToHtml(opts.messageText)}
 ${ctaButton(ctaLabel, ctaHref)}
-</td>
-</tr>
-<tr>
-<td style="padding:14px 0 4px 0;font-family:${BODY_FONT};font-size:13px;color:${C.mute};font-style:italic;text-align:center;">
-Rest well. Your farm story continues tomorrow. 🌾
-</td>
-</tr>
-</table>
+<p class="closing-p" style="margin:24px 0 0 0;font-family:${BODY_FONT};font-size:12px;color:${C.mute};font-style:italic;text-align:center;line-height:1.6;">${escapeHtml(closingLine)}</p>
 </td>
 </tr>`;
 
@@ -326,7 +298,7 @@ Rest well. Your farm story continues tomorrow. 🌾
     companionOpen(preheader, isWeekly ? "Your Weekly Farm Summary" : "Your FarmVault Evening") +
     heroPanelRow +
     contentRow +
-    footerRow(tagline, C.parchmentWarm) +
+    footerRow(tagline) +
     companionClose();
 
   return { subject, html };
@@ -339,76 +311,46 @@ Rest well. Your farm story continues tomorrow. 🌾
 // ─────────────────────────────────────────────────────────────────────────────
 
 type InactivityTheme = {
-  heroBg: string;
-  heroBgFallback: string;
-  eyebrow: string;
-  headline: string;
-  subline: string;
-  accentColor: string;
-  cardBg: string;
-  bodyLine1: string;
-  bodyLine2: string;
-  ctaLabel: string;
-  footerBg: string;
+  headline:      string;
+  headlineAccent?: string;
+  subline:       string;
+  ctaLabel:      string;
+  footerTagline: string;
 };
 
 function getInactivityTheme(tier: InactivityTier, farm: string): InactivityTheme {
   switch (tier) {
     case "2d":
       return {
-        heroBg: `linear-gradient(135deg,${C.vault} 0%,${C.forestMid} 55%,${C.forest} 100%)`,
-        heroBgFallback: C.vault,
-        eyebrow: "◇ A QUIET CHECK-IN",
-        headline: `It's been\nquiet here, ${farm}.`,
-        subline: `${farm} is ready for you, whenever you are.`,
-        accentColor: C.leaf,
-        cardBg: C.parchment,
-        bodyLine1: "It's been a couple of days since your last visit. Your records are safe and your workspace is exactly as you left it.",
-        bodyLine2: "A quick check-in — even just one record — keeps your farm story moving forward.",
-        ctaLabel: "Pick Up Where You Left Off",
-        footerBg: C.parchmentWarm,
+        headline:      `We noticed\nthe quiet.`,
+        headlineAccent: C.harvest,
+        subline:       `${farm} is ready for you, whenever you are.`,
+        ctaLabel:      "Return to Your Farm →",
+        footerTagline: "Still here. Always.",
       };
     case "5d":
       return {
-        heroBg: `linear-gradient(135deg,${C.forestMid} 0%,${C.vault} 55%,${C.vaultSoft} 100%)`,
-        heroBgFallback: C.forestMid,
-        eyebrow: "◇ YOUR FARM JOURNEY",
-        headline: `Your farm\nis still here, ${farm}.`,
-        subline: "FarmVault has been keeping watch.",
-        accentColor: C.vaultSoft,
-        cardBg: C.parchment,
-        bodyLine1: `It has been a few days, and we have been keeping ${farm} safe for you. Your records are complete, your workspace is untouched.`,
-        bodyLine2: "Farming is hard work — in and out of the app. Whenever the moment feels right, FarmVault is here.",
-        ctaLabel: "Return to FarmVault",
-        footerBg: C.parchmentWarm,
+        headline:      `Your farm\nmisses you.`,
+        headlineAccent: C.leaf,
+        subline:       "FarmVault has been keeping watch.",
+        ctaLabel:      "Come Back →",
+        footerTagline: "Still here. Always.",
       };
     case "7d":
       return {
-        heroBg: `linear-gradient(135deg,${C.forest} 0%,${C.forestMid} 55%,${C.vault} 100%)`,
-        heroBgFallback: C.forest,
-        eyebrow: "◇ WE'VE BEEN THINKING",
-        headline: `We've been\nthinking about ${farm}.`,
-        subline: "A week passes quickly. Your records don't.",
-        accentColor: C.harvest,
-        cardBg: C.parchment,
-        bodyLine1: `A week away is perfectly natural — real farming happens in the field, not just the app. ${farm} and everything you have built is safely here.`,
-        bodyLine2: "Consistency builds stronger farms. One update today reconnects you to your season.",
-        ctaLabel: "Come Back to FarmVault",
-        footerBg: C.parchmentWarm,
+        headline:      `We've been\nthinking.`,
+        headlineAccent: C.harvest,
+        subline:       `A week away from ${farm}. Your records are safe.`,
+        ctaLabel:      "Return to FarmVault →",
+        footerTagline: "Still here. Always.",
       };
     case "14d":
       return {
-        heroBg: `linear-gradient(135deg,${C.forestDeep} 0%,${C.forest} 55%,${C.forestMid} 100%)`,
-        heroBgFallback: C.forestDeep,
-        eyebrow: "◇ A MESSAGE FROM YOUR COMPANION",
-        headline: `We miss you,\n${farm}.`,
-        subline: "Your farm data is safe. Your journey is still here.",
-        accentColor: C.harvestDeep,
-        cardBg: C.parchment,
-        bodyLine1: `Two weeks away — and we want you to know that ${farm}, all your records, and everything you have logged is intact and waiting for you.`,
-        bodyLine2: "Every farmer has seasons of rest. Whenever you are ready to start again, FarmVault will be right here — no judgment, no lost data, just your full farm story.",
-        ctaLabel: "Return to Your Farm",
-        footerBg: C.parchmentWarm,
+        headline:      `We miss you,\n${farm}.`,
+        headlineAccent: C.harvestDeep,
+        subline:       "Your farm data is safe. Your journey is still here.",
+        ctaLabel:      "I'm Ready to Return →",
+        footerTagline: "Still here. Always.",
       };
   }
 }
@@ -425,39 +367,16 @@ export function buildCompanionInactivityEmail(opts: {
   const theme = getInactivityTheme(opts.tier, farm);
 
   const heroPanelRow = bannerPanel({
-    eyebrow: theme.eyebrow,
-    headline: theme.headline,
-    subline: theme.subline,
-    sceneGradient: theme.heroBg,
-    sceneFallback: theme.heroBgFallback,
+    headline:       theme.headline,
+    headlineAccent: theme.headlineAccent,
+    subline:        theme.subline,
   });
 
   const contentRow = `<tr>
-<td style="padding:28px 36px 36px 36px;background-color:${C.parchment};font-family:${BODY_FONT};">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-<tr><td>${leafRule()}</td></tr>
-<tr>
-<td style="padding:20px 22px;background-color:${C.cream};border-left:4px solid ${theme.accentColor};border-radius:0 12px 12px 0;font-size:15px;line-height:1.8;color:${C.inkSoft};">
-${escapeHtml(opts.nudgeMessage)}
-</td>
-</tr>
-<tr>
-<td style="padding:20px 0 6px 0;font-family:${BODY_FONT};font-size:14px;line-height:1.75;color:${C.inkSoft};">${escapeHtml(theme.bodyLine1)}</td>
-</tr>
-<tr>
-<td style="padding:6px 0 4px 0;font-family:${BODY_FONT};font-size:14px;line-height:1.75;color:${C.mute};">${escapeHtml(theme.bodyLine2)}</td>
-</tr>
-<tr>
-<td align="center" style="padding:26px 0 8px 0;">
+<td class="content-td" bgcolor="${C.parchment}" style="padding:44px 40px 48px;background-color:${C.parchment};font-family:${BODY_FONT};color:${C.ink}">
+${paragraphsToHtml(opts.nudgeMessage)}
 ${ctaButton(theme.ctaLabel, `${url}/home`)}
-</td>
-</tr>
-<tr>
-<td style="padding:14px 0 4px 0;font-family:${BODY_FONT};font-size:13px;color:${C.mute};font-style:italic;text-align:center;">
-FarmVault — your farming companion, always here. 🌾
-</td>
-</tr>
-</table>
+<p class="closing-p" style="margin:24px 0 0 0;font-family:${BODY_FONT};font-size:12px;color:${C.mute};font-style:italic;text-align:center;line-height:1.6;">FarmVault — walking the journey with you, always.</p>
 </td>
 </tr>`;
 
@@ -472,7 +391,7 @@ FarmVault — your farming companion, always here. 🌾
     companionOpen(opts.nudgeMessage.slice(0, 100), "FarmVault Companion") +
     heroPanelRow +
     contentRow +
-    footerRow("We're still here with you, always.", theme.footerBg) +
+    footerRow(theme.footerTagline) +
     companionClose();
 
   return { subject: subjects[opts.tier], html };
@@ -508,8 +427,6 @@ export function buildCompanionWeeklySummaryEmail(opts: {
   const url     = opts.appUrl ?? APP_URL;
   const farm    = opts.farmName ? escapeHtml(opts.farmName) : "your farm";
   const { stats } = opts;
-  const greeting  = warmGreeting(opts.displayName, "📊");
-
   const harvestNonZero = (() => {
     const t = stats.harvestLabel.trim();
     if (!t || /^0(\.0+)?(\s+\w+)?$/i.test(t)) return false;
@@ -593,39 +510,18 @@ ${showRow3 ? `<tr>
     : "A quiet week is still a farming week. Come back next week and let's build on your farm journey together.";
 
   const heroPanelRow = bannerPanel({
-    eyebrow: `◇ WEEKLY SUMMARY · ${escapeHtml(stats.weekStart)} — ${escapeHtml(stats.weekEnd)}`,
-    headline: `Here's your\nfarm summary.`,
-    subline: `Here is what ${farm} accomplished this week.`,
-    sceneGradient: `linear-gradient(160deg,${C.forestDeep} 0%,${C.forest} 55%,${C.forestMid} 100%)`,
-    sceneFallback: C.forest,
+    headline: `This week,\n${farm}.`,
+    subline:  `Here is what ${farm} accomplished this week.`,
   });
 
   const contentRow = `<tr>
-<td style="padding:28px 36px 36px 36px;background-color:${C.parchment};font-family:${BODY_FONT};">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-<tr>
-<td style="padding:0 0 6px 0;font-family:${DISPLAY_FONT};font-size:16px;font-weight:700;color:${C.ink};">${greeting}</td>
-</tr>
-<tr><td>${leafRule()}</td></tr>
-<tr>
-<td style="padding:0 0 22px 0;">${statsGrid}</td>
-</tr>
-${streakSection}${topProjectSection}<tr>
-<td style="padding:18px 22px;background-color:${C.cream};border-left:4px solid ${C.vault};border-radius:0 12px 12px 0;font-family:${BODY_FONT};font-size:14px;line-height:1.75;color:${C.inkSoft};">
-${escapeHtml(closingLine)}
-</td>
-</tr>
-<tr>
-<td align="center" style="padding:26px 0 8px 0;">
-${ctaButton("View Full Dashboard", `${url}/home`)}
-</td>
-</tr>
-<tr>
-<td style="padding:14px 0 4px 0;font-family:${BODY_FONT};font-size:13px;color:${C.mute};font-style:italic;text-align:center;">
-Keep growing. Your companion is always watching over your farm. 🌾
-</td>
-</tr>
-</table>
+<td class="content-td" bgcolor="${C.parchment}" style="padding:44px 40px 48px;background-color:${C.parchment};font-family:${BODY_FONT};color:${C.ink}">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px 0;">
+<tr><td>${statsGrid}</td></tr>
+${streakSection}${topProjectSection}</table>
+${paragraphsToHtml(closingLine)}
+${ctaButton("View This Week →", `${url}/home`)}
+<p class="closing-p" style="margin:24px 0 0 0;font-family:${BODY_FONT};font-size:12px;color:${C.mute};font-style:italic;text-align:center;line-height:1.6;">Every week you log is a season you'll understand.</p>
 </td>
 </tr>`;
 
@@ -635,7 +531,7 @@ Keep growing. Your companion is always watching over your farm. 🌾
     companionOpen(preheader, "Your Weekly FarmVault Summary") +
     heroPanelRow +
     contentRow +
-    footerRow("Your farm story, written week by week.", C.parchmentWarm) +
+    footerRow("Your farm story, written week by week.") +
     companionClose();
 
   return {

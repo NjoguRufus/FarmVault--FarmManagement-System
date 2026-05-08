@@ -493,23 +493,23 @@ export default function DeveloperNotificationTestingPage() {
     [notifType, effectiveTier, previewSeed],
   );
 
-  // Compile the actual email HTML — same function the edge function uses.
-  const emailHtml = useMemo(() => {
+  // Compile the actual email HTML via React Email render() — async.
+  // This is the same HTML that gets sent, so preview === sent email.
+  const [emailHtml, setEmailHtml] = useState<string>('');
+  useEffect(() => {
+    let cancelled = false;
     const displayName = recipientName.trim() || resolvedFarmName || 'Farmer';
     const farmName    = resolvedFarmName || '';
     const messageText = preview.body;
-    const messageHtml = paragraphsToHtml(messageText);
 
-    if (notifType === 'evening') {
-      return buildCompanionEveningEmail({ displayName, farmName, messageText, messageHtml }).html;
-    }
-    if (notifType === 'inactivity') {
-      return buildCompanionInactivityEmail({ displayName, farmName, tier: effectiveTier ?? '2d', messageText, messageHtml }).html;
-    }
-    if (notifType === 'weekly') {
-      return buildCompanionWeeklySummaryEmail({ displayName, farmName, messageText, messageHtml }).html;
-    }
-    return buildCompanionMorningEmail({ displayName, farmName, messageText, messageHtml }).html;
+    const promise =
+      notifType === 'evening'    ? buildCompanionEveningEmail({ displayName, farmName, messageText }) :
+      notifType === 'inactivity' ? buildCompanionInactivityEmail({ displayName, farmName, tier: effectiveTier ?? '2d', messageText }) :
+      notifType === 'weekly'     ? buildCompanionWeeklySummaryEmail({ displayName, farmName, messageText }) :
+                                   buildCompanionMorningEmail({ displayName, farmName, messageText });
+
+    promise.then(({ html }) => { if (!cancelled) setEmailHtml(html); }).catch(console.error);
+    return () => { cancelled = true; };
   }, [notifType, effectiveTier, recipientName, resolvedFarmName, preview.body]);
 
   // Preview HTML — same as email HTML but mascot loaded from local public folder
@@ -915,15 +915,21 @@ export default function DeveloperNotificationTestingPage() {
               />
             )}
 
-            {/* Email preview — exact compiled HTML sent via Resend, rendered in a sandboxed iframe */}
+            {/* Email preview — React Email compiled HTML in a sandboxed iframe */}
             {previewMode === 'email' && (
               <div style={{ maxWidth: 640, margin: '0 auto' }}>
-                <iframe
-                  srcDoc={previewEmailHtml}
-                  title="Email preview"
-                  sandbox="allow-same-origin allow-scripts"
-                  style={{ width: '100%', height: 720, border: 'none', borderRadius: 12, display: 'block' }}
-                />
+                {previewEmailHtml ? (
+                  <iframe
+                    srcDoc={previewEmailHtml}
+                    title="Email preview"
+                    sandbox="allow-same-origin allow-scripts"
+                    style={{ width: '100%', height: 720, border: 'none', borderRadius: 12, display: 'block' }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center rounded-xl bg-muted/30" style={{ height: 720 }}>
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
               </div>
             )}
           </div>

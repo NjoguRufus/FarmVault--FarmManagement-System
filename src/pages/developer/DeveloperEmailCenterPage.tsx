@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCopy, Mail, RefreshCw, Send, X } from 'lucide-react';
+import { ClipboardCopy, Loader2, Mail, RefreshCw, Send, X } from 'lucide-react';
+import { buildCompanionMorningEmail } from '@/emails/companion/buildCompanionEmail';
 import { DeveloperPageShell } from '@/components/developer/DeveloperPageShell';
 import { DeveloperStatGrid } from '@/components/developer/DeveloperStatGrid';
 import { Badge } from '@/components/ui/badge';
@@ -163,6 +164,25 @@ export default function DeveloperEmailCenterPage() {
   const [category, setCategory] = useState<string>('_none');
   /** When false, payload sends `showQrCode: false` (manual emails default to QR on server-side). */
   const [includeShareQr, setIncludeShareQr] = useState(true);
+
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewBuilding, setPreviewBuilding] = useState(false);
+
+  const previewName = recipients[0]?.name?.trim() || '';
+  const previewFarm = companyNameField.trim();
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewBuilding(true);
+    buildCompanionMorningEmail({
+      displayName: previewName,
+      farmName: previewFarm,
+      messageText: body.trim() || 'Your message will appear here.',
+    }).then(({ html }) => {
+      if (!cancelled) { setPreviewHtml(html); setPreviewBuilding(false); }
+    }).catch(() => { if (!cancelled) setPreviewBuilding(false); });
+    return () => { cancelled = true; };
+  }, [previewName, previewFarm, body]);
 
   const dateFromIso = useMemo(() => {
     if (!dateFrom) return null;
@@ -555,6 +575,31 @@ export default function DeveloperEmailCenterPage() {
                   rows={12}
                   className="min-h-[220px] resize-y text-[15px] leading-relaxed"
                 />
+              </div>
+            </div>
+
+            {/* Live email preview */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Email preview</p>
+                {previewBuilding && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+              </div>
+              <p className="text-xs text-muted-foreground -mt-1">
+                Approximation of what recipients will see. Uses the first recipient's name and company field.
+              </p>
+              <div style={{ maxWidth: 640, margin: '0 auto' }}>
+                {previewHtml ? (
+                  <iframe
+                    srcDoc={previewHtml}
+                    title="Email preview"
+                    sandbox="allow-same-origin"
+                    style={{ width: '100%', height: 700, border: 'none', borderRadius: 12, display: 'block' }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center rounded-xl bg-muted/30" style={{ height: 700 }}>
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
               </div>
             </div>
 

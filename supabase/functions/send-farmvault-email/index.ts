@@ -253,6 +253,17 @@ serveFarmVaultEdge("send-farmvault-email", async (req: Request, _ctx) => {
       }
       subject = isTest ? `[TEST] ${messageSubject ?? rendered.subject}` : (messageSubject ?? rendered.subject);
       html    = rendered.html;
+    } else if (payload.emailType === "custom_manual") {
+      // Broadcast / manual sends — use the companion template so every outbound email
+      // shares the same premium design as automated companion emails.
+      const data        = payload.data as Record<string, unknown>;
+      const displayName = String(data.recipientName ?? "");
+      const farmName    = String(payload.companyName ?? "");
+      const messageText = String(data.body ?? data.subject ?? "");
+      const userSubject = String(data.subject ?? "").trim();
+      const rendered    = buildCompanionMorningEmail({ displayName, messageText, messageHtml: "", farmName });
+      subject = userSubject || rendered.subject;
+      html    = rendered.html;
     } else {
       const rendered = renderFarmVaultEmail(payload.emailType, payload.data);
       subject = rendered.subject;
